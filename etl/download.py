@@ -160,8 +160,11 @@ def main() -> None:
 
         entries = [fetch(client, t, out / t.filename, force) for t in targets]
 
+    # Any previous archive audit is dropped rather than carried forward: it was keyed
+    # to the checksums of the files it was computed from, and those may have just
+    # changed. Re-run etl.inspect_teams to regenerate it.
     manifest_path = out / "manifest.json"
-    manifest_path.write_text(json.dumps(entries, indent=2) + "\n")
+    manifest_path.write_text(json.dumps({"files": entries}, indent=2) + "\n")
 
     print(f"\nManifest written to {manifest_path}")
     for entry in entries:

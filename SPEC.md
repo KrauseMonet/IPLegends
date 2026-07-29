@@ -1,8 +1,9 @@
 # IPL Draft Game — Phase 1 (Data Pipeline)
 
-Source of truth for this phase. Amendments ratified 2026-07-29 are folded in and marked
-**[A1]**–**[A8]**. Where an amendment supersedes the original brief, only the amended
-text remains.
+**This file is the single source of truth. It must not drift behind the code.**
+
+Amendments ratified 2026-07-29 are folded in and marked **[A1]**–**[A12]**. Where an
+amendment supersedes the original brief, only the amended text remains.
 
 ---
 
@@ -46,8 +47,31 @@ Budget is for the whole draft, not per pick.
 
 **Two reroll types.** Random (any franchise-season), or same franchise / different year.
 The second must be disabled with a visible reason when the franchise has no other
-eligible season. Kochi Tuskers Kerala played one season, Gujarat Lions two, Pune Warriors
-three — this is a real case, not an edge condition.
+eligible season.
+
+**[A11] Reroll availability is queried from the data at deal time, never hardcoded.**
+The reconnaissance quantifies it from the confirmed mapping:
+
+| Franchise | Seasons | Alternative seasons available |
+|---|---|---|
+| Kochi Tuskers Kerala | 1 | **0 — reroll type permanently unavailable** |
+| Gujarat Lions | 2 | 1 |
+| Rising Pune Supergiant | 2 | 1 |
+| Pune Warriors | 3 | 2 |
+
+A hardcoded list would rot the moment a season is added. Query it, and grey out the
+option with the reason shown.
+
+**[A10] Deck weighting is uniform over franchise-seasons, and is an explicit named
+constant in the dealer — not an accident of the query.**
+
+Uniform sampling over the 166 franchise-seasons means Mumbai appears 19 times and Kochi
+Tuskers Kerala once, so a player can complete a draft without ever seeing Kochi. **This
+is intended: rarity should feel like an event.** But it must be a tunable weight so
+playtesting can revisit it.
+
+**Do not weight by franchise.** That would flatten the deck and destroy exactly the
+scarcity the design wants.
 
 **Deal-time guarantee.** Only deal a franchise-season containing at least one undrafted
 player eligible for a slot the drafter has not filled. Check before serving, re-draw
@@ -101,6 +125,11 @@ reproducible from the seed alone for leaderboard disputes.
 - **ETL:** Python 3.11 (pinned via `uv`; do not install Homebrew). `polars`,
   `psycopg[binary]`, `pydantic`. No heavyweight framework.
 - **Database:** Neon Postgres. No extension unavailable on managed Postgres.
+- **Two endpoints, and the distinction matters.** `DATABASE_URL` is Neon's **pooled**
+  endpoint, for the application later. `DIRECT_URL` is **unpooled**, and migrations and
+  every bulk load must use it — the pooled endpoint runs PgBouncer in transaction mode,
+  which interferes with session-level operations and makes DDL and `COPY FROM STDIN`
+  unreliable. `etl.db.direct_url()` rejects a URL containing `-pooler` outright.
 - **Bulk loading:** `COPY FROM STDIN`, never row-by-row inserts. This is what makes a
   remote database viable for the delivery table.
 - **Migrations:** plain numbered `.sql` files in `migrations/`, applied by `etl/migrate.py`.
@@ -138,6 +167,18 @@ We need:
 
 ODbL requires attribution — see `CREDITS.md`. Share-alike attaches if we ever publish the
 derived database.
+
+**[A9] Scope is 2008–2026, 19 seasons, 1,243 matches, 166 franchise-seasons.**
+
+2026 is complete (74 matches, consistent with the current format) and is in scope.
+Excluding it would date the game immediately. Two conditions attach:
+
+1. **Cricsheet is contributor-driven and recent matches get revised after the fact.**
+   The archive SHA256 is recorded in `data/manifest.json`, and the 2026 files must be
+   **re-verified against a fresh download before ratings are finalised**.
+2. If any 2026 playing condition materially changed scoring, within-season normalisation
+   (§7.4) absorbs it — but **flag it** if that season's baseline sits far off trend
+   rather than letting it pass silently.
 
 ### 3.2 Match JSON shape
 
@@ -182,12 +223,28 @@ Address each explicitly and prove it in validation.
 `info.registry.people` to a stable person identifier and key everything on that.
 Spellings vary across seasons and there are genuine collisions.
 
-**4.2 Season labels.** `info.season` is inconsistent — sometimes `2011`, sometimes
-`2007/08` or `2020/21`. **Derive `season_year` from match dates.** Store the raw label
-alongside for reference only.
+**4.2 Season labels.** `info.season` is inconsistent. **Derive `season_year` from match
+dates.** Store the raw label for reference only.
 
-**4.3 Franchise renames.** Build a `franchise_id` stable across renames, but store the
-era-correct `display_name` per season.
+**[A12] Three anomalies observed in the archive, all confirmed:**
+
+| Season played | `info.season` says |
+|---|---|
+| 2008 | `2007/08` |
+| **2010** | **`2009/10`** |
+| 2020 | `2020/21` |
+
+The 2010 case was not in the original brief and is the reason the field is untrusted
+rather than merely special-cased. Note the asymmetry that makes it dangerous: 2009 — the
+season actually played in South Africa, where a split label would be forgivable — is
+labelled plainly `2009`, while 2010 is not. There is no pattern to exploit.
+
+**4.3 Franchise renames.** `franchise_id` is stable across renames; `display_name` is
+era-correct per season.
+
+**Mapping confirmed 2026-07-29 against the archive. 19 team-name strings → 15
+franchises → 166 franchise-seasons.** Every merge required was one already authorised;
+nothing had to be guessed. Authoritative file: `etl/overrides/franchises.csv`.
 
 | Names over time | Treatment |
 |---|---|
@@ -198,8 +255,12 @@ era-correct `display_name` per season.
 | Deccan Chargers, Sunrisers Hyderabad | **Separate** franchises |
 | Gujarat Lions, Gujarat Titans | **Separate** franchises |
 
-Do not guess at any mapping not listed. Extract the distinct team-name-by-year list from
-the data first and confirm the rest by hand.
+Chennai Super Kings and Rajasthan Royals each carry a 2016–17 gap (the suspension), with
+Rising Pune Supergiant and Gujarat Lions occupying exactly that window. The data confirms
+this independently — it is not a special case in code.
+
+A team-name string absent from the override file is a **hard error**, so a new or renamed
+side surfaces immediately rather than being silently split into its own franchise.
 
 **4.4 Super overs.** Appear as additional innings. Exclude from all player statistics.
 Flag the match.
@@ -210,6 +271,18 @@ not per match.
 
 **4.6 Abandoned and no-result matches.** May contain zero or partial innings. Must not
 break the parser or skew per-match averages.
+
+**[A12] Matches abandoned without a ball bowled are absent from the archive entirely** —
+Cricsheet publishes ball-by-ball data, so no deliveries means no file. Observed gaps:
+2011 match #20; 2024 matches #63, #66, #70.
+
+This was proved by the contrast case rather than assumed: 2011 match #68 *is* present and
+carries `"result": "no result"`, because play did occur before abandonment. So absence
+means zero balls, not missing data.
+
+**Missing match numbers per season are recorded in `data/manifest.json`**, keyed to the
+archive checksum they were computed from, so a future gap can be attributed to a revised
+archive rather than mistaken for a failed download.
 
 **4.7 Delivery numbering.** Wides and no-balls produce extra deliveries within an over.
 Preserve the true sequence in `ball_no` and store a `legal_ball` flag so balls faced and

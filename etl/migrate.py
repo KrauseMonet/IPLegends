@@ -59,7 +59,7 @@ def verify_unchanged(files: list[Path], applied: dict[str, str]) -> None:
 
 def status() -> None:
     files = discover()
-    with connect() as conn:
+    with connect(direct=True) as conn:
         conn.execute(TRACKING_TABLE)
         conn.commit()
         applied = applied_map(conn)
@@ -70,7 +70,7 @@ def status() -> None:
 
 def migrate() -> None:
     files = discover()
-    with connect() as conn:
+    with connect(direct=True) as conn:
         conn.execute(TRACKING_TABLE)
         conn.commit()
 

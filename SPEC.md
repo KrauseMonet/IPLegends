@@ -265,9 +265,63 @@ side surfaces immediately rather than being silently split into its own franchis
 **4.4 Super overs.** Appear as additional innings. Exclude from all player statistics.
 Flag the match.
 
-**4.5 Rain-reduced matches.** `info.overs` is not always 20, and DLS can leave the two
-innings of one match with **different** lengths. Derive scheduled overs **per innings**,
-not per match.
+**[A18]** 16 matches went to a super over and one of those — Mumbai v Kings XI, 2020 —
+went to a **second** one, so it holds six innings. Innings numbering is the position in
+the array, which gives that match super-over innings 3, 4, 5 and 6.
+
+Ties and super overs coincide exactly: all 16 ties carry an `outcome.eliminator` and
+nothing else does. A tie carries **no `winner` key at all**. It is stored as
+`result_type = 'tie'` with `winner_fs_id` set to the eliminator and `result_margin` null.
+The side that won the match is recorded because it did win; the match is still recorded as
+tied. Neither fact is lost and neither is invented.
+
+**4.5 Rain-reduced matches. [A13 — supersedes the original text]**
+
+**`info.overs` is `20` in all 1,243 matches. It is a constant and carries no
+information.** The original premise, that it drops for rain-reduced games, is false for
+this archive. Do not read scheduled length from it.
+
+A chasing innings states its own length in **`innings.target.overs`**, always — all 1,237
+second innings carry one, and 34 carry a value below 20. The **first innings never states
+it** and has to be read off what was bowled.
+
+**[A17 — corrects the innings-1 breakdown given in A13]** A13 originally recorded the 34
+reduced matches as 15 with innings 1 equal to `target.overs` and 19 with a full first
+innings. That is wrong. The true split is **15 equal to target, 12 full at 120, and 7
+neither** — innings 1 was itself curtailed at some third length, and that length is
+written down nowhere in the file.
+
+An innings stops short of twenty overs for one of three reasons and only two of them say
+anything about the schedule. The rule, in order:
+
+| Condition | Scheduled balls |
+|---|---|
+| Twenty overs bowled | 120 |
+| No second innings at all | **null** — abandoned during innings 1, nothing attests to the intent |
+| Chase scheduled for a full twenty | 120 — so was this innings; it ended on wickets |
+| Shortened match, side all out | **null** — the innings ended on wickets, not on the clock |
+| Shortened match, final over incomplete | **null** — rain stopped play mid-over |
+| Shortened match, final over complete | 6 × overs bowled |
+
+This resolves to null for exactly **6 innings** in the archive, each logged by name. It is
+never guessed. The "chase scheduled for a full twenty" row is what keeps ordinary all-out
+innings at 120 rather than mistaking a collapse for a rain curtailment — without it, 44
+innings go null instead of 6.
+
+Note the interaction with §4.5b: the two innings that bowled 119 legal balls are the
+5-ball miscounted overs, not curtailments. Counting **overs rather than legal balls** is
+what keeps them at 120, so A14 is load-bearing here and not merely cosmetic.
+
+**Scheduled length is stored in BALLS, not overs.** `target.overs` is not always an
+integer — one match carries `9.2`, meaning nine overs and two balls. No overs column can
+represent that. `deliveries.innings_scheduled_balls` holds 56 for that case.
+
+**4.5b Miscounted overs. [A14]** Cricsheet flags eight overs across the archive where the
+umpire miscounted and 5 or 7 legal balls were actually bowled, via `innings
+.miscounted_overs`. Take this **from the source flag, never infer it**. Validation
+check 3 whitelists them, and §7.1 drops them from the state-model fit — eight overs is
+nothing, and it costs less to drop them than to reason about what a 7-ball over does to
+the ball-index dimension.
 
 **4.6 Abandoned and no-result matches.** May contain zero or partial innings. Must not
 break the parser or skew per-match averages.
@@ -294,6 +348,20 @@ archive rather than mistaken for a failed download.
 Preserve the true sequence in `ball_no` and store a `legal_ball` flag so balls faced and
 overs bowled compute correctly.
 
+**[A19] Every delivery carries `actual_delivery`**, the scorecard ball reference such as
+`"5.3"`. It is the *legal-ball* index, so it repeats on the re-bowl after a wide — 11,075
+duplicates archive-wide — while `ball_no` counts physical deliveries.
+
+It is **not stored**, because it is exactly derivable: verified equal to
+`over.(legal balls so far, +1 if this one is illegal)` on all **295,732** deliveries, zero
+mismatches. That makes it something better than a column — an independent check on the
+wide and no-ball classification, from the source itself rather than from our own reading
+of `extras`. Validation check 15.
+
+Watch the trap: **powerplay bounds are positional, not legal-ball.** `powerplays[].to`
+reaches `5.9` in the archive, which no legal-ball index can produce. Compare powerplay
+membership against `ball_no`, never against `actual_delivery`.
+
 **4.8 Phase definition. [A5]** Two distinct mechanisms, do not conflate them:
 
 - *Display splits* (`deliveries.phase`): powerplay comes from the innings `powerplays`
@@ -319,9 +387,26 @@ asserts in `info.players`, as-is. From 2023 the Impact Player rule means this ca
 per side including players who never took the field. `participated` is derived separately
 from actual batting, bowling or fielding involvement.
 
-**`deliveries.innings_scheduled_overs`** — added so the per-innings death boundary (§4.8)
-and the §7.1 full-length fitting filter are both computable without re-deriving from the
-match. *Pending ratification.*
+**[A16, counts corrected]** Deliveries carry a `replacements` field in two kinds.
+**`match`** — the Impact Player — appears on **524 deliveries** carrying **563 entries**,
+some deliveries recording two at once; the earlier figure of 523 conflated the two counts.
+**`role`** — a substitute taking over a fielding or bowling role — appears on **61**.
+
+Both feed the A4 batting-position rule, and both feed `participated`: **a substitute who
+bowled is participation; a named-but-unused Impact Player is not.**
+
+A `match` entry always names its `team`; a `role` entry never does and never needs to,
+since taking over a bowling or fielding role places the player on the fielding side. The
+team is therefore read, not inferred.
+
+A player who takes the field only as a substitute fielder or an Impact Player gets an
+`appearances` row with **`named_in_squad = false` and `participated = true`**, which is
+the case the two flags exist to separate.
+
+**[A13] `deliveries.innings_scheduled_balls`** — carried on every delivery so the
+per-innings death boundary (§4.8) and the §7.1 full-length fitting filter are both
+computable without re-deriving from the match. In balls, not overs, for the reason given
+in §4.5.
 
 Index `deliveries` on `(batter_id)`, `(bowler_id)`, `(match_id, innings_no)` and
 `(phase)`. This table is the hot path.
@@ -412,12 +497,39 @@ mostly at the death where dismissal is cheap and scoring is forced, and accumula
 not-outs that corrupt their average.
 
 **[A5] State definition:** exact `over_no` crossed with **wickets bucketed 0–1, 2–3, 4–5,
-6+**, optionally split by innings. Not the three display phases.
+6+**. Not the three display phases.
 
-**[A5] Fitting set: full-length 20-over innings only.** Over numbers are not comparable
-across innings of different lengths, so reduced innings must not enter the fit. Score
-players in reduced innings by mapping to the nearest equivalent state **via balls
-remaining**.
+**[A15] Fitting set: first innings only, reduced matches excluded, miscounted overs
+excluded.**
+
+Over numbers are not comparable across innings of different lengths, so reduced innings
+cannot enter the fit. But the stronger reason is that **second innings are not the same
+scheduling context as first innings even when both are 20 overs:**
+
+- A chase **truncates on success**, which correlates with the batting side doing well.
+  Expected runs remaining is therefore biased downward.
+- Behaviour at a given over and wicket state depends on the **required rate**, which has
+  no first-innings equivalent. A batter blocking out a won chase and a batter slogging a
+  lost one both look bad against a neutral baseline.
+
+That leaves roughly **145,000 deliveries** across 20 overs × 4 wicket buckets — about
+1,800 per cell. Ample.
+
+**Scoring, as distinct from fitting:**
+
+| | Fitted on | Scored against it | In display stats |
+|---|---|---|---|
+| First innings, full-length | yes | yes | yes |
+| Second innings, full-length | **no** | yes | yes |
+| Any reduced-match delivery | no | **no** | **yes** |
+| Miscounted overs | no | yes | yes |
+
+**Reduced-match deliveries are excluded from rating computation entirely but still count
+in display statistics.** A player's card shows their real runs and wickets; the rating
+model does not need the 2.7%, and mis-pricing a 9-over game is worse than dropping it.
+
+**Do not pre-emptively build a second-innings state table.** Validation check 14 is the
+trigger — build it only if the diagnostic fires.
 
 For each state compute:
 - Expected runs off the bat per ball
@@ -520,6 +632,22 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     drift across eras. Pooling assumes "finisher" means the same thing in 2010 and 2024,
     and the Impact Player rule may have broken that. **If drift is large for a specific
     cohort, split that cohort's offset by era.**
+
+14. **[A15] Innings-skew diagnostic.** Compare mean rating for players whose deliveries
+    skew to second innings against those who skew to first. **Systematic separation means
+    the single first-innings state table is mispricing chases**, and the response is a
+    second state table for innings 2 bucketed by required rate. This diagnostic is the
+    trigger for building it. Do not build it in advance.
+
+15. **[A19] `legal_ball` reproduces the source's own `actual_delivery`** for every
+    delivery. This is the only check in the list that tests our reading of the source
+    against the source's own answer rather than against internal consistency, so a
+    mistake in classifying wides and no-balls cannot hide behind agreeing with itself.
+    Currently exact on all 295,732 deliveries.
+
+16. **Scheduled length is null only where §4.5/A17 says it must be.** Exactly 6 innings,
+    all named in the parser's warnings. A null appearing anywhere else means the
+    derivation rule has silently stopped matching the archive.
 
 ---
 

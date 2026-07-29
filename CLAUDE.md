@@ -38,7 +38,11 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
 - Never use `info.season` as the season year. Derive from match dates.
 - Never fabricate a value. NULL, log it, report it.
 - No LLM or AI API call anywhere in this codebase.
-- Never edit an applied migration; the runner checksums them and will refuse. Write a new one.
+- **A migration is immutable the moment it has been applied to any database, including a
+  local or personal one. Until then it is a draft and may be edited freely.** The runner
+  checksums applied files and refuses drift. `003` was edited in place on 2026-07-29
+  (`innings_scheduled_overs` -> `innings_scheduled_balls`) under a one-time exception,
+  granted only because no database existed yet. This is not a precedent.
 
 ## Deck shape (measured from the archive, not estimated)
 
@@ -104,8 +108,20 @@ only via:
 - `innings.target.overs` — the *chasing* innings' revised length (34 matches have < 20)
 - innings 1 ending before 20 overs with fewer than 10 wickets down — curtailed mid-innings
 
-Of the 34 reduced matches, 15 had innings 1 equal to `target.overs` (reduced before the
-match), and 19 had innings 1 at full length with only the chase cut.
+**[Corrected 2026-07-30 — the earlier 15/19 split was wrong.]** Of the 34 reduced matches,
+**15** had innings 1 equal to `target.overs`, **12** had it at full length with only the
+chase cut, and **7** had innings 1 curtailed at a third length written down nowhere in the
+file. The rule that resolves this is SPEC §4.5/A17.
+
+The load-bearing part of that rule: when the chase was scheduled for a full twenty, innings
+1 was too, and ended on wickets. Without that clause 44 innings go null instead of 6,
+because an ordinary batting collapse in the 19th over looks exactly like rain from inside
+a single innings. Six innings remain genuinely unknowable and are logged by name:
+`1136566`, `1136592`, `980989` (shortened, abandoned mid-over) and `1473495`, `1527685`,
+`501265` (abandoned with no second innings).
+
+Count **overs, not legal balls**, when reading innings-1 length — otherwise the two 5-ball
+miscounted overs below read as 119-ball curtailments.
 
 **`target.overs` can be fractional.** Match `392186.json` carries `9.2` — nine overs and
 two balls. Any integer overs column cannot represent it; scheduled length must be stored
@@ -119,9 +135,26 @@ these rather than treat them as parser bugs — they are real, and the source de
 `336015` inn2 ov14 (5) · `392198` inn2 ov10 (7) · `419155` inn1 ov18 (7) ·
 `501202` inn1 ov5 (5) · `501255` inn2 ov9 (5)
 
-**`replacements`** appears on 585 deliveries in two kinds: `match` (523) is the Impact
-Player, `role` (61) is a substitute taking over a fielding or bowling role. Both feed the
-A4 batting-position rule.
+**`replacements`** appears on 585 deliveries in two kinds: `match` is the Impact Player,
+`role` is a substitute taking over a fielding or bowling role. Both feed the A4
+batting-position rule. **[Counts corrected 2026-07-30]** `match` is on **524 deliveries**
+carrying **563 entries** — some deliveries record two at once — not 523. `role` is 61.
+`match` entries always name a `team`; `role` entries never do and never need to.
+
+**`actual_delivery`** is on every delivery and is the *legal-ball* scorecard reference, so
+it repeats after a wide (11,075 duplicates). Not stored — verified exactly derivable from
+`legal_ball` on all 295,732 deliveries, which makes it a free check on our own wide and
+no-ball classification against the source's answer. Validation check 15.
+
+**Powerplay bounds are positional, not legal-ball.** `powerplays[].to` reaches `5.9`,
+which no legal-ball index can produce. Compare against `ball_no`.
+
+**Super overs.** 16 matches, of which `1216517` (Mumbai v Kings XI, 2020) went to a
+*second* super over and holds six innings. Ties and eliminators coincide exactly: all 16
+ties carry `outcome.eliminator`, nothing else does, and a tie carries no `winner` key.
+
+**At most one wicket per delivery** across all 295,732 — the single `wicket_kind` /
+`player_out_id` pair on `deliveries` is safe and does not need a child table.
 
 **2026 revision risk.** Cricsheet is contributor-driven and recent seasons get revised.
 Re-verify the 2026 files against a fresh download before finalising ratings. If the 2026
@@ -144,10 +177,9 @@ the 0.5 GB.
 | Everything else | <10 MB |
 | **Total** | **~100 MB against a 500 MB cap** |
 
-Roughly 5x headroom. Note the brief's "1.2 million deliveries" figure is ~4x high:
-1,243 matches x ~250 balls is ~310k, not 1.2M.
-
-Replace the delivery figure with the true count once 2016 is loaded.
+Roughly 5x headroom. The brief's "1.2 million deliveries" figure is ~4x high. The exact
+count, from parsing the whole archive, is **295,732 deliveries across 1,243 matches and
+28,106 appearances** — not an estimate.
 
 ## Decisions log
 
@@ -165,12 +197,16 @@ Replace the delivery figure with the true count once 2016 is loaded.
 | A10 | Deck sampling uniform over the 166 franchise-seasons, as an explicit named constant. Never weight by franchise. |
 | A11 | Franchise-reroll availability queried from data at deal time, never hardcoded. |
 | A12 | Season-label and missing-match anomalies recorded permanently; gaps persisted to the manifest keyed to the archive checksum. |
+| A13 | `info.overs` is a constant carrying no information. Scheduled length comes from `target.overs` and innings-1 truncation, stored in BALLS (9.2 overs -> 56). |
+| A14 | Miscounted overs taken from the source flag, whitelisted in validation, dropped from the 7.1 fit. |
+| A15 | State table fitted on FIRST innings only, reduced matches and miscounted overs excluded. Reduced-match deliveries excluded from rating but kept in display stats. Second-innings table built only if validation 14 fires. |
+| A16 | `replacements` kinds: `match` = Impact Player, `role` = substitute. A substitute who bowled counts as participation; a named-but-unused Impact Player does not. |
+| A17 | Innings-1 scheduled length resolved by a six-case rule needing match-level context, not innings-level. Null for exactly 6 innings, each logged. Corrects A13's 15/19 split to 15/12/7. |
+| A18 | A tie is stored as `result_type = 'tie'` with `winner_fs_id` set to the eliminator. Match won, match tied, both recorded. One match holds two super overs (six innings). |
+| A19 | `actual_delivery` not stored — exactly derivable, so it serves as an independent check on wide/no-ball classification instead (validation 15). Powerplay bounds are positional, compare against `ball_no`. |
 
 ## Open questions
 
-- **`deliveries.innings_scheduled_overs`** — added (2 bytes/row) so the per-innings death
-  boundary and the §7.1 full-length filter are computable without re-deriving from the
-  match. Not in the original schema. *Awaiting ratification.*
 - **`deliveries_phase_idx`** — specified in the brief, but `phase` has three distinct
   values over ~300k rows. The planner will almost never choose it over a sequential scan,
   and it costs ~10 MB plus write overhead. Recommend dropping it and relying on the
@@ -185,7 +221,9 @@ Replace the delivery figure with the true count once 2016 is loaded.
 | 1. Scaffold + migrations + runner | done; migrations parse, not yet applied to a live DB |
 | 2. Downloader | done; 5 archives fetched, manifest + checksums written |
 | 3. Franchise reconnaissance | done; mapping confirmed, 15 franchises / 166 franchise-seasons |
-| 4. Parser + loader, 2016 only | **blocked on `.env` connection strings** |
+| 4a. Parser (pure, no DB) | done; 1,243 matches parse, 295,732 deliveries, 12 tests pass |
+| 4b. Migrations applied | **blocked on `.env` connection strings** |
+| 4c. Loader, 2016 only | blocked on 4b |
 | 5. Validation 1-7 | not started |
 
 Stage 4 uses **2016** as the single hardcoded season: it exercises Gujarat Lions and

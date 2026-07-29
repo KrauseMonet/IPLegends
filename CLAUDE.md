@@ -97,6 +97,32 @@ rot, and the consequence is nil since a zero-ball match contributes no rows anyw
 Recorded per season in `data/manifest.json` under `ipl_archive_audit.match_numbering`,
 keyed to the archive checksum, so a future gap can be told apart from a download failure.
 
+**`info.overs` never varies.** It is `20` in all 1,243 matches. The brief's §4.5 premise
+that it drops for rain-reduced games is **false for this archive**. Reduction is visible
+only via:
+
+- `innings.target.overs` — the *chasing* innings' revised length (34 matches have < 20)
+- innings 1 ending before 20 overs with fewer than 10 wickets down — curtailed mid-innings
+
+Of the 34 reduced matches, 15 had innings 1 equal to `target.overs` (reduced before the
+match), and 19 had innings 1 at full length with only the chase cut.
+
+**`target.overs` can be fractional.** Match `392186.json` carries `9.2` — nine overs and
+two balls. Any integer overs column cannot represent it; scheduled length must be stored
+in **balls**.
+
+**`miscounted_overs`.** Cricsheet flags eight overs across the archive where the umpire
+miscounted, giving 5 or 7 legal balls instead of 6. Validation check 3 must whitelist
+these rather than treat them as parser bugs — they are real, and the source declares them:
+
+`1136564` inn2 ov11 (7) · `335987` inn1 ov7 (5) · `335994` inn2 ov10 (7) ·
+`336015` inn2 ov14 (5) · `392198` inn2 ov10 (7) · `419155` inn1 ov18 (7) ·
+`501202` inn1 ov5 (5) · `501255` inn2 ov9 (5)
+
+**`replacements`** appears on 585 deliveries in two kinds: `match` (523) is the Impact
+Player, `role` (61) is a substitute taking over a fielding or bowling role. Both feed the
+A4 batting-position rule.
+
 **2026 revision risk.** Cricsheet is contributor-driven and recent seasons get revised.
 Re-verify the 2026 files against a fresh download before finalising ratings. If the 2026
 baseline sits far off trend after within-season normalisation, flag it rather than

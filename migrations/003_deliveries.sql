@@ -22,14 +22,22 @@ create table deliveries (
     extra_legbyes    smallint not null default 0,
     extra_penalty    smallint not null default 0,
 
-    -- Scheduled overs for THIS innings, not the match. DLS can leave the two innings
-    -- of one match with different lengths. Drives the phase split, and marks which
-    -- innings are eligible for the SPEC 7.1 state-model fitting set (full-length only).
-    innings_scheduled_overs smallint,
+    -- Scheduled length of THIS innings, not the match, in BALLS. Stored in balls
+    -- because target.overs is not always an integer: one match carries 9.2, meaning
+    -- nine overs and two balls, which no overs column can represent.
+    -- info.overs is useless here - it is 20 in all 1243 matches and carries no
+    -- information. Length comes from innings.target.overs and innings 1 truncation.
+    innings_scheduled_balls smallint,
 
     is_super_over    boolean not null default false,
     legal_ball       boolean not null,
     credited_to_bowler boolean,
+
+    -- Cricsheet flags overs the umpire miscounted, which really did have 5 or 7 legal
+    -- balls. Taken from the source flag, never inferred. Validation whitelists these,
+    -- and SPEC 7.1 drops them from the state-model fit rather than reasoning about
+    -- what a 7-ball over does to the ball-index dimension.
+    over_miscounted  boolean not null default false,
 
     match_id         text not null references matches (match_id) on delete cascade,
     batter_id        text not null references people (person_id),

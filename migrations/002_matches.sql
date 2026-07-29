@@ -14,8 +14,13 @@ create table matches (
     winner_fs_id       int references franchise_seasons (franchise_season_id),
     result_type        text,
     result_margin      int,
-    scheduled_overs    int,                -- match-level; per-innings value lives on deliveries
+    scheduled_overs    int,                -- always 20 in this archive; kept for completeness
     had_super_over     boolean not null default false,
+
+    -- True when any innings was scheduled for fewer than 120 balls (rain/DLS).
+    -- SPEC 7.1: these matches are excluded from rating computation entirely, but
+    -- still count toward display statistics - a player's card shows their real runs.
+    was_reduced        boolean not null default false,
     player_of_match_id text references people (person_id),
 
     constraint matches_result_type_ck

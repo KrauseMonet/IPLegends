@@ -273,8 +273,14 @@ not per match.
 break the parser or skew per-match averages.
 
 **[A12] Matches abandoned without a ball bowled are absent from the archive entirely** —
-Cricsheet publishes ball-by-ball data, so no deliveries means no file. Observed gaps:
-2011 match #20; 2024 matches #63, #66, #70.
+Cricsheet publishes ball-by-ball data, so no deliveries means no file. Ten interior gaps
+across seven seasons: 2008 #47; 2009 #7, #13; 2011 #20; 2012 #32, #34; 2015 #25;
+2017 #29; 2024 #63, #66.
+
+Only *interior* gaps are detectable — a match missing from the tail of a schedule is
+invisible, since the highest observable number is the highest one present. 2024 is short
+three league matches but only two are detectable. Do not close this with a hardcoded
+expected-schedule table; it would rot, and a zero-ball match contributes no rows anyway.
 
 This was proved by the contrast case rather than assumed: 2011 match #68 *is* present and
 carries `"result": "no result"`, because play did occur before abandonment. So absence

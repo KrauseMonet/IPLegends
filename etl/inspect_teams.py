@@ -71,12 +71,21 @@ def scan() -> dict:
                 team_years[team][year] += 1
                 franchise_years[canonical(team)].add(year)
 
+    # Interior gaps only. A match absent from the TAIL of the schedule is invisible
+    # here, because the highest number we can see is the highest one present: 2024
+    # is missing #70 as well as #63 and #66, but #70 cannot be inferred without
+    # knowing the intended schedule size. highest/count are recorded alongside so
+    # the shortfall is at least visible rather than silently absent.
     gaps = {}
     for year, nums in numbered.items():
         highest = max(nums)
         missing = sorted(set(range(1, highest + 1)) - set(nums))
-        if missing:
-            gaps[year] = missing
+        gaps[year] = {
+            "interior_missing": missing,
+            "highest_number_seen": highest,
+            "numbered_matches_present": len(nums),
+            "unnumbered_matches": unnumbered.get(year, 0),
+        }
 
     return {
         "team_years": team_years,
@@ -121,8 +130,8 @@ def write_audit(result: dict) -> None:
         # Absent match numbers. These are matches abandoned without a ball bowled:
         # Cricsheet publishes ball-by-ball data, so a match with no deliveries produces
         # no file. Recorded so a future gap can be told apart from a failed download.
-        "missing_match_numbers": {
-            str(y): nums for y, nums in sorted(result["gaps"].items())
+        "match_numbering": {
+            str(y): g for y, g in sorted(result["gaps"].items())
         },
         "raw_season_labels": {
             str(y): sorted(labels)
@@ -147,8 +156,8 @@ def report(result: dict) -> None:
     print("MATCHES PER SEASON")
     print("=" * 78)
     for year in sorted(matches_per_year):
-        gap = result["gaps"].get(year)
-        note = f"   missing match numbers: {gap}" if gap else ""
+        gap = (result["gaps"].get(year) or {}).get("interior_missing")
+        note = f"   interior gaps: {gap}" if gap else ""
         print(f"  {year}   {matches_per_year[year]:>4} matches{note}")
     print(f"\n  {'TOTAL':<6} {result['total']:>4} matches "
           f"({result['file_count']} json files)")

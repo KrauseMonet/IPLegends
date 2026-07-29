@@ -71,10 +71,31 @@ label would be forgivable, is labelled plainly `2009`, while 2010 is not. No pat
 exploit; always derive from match dates.
 
 **Missing matches.** Abandoned-without-a-ball matches are absent from the archive
-entirely, because no deliveries means no file. Observed: 2011 #20; 2024 #63, #66, #70.
+entirely, because no deliveries means no file. Ten interior gaps across seven seasons:
+
+| Season | Missing match numbers |
+|---|---|
+| 2008 | 47 |
+| 2009 | 7, 13 |
+| 2011 | 20 |
+| 2012 | 32, 34 |
+| 2015 | 25 |
+| 2017 | 29 |
+| 2024 | 63, 66 (**and 70**, see below) |
+
 Proved by contrast, not assumed: 2011 #68 *is* present carrying `"result": "no result"`,
-because play did occur. Gaps are recorded per season in `data/manifest.json` keyed to the
-archive checksum, so a future gap can be told apart from a download failure.
+because play did occur before abandonment. So absence means zero balls, not missing data.
+
+**The detector only sees interior gaps.** A match missing from the tail of a schedule is
+invisible, because the highest number observable is the highest one present. 2024 is
+short three league matches but only #63 and #66 are detectable; #70 cannot be inferred
+without knowing the intended schedule size, which is not in the data. The audit therefore
+also records `highest_number_seen` and `numbered_matches_present` so the shortfall is at
+least visible. Do not add a hardcoded expected-schedule table to close this — it would
+rot, and the consequence is nil since a zero-ball match contributes no rows anyway.
+
+Recorded per season in `data/manifest.json` under `ipl_archive_audit.match_numbering`,
+keyed to the archive checksum, so a future gap can be told apart from a download failure.
 
 **2026 revision risk.** Cricsheet is contributor-driven and recent seasons get revised.
 Re-verify the 2026 files against a fresh download before finalising ratings. If the 2026

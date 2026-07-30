@@ -1095,15 +1095,37 @@ Bhuvneshwar 2017, Tahir 2019, Harshal Patel 2021) alongside Gayle 2011, Sehwag 2
 Villiers four times, Russell 2019, Karthik 2022 and 2024, Tewatia 2020, and Muralitharan,
 Kumble and Warne in the spin-era seasons — famous names, but not *only* famous names.
 
-**One cohort is too thin to normalise and it is recorded now rather than discovered in
-§7.4: `death` bowling has 8 rateable seasons, 3 of them DJ Bravo.** This is exactly the
-condition A2 gave for refusing per-cell z-scoring, and it arrives one section early. Two
-consequences. §7.4's cohort offsets must be pooled across seasons for this cohort or it
-will be normalised against essentially one player's career. And **check 12 (slot coverage
-after the §7.3 gate) must be written to fail on this**, not to tolerate it — if the deck
-cannot field a death bowler from most franchise-seasons, that is a draft-legality problem
-and not a presentation one. Do not resolve it by lowering the bowling floor; A33 measured
-that floor and 150 is where the bowling list stops moving.
+**[A39] But the floors leave whole cohorts unrateable, and that is recorded here rather
+than discovered inside §7.4.** Of the 166 franchise-seasons, the number that can field a
+*rated* player in each slot:
+
+| batting band | fs covered | | bowling phase | fs covered |
+|---|---|---|---|---|
+| opener | 166 | | middle | 164 of 166 |
+| top_order | 165 | | mixed | 148 of 160 |
+| middle | 150 | | powerplay | 137 of 164 |
+| **finisher** | **43** | | **death** | **8 of 66** |
+| **tail** | **0** | | | |
+
+**`tail` is not thin, it is empty.** Zero of 707 tail player-seasons clear the 100-ball
+batting floor, and the largest tail batting season in nineteen years is **95 balls**. This
+is the floor being *right* — a number 9 genuinely has no measurable batting season — but
+three things follow.
+
+1. **§7.4 must not estimate a cohort offset for `tail`, and must pool `death`.** There are
+   no observations for the first and 8 for the second, 3 of them DJ Bravo. This is exactly
+   the condition A2 gave for refusing per-cell z-scoring; it has simply arrived a section
+   earlier than expected.
+2. **Check 12 must be written to FAIL on slot coverage rather than tolerate it.** A deck
+   that cannot field a rated finisher from 123 of 166 franchise-seasons is a draft-legality
+   problem, not a presentation one.
+3. **The deck may nonetheless be fine, and this has not been verified.** A tail batter is
+   drafted for bowling, and **393 of 730 tail player-seasons are bowling-rateable**. Whether
+   that covers the slot template is a claim about §6.4's bands that nobody has checked, and
+   §7.4 must not assume it.
+
+Do not resolve any of this by lowering a floor. A33 measured both and they sit where the
+lists stop moving; moving them to fill a slot would be fitting the evidence to the deck.
 
 ---
 

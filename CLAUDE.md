@@ -308,6 +308,8 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A38 | **`player_season_impact` is long grain, migration 009 applied 2026-07-30.** One row per (franchise-season, person, **discipline**), not one wide row with batting and bowling side by side. Measured: 5,149 long rows against 3,333 wide, and the wide form carries a NULL half on 2,132 of them because most player-seasons are one discipline only — and a discipline that does not exist reads identically to one that scored zero. Long grain also lets A33's two different floors share one column. **Counts and inputs only, never a rating** (A19): `impact_total` is the SUM, and the gate constants are stored beside the result so the `not_rateable_reason` CHECK can recompute the reason and refuse a loader that gates on one rule and writes another. Reasons after the load: `balls` 2,086, NULL 1,812, `both` 1,249, `matches` **2** — Symonds 2008 (105 balls, 3 matches) and Hussey 2008 (100 balls, 3 matches), both verified to have identical all-match and scoring-set counts, so the match gate earns its keep independently of the A33 denominator choice. |
 | A39 | **A33's floors leave whole cohorts unrateable, and this is a §7.4 and check-12 problem recorded before §7.4 rather than discovered inside it.** Coverage of the 166 franchise-seasons, counting how many can field a *rated* player per slot: opener 166, top_order 165, middle 150, **finisher 43**, **tail 0**; bowling middle 164, mixed 148, powerplay 137, **death 8** (of the 66 that have a death bowler at all, and 3 of the 8 are DJ Bravo). **`tail` is not thin, it is empty** — 0 of 707 tail player-seasons clear the 100-ball batting floor and the largest tail season in nineteen years is **95 balls**, so no tail batter can ever be rated on batting. That is the floor being *correct* — a number 9 genuinely has no measurable batting season — but it has three consequences. (1) §7.4 cannot estimate a cohort offset for `tail` from zero observations and must not try; `death` at 8 is the same problem in A2's stated form. (2) **Check 12 must be written to FAIL on slot coverage, not tolerate it.** (3) The deck may be fine anyway, because a tail batter is drafted for bowling and **393 of 730 tail player-seasons are bowling-rateable** — but that is a claim about the slot template (A6/§6.4) that has not been checked and must be, before §7.4 assumes it. **Do not resolve any of this by lowering a floor** — A33 measured both and they are where the lists stop moving. |
 
+| A40 | **The slot template is provisional pending feasibility, and feasibility is now measured rather than assumed.** `etl.feasibility` plays the draft out — 15 picks, uniform deck, dedupe on `person_id`, the §1.1 deal-time guarantee — instead of counting slots. **With the guarantee on the draft completes 100% of the time under every drafter policy, so the template IS feasible and nothing strands.** But guarantee-off it fails 1.7% / 55.5% / 54.4% for a rational / naive / random drafter, stranding overwhelmingly on **`finisher`** and then `keeper`: **SPEC calls the guarantee a safety net and it is currently a load-bearing beam.** `finisher` is servable from 43 of 166 franchise-seasons and has **29 distinct people in nineteen years** — a mandatory slot that near-predetermines its own pick, in tension with the variety A10's sampling exists to create, and dominated by all-rounders (Warne, Ashwin, Cummins, Jadeja beside Dhoni, Karthik, Russell, Bravo), which bears on A26. `keeper` is 126 of 166 and 35 people, but that is with `keepers_by_season.csv` unfilled and simulating the hand-fill removes it from the stranding list, so **keeper needs the CSV, not a template change**. Candidate repairs measured guarantee-off, naive drafter: as written 55.5%, finisher-accepts-middle 20.2%, finisher-folded-into-open 19.5%, both-with-keeper-filled **12.7%**. **Not decided — the numbers exist so the template is retuned against them rather than guessed.** |
+
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
 them for a player who looks miscategorised** — the shape to watch for is a pure batter
@@ -344,7 +346,8 @@ treat the current values as ratified beyond the twelve.
 | 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
 | **7.1 State model** | **done 2026-07-30**, migration 007 applied. 146,159 balls faced into 80 states (5 never observed, kept as zeroes) plus 161 exact-wicket runs-remaining states, 88 kB. Checks 6, 8 and 20 written; check 6 came off SKIP. **A31 corrected SPEC's wicket-cost rule — the old wording priced a wicket by differencing runs remaining, which is confounded and goes negative.** |
 | **7.2-7.3 Shrinkage + gates** | **done 2026-07-30**, migration 009 applied. State model refit striker-only (7,139 of 7,458 dismissals), **5,149 `player_season_impact` rows** written, `player_season_rating` view live. Ratified: two gates on the scoring-set denominator (A33), striker-only attribution (A36), one fallback rule (A37), long grain (A38). Provisional and paired: A34 residual + A35 `k`, both post-§7.4. `tests/test_impact.py` pins A37 and the gate arithmetic, 15 tests. |
-| 7.4-7.7 Ratings | **not started.** Normalisation, display-vs-simulator split, top-20 print. §7.7's lists have been read once and pass (see A39 for the one cohort that does not). **Checks 9-14 are blocked behind this** and must not be written first. A34 and A35 get re-read together once §7.4 lands. |
+| **1.1 Draft feasibility** | **done 2026-07-30**, out of order and deliberately so. §7.4 normalises toward the slot template, so normalising before knowing the template is legal would be wasted work. `etl.feasibility` runs the draft; check 12 asserts it and was verified falsifiable. Template feasible, **but provisional pending a retune** (A40). |
+| 7.4-7.7 Ratings | **not started.** Normalisation, display-vs-simulator split, top-20 print. §7.7's lists have been read once and pass (see A39 for the cohorts that do not). **Checks 9-11, 13 and 14 are blocked behind this** and must not be written first; check 12 is now written and passing. A34 and A35 get re-read together once §7.4 lands. |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
 **640** balls (the all-time single-season record — recorded here as 637 until check 7
@@ -367,16 +370,22 @@ uv run python -m validation --match 598027   # one scorecard
 uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
 
-**13 checks: 12 pass, 1 fails.** The failure is check 19 and it is correct — 26
+**14 checks: 13 pass, 1 fails.** The failure is check 19 and it is correct — 26
 franchise-seasons have no keeper until `keepers_by_season.csv` is hand-filled. Nothing
 skips any more: check 6 came off SKIP when migration 007 gave it a derived table.
 
-**Checks 9-14 are still unwritten and cannot be written yet.** Every one of them reads a
-rating (9 leakage, 10 under-shrinkage, 11 over-shrinkage, 12 slot coverage after the §7.3
-gate, 13 cohort era-drift, 14 innings skew), and §7.2-7.7 does not exist. Writing them now
-would produce the tautologies A2 already had to delete twice — the original 10 and 11 were
-removed for being true by construction, and check 2 for being enforced by five foreign keys.
-Do not add them until there is a rating to point them at.
+**Checks 9-11, 13 and 14 are still unwritten and cannot be written yet.** Every one of them
+reads a *normalised* rating (9 leakage, 10 under-shrinkage, 11 over-shrinkage, 13 cohort
+era-drift, 14 innings skew), and §7.4-7.7 does not exist. Writing them now would produce
+the tautologies A2 already had to delete twice — the original 10 and 11 were removed for
+being true by construction, and check 2 for being enforced by five foreign keys. Do not add
+them until there is a normalised rating to point them at.
+
+**Check 12 is written and is not one of those.** It reads the §7.3 gate, which exists, and
+it asks a question no count can answer — see A40. Its predecessor, "every franchise-season
+has enough draftable players to fill every slot type", would have passed while the draft
+was infeasible, because a drafter is served fifteen franchise-seasons one at a time and
+dedupe removes a player from every other card. It runs the draft instead.
 
 `--check` takes the SPEC 8 number, not the position in the list. It used to take the
 position, which was harmless while the checks ran 1-6 and became a silent trap the moment
@@ -428,6 +437,29 @@ stale rating that still looks fresh. Order: `etl.load` -> `etl.state_model --wri
 
 `k` is not written. It lives in the `player_season_rating` view alone (A35), so re-tuning
 it post-§7.4 is `create or replace view` and nothing else.
+
+## Section 1.1: draft feasibility
+
+```bash
+uv run python -m etl.feasibility                    # slot supply, policies, variants
+uv run python -m etl.feasibility --trials 5000 --seed 11
+uv run python -m validation --check 12              # the same thing, as a check
+```
+
+Read-only, no writes, no arguments needed. It plays 15-pick drafts against the real deck —
+uniform over the 166 franchise-seasons, dedupe on `person_id`, the §1.1 deal-time
+guarantee — under three drafter policies, and reports completion, where a stranded drafter
+strands, and how many candidate template repairs would help.
+
+**Read the guarantee-off column, not the guarantee-on one.** Guarantee-on is 100% and will
+stay 100% until coverage collapses, because the guarantee re-draws until it finds a
+servable squad; it tells you the game works, not whether the template does. Guarantee-off
+is the template judged on its own, and it is the number that moved from "fine" to "the
+finisher slot is carrying all the risk".
+
+`TEMPLATE` in `etl/feasibility.py` is the single definition of the slot template and check
+12 imports it, so retuning the template moves the check with it rather than leaving the
+check asserting a shape nobody drafts against.
 
 ## Section 6: squads, and the four CSVs that gate the deck
 

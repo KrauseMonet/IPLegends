@@ -103,6 +103,48 @@ bowling slots regardless of their batting band, which is why `tail` gets no slot
 Bands are the §6.4 canonical bands. All-rounders may fill either a batting or a bowling
 slot, decided by the drafter at pick time.
 
+**[A40, 2026-07-30] The slot template is PROVISIONAL pending feasibility retuning.** It
+was written before coverage was known, in the same way `k` was chosen before normalisation
+existed. Coverage is now known (A39), so the template gets validated against it rather than
+assumed. `uv run python -m etl.feasibility` plays the draft out; check 12 asserts it.
+
+*What the simulation found.* With the deal-time guarantee on — which is the game — the
+draft completes **100% of the time under every drafter policy**, so the template is
+feasible and nothing is stranded. But the guarantee is doing all of that work:
+
+| policy | guarantee on | guarantee off | strands on |
+|---|---|---|---|
+| rational (fills scarcest slot first, hoards `open`) | 100% | 98.3% | finisher |
+| naive (best available, spends `open` early) | 100% | 44.5% | finisher, then keeper |
+| random | 100% | 45.6% | finisher, then keeper |
+
+**SPEC calls the guarantee a safety net and it is currently a load-bearing beam.** That is
+the finding, not the completion rate. Two consequences worth naming before §7.4:
+
+- **`finisher` is servable from 43 of 166 franchise-seasons and has 29 distinct people in
+  nineteen years.** A mandatory slot drawn from 29 people is a slot whose pick is close to
+  predetermined, which is in direct tension with the variety §1.1 sampling exists to create.
+  The list is also dominated by all-rounders (Warne, Ashwin, Cummins, Jadeja sit in it
+  alongside Dhoni, Karthik, Russell, Bravo), which is worth reading against A26's unsettled
+  role thresholds.
+- **`keeper` is servable from 126 of 166 and has 35 people**, and that is *with*
+  `keepers_by_season.csv` unfilled. Simulating the hand-fill at its optimistic upper bound
+  removes keeper from the stranding list entirely, so this one is fixed by finishing the
+  CSV and needs no template change.
+
+*Candidate repairs, measured guarantee-off so the template is judged on its own:*
+
+| variant | rational | naive | random | then strands on |
+|---|---|---|---|---|
+| template as written | 1.7% | 55.5% | 54.4% | finisher, keeper |
+| finisher slot accepts `middle` too | 0.1% | 20.2% | 15.9% | keeper, middle |
+| keeper CSV hand-filled | 1.7% | 51.4% | 53.7% | finisher |
+| both | **0.1%** | **12.7%** | **11.6%** | middle, keeper |
+| finisher slot folded into `open` (x3) | 0.1% | 19.5% | 14.2% | keeper, middle |
+
+Not decided here. The numbers exist so the template can be retuned against them rather than
+guessed at, the same way every other constant in this document was sized.
+
 **[A8] Interim bowling slots.** Until `etl/overrides/bowling_style.csv` is filled, collapse
 the pace (3) and spin (2) slots into a single generic **bowler slot of 5**, so the draft
 loop is testable end to end. `bowling_style.csv` ships immediately after the full archive
@@ -1112,17 +1154,23 @@ batting floor, and the largest tail batting season in nineteen years is **95 bal
 is the floor being *right* — a number 9 genuinely has no measurable batting season — but
 three things follow.
 
-1. **§7.4 must not estimate a cohort offset for `tail`, and must pool `death`.** There are
-   no observations for the first and 8 for the second, 3 of them DJ Bravo. This is exactly
-   the condition A2 gave for refusing per-cell z-scoring; it has simply arrived a section
-   earlier than expected.
+1. **A cohort with zero rateable seasons has no offset and no display mapping, and any
+   player whose only rateable discipline falls in it is simply not rated as a batter.**
+   `tail` has nothing to estimate from, so §7.4 must not estimate it; `death`, at 8
+   seasons and 3 of them DJ Bravo, must be pooled rather than fitted. This is exactly the
+   condition A2 gave for refusing per-cell z-scoring, arriving a section earlier than
+   expected. Not rating a number 9's batting is the honest outcome — a tail batter is
+   drafted for their bowling, and that rating is real.
 2. **Check 12 must be written to FAIL on slot coverage rather than tolerate it.** A deck
    that cannot field a rated finisher from 123 of 166 franchise-seasons is a draft-legality
    problem, not a presentation one.
-3. **The deck may nonetheless be fine, and this has not been verified.** A tail batter is
-   drafted for bowling, and **393 of 730 tail player-seasons are bowling-rateable**. Whether
-   that covers the slot template is a claim about §6.4's bands that nobody has checked, and
-   §7.4 must not assume it.
+3. ~~**The deck may nonetheless be fine, and this has not been verified.**~~ **Verified
+   2026-07-30 — see A40.** The draft completes 100% of the time under the deal-time
+   guarantee, so the template is feasible; **393 of 730 tail player-seasons are
+   bowling-rateable** and `tail` never strands anyone. What the simulation *did* find is
+   that the guarantee has stopped being a safety net, and that `finisher` is the slot
+   carrying the risk. §7.4 may proceed on the feasibility question; the template retune is
+   a separate open decision.
 
 Do not resolve any of this by lowering a floor. A33 measured both and they sit where the
 lists stop moving; moving them to fill a slot would be fitting the evidence to the deck.
@@ -1180,8 +1228,19 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     a player's ratings have collapsed toward a flat line, shrinkage is too strong and the
     Kohli-2016-vs-2022 contrast the whole design rests on has been destroyed.
 
-12. Every franchise-season has enough draftable players after the §7.3 gate to fill every
-    slot type in the template. Flag any that do not — the deal-time guarantee depends on it.
+12. **[Rewritten 2026-07-30, A40. The original was a per-slot count and asked the wrong
+    question.]** It read "every franchise-season has enough draftable players after the
+    §7.3 gate to fill every slot type in the template", which cannot answer feasibility: a
+    drafter is not served every franchise-season, they are served fifteen of them one at a
+    time, and dedupe on `person_id` removes a player from every other card they appear on.
+    Feasibility is a property of that sequence. **The check now runs the draft** — 300
+    seeded drafts against each of three drafter policies — and fails if any of them
+    strands. It reports the guarantee-off failure rate beside the result, because that is
+    the number that says whether the guarantee is the safety net SPEC calls it. It reads
+    the template from `etl.feasibility` so a retune moves the check with it. Currently
+    passes: 100% completion on the guarantee, 1%/55%/51% failure without it, thinnest slot
+    `finisher` at 43 of 166. **Verified falsifiable** — emptying the finisher pool or the
+    keeper pool strands 30 of 30 drafts while the unmodified deck completes 30 of 30.
 
 13. **[A2] Cohort offset era-drift diagnostic.** Check whether the pooled cohort offsets
     drift across eras. Pooling assumes "finisher" means the same thing in 2010 and 2024,

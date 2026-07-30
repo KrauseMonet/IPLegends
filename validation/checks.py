@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections import Counter
 
 from etl.db import data_dir
+from etl.feasibility import load_deck, simulate
 # Imported rather than restated. The fitting filter and the bucket labels live in one
 # place, so check 20 cannot drift into validating the state model against a copy of the
 # rule the state model no longer uses. A19's habit applied to code instead of columns.
@@ -624,6 +626,49 @@ def check_19_every_squad_can_field_a_keeper(conn) -> Result:
     )
 
 
+def check_12_the_draft_can_always_complete(conn) -> Result:
+    """SPEC 1.1/8.12. Run the draft. Do not count slots and infer that it would work.
+
+    The original wording asked whether every franchise-season holds enough draftable
+    players to fill every slot type, which is a per-slot count and is not the question.
+    A drafter is not served every franchise-season; they are served fifteen of them, one
+    at a time, and dedupe on `person_id` removes a player from every other card they
+    appear on. Feasibility is a property of that sequence, so the only honest test is to
+    play it out.
+
+    Asserted with the SPEC 1.1 guarantee *on*, since that is the game. The guarantee-off
+    rate is reported beside it because that is the number saying whether the guarantee is
+    a safety net or a load-bearing beam, and SPEC calls it the former.
+
+    Reads its template from `etl.feasibility`, so retuning the template moves the check
+    with it rather than leaving it asserting a shape nobody drafts against any more.
+    """
+    title = "a draft can always complete against real coverage"
+    deck = load_deck(conn)
+    trials, seed = 300, 7
+
+    offenders, notes = [], []
+    for policy in ("rational", "naive", "random"):
+        stranded = [r for r in simulate(deck, policy, trials, seed, guarantee=True)
+                    if not r.completed]
+        if stranded:
+            slots = Counter(s for r in stranded for s in r.stranded_on)
+            offenders.append(
+                f"{policy}: {len(stranded)} of {trials} drafts stranded, on "
+                + ", ".join(f"{s} x{n}" for s, n in slots.most_common(3))
+            )
+        blind = [r for r in simulate(deck, policy, trials, seed, guarantee=False)
+                 if not r.completed]
+        notes.append(f"{policy} {len(blind) / trials:.0%}")
+
+    supply = deck.slot_supply()
+    thin = min(supply.items(), key=lambda kv: kv[1])
+    detail = (f"{trials} drafts x 3 policies complete with the guarantee on; "
+              f"without it {', '.join(notes)}; thinnest slot '{thin[0]}' servable "
+              f"from {thin[1]} of {len(deck.fs_ids)} franchise-seasons")
+    return verdict(12, title, detail, offenders)
+
+
 def check_08_career_leaderboards(conn) -> Result:
     """SPEC 8.8. The career leaderboards, and the three ways they break quietly.
 
@@ -885,6 +930,7 @@ CHECKS = (
     check_05_no_squad_member_without_appearances,
     check_06_super_overs_excluded,
     check_08_career_leaderboards,
+    check_12_the_draft_can_always_complete,
     check_15_actual_delivery_is_reproducible,
     check_16_scheduled_length_is_null_only_where_specified,
     check_17_balls_faced_convention,

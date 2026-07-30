@@ -488,25 +488,48 @@ Do not invent any of them.
 men's **Test, ODI and T20I** archives combined. T20I alone misses anyone whose caps
 predate the format or came only in longer forms.
 
-**[A23 — corrects A3, 2026-07-30] Anyone not found is NULL, not Indian.** A3 said to
-default them to India with `nationality_source = 'default'`, with the review list as the
-safety net. That default cannot be used, because the failure it produces is systematic
-rather than scattered: **the three archives contain no Afghanistan team at all**, so every
-Afghan without other caps was written down as Indian *and* as not overseas. Eight were
-found by name in one pass — Mohammad Nabi, Rashid Khan, Mujeeb Ur Rahman, Rahmanullah
-Gurbaz, Noor Ahmad, Naveen-ul-Haq, Fazalhaq Farooqi, Karim Janat. `nationality`,
-`nationality_source` and `is_overseas` all stay NULL until a human fills the CSV in.
-`is_overseas` in particular is a claim, and must not be derived from a value never
-observed. `nationality_source = 'default'` is now never written.
+**[A23 — corrects A3, 2026-07-30] Anyone not found is NULL. There is no default.**
+
+This section previously said an unobserved player defaults to Indian, on the reasoning
+that uncapped IPL players are overwhelmingly domestic. **The reasoning was sound and the
+rule was still wrong**, because it assumed the archive contains every cricketing nation.
+It does not contain Afghanistan at all — not one match across Tests, ODIs and T20Is — and
+the default turned that single gap into eight confidently false records: Mohammad Nabi,
+Rashid Khan, Mujeeb Ur Rahman, Rahmanullah Gurbaz, Noor Ahmad, Naveen-ul-Haq, Fazalhaq
+Farooqi and Karim Janat, each stored as Indian **and** as `is_overseas = false`. That
+second column is the damaging one: it would have let a legal XI field five overseas
+players while the four-overseas check reported compliance.
+
+So: `nationality`, `nationality_source` and `is_overseas` all stay **NULL** until a human
+fills in `etl/overrides/nationality.csv`. `nationality_source = 'default'` is never
+written. `is_overseas` is a claim, and a claim may not be derived from a value that was
+never observed.
+
+> **General rule, and the reason this is written down.** **Never default an unobserved
+> value to the majority class where a gap in the source can masquerade as a real value.**
+> The majority default is exactly the shape of error that internal checks cannot catch:
+> it is plausible, it is usually right, and it fails silently and in a body wherever the
+> source is blind. If a field can be unobserved, it must be able to be NULL. This applies
+> to every derived field in this document, not only nationality.
 
 **Composite sides are not nationalities.** ICC World XI, World XI, Africa XI and Asia XI
 are excluded before the most-frequent-team vote. Rashid Khan resolved to `ICC World XI`
-on a single cap, which is how this surfaced: with Afghanistan missing, that was his only
-appearance in any of the three archives.
+on a single cap, which is how the missing nation surfaced at all: with Afghanistan gone,
+that was his only appearance in any of the three archives.
 
-Measured 2026-07-30: 502 resolved from international caps, **314 unknown**. The unknown
-list needs **full review, not a spot check**, printed **sorted by matches played
-descending** so the ones that matter surface first.
+**Coverage audit, run 2026-07-30.** The archives hold 110 team names. Of the twelve ICC
+full members, **Afghanistan is the only one absent** — the other eleven appear in all
+three formats. Netherlands, UAE, USA, Nepal, Scotland and Ireland are all present, so the
+associate nations that actually supply IPL players are covered. Re-run this audit against
+a fresh download before the deck is final; a second missing nation would be invisible
+otherwise. `etl.derive_people --nationality` prints it.
+
+Measured 2026-07-30: 502 resolved from international caps, **314 unknown**. By IPL
+footprint — matches actually participated in — the unknown ones are 13 with 50+, 61 with
+20–49, 126 with 5–19, 112 with 1–4, and 2 who never took the field. **The 74 at 20
+matches or more are the priority tier** for the override; Rashid Khan alone is 153
+matches over 10 seasons and is overseas. The list needs **full review, not a spot check**, printed **sorted by matches
+played descending** so the ones that matter surface first.
 
 `etl/overrides/nationality.csv` is authoritative over the derivation.
 
@@ -646,12 +669,19 @@ and 148 deliveries of unknown-length innings would have entered the fit.
 
 Testing for a known 120 closes it by construction. **A null can never satisfy an equality,
 so unknown scheduled length falls out of the fitting set automatically** rather than
-depending on anyone remembering to exclude it. Both predicates are kept — the
-`was_reduced` clause preserves the ratified rule below, and the `= 120` clause makes the
-null safe.
+depending on anyone remembering to exclude it.
 
-That leaves **149,697 deliveries** across 20 overs × 4 wicket buckets — about **1,871 per
-cell**. The earlier ~145,000 was an estimate; this is counted.
+**[A28, ratified 2026-07-30] `= 120` is the whole filter. `not was_reduced` is gone.**
+Carrying both was the cautious reading, and it excluded 12 first innings that were
+themselves scheduled for and played to a full twenty overs — the reduction in those
+matches fell on the chase only, after the first innings was complete. A full-length
+innings is a full-length scheduling context whatever else happened later in the match,
+and what happens after an innings ends cannot change the run environment it was played
+in. Excluding them discarded real observations to no purpose.
+
+That takes the fitting set from 149,697 to **151,175 deliveries** (+1,478 from those 12
+matches) across 20 overs × 4 wicket buckets — about **1,890 per cell**. The earlier
+~145,000 was an estimate; both later figures are counted.
 
 **Scoring, as distinct from fitting:**
 

@@ -1,7 +1,7 @@
 """Run the SPEC 8 checks.
 
-    uv run python -m validation                 checks 1-6
-    uv run python -m validation --check 3       one check
+    uv run python -m validation                 every check that exists
+    uv run python -m validation --check 17      one check, by its SPEC 8 number
     uv run python -m validation --scorecards    check 7, for reading by hand
 """
 
@@ -29,12 +29,18 @@ def main(argv: list[str] | None = None) -> int:
                 print_scorecard(conn, match_id)
             return 0
 
+        # Selected by SPEC 8 number, taken from the function name, not by position in
+        # CHECKS. The two stopped agreeing the moment the suite skipped from 6 to 17.
+        available = {int(check.__name__.split("_")[1]): check for check in CHECKS}
         chosen = [
-            check for i, check in enumerate(CHECKS, start=1)
-            if args.only is None or i in args.only
+            check for number, check in sorted(available.items())
+            if args.only is None or number in args.only
         ]
         if not chosen:
-            raise SystemExit(f"No such check. There are {len(CHECKS)}.")
+            raise SystemExit(
+                f"No such check. Available: "
+                f"{', '.join(str(n) for n in sorted(available))}."
+            )
         return report([check(conn) for check in chosen])
 
 

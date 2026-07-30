@@ -44,6 +44,16 @@ HOME_NATION = "India"
 # is the difference between 'unknown' and a confidently wrong answer.
 COMPOSITE_TEAMS = frozenset({"ICC World XI", "World XI", "Africa XI", "Asia XI"})
 
+# The twelve ICC full members, checked against the archives on every run. Afghanistan
+# is absent from all three, which is what made 'default to India' silently produce
+# eight false records - see A23. A hardcoded list is safe here in a way an expected
+# schedule is not: full membership has changed twice in thirty years, and the check
+# reports rather than corrects, so staleness shows up as a stale line of output.
+FULL_MEMBERS = (
+    "Afghanistan", "Australia", "Bangladesh", "England", "India", "Ireland",
+    "New Zealand", "Pakistan", "South Africa", "Sri Lanka", "West Indies", "Zimbabwe",
+)
+
 
 def ipl_people(conn) -> dict[str, str]:
     with conn.cursor() as cur:
@@ -60,6 +70,22 @@ def matches_played(conn) -> dict[str, int]:
         return dict(cur.fetchall())
 
 
+def report_coverage(all_teams: set[str]) -> None:
+    """Which cricketing nations the archives can speak for at all. A23.
+
+    A nation missing here cannot be derived for anybody, so every one of its players
+    falls to the override. Afghanistan is the known case; this runs every time so a
+    second one cannot arrive unnoticed in a later Cricsheet revision.
+    """
+    missing = [nation for nation in FULL_MEMBERS if nation not in all_teams]
+    print(f"  archives cover {len(all_teams)} team names")
+    if missing:
+        print(f"  ICC FULL MEMBERS ABSENT FROM ALL THREE ARCHIVES: {', '.join(missing)}")
+        print("  Every player of theirs is unknown and must come from the override.")
+    else:
+        print("  all 12 ICC full members present")
+
+
 def national_teams(wanted: set[str]) -> tuple[dict[str, str], list[str]]:
     """person_id -> national team, from the Test, ODI and T20I archives combined.
 
@@ -68,6 +94,7 @@ def national_teams(wanted: set[str]) -> tuple[dict[str, str], list[str]]:
     """
     seen: dict[str, Counter] = defaultdict(Counter)
     composite_only: list[str] = []
+    all_teams: set[str] = set()
     for archive in INTERNATIONAL_ARCHIVES:
         path = data_dir() / archive
         if not path.exists():
@@ -78,11 +105,14 @@ def national_teams(wanted: set[str]) -> tuple[dict[str, str], list[str]]:
                     continue
                 info = json.loads(zf.read(name))["info"]
                 registry = info.get("registry", {}).get("people", {})
+                all_teams.update(info.get("teams") or ())
                 for team, players in (info.get("players") or {}).items():
                     for player in players:
                         person_id = registry.get(player)
                         if person_id in wanted:
                             seen[person_id][team] += 1
+
+    report_coverage(all_teams)
 
     resolved: dict[str, str] = {}
     conflicts: list[str] = []
@@ -229,10 +259,22 @@ def do_nationality(conn) -> None:
         for line in conflicts[:10]:
             print(f"    {line}")
 
-    # A3: this list needs full review, not a spot check. Until a row is filled in,
+    # A3/A23: this list needs full review, not a spot check. Until a row is filled in
     # the player has no nationality and cannot be counted against the overseas rule.
+    # Banded by IPL footprint because that, not alphabetical order, is what decides
+    # whether an unknown can quietly break a legal XI.
     print(f"\n  {len(unknown)} with no international cap in the archives, "
           f"sorted by matches played - REVIEW ALL OF THESE:")
+    bands = (
+        ("50+ matches", 50, 10**9),
+        ("20-49", 20, 49),
+        ("5-19", 5, 19),
+        ("1-4", 1, 4),
+        ("never played", 0, 0),
+    )
+    for label, low, high in bands:
+        n = sum(1 for m, _, _ in unknown if low <= m <= high)
+        print(f"    {label:<14} {n:>4}")
     rows = [
         {"person_id": pid, "name": name, "matches": m, "nationality": ""}
         for m, name, pid in sorted(unknown, reverse=True)

@@ -458,6 +458,37 @@ def check_18_batting_order_is_complete(conn) -> Result:
     return verdict(18, title, f"{all_out} all-out innings checked", offenders)
 
 
+def check_19_every_squad_can_field_a_keeper(conn) -> Result:
+    """A24. A franchise-season with no keeper cannot be drafted legally.
+
+    This is a check on the deck, not on the parse. The keeper slot in the XI has to
+    be filled from somewhere, so a squad that offers nobody to fill it is a card that
+    breaks the game rather than a statistic that is slightly off. It fails while
+    `keepers_by_season.csv` is unfilled, and that is the correct reading: the failure
+    is real and it blocks the deck.
+    """
+    title = "every franchise-season offers at least one keeper"
+    offenders = [
+        f"{season} {name} ({squad} players, none kept)"
+        for season, name, squad in _rows(
+            conn,
+            """
+            select fs.season_year, fs.display_name, count(sm.person_id)
+            from franchise_seasons fs
+            left join squad_members sm using (franchise_season_id)
+            group by fs.franchise_season_id, fs.season_year, fs.display_name
+            having count(*) filter (where sm.role = 'keeper') = 0
+            order by fs.season_year, fs.display_name
+            """,
+        )
+    ]
+    (total,), = _rows(conn, "select count(*) from franchise_seasons")
+    return verdict(
+        19, title, f"{total - len(offenders)} of {total} franchise-seasons covered",
+        offenders,
+    )
+
+
 CHECKS = (
     check_01_runs_total,
     check_02_participants_are_recorded,
@@ -467,4 +498,5 @@ CHECKS = (
     check_06_super_overs_excluded,
     check_17_balls_faced_convention,
     check_18_batting_order_is_complete,
+    check_19_every_squad_can_field_a_keeper,
 )

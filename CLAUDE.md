@@ -73,6 +73,17 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
   filters that test for the known value (`scheduled_balls = 120`) over filters that test
   for the absence of a problem (`not was_reduced`), because a null fails the first by
   construction and slips through the second.
+- **Never default an unobserved value to the majority class, anywhere a gap in the source
+  can masquerade as a real value.** [A23] This is the general form of the rule above and
+  it applies to every derived field, not just the one that broke. A majority default is
+  the single hardest error for internal checks to catch: it is plausible, it is right most
+  of the time, and where the source is blind it is wrong silently and in a body rather
+  than one row at a time. §6.1 defaulted unobserved nationality to Indian on the perfectly
+  sound reasoning that uncapped IPL players are overwhelmingly domestic — and the archives
+  turn out to contain no Afghanistan at all, so the rule minted eight confidently false
+  records including an `is_overseas = false` that would have let a legal XI field five
+  overseas players while the check reported compliance. **If a field can be unobserved, it
+  must be able to be NULL.**
 - No LLM or AI API call anywhere in this codebase.
 - **A migration is immutable the moment it has been applied to any database, including a
   local or personal one. Until then it is a draft and may be edited freely.** The runner
@@ -221,6 +232,7 @@ the 0.5 GB.
 | Everything else | <10 MB |
 | **Total, estimated** | ~100 MB against a 500 MB cap |
 | **Total, MEASURED after the full load** | **70 MB** (deliveries 65 MB, appearances 3.8 MB, rest <1 MB) |
+| **Total, MEASURED after SPEC 6 and migration 006** | **69 MB** (deliveries 63 MB after the phase index went, appearances 3.9 MB, squad_members 520 kB) |
 
 Roughly 7x headroom, so the estimate was conservative rather than wrong. The brief's "1.2 million deliveries" figure is ~4x high. The exact
 count, from parsing the whole archive, is **295,732 deliveries across 1,243 matches and
@@ -255,17 +267,29 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A23 | **Corrects A3.** Unknown nationality is NULL, never a default to India. The three international archives contain **no Afghanistan team at all**, so the default was systematically wrong for a whole nation — 8 Afghan internationals were being written down as Indian and not overseas. `is_overseas` is NULL too, since it was a claim derived from a value never observed. Composite sides (ICC World XI, World XI, Africa XI, Asia XI) excluded from the vote: Rashid Khan resolved to `ICC World XI` on one cap. 502 resolved, 314 unknown. |
 | A24 | Keeper role is per franchise-season, from stumpings attributed to the season they happened in — not the career `people.is_keeper` flag, which gave exactly one keeper to only 41 of 166 franchise-seasons. Now 116 with one, 24 with two, 26 unproved. `keepers_by_season.csv` carries the per-squad answer; blank is undecided, not yes. |
 | A25 | Two phases level on the same count is `mixed`, not whichever the tie-break picks. A tie for the lead among three phases can only be 50/50, which passes the >= 50% dominance test, so the naive rule names a phase by coin toss. |
-| A26 | Role thresholds asymmetric and calibrated, not chosen: `BAT_MIN = 9.0` balls faced/match, `BOWL_MIN = 6.0` legal balls bowled/match. Symmetric cutoffs gave 2.9% or 12.6% all-rounders with a "neither" bucket. Falsifiable window pinned by a 12-player calibration table in `etl/roles.py`. |
+| A26 | Role thresholds asymmetric and calibrated, not chosen: `BAT_MIN = 9.0` balls faced/match, `BOWL_MIN = 6.0` legal balls bowled/match. Symmetric cutoffs gave 2.9% or 12.6% all-rounders with a "neither" bucket. Falsifiable window pinned by a 12-player calibration table in `etl/roles.py`. **Provisional — see the note below the table.** |
 | A27 | A player who neither batted nor bowled gets no `squad_members` row. `role` is NOT NULL and fielding a dismissal implies no role. 47 of 3,384 pairs excluded, 3,337 written. |
+| A28 | §7.1 fitting filter is `innings_scheduled_balls = 120` alone; the `not was_reduced` clause is dropped. It excluded 12 first innings that were themselves scheduled for and played to a full twenty — the reduction fell on the chase, after they ended. 149,697 -> **151,175** deliveries. Refines A21, which remains correct about *why* `= 120` is the right predicate. |
+| A29 | `deliveries_phase_idx` dropped in migration `006`. Three distinct values over 295,732 rows: the planner will not choose it, and every query that filters on phase also filters on match or franchise-season. `deliveries` is 63 MB, down from 65. |
+
+**A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
+twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
+them for a player who looks miscategorised** — the shape to watch for is a pure batter
+tagged all-rounder on the strength of a few tidy overs. If that appears, the thresholds
+get retuned then, against the larger evidence. Do not touch them before then, and do not
+treat the current values as ratified beyond the twelve.
 
 ## Open questions
 
-- **`deliveries_phase_idx`** — specified in the brief, but `phase` has three distinct
-  values over ~300k rows. The planner will almost never choose it over a sequential scan,
-  and it costs ~10 MB plus write overhead. Recommend dropping it and relying on the
-  `(match_id, innings_no)` index. *Awaiting ruling.*
 - **`wickets_down` on `deliveries`** — deliberately not added. Derivable with a window
   function; revisit as a migration when §7.1 lands if the recompute cost is annoying.
+- **Fielders on `deliveries`, as the fallback keeper signal.** Not stored, per A19, which
+  is fine for phase 1 but forecloses the better signal: catches taken behind the stumps.
+  Stumpings prove a keeper but are rare, which is why 26 franchise-seasons have no proof
+  and `keepers_by_season.csv` has to be filled by hand. **If that hand-fill turns out to
+  be painful, store fielder ids and mine dismissals where the keeper took the catch
+  instead.** Not now — it is a migration plus a full reload, and the hand-fill may well
+  be cheaper. Filed so the option is not forgotten if the CSV becomes a slog.
 
 ## Stage status
 
@@ -279,7 +303,7 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
 | 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
 | 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 still awaits SPEC 7 |
-| 6. Squads, roles and bands | code done; **three override CSVs are unfilled and block the deck** |
+| 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
 **640** balls (the all-time single-season record — recorded here as 637 until check 7
@@ -295,11 +319,15 @@ figure matched what the parser had reported before any database existed.
 ## Validation
 
 ```bash
-uv run python -m validation                 # checks 1-6, 17 and 18
-uv run python -m validation --check 3       # one check
+uv run python -m validation                 # checks 1-6, 17, 18, 19
+uv run python -m validation --check 17      # one check, BY ITS SPEC 8 NUMBER
 uv run python -m validation --scorecards    # check 7, for reading by hand
 uv run python -m validation --match 598027  # one scorecard
 ```
+
+`--check` takes the SPEC 8 number, not the position in the list. It used to take the
+position, which was harmless while the checks ran 1-6 and became a silent trap the moment
+the suite skipped to 17: `--check 17` reported "no such check" while `--check 7` ran it.
 
 ## Section 6: squads, and the four CSVs that gate the deck
 

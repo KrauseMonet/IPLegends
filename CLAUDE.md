@@ -27,7 +27,14 @@ uv run python -m etl.download             # resolve + fetch archives, write mani
 uv run python -m etl.inspect_teams        # deck shape + archive audit
 uv run python -m etl.migrate --status     # show applied vs pending
 uv run python -m etl.migrate              # apply pending migrations
+uv run python -m etl.load                 # load season 2016 (the default)
+uv run python -m etl.load --season 2008 --season 2020
+uv run python -m etl.load --all           # the whole archive
 ```
+
+Reloading a season is safe. `etl.load` deletes the target matches first and
+`deliveries`/`appearances` cascade from them, so a reload replaces rather than
+duplicates. `people` is upserted, since a person spans seasons.
 
 Parse-check migrations without a server (catches syntax errors before they hit Neon):
 
@@ -244,13 +251,20 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 
 | Stage | State |
 |---|---|
-| 1. Scaffold + migrations + runner | done; migrations parse, not yet applied to a live DB |
+| 1. Scaffold + migrations + runner | done |
 | 2. Downloader | done; 5 archives fetched, manifest + checksums written |
 | 3. Franchise reconnaissance | done; mapping confirmed, 15 franchises / 166 franchise-seasons |
-| 4a. Parser (pure, no DB) | done; 1,243 matches parse, 295,732 deliveries, 12 tests pass |
-| 4b. Migrations applied | **blocked on `.env` connection strings** |
-| 4c. Loader, 2016 only | blocked on 4b |
+| 4a. Parser (pure, no DB) | done; 1,243 matches parse, 295,732 deliveries, 16 tests pass |
+| 4b. Migrations applied | done; 4 applied to Neon, 8 tables / 14 checks / 21 indexes, runner idempotent |
+| 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
 | 5. Validation 1-7 | not started |
+
+2016 was checked against the public record before being called done: Kohli 973 runs off
+637 balls (the all-time single-season record), Warner 848, de Villiers 687, Bhuvneshwar
+Kumar 23 wickets (Purple Cap), SRH 17 matches. Display names came out era-correct
+("Royal Challengers Bangalore", "Delhi Daredevils", "Kings XI Punjab", "Rising Pune
+Supergiants"), which is what `franchise_seasons.display_name` exists for. One parser
+warning, `980989 innings 1`, and its 108 deliveries carry a null scheduled length.
 
 Stage 4 uses **2016** as the single hardcoded season: it exercises Gujarat Lions and
 Rising Pune Supergiants in one go. The 2008 `"2007/08"` label trap and the super-over trap

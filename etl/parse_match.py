@@ -99,6 +99,10 @@ class ParsedMatch(BaseModel):
     had_super_over: bool
     was_reduced: bool
     player_of_match_id: str | None
+    # Canonical key -> the name the franchise actually carried this season, which
+    # is what franchise_seasons.display_name stores. Canonicalising alone throws
+    # this away: 'Delhi Daredevils' has to survive for the 2012 card to read right.
+    display_names: dict[str, str]
     people: list[ParsedPerson]
     appearances: list[ParsedAppearance]
     deliveries: list[ParsedDelivery]
@@ -465,6 +469,7 @@ def parse_match(raw: dict, match_id: str) -> ParsedMatch:
             b is not None and b < FULL_INNINGS_BALLS for b in scheduled_by_innings
         ),
         player_of_match_id=potm_id,
+        display_names={canonical_name: raw for raw, canonical_name in squads.items()},
         people=[ParsedPerson(person_id=p, name=n) for p, n in sorted(people.items())],
         appearances=appearances,
         deliveries=deliveries,

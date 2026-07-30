@@ -269,11 +269,43 @@ Flag the match.
 went to a **second** one, so it holds six innings. Innings numbering is the position in
 the array, which gives that match super-over innings 3, 4, 5 and 6.
 
+Both super overs of that match are flagged by the same `is_super_over` mechanism as any
+other — there is no special case for the second one. `innings_no` is the position in the
+array, so the match occupies 1 through 6 and the `smallint` column accommodates it.
+
 Ties and super overs coincide exactly: all 16 ties carry an `outcome.eliminator` and
 nothing else does. A tie carries **no `winner` key at all**. It is stored as
 `result_type = 'tie'` with `winner_fs_id` set to the eliminator and `result_margin` null.
 The side that won the match is recorded because it did win; the match is still recorded as
 tied. Neither fact is lost and neither is invented.
+
+**`matches.decided_by`** makes that row self-describing, because `result_type = 'tie'` with
+a populated `winner_fs_id` otherwise reads as a contradiction. One of `runs`, `wickets`,
+`eliminator`, `dls`, or null for a no-result match. No downstream aggregate has to infer
+intent.
+
+**D/L is the case that would otherwise hide completely.** `outcome.method` is present on
+**23 matches and is always `'D/L'`** — there is no other method in the archive. Those 23
+carry an ordinary margin, **13 by runs and 10 by wickets**, so a D/L result is
+indistinguishable from a normal win by `result_type` alone. All 23 fall inside the 34
+reduced matches, so D/L is a strict subset of reduction and not an independent exclusion
+criterion — but it was recorded nowhere before this column existed.
+
+`decided_by` therefore takes **`dls` in preference to the margin type**: the margin type is
+already in `result_type`, and this is the only place the D/L involvement survives. Observed
+distribution across all 1,243 matches:
+
+| `result_type` | `decided_by` | Matches |
+|---|---|---|
+| wickets | wickets | 650 |
+| runs | runs | 545 |
+| tie | eliminator | 16 |
+| runs | dls | 13 |
+| wickets | dls | 10 |
+| no result | *null* | 9 |
+
+Two check constraints hold this shape: a tie must be `decided_by = 'eliminator'`, and a
+no-result match must have `decided_by` null.
 
 **4.5 Rain-reduced matches. [A13 — supersedes the original text]**
 
@@ -307,6 +339,13 @@ This resolves to null for exactly **6 innings** in the archive, each logged by n
 never guessed. The "chase scheduled for a full twenty" row is what keeps ordinary all-out
 innings at 120 rather than mistaking a collapse for a rain curtailment — without it, 44
 innings go null instead of 6.
+
+**The 6 are not all inside the 34 reduced matches.** Three are — `1136566`, `1136592`,
+`980989`, shortened matches abandoned mid-over. The other three — `1473495`, `1527685`,
+`501265` — were abandoned during the first innings with no second innings, so there is no
+`target.overs` to mark them reduced and `was_reduced` is **false**. Excluding them from
+rating therefore cannot rely on the reduced flag; see the §7.1 fitting filter, which tests
+for a known 120 so that a null fails the test by construction.
 
 Note the interaction with §4.5b: the two innings that bowled 119 legal balls are the
 5-ball miscounted overs, not curtailments. Counting **overs rather than legal balls** is
@@ -512,8 +551,26 @@ scheduling context as first innings even when both are 20 overs:**
   no first-innings equivalent. A batter blocking out a won chase and a batter slogging a
   lost one both look bad against a neutral baseline.
 
-That leaves roughly **145,000 deliveries** across 20 overs × 4 wicket buckets — about
-1,800 per cell. Ample.
+**[A17] The fitting filter is a positive test, not the absence of a reduction:**
+
+```sql
+innings_no = 1 and not is_super_over and not over_miscounted
+  and innings_scheduled_balls = 120        -- not: and not was_reduced
+```
+
+`was_reduced` alone leaks. Three matches — `1473495`, `1527685`, `501265` — were abandoned
+during the first innings with no second innings at all, so no `target.overs` exists to mark
+them reduced, and their scheduled length is unknown. `was_reduced` is false for all three
+and 148 deliveries of unknown-length innings would have entered the fit.
+
+Testing for a known 120 closes it by construction. **A null can never satisfy an equality,
+so unknown scheduled length falls out of the fitting set automatically** rather than
+depending on anyone remembering to exclude it. Both predicates are kept — the
+`was_reduced` clause preserves the ratified rule below, and the `= 120` clause makes the
+null safe.
+
+That leaves **149,697 deliveries** across 20 overs × 4 wicket buckets — about **1,871 per
+cell**. The earlier ~145,000 was an estimate; this is counted.
 
 **Scoring, as distinct from fitting:**
 
@@ -523,6 +580,13 @@ That leaves roughly **145,000 deliveries** across 20 overs × 4 wicket buckets �
 | Second innings, full-length | **no** | yes | yes |
 | Any reduced-match delivery | no | **no** | **yes** |
 | Miscounted overs | no | yes | yes |
+| **[A17] Unknown scheduled length** | **no** | **no** | **yes** |
+
+**[A17] The 6 innings of unknown scheduled length reach display statistics and nothing
+else.** A player's card shows the runs they really scored in an abandoned game; no rating,
+no state-model cell and no aggregate ever treats the unknown length as twenty overs. The
+`= 120` filter above is what enforces it, and validation check 16 asserts the count is
+still exactly 6.
 
 **Reduced-match deliveries are excluded from rating computation entirely but still count
 in display statistics.** A player's card shows their real runs and wickets; the rating

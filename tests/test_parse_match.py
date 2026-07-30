@@ -66,10 +66,40 @@ def test_super_overs_are_flagged_and_excluded():
     assert all(d.phase is None for d in super_over)
 
     # A tie stays a tie. The eliminator is recorded as the winner because it is,
-    # and nothing about the tie is lost by doing so.
+    # and decided_by keeps the row from reading as a contradiction.
     assert match.result_type == "tie"
     assert match.winner is not None
     assert match.result_margin is None
+    assert match.decided_by == "eliminator"
+
+
+def test_both_super_overs_use_the_same_flag():
+    """The second super over is not a special case; it is innings 5 and 6."""
+    match = load("1216517")
+    by_innings = {}
+    for d in match.deliveries:
+        by_innings.setdefault(d.innings_no, set()).add(d.is_super_over)
+
+    assert by_innings[1] == {False} and by_innings[2] == {False}
+    for innings_no in (3, 4, 5, 6):
+        assert by_innings[innings_no] == {True}, (
+            f"innings {innings_no} not uniformly flagged as a super over"
+        )
+    assert max(by_innings) == 6
+
+
+def test_dls_result_is_visible_rather_than_implied():
+    """A D/L match carries an ordinary margin, so only decided_by distinguishes it."""
+    match = load("392186")
+    assert match.result_type == "runs"
+    assert match.result_margin == 11
+    assert match.decided_by == "dls"
+
+
+def test_ordinary_win_is_decided_by_its_margin_type():
+    match = load("335982")
+    assert match.result_type == "runs"
+    assert match.decided_by == "runs"
 
 
 def test_super_over_contributes_nothing_to_participation():
@@ -163,7 +193,23 @@ def test_abandoned_innings_reports_rather_than_guesses():
     assert all(d.innings_scheduled_balls is None for d in match.deliveries)
     assert match.result_type == "no result"
     assert match.winner is None
+    assert match.decided_by is None
     assert any("not observable" in w for w in match.warnings)
+
+
+def test_unknown_scheduled_length_never_becomes_a_default():
+    """SPEC 4.5/A17. The rating fit tests for 120, so a null falls out of it.
+
+    Testing for the presence of a known full length rather than the absence of a
+    reduction is what makes this safe: a null can never satisfy it, so it cannot
+    be silently read as twenty overs.
+    """
+    match = load("1527685")
+    assert all(d.innings_scheduled_balls is None for d in match.deliveries)
+    # Neither the reduced flag nor the null is enough on its own; the fit needs
+    # both, which is the leak this pins down.
+    assert match.was_reduced is False
+    assert not [d for d in match.deliveries if d.innings_scheduled_balls == 120]
 
 
 def test_legal_ball_agrees_with_the_source_ball_reference():

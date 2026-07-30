@@ -94,6 +94,7 @@ class ParsedMatch(BaseModel):
     winner: str | None
     result_type: str | None
     result_margin: int | None
+    decided_by: str | None
     scheduled_overs: int | None
     had_super_over: bool
     was_reduced: bool
@@ -272,7 +273,7 @@ def parse_match(raw: dict, match_id: str) -> ParsedMatch:
     outcome = info.get("outcome") or {}
     winner_name = outcome.get("winner") or outcome.get("eliminator")
     winner = squads.get(winner_name) if winner_name else None
-    result_type, result_margin = _result(outcome, warnings, match_id)
+    result_type, result_margin, decided_by = _result(outcome, warnings, match_id)
 
     people: dict[str, str] = {}
     team_of: dict[str, str] = {}
@@ -457,6 +458,7 @@ def parse_match(raw: dict, match_id: str) -> ParsedMatch:
         winner=winner,
         result_type=result_type,
         result_margin=result_margin,
+        decided_by=decided_by,
         scheduled_overs=info.get("overs"),
         had_super_over=had_super_over,
         was_reduced=any(
@@ -472,24 +474,38 @@ def parse_match(raw: dict, match_id: str) -> ParsedMatch:
 
 def _result(
     outcome: dict, warnings: list[str], match_id: str
-) -> tuple[str | None, int | None]:
-    """A tie is stored as a tie even when a super over decided it.
+) -> tuple[str | None, int | None, str | None]:
+    """Returns (result_type, result_margin, decided_by).
 
-    Every tie in the archive carries an `eliminator`, so `winner_fs_id` is the
-    side that won the super over while `result_type` still reads 'tie'. Neither
-    fact is lost and neither is invented.
+    A tie is stored as a tie even when a super over settled it. Every tie in the
+    archive carries an `eliminator`, so `winner_fs_id` holds the side that won
+    the super over while `result_type` still reads 'tie', and `decided_by` says
+    which of the two the reader is looking at.
+
+    `decided_by` prefers 'dls' over the margin type. The margin type is already
+    in `result_type`; D/L involvement is recorded nowhere else, and a D/L result
+    carries an ordinary runs or wickets margin that makes it invisible otherwise.
     """
+    method = outcome.get("method")
+    if method is not None and method != "D/L":
+        warnings.append(f"{match_id}: unrecognised outcome.method {method!r}")
+
     if "result" in outcome:
         result = outcome["result"]
         if result not in ("tie", "no result"):
             warnings.append(f"{match_id}: unrecognised outcome.result {result!r}")
-            return None, None
-        return result, None
+            return None, None, None
+        if result == "tie":
+            if "eliminator" not in outcome:
+                warnings.append(f"{match_id}: tie with no eliminator")
+                return result, None, None
+            return result, None, "eliminator"
+        return result, None, None
 
     by = outcome.get("by") or {}
     for key in ("runs", "wickets"):
         if key in by:
-            return key, by[key]
+            return key, by[key], "dls" if method == "D/L" else key
 
     warnings.append(f"{match_id}: outcome has neither a result nor a margin")
-    return None, None
+    return None, None, None

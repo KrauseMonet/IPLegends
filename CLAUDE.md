@@ -2,6 +2,14 @@
 
 Read `SPEC.md` first. This file tracks state, commands, and open questions.
 
+**`SPEC.md` is the source of truth and this is not a formality.** Three figures recorded
+there as measured fact turned out wrong once code actually read the archive: the reduced-
+match split (15/19, really 15/12/7), the Impact Player replacement count (523, really 524
+deliveries carrying 563 entries), and the state-model fitting size (~145,000, really
+149,697). Each was corrected in the spec the moment it was found, with the old value named
+so the correction is auditable rather than silent. Keep doing that — a figure quietly
+replaced is indistinguishable from a figure that was never checked.
+
 ## Environment
 
 Python 3.11 pinned via `uv`. No Homebrew, no Docker, no local Postgres. Database is
@@ -37,6 +45,16 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
 - Never key a player on a name string. Always `person_id` from `info.registry.people`.
 - Never use `info.season` as the season year. Derive from match dates.
 - Never fabricate a value. NULL, log it, report it.
+- **Where the source carries a field we can derive independently, derive it and validate
+  against the source rather than storing both.** [A19] Two copies of the same fact drift,
+  and the storage is the lesser cost — what is really lost is the check. Deriving turns a
+  redundant column into a test of our reading against the source's own answer, which is
+  the only kind of check that cannot pass by agreeing with itself. `actual_delivery` is
+  the worked example: not stored, and validation 15 is stronger for it.
+- **A null must propagate as unknown.** Never let it acquire a default downstream. Prefer
+  filters that test for the known value (`scheduled_balls = 120`) over filters that test
+  for the absence of a problem (`not was_reduced`), because a null fails the first by
+  construction and slips through the second.
 - No LLM or AI API call anywhere in this codebase.
 - **A migration is immutable the moment it has been applied to any database, including a
   local or personal one. Until then it is a draft and may be edited freely.** The runner
@@ -156,6 +174,12 @@ ties carry `outcome.eliminator`, nothing else does, and a tie carries no `winner
 **At most one wicket per delivery** across all 295,732 — the single `wicket_kind` /
 `player_out_id` pair on `deliveries` is safe and does not need a child table.
 
+**`outcome.method`.** Present on 23 matches, always `'D/L'`, never anything else. All 23
+sit inside the 34 reduced matches, so D/L is a strict subset of reduction and not a
+separate exclusion criterion. But a D/L result carries an ordinary margin — 13 by runs,
+10 by wickets — so it is invisible in `result_type` and would have gone unrecorded without
+`matches.decided_by`.
+
 **2026 revision risk.** Cricsheet is contributor-driven and recent seasons get revised.
 Re-verify the 2026 files against a fresh download before finalising ratings. If the 2026
 baseline sits far off trend after within-season normalisation, flag it rather than
@@ -203,7 +227,9 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A16 | `replacements` kinds: `match` = Impact Player, `role` = substitute. A substitute who bowled counts as participation; a named-but-unused Impact Player does not. |
 | A17 | Innings-1 scheduled length resolved by a six-case rule needing match-level context, not innings-level. Null for exactly 6 innings, each logged. Corrects A13's 15/19 split to 15/12/7. |
 | A18 | A tie is stored as `result_type = 'tie'` with `winner_fs_id` set to the eliminator. Match won, match tied, both recorded. One match holds two super overs (six innings). |
-| A19 | `actual_delivery` not stored — exactly derivable, so it serves as an independent check on wide/no-ball classification instead (validation 15). Powerplay bounds are positional, compare against `ball_no`. |
+| A19 | `actual_delivery` not stored — exactly derivable, so it serves as an independent check on wide/no-ball classification instead (validation 15). Powerplay bounds are positional, compare against `ball_no`. Generalised into a hard rule above. |
+| A20 | `matches.decided_by` (runs / wickets / eliminator / dls / null) makes the result row self-describing. Takes `dls` over the margin type, since the margin type is already in `result_type` and D/L is recorded nowhere else. |
+| A21 | §7.1 fitting filter tests `innings_scheduled_balls = 120`, not `not was_reduced`. The latter leaked 148 deliveries from 3 matches abandoned in innings 1 with no chase to mark them reduced. |
 
 ## Open questions
 

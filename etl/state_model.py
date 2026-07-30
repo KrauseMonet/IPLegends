@@ -55,7 +55,8 @@ class Cell(NamedTuple):
     bucket: str
     faced: int              # deliveries a batter faced here (A22: extra_wides = 0)
     runs_off_bat: int
-    dismissals: int
+    dismissals: int         # [A36] every dismissal here. DIAGNOSTIC - see below.
+    striker_dismissals: int  # [A36] the striker's own. This is what prices a batter.
     outcomes: dict[int, int]
 
     @property
@@ -64,7 +65,12 @@ class Cell(NamedTuple):
 
     @property
     def dismissal_rate(self) -> float:
+        """[A36] Any-wicket. Diagnostic only — nothing that scores a batter may read it."""
         return self.dismissals / self.faced if self.faced else 0.0
+
+    @property
+    def striker_dismissal_rate(self) -> float:
+        return self.striker_dismissals / self.faced if self.faced else 0.0
 
     @property
     def unexpected(self) -> dict[int, int]:
@@ -115,7 +121,7 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], Remaining]]:
     the bucketed grid half the states would price a wicket at zero.
     """
     per_ball: dict[tuple[int, str], list] = defaultdict(
-        lambda: [0, 0, 0, defaultdict(int)]
+        lambda: [0, 0, 0, 0, defaultdict(int)]
     )
     remaining: dict[tuple[int, int], list] = defaultdict(lambda: [0, 0, 0])
 
@@ -125,13 +131,14 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], Remaining]]:
             f"""
             with fit as (
                 select match_id, over_no, ball_no, runs_batter, runs_extras,
-                       extra_wides,
+                       extra_wides, batter_id, player_out_id,
                        (wicket_kind is not null
                         and wicket_kind <> all(%s)) as is_wicket
                 from deliveries
                 where {FITTING_SET}
             )
             select over_no, runs_batter, extra_wides, is_wicket,
+                   (is_wicket and player_out_id = batter_id) as striker_out,
                    coalesce(sum(case when is_wicket then 1 else 0 end) over w, 0)
                        as wickets_down,
                    coalesce(sum(runs_batter + runs_extras) over w, 0) as runs_so_far,
@@ -145,7 +152,8 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], Remaining]]:
             """,
             (list(NOT_A_WICKET),),
         )
-        for over_no, runs, wides, is_wicket, wickets, runs_before, runs_left in cur:
+        for (over_no, runs, wides, is_wicket, striker_out, wickets,
+             runs_before, runs_left) in cur:
             exact = remaining[(over_no, min(wickets, 9))]
             exact[0] += 1
             exact[1] += runs_before
@@ -157,11 +165,13 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], Remaining]]:
             cell[0] += 1
             cell[1] += runs
             cell[2] += int(is_wicket)
-            cell[3][runs] += 1  # keyed by the real value, so a surprise names itself
+            cell[3] += int(striker_out)
+            cell[4][runs] += 1  # keyed by the real value, so a surprise names itself
 
     cells = [
-        Cell(over_no, bucket, faced, runs, outs, dict(dist))
-        for (over_no, bucket), (faced, runs, outs, dist) in sorted(per_ball.items())
+        Cell(over_no, bucket, faced, runs, outs, struck, dict(dist))
+        for (over_no, bucket), (faced, runs, outs, struck, dist)
+        in sorted(per_ball.items())
     ]
     # Counts, not means - the rule migrations 007 and 008 store under. Every mean is one
     # division away wherever it is wanted, and there is only ever one copy of the fact.
@@ -220,7 +230,7 @@ def every_cell(cells: list[Cell]) -> list[Cell]:
     have = {(c.over_no, c.bucket): c for c in cells}
     return [
         have.get((over, label))
-        or Cell(over, label, 0, 0, 0, {r: 0 for r in OFF_THE_BAT})
+        or Cell(over, label, 0, 0, 0, 0, {r: 0 for r in OFF_THE_BAT})
         for over in range(20)
         for label, _ in BUCKETS
     ]
@@ -244,13 +254,15 @@ def write(conn, cells: list[Cell], expected) -> tuple[int, int]:
             """
             copy state_ball_outcomes (
                 over_no, wicket_bucket, faced, runs_off_bat, dismissals,
+                striker_dismissals,
                 runs_0, runs_1, runs_2, runs_3, runs_4, runs_5, runs_6
             ) from stdin
             """
         ) as copy:
             for c in rows:
                 copy.write_row(
-                    (c.over_no, c.bucket, c.faced, c.runs_off_bat, c.dismissals)
+                    (c.over_no, c.bucket, c.faced, c.runs_off_bat, c.dismissals,
+                     c.striker_dismissals)
                     + tuple(c.outcomes.get(r, 0) for r in OFF_THE_BAT)
                 )
 
@@ -297,15 +309,21 @@ def report(cells: list[Cell], expected, show_cells: bool) -> None:
             row += f"{c.runs_per_ball:>10.3f}" if ok else f"{'-':>10}"
         print(row)
 
-    print("\ndismissal probability per ball faced")
+    print("\nSTRIKER dismissal probability per ball faced (A36 - what prices a batter)")
     print(f"    {'over':<6}" + "".join(f"{label:>10}" for label, _ in BUCKETS))
     for over in range(20):
         row = f"    {over:<6}"
         for label, _ in BUCKETS:
             c = grid.get((over, label))
             ok = c and c.faced >= MIN_OBSERVATIONS
-            row += f"{c.dismissal_rate:>10.4f}" if ok else f"{'-':>10}"
+            row += f"{c.striker_dismissal_rate:>10.4f}" if ok else f"{'-':>10}"
         print(row)
+
+    struck = sum(c.striker_dismissals for c in cells)
+    every = sum(c.dismissals for c in cells)
+    print(f"    {struck:,} striker dismissals of {every:,} in the fitting set; the other "
+          f"{every - struck:,} ({(every - struck) / every:.2%}) belong to somebody else "
+          "and are\n    kept only as the labelled diagnostic column.")
 
     print("\nexpected FINAL total at exact wickets, and the cost of a wicket (A31)")
     print(f"    {'over':<6}{'0 down':>10}{'2 down':>10}{'4 down':>10}{'6 down':>10}"
@@ -329,11 +347,13 @@ def report(cells: list[Cell], expected, show_cells: bool) -> None:
     if show_cells:
         print("\nall 80 cells, with the outcome distribution the simulator needs")
         header = "".join(f"{r:>7}" for r in OFF_THE_BAT)
-        print(f"    {'over':<5}{'wkts':<6}{'balls':>7}{header}{'other':>7}{'W':>7}")
+        print(f"    {'over':<5}{'wkts':<6}{'balls':>7}{header}{'other':>7}"
+              f"{'W(str)':>7}{'W(any)':>7}")
         for c in every_cell(cells):
             dist = "".join(f"{c.outcomes.get(r, 0):>7}" for r in OFF_THE_BAT)
             print(f"    {c.over_no:<5}{c.bucket:<6}{c.faced:>7}{dist}"
-                  f"{sum(c.unexpected.values()):>7}{c.dismissals:>7}")
+                  f"{sum(c.unexpected.values()):>7}"
+                  f"{c.striker_dismissals:>7}{c.dismissals:>7}")
 
 
 def main(argv: list[str] | None = None) -> int:

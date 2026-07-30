@@ -1,13 +1,20 @@
-"""SPEC 7.1 per-ball impact, computed in memory and printed. No schema, no writes.
+"""SPEC 7.2-7.3 per-ball impact, shrinkage and the draftability gates.
 
     uv run python -m etl.impact                        the distributions
     uv run python -m etl.impact --player "V Kohli"     one player's seasons, batting
     uv run python -m etl.impact --bowler "YS Chahal"   one player's seasons, bowling
     uv run python -m etl.impact --reconcile "V Kohli"  scored totals vs the scorecard
+    uv run python -m etl.impact --cohorts              SPEC 7.7 top 20 per cohort
+    uv run python -m etl.impact --gate-gap             what the scoring-set gate tightens
+    uv run python -m etl.impact --write                load migration 009's table
 
-Deliberately writes nothing. The ratings grain is migration 009's to settle and the
-shrinkage constant with it, so this module produces evidence and stops. It has no
-`--write`.
+`--write` truncates and rewrites, so it is re-runnable, and it must be re-run after any
+`etl.load` or any refit of the state model it scores against.
+
+**The shrinkage constant is not written.** Storage holds inputs only - balls, impact total
+and prior - and `player_season_rating` derives the rest. k lives in that view and nowhere
+else, which is what makes A35's provisional 100 revisable without a refit. Nothing may
+reimplement the formula; two copies drift and nothing catches it.
 
 The formula, from SPEC 7.1:
 
@@ -72,7 +79,13 @@ SHRINKAGE_K = 100
 BAT_FLOOR_BALLS = 100
 BOWL_FLOOR_BALLS = 150          # 25 overs; not 100 - see print_stability
 
-DRAFT_GATE_MATCHES = 4          # SPEC 7.3, provisional and unratified
+# [A33] SPEC 7.3's participation gate, counted over the SCORING SET rather than over squad
+# appearances. The two disagree on 890 of 3,333 player-seasons and flip the gate on 61,
+# because appearances include super overs and reduced matches that the rating discards. A
+# player should not clear a participation gate on cricket that does not contribute to his
+# rating, and migration 009's CHECK could not be written at all while the two gates counted
+# different deliveries.
+DRAFT_GATE_MATCHES = 4
 
 K_SWEEP = (50, 100, 200, 400, 800)
 
@@ -250,7 +263,9 @@ class Scored(NamedTuple):
     bowl_careers: dict[int, Tally]
     names: dict[int, str]
     bands: dict[tuple[int, int], str]
-    matches: dict[tuple[int, int], int]
+    usages: dict[tuple[int, int], str]
+    matches: dict[tuple[int, int], int]      # scoring-set count - see `score`
+    squad_matches: dict[tuple[int, int], int]  # whole-archive count, for the gap report
     franchises: dict[tuple[int, int], set[int]]
     bat_grid: Grid
     bowl_grid: Grid
@@ -264,6 +279,12 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
     bat_careers: dict[int, Tally] = defaultdict(Tally)
     bowl_careers: dict[int, Tally] = defaultdict(Tally)
     franchises: dict[tuple[int, int], set[int]] = defaultdict(set)
+    # [A33, ratified 2026-07-30] The match gate counts SCORING-SET matches, not squad
+    # appearances. Both gates must speak about the same deliveries or the constraint tying
+    # them together compares across two universes - the A22 failure. Matches in which the
+    # player batted or bowled here, which is `matches_played`'s definition over a narrower
+    # universe rather than a different definition.
+    played: dict[tuple[int, int], set[int]] = defaultdict(set)
 
     with conn.cursor(name="impact_score") as cur:
         cur.itersize = 20_000
@@ -280,7 +301,8 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
                 join matches m using (match_id)
                 where {SCORING_SET}
             )
-            select season_year, batter_id, bowler_id, batting_fs_id, bowling_fs_id,
+            select match_id, season_year, batter_id, bowler_id,
+                   batting_fs_id, bowling_fs_id,
                    over_no, runs_batter, extra_wides, extra_noballs, legal_ball,
                    is_wicket,
                    (is_wicket and player_out_id = batter_id) as striker_out,
@@ -293,7 +315,7 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
             """,
             (list(NOT_A_WICKET),),
         )
-        for (season, batter, bowler, bat_fs, bowl_fs, over, runs, wides, noballs,
+        for (match, season, batter, bowler, bat_fs, bowl_fs, over, runs, wides, noballs,
              legal, is_wicket, striker_out, bowler_out, wickets) in cur:
             exact = min(wickets, 9)
             cost = costs.of(over, exact)
@@ -312,6 +334,8 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
                 t.impact += value
                 t.impact_any += value
             franchises[(bowler, season)].add(bowl_fs)
+            if legal:
+                played[(bowler, season)].add(match)
 
             if wides:
                 continue
@@ -326,26 +350,33 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
                 t.impact += value
                 t.impact_any += diagnostic
             franchises[(batter, season)].add(bat_fs)
+            played[(batter, season)].add(match)
 
     with conn.cursor() as cur:
         cur.execute("select person_id, primary_name from people")
         names = dict(cur.fetchall())
         cur.execute(
             """
-            select s.person_id, f.season_year, s.batting_band, s.matches_played
+            select s.person_id, f.season_year, s.batting_band, s.bowling_usage,
+                   s.matches_played
             from squad_members s
             join franchise_seasons f using (franchise_season_id)
             """
         )
-        bands, matches = {}, {}
-        for person, season, band, played in cur:
+        bands, usages, squad_matches = {}, {}, {}
+        for person, season, band, usage, played_all in cur:
             if band is not None:
                 bands[(person, season)] = band
+            if usage is not None:
+                usages[(person, season)] = usage
             # A player can appear for two franchises in one season; take the larger.
-            matches[(person, season)] = max(played, matches.get((person, season), 0))
+            squad_matches[(person, season)] = max(
+                played_all, squad_matches.get((person, season), 0)
+            )
 
+    matches = {key: len(ms) for key, ms in played.items()}
     return Scored(dict(bat), dict(bowl), dict(bat_careers), dict(bowl_careers),
-                  names, bands, matches, dict(franchises),
+                  names, bands, usages, matches, squad_matches, dict(franchises),
                   bat_grid, bowl_grid, costs)
 
 
@@ -369,22 +400,31 @@ class Prior(NamedTuple):
     source: str         # 'loso' | 'band' | 'season'
 
 
-def band_league_means(scored: Scored, seasons, striker_only=True) \
-        -> dict[tuple[int, str], float]:
-    """[SPEC 7.2] League mean per season x A6 batting band, the fallback prior.
+def band_league_means(cohorts, seasons) -> dict[tuple[int, str], float]:
+    """[SPEC 7.2] League mean per season x cohort, the fallback prior.
 
     Never the undifferentiated mean: shrinking a number 6 toward the all-batters average
     drags every finisher toward top-order norms.
+
+    `cohorts` is the discipline's own cohort map - A6 batting band for batting, bowling
+    usage phase for bowling. They are not interchangeable: grouping bowlers by the band
+    they bat in would shrink every bowler toward the tail-batter mean of a different
+    measurement entirely.
     """
     per: dict[tuple[int, str], list] = defaultdict(lambda: [0.0, 0])
     for (person, season), t in seasons.items():
-        band = scored.bands.get((person, season))
-        if band is None:
+        cohort = cohorts.get((person, season))
+        if cohort is None:
             continue
-        acc = per[(season, band)]
+        acc = per[(season, cohort)]
         acc[0] += t.impact
         acc[1] += t.balls
     return {key: total / n for key, (total, n) in per.items() if n}
+
+
+def cohorts_for(scored: Scored, what: str):
+    """[SPEC 7.4] The cohort a discipline is scored within: A6 band, or bowling phase."""
+    return scored.bands if what == "batting" else scored.usages
 
 
 def league_means(seasons) -> dict[int, float]:
@@ -396,20 +436,34 @@ def league_means(seasons) -> dict[int, float]:
     return {s: total / n for s, (total, n) in per.items() if n}
 
 
-def loso_prior(scored, seasons, careers, person, season, league, bands,
+def loso_prior(cohorts, seasons, careers, person, season, league, bands,
                floor: int = CAREER_FLOOR) -> Prior:
     career, mine = careers[person], seasons[(person, season)]
     n = career.balls - mine.balls
     if n and n >= floor:
         return Prior((career.impact - mine.impact) / n, n, "loso")
-    band = scored.bands.get((person, season))
-    fallback = bands.get((season, band)) if band else None
+    cohort = cohorts.get((person, season))
+    fallback = bands.get((season, cohort)) if cohort else None
     return (Prior(fallback, n, "band") if fallback is not None
             else Prior(league[season], n, "season"))
 
 
 def shrink(raw: float, n: int, prior: float, k: float) -> float:
     return (n * raw + k * prior) / (n + k)
+
+
+def gate_reason(balls: int, matches: int, floor: int) -> str | None:
+    """[A33] Why this player-season is not rateable, or None if it is.
+
+    Mirrors migration 009's CHECK exactly, and deliberately: the constraint is what stops
+    the two halves drifting, so the loader computing it differently would be the one thing
+    the constraint cannot catch.
+    """
+    thin = balls < floor
+    few = matches < DRAFT_GATE_MATCHES
+    if not thin and not few:
+        return None
+    return "both" if thin and few else ("matches" if few else "balls")
 
 
 # --- reporting ---------------------------------------------------------------------------
@@ -484,12 +538,13 @@ def print_stability(seasons, what: str) -> None:
 
 def print_floor_effect(scored, seasons, floor, what, k=SHRINKAGE_K) -> None:
     """The floor and the ratified k together, which is what a rating will actually be."""
+    cohorts = cohorts_for(scored, what)
     gated = {key: t for key, t in seasons.items() if t.balls >= floor}
-    league, bands = league_means(gated), band_league_means(scored, gated)
+    league, bands = league_means(gated), band_league_means(cohorts, gated)
     careers = scored.bat_careers if what == "batting" else scored.bowl_careers
     ranked = sorted(
         (shrink(t.per_ball, t.balls,
-                loso_prior(scored, gated, careers, p, s, league, bands).value, k),
+                loso_prior(cohorts, gated, careers, p, s, league, bands).value, k),
          t, (p, s))
         for (p, s), t in gated.items()
     )[::-1]
@@ -510,14 +565,15 @@ def print_prior_breadth(scored, seasons, careers, floor, what, k=SHRINKAGE_K) ->
     problem one level up, and it is the mechanism behind the only pathology that survived
     the balls floor, so it is measured rather than argued about.
     """
+    cohorts = cohorts_for(scored, what)
     gated = {key: t for key, t in seasons.items() if t.balls >= floor}
-    league, bands = league_means(gated), band_league_means(scored, gated)
+    league, bands = league_means(gated), band_league_means(cohorts, gated)
     others = Counter()
     for person, _ in gated:
         others[person] += 1
     rows = []
     for (person, season), t in gated.items():
-        prior = loso_prior(scored, seasons, careers, person, season, league, bands)
+        prior = loso_prior(cohorts, seasons, careers, person, season, league, bands)
         n_seasons = sum(1 for (p, s) in seasons if p == person and s != season
                         and seasons[(p, s)].balls)
         moved = shrink(t.per_ball, t.balls, prior.value, k) - t.per_ball
@@ -595,7 +651,8 @@ def print_player(scored, seasons, careers, name, what, floor) -> None:
         print(f"\nno person named {name!r}")
         return
     person = match[0]
-    league, bands = league_means(seasons), band_league_means(scored, seasons)
+    cohorts = cohorts_for(scored, what)
+    league, bands = league_means(seasons), band_league_means(cohorts, seasons)
     rows = sorted((s, t) for (p, s), t in seasons.items() if p == person)
     career = careers[person]
     if not rows:
@@ -609,7 +666,7 @@ def print_player(scored, seasons, careers, name, what, floor) -> None:
     print(f"    {'season':<8}{'balls':>7}{'runs':>6}{'raw':>8}{'prior':>8}{'src':>7}"
           + "".join(f"{'k=' + str(k):>9}" for k in K_SWEEP) + "   rateable")
     for season, t in rows:
-        prior = loso_prior(scored, seasons, careers, person, season, league, bands)
+        prior = loso_prior(cohorts, seasons, careers, person, season, league, bands)
         print(f"    {season:<8}{t.balls:>7}{t.runs:>6}{t.per_ball:>+8.3f}"
               f"{prior.value:>+8.3f}{prior.source:>7}"
               + "".join(f"{shrink(t.per_ball, t.balls, prior.value, k):>+9.3f}"
@@ -620,7 +677,7 @@ def print_player(scored, seasons, careers, name, what, floor) -> None:
     # contrast "is the point of the game", so it is a quantity to watch, not a side-effect.
     def spread_at(k):
         vals = [shrink(t.per_ball, t.balls,
-                       loso_prior(scored, seasons, careers, person, s, league,
+                       loso_prior(cohorts, seasons, careers, person, s, league,
                                   bands).value, k)
                 for s, t in rows]
         return max(vals) - min(vals)
@@ -666,17 +723,152 @@ def print_reconcile(conn, scored: Scored, name: str) -> None:
     print(f"    {len(truth) - bad} of {len(truth)} seasons reconcile exactly")
 
 
+def rows_for(scored: Scored, what: str):
+    """Every (franchise-season, person) row for one discipline, gated and priored."""
+    seasons = scored.bat if what == "batting" else scored.bowl
+    careers = scored.bat_careers if what == "batting" else scored.bowl_careers
+    floor = BAT_FLOOR_BALLS if what == "batting" else BOWL_FLOOR_BALLS
+    cohorts = cohorts_for(scored, what)
+
+    # The prior is fitted on the RATEABLE seasons only. A prior that averages in the
+    # five-ball seasons is a prior contaminated by exactly the noise the floor exists to
+    # remove, and every gated row would then be shrunk toward it.
+    gated = {key: t for key, t in seasons.items() if t.balls >= floor}
+    league, bands = league_means(gated), band_league_means(cohorts, gated)
+
+    for (person, season), t in sorted(seasons.items()):
+        fs = scored.franchises[(person, season)]
+        if len(fs) != 1:
+            raise SystemExit(
+                f"{scored.names.get(person, person)} {season} spans {len(fs)} "
+                "franchise-seasons, so the ratings grain assumption is broken; "
+                "migration 009 keys on franchise_season_id and cannot hold this row"
+            )
+        prior = loso_prior(cohorts, seasons, careers, person, season, league, bands)
+        matches = scored.matches.get((person, season), 0)
+        yield (next(iter(fs)), person, what, t.balls, t.impact,
+               t.impact_any if what == "batting" else None,
+               matches, prior.value, prior.n, prior.source, floor,
+               DRAFT_GATE_MATCHES, gate_reason(t.balls, matches, floor))
+
+
+def write(conn, scored: Scored) -> int:
+    """Load migration 009's table. Truncate-and-rewrite, so re-running is safe."""
+    with conn.cursor() as cur:
+        cur.execute("truncate player_season_impact")
+        n = 0
+        with cur.copy(
+            """
+            copy player_season_impact (
+                franchise_season_id, person_id, discipline, balls, impact_total,
+                impact_total_any_wicket, matches, prior_per_ball, prior_balls,
+                prior_source, floor_balls, gate_matches, not_rateable_reason
+            ) from stdin
+            """
+        ) as copy:
+            for what in ("batting", "bowling"):
+                for row in rows_for(scored, what):
+                    copy.write_row(row)
+                    n += 1
+    return n
+
+
+def print_gate_gap(scored: Scored) -> None:
+    """[A33] The seasons the scoring-set match count gates that appearances did not.
+
+    The tightening has to be inspected, not just counted: if the scoring-set count were
+    dropping matches it should not, these would look like real careers rather than thin
+    ones padded by excluded cricket.
+    """
+    flipped = []
+    for key, squad in scored.squad_matches.items():
+        scoring = scored.matches.get(key, 0)
+        if squad >= DRAFT_GATE_MATCHES > scoring:
+            bat = scored.bat.get(key)
+            bowl = scored.bowl.get(key)
+            flipped.append((squad - scoring, key, squad, scoring,
+                            bat.balls if bat else 0, bowl.balls if bowl else 0))
+    flipped.sort(key=lambda r: (-r[0], -r[4] - r[5]))
+
+    print(f"\n=== newly gated by counting matches over the scoring set ({len(flipped)}) ===")
+    print("    squad appearances include super overs and reduced matches; the rating does")
+    print("    not. These pass the 4-match gate on the first count and fail it on the "
+          "second.")
+    print(f"    {'player':<26}{'season':>7}{'squad':>7}{'scoring':>9}{'bat b':>8}"
+          f"{'bowl b':>8}   would have been rateable")
+    for _, key, squad, scoring, bat_b, bowl_b in flipped:
+        person, season = key
+        would = [w for w, b, f in (("bat", bat_b, BAT_FLOOR_BALLS),
+                                   ("bowl", bowl_b, BOWL_FLOOR_BALLS)) if b >= f]
+        print(f"    {scored.names.get(person, person)[:25]:<26}{season:>7}{squad:>7}"
+              f"{scoring:>9}{bat_b:>8}{bowl_b:>8}   "
+              f"{', '.join(would) if would else '-'}")
+    both = [r for r in flipped if r[4] >= BAT_FLOOR_BALLS or r[5] >= BOWL_FLOOR_BALLS]
+    print(f"\n    {len(both)} of {len(flipped)} would have cleared a balls floor too, so "
+          f"the tightening\n    changes the answer for {len(both)} player-season(s) rather "
+          f"than {len(flipped)}.")
+
+
+def print_cohort_tops(scored: Scored, what: str, n: int = 20) -> None:
+    """[SPEC 7.7] Top n per cohort. Unknowns everywhere means shrinkage is too weak;
+    only the famous means it is too strong."""
+    seasons = scored.bat if what == "batting" else scored.bowl
+    careers = scored.bat_careers if what == "batting" else scored.bowl_careers
+    floor = BAT_FLOOR_BALLS if what == "batting" else BOWL_FLOOR_BALLS
+    cohorts = cohorts_for(scored, what)
+    gated = {key: t for key, t in seasons.items()
+             if t.balls >= floor
+             and scored.matches.get(key, 0) >= DRAFT_GATE_MATCHES}
+    league, bands = league_means(gated), band_league_means(cohorts, gated)
+
+    by_cohort: dict[str, list] = defaultdict(list)
+    for key, t in gated.items():
+        person, season = key
+        prior = loso_prior(cohorts, gated, careers, person, season, league, bands)
+        value = shrink(t.per_ball, t.balls, prior.value, SHRINKAGE_K)
+        by_cohort[cohorts.get(key) or "(uncohorted)"].append((value, t, key))
+
+    order = (["opener", "top_order", "middle", "finisher", "tail"] if what == "batting"
+             else ["powerplay", "middle", "death", "mixed"])
+    print(f"\n=== SPEC 7.7: top {n} {what} seasons per cohort "
+          f"(floor {floor}, gate {DRAFT_GATE_MATCHES}, k = {SHRINKAGE_K}) ===")
+    for cohort in order + sorted(set(by_cohort) - set(order)):
+        rows = sorted(by_cohort.get(cohort, []), reverse=True)[:n]
+        if not rows:
+            continue
+        print(f"\n    --- {cohort} ({len(by_cohort[cohort])} rateable) ---")
+        for i, (value, t, (person, season)) in enumerate(rows, 1):
+            print(f"    {i:>3}. {scored.names.get(person, person)[:25]:<26}{season:>6}"
+                  f"{t.balls:>6}b{t.per_ball:>+8.3f}{value:>+8.3f}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--player", action="append", dest="players")
     parser.add_argument("--bowler", action="append", dest="bowlers")
     parser.add_argument("--reconcile", action="append", dest="reconcile")
+    parser.add_argument("--write", action="store_true",
+                        help="load migration 009's table (truncates first)")
+    parser.add_argument("--cohorts", action="store_true",
+                        help="SPEC 7.7 top-20 per cohort, and nothing else")
+    parser.add_argument("--gate-gap", action="store_true",
+                        help="the seasons the scoring-set match count newly gates")
     args = parser.parse_args(argv)
 
     with connect(direct=True) as conn:
         _, expected = fetch(conn)
         bat_grid, bowl_grid = fit_grids(conn)
         scored = score(conn, bat_grid, bowl_grid, expected)
+
+        if args.cohorts or args.gate_gap:
+            if args.gate_gap:
+                print_gate_gap(scored)
+            if args.cohorts:
+                print_cohort_tops(scored, "batting")
+                print_cohort_tops(scored, "bowling")
+            if args.write:
+                print(f"\nwrote {write(conn, scored):,} player_season_impact rows")
+            return 0
 
         total_bat = sum(t.balls for t in scored.bat.values())
         total_bowl = sum(t.balls for t in scored.bowl.values())
@@ -698,6 +890,8 @@ def main(argv: list[str] | None = None) -> int:
                          BOWL_FLOOR_BALLS)
         for name in args.reconcile or ["V Kohli"]:
             print_reconcile(conn, scored, name)
+        if args.write:
+            print(f"\nwrote {write(conn, scored):,} player_season_impact rows")
     return 0
 
 

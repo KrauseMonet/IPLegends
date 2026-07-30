@@ -22,9 +22,10 @@ from etl.state_model import (
 )
 
 
-def cell(over=0, bucket="0-1", faced=6, outcomes=None):
+def cell(over=0, bucket="0-1", faced=6, outcomes=None, dismissals=0, striker=0):
     dist = outcomes if outcomes is not None else {1: faced}
-    return Cell(over, bucket, faced, sum(r * n for r, n in dist.items()), 0, dist)
+    return Cell(over, bucket, faced, sum(r * n for r, n in dist.items()),
+                dismissals, striker, dist)
 
 
 class RefusesToBeUsed:

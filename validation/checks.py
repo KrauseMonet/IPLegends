@@ -23,6 +23,7 @@ from etl.db import data_dir
 # Imported rather than restated. The fitting filter and the bucket labels live in one
 # place, so check 20 cannot drift into validating the state model against a copy of the
 # rule the state model no longer uses. A19's habit applied to code instead of columns.
+from etl.impact import SCORING_SET
 from etl.state_model import BUCKETS, FITTING_SET
 from validation.harness import Result, bad, skipped, verdict
 
@@ -56,7 +57,10 @@ BASE_TABLES = {
 
 # Derived stat tables check 6 knows how to examine. A table appearing in neither this
 # set nor BASE_TABLES still fails check 6, which is the trap working rather than a gap.
-STATE_TABLES = {"state_ball_outcomes", "state_runs_remaining"}
+STATE_TABLES = {
+    "state_ball_outcomes", "state_runs_remaining",
+    "player_season_impact", "player_season_rating",
+}
 
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
 # for every kind in the archive, so a kind added later cannot fall silently between them.
@@ -439,11 +443,47 @@ def check_06_super_overs_excluded(conn) -> Result:
         if survives:
             offenders.append(f"`{clause}` alone lets {survives} super over deliveries through")
 
+    # Migration 009's ratings table is fed by the SCORING set, not the fitting set: it
+    # scores second innings and miscounted overs too. So it needs its own assertion rather
+    # than inheriting the one above, and the same redundancy holds for the same reason -
+    # a super over's `innings_scheduled_balls` is null, so `= 120` excludes it unaided.
+    (leaked,), = _rows(
+        conn, f"select count(*) from deliveries where is_super_over and ({SCORING_SET})")
+    if leaked:
+        offenders.append(f"{leaked} super over deliveries satisfy the SPEC 7.2 scoring set")
+    (survives,), = _rows(
+        conn,
+        "select count(*) from deliveries "
+        "where is_super_over and innings_scheduled_balls = 120",
+    )
+    if survives:
+        offenders.append(
+            f"`innings_scheduled_balls = 120` alone lets {survives} super over deliveries "
+            "into the scoring set"
+        )
+
+    # `player_season_rating` has no delivery provenance of its own - it reads only
+    # `player_season_impact`, so the exclusion above already covers it. What it CAN get
+    # wrong independently is the gate: the view exists so that consuming a rating and
+    # respecting A33 are the same act, and a widened WHERE clause would quietly hand out
+    # ratings for seasons that are not draftable. That is what is asserted here.
+    (rateable,), = _rows(
+        conn, "select count(*) from player_season_impact where not_rateable_reason is null")
+    (offered,), = _rows(conn, "select count(*) from player_season_rating")
+    if offered != rateable:
+        offenders.append(
+            f"player_season_rating offers {offered:,} rows but only {rateable:,} "
+            "player-seasons pass the A33 gates"
+        )
+
     (stored,), = _rows(conn, "select sum(faced) from state_ball_outcomes")
+    (rated,), = _rows(conn, "select count(*) from player_season_impact")
     return verdict(
         6, title,
         f"{len(derived)} derived table(s) examined; all {supers:,} super over deliveries "
-        f"excluded by both clauses independently; state model holds {stored:,} balls",
+        f"excluded from both the fitting and scoring sets by each clause independently; "
+        f"state model holds {stored:,} balls; ratings hold {rated:,} rows of which "
+        f"{rateable:,} pass the A33 gates and the view offers exactly those",
         offenders,
     )
 

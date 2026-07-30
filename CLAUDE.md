@@ -94,6 +94,20 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
   lesson.** The reconciliation step is the one that got skipped, and it gets skipped
   precisely when both halves feel already-decided. Expect this to recur in the simulator,
   where the parameters it consumes and the tables that hold them will be specified together.
+  **It recurred immediately.** Migration 009's `not_rateable_reason` CHECK and the loader's
+  gate were specified in the same pass, and reconciling them found that "matches played" had
+  two candidate denominators disagreeing on 890 of 3,333 player-seasons and flipping 61
+  across the gate. This check is not a formality even one section after it was written down.
+- **A rule enforced by a CHECK is protected by the database. A rule that lives in loader
+  behaviour is protected by nothing unless a test points at it, so a ratified loader rule
+  without a test is an unprotected rule.** Schema rules announce themselves — a reader of
+  the migrations sees them. Behavioural rules are invisible: A37's shared state-resolution
+  walk has no column and no constraint, so nothing tells a future reader it was ever
+  decided, and the day somebody rewrites the walk it vanishes silently with a moved rating
+  as the only symptom. When ratifying a rule, ask which of the two kinds it is; if it is
+  the second, the test ships **with** the rule, not after it. `tests/test_impact.py` is the
+  worked example, and every assertion in it was verified to fail with the corresponding line
+  broken — an unfalsified test is the same unprotected rule wearing a badge.
 - No LLM or AI API call anywhere in this codebase.
 - **A migration is immutable the moment it has been applied to any database, including a
   local or personal one. Until then it is a draft and may be edited freely.** The runner
@@ -244,6 +258,7 @@ the 0.5 GB.
 | **Total, MEASURED after the full load** | **70 MB** (deliveries 65 MB, appearances 3.8 MB, rest <1 MB) |
 | **Total, MEASURED after SPEC 6 and migration 006** | **69 MB** (deliveries 63 MB after the phase index went, appearances 3.9 MB, squad_members 520 kB) |
 | **Total, MEASURED after SPEC 7.1 and migration 007** | **68.6 MB** — the state model costs **88 kB** for 241 rows. The fitted grid is four orders of magnitude smaller than the deliveries it was fitted on, which is the whole argument for storing it. |
+| **Total, MEASURED after SPEC 7.2-7.3 and migration 009** | **73.1 MB** — `player_season_impact` is **1,080 kB** for 5,149 rows, most of it the two indexes. Every rating in the game costs one megabyte. |
 
 Roughly 7x headroom, so the estimate was conservative rather than wrong. The brief's "1.2 million deliveries" figure is ~4x high. The exact
 count, from parsing the whole archive, is **295,732 deliveries across 1,243 matches and
@@ -285,11 +300,13 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A30 | **The four override CSVs cannot be narrowed further by derivation, and that was measured rather than assumed.** Afghanistan's absence is documented Cricsheet *policy* — 158 matches withheld — so no re-download will ever close it. No nationality-restricted competition exists among the 1,115 published archives. Catches name the proven keeper 51% of the time (86% within the top 3), and the career-keeper cross-reference is **wrong for 5 of the 39 squads it is confident about**, failing in the A23 shape. So the generators emit **evidence and a ranking, never a verdict**: `merge_override` now takes the decision column by name, preserves it untouched, and refreshes every other column. `cricinfo_id` added to all four files. No migration was needed — A19 stands unchanged. |
 | A31 | **§7.1 state model stored as two tables, migration 007, because the grains genuinely differ.** `state_ball_outcomes` is (over x bucketed wickets), 80 rows; `state_runs_remaining` is (over x **exact** wickets), 161 rows. One grain cannot serve both: per-ball rates are too noisy for exact wickets, and inside a two-wide bucket one more wicket usually stays in the bucket, so a bucketed runs-remaining grid would price a wicket at zero for half the states. **Counts only, never rates** (A19), with a CHECK that the seven outcome columns sum to balls faced. **The cost of a wicket is the drop in expected FINAL total, not the difference in expected runs remaining** — the latter is confounded by runs already scored and comes out **negative** at over 12, 0 down. SPEC 7.1 corrects the old wording and names it. All 80 states stored, the 5 never observed as **explicit zeroes**, because an absent row and a zero row say different things to the simulator. Thin cells kept raw with their `n` and shrunk by the consumer, never smoothed at rest. |
 | A32 | **Shrinkage cannot carry the low-volume problem, and §7.2 was written as though it could.** Shrinking toward an own-career prior protects against a thin *career* and never against a thin *season*: for a thin season the prior is mostly that same thin season, so a larger `k` makes the outlier climb rather than fall. Measured: BA Bhatt's 5-ball 2011 goes **+2.003 -> +2.206** as `k` runs 50 -> 800. No value of `k` fixes this. The fix is a gate, not a constant — see A33. |
-| A33 | **Two draftability gates, not one.** The §7.3 four-match gate stays, and a **balls floor** joins it: **100 balls faced** for batting, **150 legal balls bowled** for bowling. Below the floor a player-season is *not rated at all* — not shrunk, not floored, simply not draftable from that squad. Floors measured from where the raw top-5 stabilises, per discipline rather than assumed to transfer: batting settles at 100 (+0.99 at 100, +0.97 at 150 and 200), bowling only at **150** (+0.87 at 100 with RG Sharma's 138-ball 2009 in the top twelve; +0.76 at 150 and 200, and he is gone). 150 balls is ~7 matches, so the match gate is non-binding for bowling. Rateable: **1,027 of 2,954** batting seasons, **787 of 2,195** bowling. |
-| A34 | **A residual survives the floor and is recorded rather than papered over.** Suryavanshi 2025 (122 balls, raw +0.574) shrinks **up** to +0.754 and outranks Sehwag 2011 (240 balls, raw +0.615, shrunk +0.429). Strictly-dominated inversions — fewer balls *and* lower raw, yet higher rating — are **4.56% within-band**. Dropping A7's own-career LOSO prior for a band-season-mean prior alone gives **3.71%** and raises Kohli's retained spread 68% -> 80%, at the cost of A7. **Not decided.** Revisit with A32 after §7.4. |
-| A35 | **`k = 100` is provisional and is not settled until re-checked post-§7.4 against within-season-normalised numbers.** Chosen for noise protection over spread: Kohli's within-player spread retained runs 81/68/53/38/23% at k = 50/100/200/400/800. Normalisation may make a lower `k` affordable. **Do not treat 100 as ratified.** Kohli calibrates within-player spread and ordering only, never level — the league mean is not zero and drifts from **-0.188 (2009) to +0.205 (2026)**, which is exactly what §7.4 removes. |
+| A33 | **Two draftability gates, not one.** The §7.3 four-match gate stays, and a **balls floor** joins it: **100 balls faced** for batting, **150 legal balls bowled** for bowling. Below the floor a player-season is *not rated at all* — not shrunk, not floored, simply not draftable from that squad. Floors measured from where the raw top-5 stabilises, per discipline rather than assumed to transfer: batting settles at 100 (+0.99 at 100, +0.97 at 150 and 200), bowling only at **150** (+0.87 at 100 with RG Sharma's 138-ball 2009 in the top twelve; +0.76 at 150 and 200, and he is gone). 150 balls is ~7 matches, so the match gate is non-binding for bowling. Rateable: **1,027 of 2,954** batting seasons, **787 of 2,195** bowling. **Both floors are empirically derived from where each raw list stops moving, not round numbers** — they only look round because of the sweep grid, so a revised archive moves them rather than keeping them. **Both gates count the scoring set**, not `squad_members.matches_played`: the two disagree on 890 of 3,333 seasons by up to 7 matches and flip 61 across the gate, and a gate asking "is there enough evidence to rate this?" must count the evidence the rating was computed from. Confirmed after the load — all 61 newly-gated seasons are marginal (max 63 balls faced, max 72 bowled) and **0 of 61 would have cleared a balls floor anyway**, so the tightening is right in principle and inert in effect. |
+| A34 | **A residual survives the floor and is recorded rather than papered over.** Suryavanshi 2025 (122 balls, raw +0.574) shrinks **up** to +0.754 and outranks Sehwag 2011 (240 balls, raw +0.615, shrunk +0.429). Strictly-dominated inversions — fewer balls *and* lower raw, yet higher rating — are **4.56% within-band**. Dropping A7's own-career LOSO prior for a band-season-mean prior alone gives **3.71%** and raises Kohli's retained spread 68% -> 80%, at the cost of A7. **Explicitly provisional and deliberately not fixed now** — the repair means calibrating a new prior against pre-normalisation numbers, and §7.4 changes exactly the baseline the prior is measured against, so tuning it twice risks landing on a value that was right for the wrong baseline. **A34 and A35 are one decision viewed twice** (how hard to pull a thin season toward a prior, and which prior) and **resolve together in a single pass post-§7.4**. Neither may be ratified alone. |
+| A35 | **`k = 100` is provisional and is not settled until re-checked post-§7.4 against within-season-normalised numbers.** Chosen for noise protection over spread: Kohli's within-player spread retained runs 81/68/53/38/23% at k = 50/100/200/400/800. Normalisation may make a lower `k` affordable. **Do not treat 100 as ratified.** Kohli calibrates within-player spread and ordering only, never level — the league mean is not zero and drifts from **-0.188 (2009) to +0.205 (2026)**, which is exactly what §7.4 removes. **Resolves in the same pass as A34.** `k` lives in exactly one place, the `player_season_rating` view, and is never a stored column — a stored shrunk value plus a stored `k` are two copies of one fact and would drift the moment the constant is revisited, which is guaranteed. Re-tuning is a view replacement and no reload. One view, single source, no exceptions. |
 | A36 | **Dismissal attribution is striker-only.** Charging a batter for a non-striker run-out is wrong on its face. 7,458 fitting-set dismissals, **319 (4.28%)** belong to somebody other than the striker. The aggregate effect is tiny (**+0.0010**/ball mean) and the per-player effect is not (**max +0.193**, min -0.049, two changes in the top 20), which is why the aggregate could not have settled it. The any-wicket grid is kept as a **labelled diagnostic only**, never consumed by ratings. Bowling attribution is `credited_to_bowler`, so run outs are excluded there too. |
-| A37 | **One state-resolution rule across both halves of a ball's impact.** The runs baseline silently `continue`d on thin cells while the wicket cost fell back to the nearest state — so **867 balls (0.31%)** were dropped, and non-randomly: thin cells are collapse and death states, so the drop biased against exactly the players who batted in them. Kohli 2016 read **838 off 583** against a real **860 off 590**. Both baselines now take the same nearest-bucket-in-the-same-over walk. After the fix: **19 of 19** Kohli seasons reconcile exactly, 2016 = **860 off 590**, and nothing is dropped — 886 of 281,389 batting balls and 921 of 280,192 bowling balls resolve to a neighbour instead. `uv run python -m etl.impact --reconcile` is the standing check. |
+| A37 | **One state-resolution rule across both halves of a ball's impact.** The runs baseline silently `continue`d on thin cells while the wicket cost fell back to the nearest state — so **867 balls (0.31%)** were dropped, and non-randomly: thin cells are collapse and death states, so the drop biased against exactly the players who batted in them. Kohli 2016 read **838 off 583** against a real **860 off 590**. Both baselines now take the same nearest-bucket-in-the-same-over walk. After the fix: **19 of 19** Kohli seasons reconcile exactly, 2016 = **860 off 590**, and nothing is dropped — 886 of 281,389 batting balls and 921 of 280,192 bowling balls resolve to a neighbour instead. `uv run python -m etl.impact --reconcile` is the standing check. **A37 has no schema representation and never will** — it is a property of a walk, so `tests/test_impact.py` is the only thing protecting it, per the standing rule above. |
+| A38 | **`player_season_impact` is long grain, migration 009 applied 2026-07-30.** One row per (franchise-season, person, **discipline**), not one wide row with batting and bowling side by side. Measured: 5,149 long rows against 3,333 wide, and the wide form carries a NULL half on 2,132 of them because most player-seasons are one discipline only — and a discipline that does not exist reads identically to one that scored zero. Long grain also lets A33's two different floors share one column. **Counts and inputs only, never a rating** (A19): `impact_total` is the SUM, and the gate constants are stored beside the result so the `not_rateable_reason` CHECK can recompute the reason and refuse a loader that gates on one rule and writes another. Reasons after the load: `balls` 2,086, NULL 1,812, `both` 1,249, `matches` **2** — Symonds 2008 (105 balls, 3 matches) and Hussey 2008 (100 balls, 3 matches), both verified to have identical all-match and scoring-set counts, so the match gate earns its keep independently of the A33 denominator choice. |
+| A39 | **The `death` bowling cohort has only 8 rateable seasons, 3 of them DJ Bravo — recorded now rather than discovered inside §7.4.** This is A2's thin-cell condition arriving one section early. Two consequences: §7.4's cohort offsets must be pooled across seasons here or the cohort is normalised against essentially one career; and **check 12 (slot coverage after the §7.3 gate) must be written to FAIL on this, not tolerate it**, since a deck that cannot field a death bowler is a draft-legality problem. **Do not resolve it by lowering the bowling floor** — A33 measured that floor and 150 is where the bowling list stops moving. |
 
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
@@ -326,8 +343,8 @@ treat the current values as ratified beyond the twelve.
 | 5b. Checks 15 and 16 | done 2026-07-30; both had been asserted in SPEC as measured fact with no standing check behind them. 15 regenerates all 295,732 scorecard references from `legal_ball`; 16 pins the unknown-length innings at exactly 6. |
 | 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
 | **7.1 State model** | **done 2026-07-30**, migration 007 applied. 146,159 balls faced into 80 states (5 never observed, kept as zeroes) plus 161 exact-wicket runs-remaining states, 88 kB. Checks 6, 8 and 20 written; check 6 came off SKIP. **A31 corrected SPEC's wicket-cost rule — the old wording priced a wicket by differencing runs remaining, which is confounded and goes negative.** |
-| **7.2-7.3 Shrinkage + gates** | **measured, not yet stored.** `etl.impact` computes per-ball impact in memory over the whole archive and prints every distribution the decisions rest on. Ratified: two gates (A33), striker-only attribution (A36), one fallback rule (A37), k=100 provisional (A35). **Migration 009 is not written** — its grain proposal comes first, per the standing pattern. |
-| 7.4-7.7 Ratings | **not started.** Normalisation, display-vs-simulator split, top-20 print. **Checks 9-14 are blocked behind this** and must not be written first. A35's `k` and A33's residual both get re-read once §7.4 lands. |
+| **7.2-7.3 Shrinkage + gates** | **done 2026-07-30**, migration 009 applied. State model refit striker-only (7,139 of 7,458 dismissals), **5,149 `player_season_impact` rows** written, `player_season_rating` view live. Ratified: two gates on the scoring-set denominator (A33), striker-only attribution (A36), one fallback rule (A37), long grain (A38). Provisional and paired: A34 residual + A35 `k`, both post-§7.4. `tests/test_impact.py` pins A37 and the gate arithmetic, 15 tests. |
+| 7.4-7.7 Ratings | **not started.** Normalisation, display-vs-simulator split, top-20 print. §7.7's lists have been read once and pass (see A39 for the one cohort that does not). **Checks 9-14 are blocked behind this** and must not be written first. A34 and A35 get re-read together once §7.4 lands. |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
 **640** balls (the all-time single-season record — recorded here as 637 until check 7
@@ -393,13 +410,24 @@ uv run python -m etl.impact                 # every distribution the decisions r
 uv run python -m etl.impact --player "V Kohli"
 uv run python -m etl.impact --bowler "SL Malinga"
 uv run python -m etl.impact --reconcile "V Kohli"   # A37's check, vs the scorecard
+uv run python -m etl.impact --cohorts       # SPEC 7.7 top-20 per band and usage phase
+uv run python -m etl.impact --gate-gap      # the 61 seasons the scoring-set denominator flips
+uv run python -m etl.impact --write         # load migration 009's player_season_impact
 ```
 
-**Nothing here writes to the database.** It scores every delivery in memory against the
+Everything except `--write` is read-only: it scores every delivery in memory against the
 §7.1 grids and prints raw and shrunk lists, the floor sweeps behind A33, the `k` sweep
-behind A35, and the prior-breadth and era-drift tables. Migration 009 stores the result;
-until it exists, this command *is* §7.2-7.3, and re-running it is how any figure quoted in
-A32-A37 gets re-checked.
+behind A35, and the prior-breadth and era-drift tables. Re-running it is how any figure
+quoted in A32-A39 gets re-checked.
+
+`--write` truncates and rewrites `player_season_impact`, so it is re-runnable, and it must
+be re-run after any `etl.load` **and after any `etl.state_model --write`** — the impact
+numbers are scored against the stored grids, so a refit grid without a refit impact is a
+stale rating that still looks fresh. Order: `etl.load` -> `etl.state_model --write` ->
+`etl.impact --write`.
+
+`k` is not written. It lives in the `player_season_rating` view alone (A35), so re-tuning
+it post-§7.4 is `create or replace view` and nothing else.
 
 ## Section 6: squads, and the four CSVs that gate the deck
 
@@ -452,6 +480,14 @@ is **carrying no weight**. A super over has `innings_no >= 3` and a null
 unaided. That is A21 working as designed rather than a reason to delete the clause — it
 states intent — but the check asserts each clause independently so nobody mistakes the
 explicit one for the thing doing the work.
+
+**Check 6's trap fired twice more when migration 009 landed** — once for
+`player_season_impact` and again for the `player_season_rating` view — and both times the
+right response was a real assertion rather than adding the name to a list. The scoring set
+gets the same independent-clause treatment as the fitting set, and the view is checked by
+recomputing which rows *should* be offered from the gate columns and naming any row where
+the view and the arithmetic disagree. A view that simply selected everything would pass a
+count-based check, which is why the check counts nothing.
 
 Check 7 is the only check a human can disagree with, and it is the only one that has ever
 found anything the others could not — see A22. Five matches, hand-verified: `335982`

@@ -859,6 +859,13 @@ a real **860 off 590**. Under A37 nothing is dropped, every scoring-set ball is 
 Kohli's seasons reconcile exactly against the scoring set. `etl.impact --reconcile` is that
 check and it is the only place a silent drop would ever show.
 
+**A37 has no schema representation and never will.** It is a property of a walk, not of a
+column, so no CHECK can hold it and a reader of the migrations would not know it exists.
+It is pinned instead by `tests/test_impact.py`, which asserts the walk stays inside the
+over, picks the nearest trustworthy bucket, counts every fallback, refuses to resolve a
+healthy cell, and exits rather than dropping an unpriceable ball. Each of those was
+verified to fail with the corresponding line broken.
+
 **What was actually fitted, measured 2026-07-30.** 151,175 deliveries = **146,159 balls
 faced** (A22: `extra_wides = 0`) + 5,016 wides, reconciling exactly with A28. 196,068 runs
 off the bat and 7,458 dismissals.
@@ -917,13 +924,20 @@ first half true and it is load-bearing; `CAREER_FLOOR` is 300 balls.
 
 *The rule: two gates, not one.* §7.3's match gate stays, and a **balls floor** joins it.
 
-**7.3 Draftability gates.** Two, applied together. Both stored as named constants.
+**7.3 Draftability gates. [A33, ratified 2026-07-30]** Two, applied together. Both stored as
+named constants.
 
 | Gate | Value | Why this value |
 |---|---|---|
 | Matches played | **4** | SPEC's original, provisional and unratified |
-| Balls faced (batting) | **100** | where the raw list stabilises — see below |
-| Legal balls bowled (bowling) | **150** | 25 overs; bowling stabilises *later* than batting |
+| Balls faced (batting) | **100** | where the raw batting list stops moving — measured |
+| Legal balls bowled (bowling) | **150** | where the raw bowling list stops moving — measured |
+
+**Both floors are empirically derived from where each raw list stabilises. Neither is a round
+number chosen for tidiness**, and the fact that they *look* round is a coincidence of the
+sweep grid, not a reason to trust them less or to round the next one. The sweep below is the
+evidence; if it is ever re-run on a revised archive and the stabilisation point moves, the
+constants move with it.
 
 Below a floor a player-season is **not rated at all** — not shrunk, not floored, simply not
 draftable from that franchise-season. This is the honest form: below the floor there is not
@@ -956,7 +970,24 @@ Effect: **1,027 of 2,954** batting player-seasons and **787 of 2,195** bowling p
 are rateable; 123 in both. 1,642 player-seasons are rateable in neither, 802 of those past
 the match gate.
 
-**[A33] Known residual, accepted and flagged.** The floors remove the pathology in the form
+**Both gates count the same matches: the scoring set.** The match gate could read either
+`squad_members.matches_played` (every match the player appeared in) or the number of distinct
+matches that contributed balls to the impact total (the §7.1 fitting-set filter — first
+innings, full-length, not miscounted). They disagree on **890 of 3,333** player-seasons, by
+up to **7** matches, and that gap flips **61** seasons across the four-match gate. The
+scoring-set count is the correct denominator and not merely the convenient one: a gate that
+answers "is there enough evidence to rate this season?" must count the evidence the rating
+was actually computed from. Counting matches that contributed zero balls to the number lets a
+season claim support it does not have. This was found by the standing reconciliation check —
+the rule and the CHECK that enforces it were being written in the same pass, which is
+precisely when the check gets skipped.
+
+*Confirmed after the load:* all 61 newly-gated seasons are genuinely marginal — at most 63
+balls faced and at most 72 balls bowled — and **0 of 61 would have cleared a balls floor
+anyway**. The tightening is right in principle and inert in effect, which is the outcome to
+want: it closes a hole without moving a single rating.
+
+**[A34] Known residual, accepted and flagged.** The floors remove the pathology in the form
 that motivated them — a thin season outranking the same player's own thick one, and a
 47-ball season reaching the top eight — but not entirely. Under the ratified k,
 Suryavanshi's 122-ball 2025 (raw +0.574) shrinks **up** to +0.754 and outranks Sehwag's
@@ -966,9 +997,17 @@ strictly-dominated inversions** — fewer balls *and* a lower raw figure, yet a 
 This is empirical Bayes working as designed, but it imports career information into a number
 §7 opens by defining as season-only. Dropping the own-career prior for the band-season mean
 alone takes it to 3.71% and returns 80% of Kohli's raw spread instead of 68%, at the cost of
-A7. **Not decided.** Revisit with §7.4.
+A7.
 
-**[A34, ratified 2026-07-30] The shrinkage constant is `k = 100` balls, provisionally.**
+**Explicitly provisional, and deliberately not fixed now.** The obvious repair — drop the
+own-career prior — means calibrating a new prior against pre-normalisation numbers, and §7.4
+changes exactly the baseline the prior is measured against. Tuning it twice risks landing on
+a value that was right for the wrong baseline. **A34 and A35 are the same decision viewed
+twice** — how hard to pull a thin season toward a prior, and which prior to pull it toward —
+so they are decided together, in one pass, after §7.4, against normalised numbers. Neither
+may be ratified alone.
+
+**[A35, ratified 2026-07-30] The shrinkage constant is `k = 100` balls, provisionally.**
 `k >= 400` is ruled out on design grounds before any statistics: §7 opens by saying the
 season-to-season contrast "is the point of the game", and k = 400 retains 38% of Kohli's
 best-to-worst spread while k = 800 retains 23% and turns his genuinely poor 2008 *positive*.
@@ -982,15 +1021,44 @@ best-to-worst spread while k = 800 retains 23% and turns his genuinely poor 2008
 
 k = 50 and k = 100 both pass the within-player ordering test; k = 100 pulls harder on the
 noise and that is the trade taken. **Not settled.** It must be re-checked after §7.4's
-within-season normalisation, against normalised numbers, which may permit a lower value.
+within-season normalisation, against normalised numbers, which may permit a lower value —
+**in the same pass that decides A34**, per the note above.
 
-**[A35] What Kohli can and cannot calibrate right now.** His 2016 reads as his *third* best
+`k` lives in exactly one place: the `player_season_rating` view. It is **not** a stored
+column on `player_season_impact`, because a stored shrunk value and a stored `k` are two
+copies of one fact and would drift the moment the constant is revisited — which it is
+guaranteed to be, post-§7.4. The table stores only the inputs the formula names
+(`impact_total` as a **sum**, `balls`, `prior_per_ball`); re-tuning `k` is a view replacement
+and no reload. One view, single source, no exceptions.
+
+**[A35, continued] What Kohli can and cannot calibrate right now.** His 2016 reads as his *third* best
 season (+0.332) behind 2026 (+0.520) and 2024 (+0.414). That is not the model disagreeing
 with the record — the state baseline is fitted pooled across all 19 seasons, and the league
 mean impact runs **−0.188 (2009) to +0.205 (2026)**, so recent seasons beat a pooled baseline
 by construction. §7.4's within-season normalisation is exactly what removes it. **Absolute
 cross-season ordering therefore cannot calibrate the shrinkage constant until §7.4 lands.**
-Within-player spread and ordering can, and are what A34 used.
+Within-player spread and ordering can, and are what the `k` table above used.
+
+**Storage, migration 009, applied 2026-07-30.** One table at **long grain** —
+(`franchise_season_id`, `person_id`, `discipline`) — not one wide row per player-season with
+batting and bowling columns side by side. Measured rather than assumed: 5,149 long rows
+against 3,333 wide ones, and the wide form would carry a NULL batting or bowling half on
+2,132 of them, because most player-seasons are one discipline only. A discipline that does
+not exist and a discipline that scored zero are different facts and a NULL column cannot
+say which. Long grain also lets the two floors, which are different numbers per A33, sit in
+the same column.
+
+**Counts and inputs only, never a rating** (A19). The table stores `impact_total` as a
+**sum**, `balls`, `matches` (scoring-set), the prior and its provenance, and both gate
+constants as they stood at load time; the rating is the `player_season_rating` view. Storing
+the constants beside the result is what makes `not_rateable_reason` checkable — the CHECK
+recomputes the reason from `matches`, `balls`, `gate_matches` and `floor_balls`, so a loader
+that gates on one rule and writes another is refused by the database rather than believed.
+Reasons after the load: `balls` 2,086, NULL 1,812, `both` 1,249, `matches` 2. **The two
+where the match gate binds alone are Symonds 2008 (105 balls, 3 matches) and Hussey 2008
+(100 balls, 3 matches)** — both verified to have identical all-match and scoring-set counts,
+so the gate is catching "many balls, very few matches" on its own merits and is not an
+artefact of the denominator choice.
 
 **7.4 Normalise within season and within cohort. [A2]**
 
@@ -1020,6 +1088,22 @@ must not read the display rating. Store both.
 **7.7 Show the output before moving on.** Print the top 20 franchise-season entries by
 rating **within each position band and each bowling usage phase**. Lists full of unknowns
 mean shrinkage is too weak; lists of only the six most famous names mean it is too strong.
+
+*First read, post-A33 floors:* the lists pass. Purple Cap winners surface in the right
+cohorts across the whole span (Tanvir 2008, RP Singh 2009, Malinga 2011, Faulkner 2013,
+Bhuvneshwar 2017, Tahir 2019, Harshal Patel 2021) alongside Gayle 2011, Sehwag 2011, de
+Villiers four times, Russell 2019, Karthik 2022 and 2024, Tewatia 2020, and Muralitharan,
+Kumble and Warne in the spin-era seasons — famous names, but not *only* famous names.
+
+**One cohort is too thin to normalise and it is recorded now rather than discovered in
+§7.4: `death` bowling has 8 rateable seasons, 3 of them DJ Bravo.** This is exactly the
+condition A2 gave for refusing per-cell z-scoring, and it arrives one section early. Two
+consequences. §7.4's cohort offsets must be pooled across seasons for this cohort or it
+will be normalised against essentially one player's career. And **check 12 (slot coverage
+after the §7.3 gate) must be written to fail on this**, not to tolerate it — if the deck
+cannot field a death bowler from most franchise-seasons, that is a draft-legality problem
+and not a presentation one. Do not resolve it by lowering the bowling floor; A33 measured
+that floor and 150 is where the bowling list stops moving.
 
 ---
 

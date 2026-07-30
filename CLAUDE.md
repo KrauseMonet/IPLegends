@@ -2,13 +2,21 @@
 
 Read `SPEC.md` first. This file tracks state, commands, and open questions.
 
-**`SPEC.md` is the source of truth and this is not a formality.** Three figures recorded
+**`SPEC.md` is the source of truth and this is not a formality.** Four figures recorded
 there as measured fact turned out wrong once code actually read the archive: the reduced-
 match split (15/19, really 15/12/7), the Impact Player replacement count (523, really 524
-deliveries carrying 563 entries), and the state-model fitting size (~145,000, really
-149,697). Each was corrected in the spec the moment it was found, with the old value named
-so the correction is auditable rather than silent. Keep doing that — a figure quietly
-replaced is indistinguishable from a figure that was never checked.
+deliveries carrying 563 entries), the state-model fitting size (~145,000, really
+149,697), and Kohli's 2016 balls faced (637, really 640 — see A22). Each was corrected in
+the spec the moment it was found, with the old value named so the correction is auditable
+rather than silent. Keep doing that — a figure quietly replaced is indistinguishable from a
+figure that was never checked.
+
+The fourth is the worst of the four and worth studying. It was reported here as *verified
+against the public record* when only the runs had actually been checked; the balls figure
+was asserted to match and did not. Every internal check passed, because the error was a
+misreading of cricket's own scoring convention and the database was perfectly consistent
+with it. **Only check 7 — a human reading a scorecard — could catch it.** When claiming a
+figure matches an external source, check the figure being claimed, not a neighbouring one.
 
 ## Environment
 
@@ -58,6 +66,9 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
   redundant column into a test of our reading against the source's own answer, which is
   the only kind of check that cannot pass by agreeing with itself. `actual_delivery` is
   the worked example: not stored, and validation 15 is stronger for it.
+- **Balls faced is `extra_wides = 0`, not `legal_ball`.** [A22] A no-ball is a ball faced;
+  a wide is not. `legal_ball` is for overs bowled and the bowling economy denominator only.
+  The two denominators are different predicates and sharing them inflates batting ratings.
 - **A null must propagate as unknown.** Never let it acquire a default downstream. Prefer
   filters that test for the known value (`scheduled_balls = 120`) over filters that test
   for the absence of a problem (`not was_reduced`), because a null fails the first by
@@ -67,7 +78,9 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
   local or personal one. Until then it is a draft and may be edited freely.** The runner
   checksums applied files and refuses drift. `003` was edited in place on 2026-07-29
   (`innings_scheduled_overs` -> `innings_scheduled_balls`) under a one-time exception,
-  granted only because no database existed yet. This is not a precedent.
+  granted only because no database existed yet. This is not a precedent. The rule was then
+  honoured for real: A22 found a wrong column comment in the applied `003` and it was
+  corrected in a new `005` rather than edited in place.
 
 ## Deck shape (measured from the archive, not estimated)
 
@@ -206,9 +219,10 @@ the 0.5 GB.
 | `deliveries` heap | ~40 MB |
 | 5 indexes on `deliveries` | ~50 MB |
 | Everything else | <10 MB |
-| **Total** | **~100 MB against a 500 MB cap** |
+| **Total, estimated** | ~100 MB against a 500 MB cap |
+| **Total, MEASURED after the full load** | **70 MB** (deliveries 65 MB, appearances 3.8 MB, rest <1 MB) |
 
-Roughly 5x headroom. The brief's "1.2 million deliveries" figure is ~4x high. The exact
+Roughly 7x headroom, so the estimate was conservative rather than wrong. The brief's "1.2 million deliveries" figure is ~4x high. The exact
 count, from parsing the whole archive, is **295,732 deliveries across 1,243 matches and
 28,106 appearances** — not an estimate.
 
@@ -237,6 +251,7 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A19 | `actual_delivery` not stored — exactly derivable, so it serves as an independent check on wide/no-ball classification instead (validation 15). Powerplay bounds are positional, compare against `ball_no`. Generalised into a hard rule above. |
 | A20 | `matches.decided_by` (runs / wickets / eliminator / dls / null) makes the result row self-describing. Takes `dls` over the margin type, since the margin type is already in `result_type` and D/L is recorded nowhere else. |
 | A21 | §7.1 fitting filter tests `innings_scheduled_balls = 120`, not `not was_reduced`. The latter leaked 148 deliveries from 3 matches abandoned in innings 1 with no chase to mark them reduced. |
+| A22 | Balls faced = `extra_wides = 0`. A no-ball is a ball faced, a wide is not, so `legal_ball` is the wrong predicate and undercounts. Corrects Kohli 2016 from 637 balls to 640. No new column (A19); migration `005` fixes the wrong comment in the immutable `003`. Pinned by validation check 17. |
 
 ## Open questions
 
@@ -257,15 +272,41 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | 4a. Parser (pure, no DB) | done; 1,243 matches parse, 295,732 deliveries, 16 tests pass |
 | 4b. Migrations applied | done; 4 applied to Neon, 8 tables / 14 checks / 21 indexes, runner idempotent |
 | 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
-| 5. Validation 1-7 | not started |
+| 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
+| 5. Validation 1-7 | done; 5 pass, 0 fail, 2 skip (checks 5 and 6 await SPEC 6/7) |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
-637 balls (the all-time single-season record), Warner 848, de Villiers 687, Bhuvneshwar
-Kumar 23 wickets (Purple Cap), SRH 17 matches. Display names came out era-correct
-("Royal Challengers Bangalore", "Delhi Daredevils", "Kings XI Punjab", "Rising Pune
-Supergiants"), which is what `franchise_seasons.display_name` exists for. One parser
-warning, `980989 innings 1`, and its 108 deliveries carry a null scheduled length.
+**640** balls (the all-time single-season record — recorded here as 637 until check 7
+corrected it, see A22), Warner 848, de Villiers 687, Bhuvneshwar Kumar 23 wickets (Purple
+Cap), SRH 17 matches. Display names came out era-correct ("Royal Challengers Bangalore",
+"Delhi Daredevils", "Kings XI Punjab", "Rising Pune Supergiants"), which is what
+`franchise_seasons.display_name` exists for. One parser warning, `980989 innings 1`, and
+its 108 deliveries carry a null scheduled length.
 
-Stage 4 uses **2016** as the single hardcoded season: it exercises Gujarat Lions and
-Rising Pune Supergiants in one go. The 2008 `"2007/08"` label trap and the super-over trap
-are covered by unit tests on individual files rather than by loading those seasons yet.
+The full archive produced exactly the 6 A17 warnings and no others, and every headline
+figure matched what the parser had reported before any database existed.
+
+## Validation
+
+```bash
+uv run python -m validation                 # checks 1-6 and 17
+uv run python -m validation --check 3       # one check
+uv run python -m validation --scorecards    # check 7, for reading by hand
+uv run python -m validation --match 598027  # one scorecard
+```
+
+A **SKIP is not a pass** and the runner says so. Checks 5 and 6 target tables SPEC 6 and 7
+build; they skip with a reason rather than reporting green against an empty table. Check 6
+turns into a hard FAIL the moment a derived table appears without the check being written,
+so it cannot be forgotten.
+
+Check 7 is the only check a human can disagree with, and it is the only one that has ever
+found anything the others could not — see A22. Five matches, hand-verified: `335982`
+(McCullum 158* off 73), `598027` (Gayle 175* off 66), `980987` (Kohli 109, de Villiers
+129*), `1216517` (tied, then two super overs), `1426312` (2024 final, SRH 113 all out).
+
+2016 was the inspection season for stage 4 because it exercises Gujarat Lions and Rising
+Pune Supergiants in one go. It remains the `etl.load` default. The full archive went in
+before stage 5, because check 7 needs 2008/2013/2020/2024 present and one season out of
+nineteen exercises almost none of the parser's traps — no super over, no `2007/08` label,
+no fractional target, and one of the eight miscounted overs.

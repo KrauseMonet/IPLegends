@@ -157,6 +157,38 @@ def test_illegal_deliveries_keep_their_place_in_the_sequence():
         )
 
 
+def test_balls_faced_counts_no_balls_but_not_wides():
+    """SPEC 4.7/A22. Gayle's 175* is off 66 balls, and 65 of them were legal.
+
+    The published figure is what makes this test worth anything: `legal_ball` gives 65
+    and is perfectly self-consistent, so only an external number can distinguish the
+    two predicates. Dilshan is here as a second witness in the same innings, because
+    one player being off by one could be a coincidence in the register or the parse.
+    """
+    match = load("598027")
+    first = [d for d in match.deliveries if d.innings_no == 1]
+
+    published = {"175": (175, 66), "33": (33, 36)}
+    by_batter: dict[str, list[int]] = {}
+    for d in first:
+        runs, faced, legal = by_batter.setdefault(d.batter_id, [0, 0, 0])
+        by_batter[d.batter_id] = [
+            runs + d.runs_batter,
+            faced + (d.extra_wides == 0),
+            legal + d.legal_ball,
+        ]
+
+    checked = 0
+    for runs, faced, legal in by_batter.values():
+        expected = published.get(str(runs))
+        if expected is None:
+            continue
+        assert (runs, faced) == expected, f"{runs} runs off {faced} balls"
+        assert legal < faced, "a no-ball must widen balls faced beyond the legal count"
+        checked += 1
+    assert checked == len(published), "both published innings must have been found"
+
+
 def test_extras_columns_sum_to_the_total():
     """SPEC 5 A1. The check constraint in migration 003 must never fire."""
     match = load("335982")

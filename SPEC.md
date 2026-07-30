@@ -384,8 +384,28 @@ archive checksum they were computed from, so a future gap can be attributed to a
 archive rather than mistaken for a failed download.
 
 **4.7 Delivery numbering.** Wides and no-balls produce extra deliveries within an over.
-Preserve the true sequence in `ball_no` and store a `legal_ball` flag so balls faced and
-overs bowled compute correctly.
+Preserve the true sequence in `ball_no` and store a `legal_ball` flag so overs bowled
+computes correctly.
+
+**[A22] `legal_ball` is NOT the predicate for balls faced.** A no-ball *is* a ball faced —
+the batter can and does score off it — but it is not a legal ball. A wide is neither. So:
+
+| quantity | predicate |
+|---|---|
+| Balls faced, batting strike rate | `extra_wides = 0` |
+| Overs bowled, bowling economy denominator | `legal_ball` |
+| Runs conceded (A1) | `runs_batter + extra_wides + extra_noballs` |
+
+**[Corrected 2026-07-30 — the earlier figure of 637 was wrong.]** This was found by
+check 7, by hand, and nothing else in the suite could have found it. Gayle's 175* came out
+at 65 balls against a published 66; the same one-ball gap appeared on Dilshan in the same
+innings. Confirmed against three published 2016 season aggregates, where the two predicates
+differ unmistakably: Kohli **973 off 640** (not 637), Warner **848 off 560** (not 558),
+de Villiers **687 off 407** (not 405). Pinned by validation check 17.
+
+Per A19 this adds no column — `extra_wides = 0` is already derivable from the extras split.
+But the `legal_ball` column comment in migration `003` asserts the wrong rule and that
+migration is applied, so it is immutable; the comment is corrected in `005` instead.
 
 **[A19] Every delivery carries `actual_delivery`**, the scorecard ball reference such as
 `"5.3"`. It is the *legal-ball* index, so it repeats on the re-bowl after a wide — 11,075
@@ -605,6 +625,11 @@ A batter's contribution on a delivery is the actual outcome minus the expected o
 that exact state, with dismissals priced by the wicket cost. Sum across a season, divide
 by balls faced for a per-ball impact figure. Same for bowlers with signs reversed.
 
+**[A22] The two denominators are different predicates and must not be shared.** Balls faced
+is `extra_wides = 0`; legal balls bowled is `legal_ball`. A no-ball sits in the first and
+not the second. Reusing `legal_ball` for the batting denominator inflates every batting
+rating by roughly the no-ball rate.
+
 This prices context automatically. A dot in the 19th over with four down is barely a
 failure; a dot in the 8th with one down is worse. Thirty off 12 at the death is worth far
 more than thirty off 30 in the middle. The finisher stops being punished for the situation
@@ -665,8 +690,19 @@ mean shrinkage is too weak; lists of only the six most famous names mean it is t
 Runnable scripts in `/validation` with clear pass/fail output.
 
 1. Every delivery's `runs_batter + runs_extras` equals the source `runs.total`.
-2. Every person referenced in `deliveries` and `appearances` exists in `people`.
-3. Legal balls per completed over equals 6, except where the innings ended mid-over.
+2. **[Replaced 2026-07-30 — the original was tautological.]** It read "every person
+   referenced in `deliveries` and `appearances` exists in `people`", which five foreign
+   keys already enforce; Postgres refuses the write, so the check could never fail. It is
+   replaced by the two things the schema does *not* enforce: every batter, bowler,
+   non-striker and dismissed player has an `appearances` row **for that same match**, and
+   every `franchise_season_id` on a match's deliveries and appearances is one of that
+   match's own two teams. Comparisons use `is distinct from`, not `not in`, because
+   `team_a_fs_id` is nullable and `not in` would return null and read as a pass.
+3. Legal balls per completed over equals 6, except where the innings ended mid-over and
+   except the eight overs the source itself flags under A14. The exemption is only worth
+   as much as the set it exempts, so the check also asserts the flagged set in the
+   database is exactly the eight whitelisted overs, and that none of them holds six legal
+   balls.
 4. Every match maps to exactly two distinct franchise-seasons, both belonging to the
    match's season year.
 5. No franchise-season contains a player with zero appearances for it.
@@ -712,6 +748,12 @@ never fail. These two bracket the shrinkage constant from opposite sides.
 16. **Scheduled length is null only where §4.5/A17 says it must be.** Exactly 6 innings,
     all named in the parser's warnings. A null appearing anywhere else means the
     derivation rule has silently stopped matching the archive.
+
+17. **[A22] Balls faced reproduces published strike rates.** Hand-entered reference
+    figures for three 2016 season aggregates — Kohli 973 off 640, Warner 848 off 560,
+    de Villiers 687 off 407. The two candidate predicates differ only by the no-balls a
+    batter faced, which is small but never zero across a season, so a wrong predicate
+    cannot coincidentally satisfy all three. This is the check that caught A22.
 
 ---
 

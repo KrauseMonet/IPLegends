@@ -785,11 +785,69 @@ For each state compute:
 - Expected runs off the bat per ball
 - Dismissal probability per ball
 - Expected runs remaining in the innings, at that state and at that state with one more
-  wicket down. The difference is the cost of a wicket there.
+  wicket down.
+
+**[A31, corrected 2026-07-30] The cost of a wicket is the drop in expected FINAL total, not
+the difference in expected runs remaining.** This paragraph previously read "the difference
+is the cost of a wicket there", pointing at runs remaining. That is wrong, and wrong in a
+direction no internal check would catch, so the old claim is named here rather than quietly
+replaced.
+
+*The rule, stated positively.* Wicket cost at (over, wickets) is
+
+```
+E[final total | over, wickets]  -  E[final total | over, wickets + 1]
+```
+
+where expected final total is runs already scored plus expected runs remaining. Measured
+this way it is **strictly monotone in wickets at every over, with no inversions**:
+
+| over | 0 down | 1 down | 2 down | 3 down | 4 down |
+|---|---|---|---|---|---|
+| 4 | 182.0 | 170.2 | 156.9 | 142.3 | 118.6 |
+| 8 | 190.6 | 182.3 | 169.3 | 156.5 | 139.1 |
+| 12 | 199.4 | 194.4 | 180.2 | 169.1 | 156.5 |
+| 16 | 215.1 | 204.1 | 192.0 | 183.9 | 170.9 |
+
+*Why differencing runs remaining fails.* A team 4 down in over 12 is not a team that was 3
+down and lost one. It is disproportionately a team being bowled at well, or one taking risks
+because it has to, so the two states are not comparable and the difference between them
+measures that selection as much as it measures the wicket. The confounding is strong enough
+to flip the sign: over 12 at 0 down prices a wicket at **−2.0 runs**, over 18 at 2 down at
+−0.0, and three cells came out indistinguishable from zero at two standard errors.
+`etl.state_model` still prints that column, labelled as confounded, because the printout is
+how the problem was found and the fastest way to see it again.
+
+**Known limitation, deliberately accepted for phase 1.** The monotone version is still a
+descriptive conditional expectation, not a causal one — the same selection sits inside it,
+just not strongly enough to invert anything. That is acceptable because the rating is a
+comparative yardstick and every player is priced against the same one. **If a rating later
+looks wrong for a player who batted mostly in collapse situations, look here first,** before
+suspecting shrinkage or the cohort offsets.
 
 A batter's contribution on a delivery is the actual outcome minus the expected outcome for
-that exact state, with dismissals priced by the wicket cost. Sum across a season, divide
-by balls faced for a per-ball impact figure. Same for bowlers with signs reversed.
+that exact state, with dismissals priced by the wicket cost above. Sum across a season,
+divide by balls faced for a per-ball impact figure. Same for bowlers with signs reversed.
+
+**What was actually fitted, measured 2026-07-30.** 151,175 deliveries = **146,159 balls
+faced** (A22: `extra_wides = 0`) + 5,016 wides, reconciling exactly with A28. 196,068 runs
+off the bat and 7,458 dismissals.
+
+- **Coverage is 63 of 80 states.** 75 observed, 12 under 100 balls, and **5 that have never
+  happened** — 4 down in over 0 and its neighbours. All 17 weak states sit in one corner,
+  early-over collapses, plus `ov19 0-1`, the innings that loses almost nobody. Their
+  thinness reflects how rarely cricket reaches them, not a sampling failure.
+- **[A31] Thin states are stored raw with their `n` and shrunk by the consumer, never
+  smoothed at rest.** How to handle a state with n = 40 is a simulator decision, to be made
+  with the simulator in front of us. The table must not pre-empt it.
+- **The archive produced the powerplay unprompted.** Scoring climbs 0.915 → 1.480 runs/ball
+  across overs 0–5, **drops to 1.166 at over 6** as fielding restrictions lift, then climbs
+  to 2.157 by over 18. Dismissal probability runs 0.029 (over 0) to 0.156 (over 19, 6+
+  down). Nothing in the fit knows about over 6; the discontinuity is the data agreeing with
+  the laws of the game, which is the closest thing to an external check available here.
+- **Seven outcomes cover 100% of the fit**: 0,1,2,3,4,5,6 off the bat. 5s happen (32, off
+  overthrows), 7s do not. That is a measurement of this archive, not a law, so it is guarded
+  twice — see A31.
 
 **[A22] The two denominators are different predicates and must not be shared.** Balls faced
 is `extra_wides = 0`; legal balls bowled is `legal_ball`. A no-ball sits in the first and
@@ -876,7 +934,18 @@ Runnable scripts in `/validation` with clear pass/fail output.
 7. Reconstruct and print full scorecards for five specific matches spread across 2008,
    2013, 2016, 2020 and 2024, to be checked by hand against public scorecards. **This is
    the check that actually matters — make the output readable.**
-8. Print the top 10 career run scorers and top 10 wicket takers for plausibility.
+8. **Career leaderboards.** `--leaderboards` prints the top 10 run scorers and wicket
+    takers for the plausibility read this check was specified for. Printing cannot fail, so
+    the automated half asserts the three things a human skimming ten names would not notice:
+    **Kohli leads the run scorers** (the only external anchor here — deliberately an
+    ordering and not a total, because the margin is over 2,000 runs and no revision to a
+    recent season can reorder it, whereas an exact figure goes stale; A22's lesson is that
+    the claim must be the thing actually checked); **no name appears twice**, which is where
+    a split `person_id` surfaces as one player wearing two rows and no foreign key can see
+    it; and **every dismissal kind is classified** as bowler-credited or not, so a kind
+    Cricsheet adds later cannot fall between the two sets and vanish from the wicket column.
+    Currently Kohli 9,336 runs, Chahal 233 wickets, 10 kinds all classified. Chahal's lead
+    is 7 wickets and is **not** asserted, for the same robustness reason.
 9. No franchise-season rating uses data from any other season, any other competition, or
    any career aggregate except as a shrinkage prior.
 
@@ -927,6 +996,36 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     Dropping the `non_striker` scan, or letting an Impact Player entrant take a twelfth
     position, both break it. Currently exact on all 227 all-out innings. Carries a bounds
     assertion on `squad_members` in the same check: no stored position outside 1–11.
+
+19. **[A24] Every franchise-season offers at least one keeper.** *Recorded here 2026-07-30;
+    it had been implemented since SPEC 6 and listed nowhere, which is exactly the drift this
+    document exists to prevent.* This is a check on the deck rather than on the parse: the
+    keeper slot in the XI has to be filled from somewhere, so a squad offering nobody to
+    fill it is a card that breaks the game, not a statistic that is slightly off.
+    **Currently FAILS at 140 of 166** and correctly so — it is blocked on
+    `keepers_by_season.csv` being hand-filled, and the failure is the block being visible.
+
+20. **[A31] The state model covers all 80 states and reconciles with a fresh recount.** Two
+    claims. *Legibility:* a state the archive has never seen is stored with `faced = 0`, not
+    left out, because an absent row and a zero row mean different things to the simulator —
+    "this table does not cover that" against "cricket has never produced that" — and only
+    one is true, so the table says which instead of leaving it inferred from a missing key.
+    *Freshness:* the fitting set is re-derived straight from `deliveries` and the stored
+    totals must match, which is what makes this more than a restatement of the loader. It
+    fails if the state model is left stale behind a reload, or refitted through a filter that
+    has drifted from A28's `innings_scheduled_balls = 120`. Currently 80 of 80 states, 5 as
+    explicit zeroes, 146,159 balls faced, 161 runs-remaining states.
+
+**Check 6 came off SKIP on 2026-07-30**, when migration 007 gave it a derived table to
+examine. It had been written to turn into a hard FAIL in exactly that moment rather than a
+silent pass, and it did. Its assertion is now that **no delivery is both a super over and
+inside the fitting set** — aggregation destroys provenance, so the exclusion has to be
+checked where it happens, not on the aggregate. It also reports that `not is_super_over` is
+**carrying no weight**: a super over has `innings_no >= 3` and a null
+`innings_scheduled_balls`, so `innings_no = 1` and `innings_scheduled_balls = 120` each
+exclude all 175 of them unaided. That is A21 working as designed — a positive test for a
+known value excludes nulls by construction — and the redundancy is reported rather than
+trimmed so nobody mistakes the explicit clause for the thing doing the work.
 
 ---
 

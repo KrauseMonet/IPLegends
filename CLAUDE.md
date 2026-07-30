@@ -233,6 +233,7 @@ the 0.5 GB.
 | **Total, estimated** | ~100 MB against a 500 MB cap |
 | **Total, MEASURED after the full load** | **70 MB** (deliveries 65 MB, appearances 3.8 MB, rest <1 MB) |
 | **Total, MEASURED after SPEC 6 and migration 006** | **69 MB** (deliveries 63 MB after the phase index went, appearances 3.9 MB, squad_members 520 kB) |
+| **Total, MEASURED after SPEC 7.1 and migration 007** | **68.6 MB** — the state model costs **88 kB** for 241 rows. The fitted grid is four orders of magnitude smaller than the deliveries it was fitted on, which is the whole argument for storing it. |
 
 Roughly 7x headroom, so the estimate was conservative rather than wrong. The brief's "1.2 million deliveries" figure is ~4x high. The exact
 count, from parsing the whole archive, is **295,732 deliveries across 1,243 matches and
@@ -272,6 +273,7 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A28 | §7.1 fitting filter is `innings_scheduled_balls = 120` alone; the `not was_reduced` clause is dropped. It excluded 12 first innings that were themselves scheduled for and played to a full twenty — the reduction fell on the chase, after they ended. 149,697 -> **151,175** deliveries. Refines A21, which remains correct about *why* `= 120` is the right predicate. |
 | A29 | `deliveries_phase_idx` dropped in migration `006`. Three distinct values over 295,732 rows: the planner will not choose it, and every query that filters on phase also filters on match or franchise-season. `deliveries` is 63 MB, down from 65. |
 | A30 | **The four override CSVs cannot be narrowed further by derivation, and that was measured rather than assumed.** Afghanistan's absence is documented Cricsheet *policy* — 158 matches withheld — so no re-download will ever close it. No nationality-restricted competition exists among the 1,115 published archives. Catches name the proven keeper 51% of the time (86% within the top 3), and the career-keeper cross-reference is **wrong for 5 of the 39 squads it is confident about**, failing in the A23 shape. So the generators emit **evidence and a ranking, never a verdict**: `merge_override` now takes the decision column by name, preserves it untouched, and refreshes every other column. `cricinfo_id` added to all four files. No migration was needed — A19 stands unchanged. |
+| A31 | **§7.1 state model stored as two tables, migration 007, because the grains genuinely differ.** `state_ball_outcomes` is (over x bucketed wickets), 80 rows; `state_runs_remaining` is (over x **exact** wickets), 161 rows. One grain cannot serve both: per-ball rates are too noisy for exact wickets, and inside a two-wide bucket one more wicket usually stays in the bucket, so a bucketed runs-remaining grid would price a wicket at zero for half the states. **Counts only, never rates** (A19), with a CHECK that the seven outcome columns sum to balls faced. **The cost of a wicket is the drop in expected FINAL total, not the difference in expected runs remaining** — the latter is confounded by runs already scored and comes out **negative** at over 12, 0 down. SPEC 7.1 corrects the old wording and names it. All 80 states stored, the 5 never observed as **explicit zeroes**, because an absent row and a zero row say different things to the simulator. Thin cells kept raw with their `n` and shrunk by the consumer, never smoothed at rest. |
 
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
@@ -304,9 +306,11 @@ treat the current values as ratified beyond the twelve.
 | 4b. Migrations applied | done; 4 applied to Neon, 8 tables / 14 checks / 21 indexes, runner idempotent |
 | 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
 | 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
-| 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 still awaits SPEC 7 |
-| 5b. Checks 15 and 16 | done 2026-07-30; both had been asserted in SPEC as measured fact with no standing check behind them. 15 regenerates all 295,732 scorecard references from `legal_ball`; 16 pins the unknown-length innings at exactly 6. **Checks 8-14 remain unwritten and all depend on SPEC 7.** |
+| 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 now live off the state model |
+| 5b. Checks 15 and 16 | done 2026-07-30; both had been asserted in SPEC as measured fact with no standing check behind them. 15 regenerates all 295,732 scorecard references from `legal_ball`; 16 pins the unknown-length innings at exactly 6. |
 | 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
+| **7.1 State model** | **done 2026-07-30**, migration 007 applied. 146,159 balls faced into 80 states (5 never observed, kept as zeroes) plus 161 exact-wicket runs-remaining states, 88 kB. Checks 6, 8 and 20 written; check 6 came off SKIP. **A31 corrected SPEC's wicket-cost rule — the old wording priced a wicket by differencing runs remaining, which is confounded and goes negative.** |
+| 7.2-7.7 Ratings | **not started.** Shrinkage, draftability gate, normalisation, display-vs-simulator split, top-20 print. **Checks 9-14 are blocked behind this** and must not be written first. |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
 **640** balls (the all-time single-season record — recorded here as 637 until check 7
@@ -322,15 +326,48 @@ figure matched what the parser had reported before any database existed.
 ## Validation
 
 ```bash
-uv run python -m validation                 # checks 1-6, 15, 16, 17, 18, 19
-uv run python -m validation --check 17      # one check, BY ITS SPEC 8 NUMBER
-uv run python -m validation --scorecards    # check 7, for reading by hand
-uv run python -m validation --match 598027  # one scorecard
+uv run python -m validation                  # checks 1-6, 8, 15-20
+uv run python -m validation --check 20       # one check, BY ITS SPEC 8 NUMBER
+uv run python -m validation --scorecards     # check 7, for reading by hand
+uv run python -m validation --match 598027   # one scorecard
+uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
+
+**13 checks: 12 pass, 1 fails.** The failure is check 19 and it is correct — 26
+franchise-seasons have no keeper until `keepers_by_season.csv` is hand-filled. Nothing
+skips any more: check 6 came off SKIP when migration 007 gave it a derived table.
+
+**Checks 9-14 are still unwritten and cannot be written yet.** Every one of them reads a
+rating (9 leakage, 10 under-shrinkage, 11 over-shrinkage, 12 slot coverage after the §7.3
+gate, 13 cohort era-drift, 14 innings skew), and §7.2-7.7 does not exist. Writing them now
+would produce the tautologies A2 already had to delete twice — the original 10 and 11 were
+removed for being true by construction, and check 2 for being enforced by five foreign keys.
+Do not add them until there is a rating to point them at.
 
 `--check` takes the SPEC 8 number, not the position in the list. It used to take the
 position, which was harmless while the checks ran 1-6 and became a silent trap the moment
 the suite skipped to 17: `--check 17` reported "no such check" while `--check 7` ran it.
+
+## Section 7.1: the state model
+
+```bash
+uv run python -m etl.state_model            # fit and print the grid, no writes
+uv run python -m etl.state_model --cells    # all 80 cells with their distributions
+uv run python -m etl.state_model --write    # load migration 007's two tables
+```
+
+`--write` truncates and rewrites, so it is re-runnable, and it must be re-run after any
+`etl.load`. Check 20 recounts the fitting set from `deliveries` and fails if the stored
+totals have gone stale, so a forgotten refit is caught rather than silently believed.
+
+**The outcome guard.** Seven columns hold the whole distribution because 0-6 covers 100% of
+the archive today — 32 fives off overthrows, zero sevens. That is a measurement, not a law:
+an 8 off an overthrow is legal. So `--write` **refuses to run** if any outcome has no column,
+naming every offending value, and migration 007 carries a CHECK that the seven columns sum to
+balls faced. Both, deliberately: the constraint protects the table, and the loader protects
+against the constraint being quietly wrong about what belongs in it. Cricsheet revises recent
+seasons, so a refreshed archive is exactly when both matter. `tests/test_state_model.py` pins
+the guard and was verified to fail with it removed.
 
 ## Section 6: squads, and the four CSVs that gate the deck
 
@@ -369,10 +406,20 @@ A typo in a decision column reads as a silent "no" rather than an error, so
 `tests/test_overrides.py` pins the vocabulary each reader accepts: `kept` and `is_keeper`
 take y/yes/true/1 or n/no/false/0, `bowling_style` takes pace or spin.
 
-A **SKIP is not a pass** and the runner says so. Checks 5 and 6 target tables SPEC 6 and 7
-build; they skip with a reason rather than reporting green against an empty table. Check 6
-turns into a hard FAIL the moment a derived table appears without the check being written,
-so it cannot be forgotten.
+A **SKIP is not a pass** and the runner says so. Checks 5 and 6 targeted tables SPEC 6 and 7
+build; they skipped with a reason rather than reporting green against an empty table. Check 6
+was written to turn into a hard FAIL the moment a derived table appeared without the check
+being written, so it could not be forgotten — **and on 2026-07-30 it did exactly that.**
+Migration 007 created the state tables and check 6 failed on the next run with "a derived
+stat table exists but this check has not been written". The trap worked. It is now a real
+pass and the suite skips nothing.
+
+Check 6 also reports something worth knowing: `not is_super_over` in the §7.1 fitting filter
+is **carrying no weight**. A super over has `innings_no >= 3` and a null
+`innings_scheduled_balls`, so `innings_no = 1` and `= 120` each exclude all 175 of them
+unaided. That is A21 working as designed rather than a reason to delete the clause — it
+states intent — but the check asserts each clause independently so nobody mistakes the
+explicit one for the thing doing the work.
 
 Check 7 is the only check a human can disagree with, and it is the only one that has ever
 found anything the others could not — see A22. Five matches, hand-verified: `335982`

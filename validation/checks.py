@@ -20,7 +20,13 @@ import json
 import zipfile
 
 from etl.db import data_dir
+# Imported rather than restated. The fitting filter and the bucket labels live in one
+# place, so check 20 cannot drift into validating the state model against a copy of the
+# rule the state model no longer uses. A19's habit applied to code instead of columns.
+from etl.state_model import BUCKETS, FITTING_SET
 from validation.harness import Result, bad, skipped, verdict
+
+WICKET_BUCKETS = tuple(label for label, _ in BUCKETS)
 
 ARCHIVE = data_dir() / "ipl_json.zip"
 
@@ -48,11 +54,61 @@ BASE_TABLES = {
     "people", "schema_migrations", "squad_members",
 }
 
+# Derived stat tables check 6 knows how to examine. A table appearing in neither this
+# set nor BASE_TABLES still fails check 6, which is the trap working rather than a gap.
+STATE_TABLES = {"state_ball_outcomes", "state_runs_remaining"}
+
+# Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
+# for every kind in the archive, so a kind added later cannot fall silently between them.
+# `retired hurt` is not a dismissal at all - the batter may return - but it carries a
+# player_out_id, so it has to be named somewhere or it reads as an unclassified kind.
+BOWLER_CREDITED = ("caught", "bowled", "lbw", "caught and bowled", "stumped",
+                   "hit wicket")
+NOT_BOWLER_CREDITED = ("run out", "retired hurt", "retired out",
+                       "obstructing the field")
+
+# The one external anchor on the career leaderboards. Deliberately an ordering and not a
+# total: the margin over second place is more than 2,000 runs, so no revision to a recent
+# season can reorder it, whereas any exact figure would go stale the next time Cricsheet
+# revises 2026. A22's lesson is that the claim has to be the thing actually verified.
+LEADING_RUN_SCORER = "V Kohli"
+
+TOP_RUN_SCORERS = """
+    select p.primary_name, sum(d.runs_batter) as runs,
+           count(*) filter (where d.extra_wides = 0) as balls
+    from deliveries d join people p on p.person_id = d.batter_id
+    where not d.is_super_over
+    group by p.person_id, p.primary_name
+    order by runs desc, p.primary_name
+    limit %s
+"""
+
+TOP_WICKET_TAKERS = """
+    select p.primary_name, count(*) as wickets
+    from deliveries d join people p on p.person_id = d.bowler_id
+    where not d.is_super_over and d.wicket_kind is not null
+      and d.wicket_kind <> all(%s)
+    group by p.person_id, p.primary_name
+    order by wickets desc, p.primary_name
+    limit %s
+"""
+
 
 def _rows(conn, sql: str, params=None) -> list[tuple]:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def _tables(conn) -> set[str]:
+    return {t for (t,) in _rows(
+        conn,
+        "select table_name from information_schema.tables where table_schema = 'public'",
+    )}
+
+
+def _table_exists(conn, name: str) -> bool:
+    return name in _tables(conn)
 
 
 def check_01_runs_total(conn) -> Result:
@@ -332,12 +388,29 @@ def check_05_no_squad_member_without_appearances(conn) -> Result:
 
 
 def check_06_super_overs_excluded(conn) -> Result:
+    """Super over deliveries reach no derived stat table.
+
+    The state model is the first derived table to exist, and this check fired as a FAIL
+    the moment migration 007 created it - which is what it was built to do. It had been
+    skipping with a reason, and the skip turned into a failure rather than a pass so that
+    an unexamined derived table could not be mistaken for a verified one.
+
+    Aggregation destroys provenance: no column on `state_ball_outcomes` can say which
+    deliveries built a cell, so the exclusion has to be checked where it happens. The
+    assertion is that **no delivery is both a super over and inside the fitting set**, and
+    that each clause of the filter would exclude them on its own.
+
+    The redundancy is the finding here and it is worth stating rather than trimming. A
+    super over carries `innings_no >= 3` and a null `innings_scheduled_balls`, so
+    `innings_no = 1` and `innings_scheduled_balls = 120` each exclude every super over
+    delivery without help - the explicit `not is_super_over` removes nothing. That is A21
+    working exactly as intended: a positive test for a known value excludes nulls by
+    construction instead of relying on anyone remembering the negative clause. The clause
+    stays because it states the intent, and this check reports that it is currently
+    carrying no weight, so nobody mistakes it for the thing doing the work.
+    """
     title = "super over deliveries are excluded from derived stat tables"
-    present = {t for (t,) in _rows(
-        conn,
-        "select table_name from information_schema.tables where table_schema = 'public'",
-    )}
-    derived = sorted(present - BASE_TABLES)
+    derived = sorted(_tables(conn) - BASE_TABLES)
     if not derived:
         (n,), = _rows(conn, "select count(*) from deliveries where is_super_over")
         return skipped(
@@ -345,11 +418,33 @@ def check_06_super_overs_excluded(conn) -> Result:
             f"no derived stat table exists yet; SPEC 7 builds them. "
             f"{n} super over deliveries are flagged and waiting to be excluded.",
         )
-    # Not a pass. A derived table exists and this check does not yet look at it,
-    # which is precisely when a silent green would do damage.
-    return bad(
-        6, title, "a derived stat table exists but this check has not been written",
-        [f"unexamined table: {t}" for t in derived],
+    unexamined = [t for t in derived if t not in STATE_TABLES]
+    if unexamined:
+        return bad(
+            6, title, "a derived stat table exists but this check has not been written",
+            [f"unexamined table: {t}" for t in unexamined],
+        )
+
+    offenders: list[str] = []
+    (leaked,), = _rows(
+        conn, f"select count(*) from deliveries where is_super_over and ({FITTING_SET})")
+    if leaked:
+        offenders.append(f"{leaked} super over deliveries satisfy the SPEC 7.1 fitting set")
+
+    # Each clause on its own, so the exclusion does not rest on a single predicate.
+    (supers,), = _rows(conn, "select count(*) from deliveries where is_super_over")
+    for clause in ("innings_no = 1", "innings_scheduled_balls = 120"):
+        (survives,), = _rows(
+            conn, f"select count(*) from deliveries where is_super_over and {clause}")
+        if survives:
+            offenders.append(f"`{clause}` alone lets {survives} super over deliveries through")
+
+    (stored,), = _rows(conn, "select sum(faced) from state_ball_outcomes")
+    return verdict(
+        6, title,
+        f"{len(derived)} derived table(s) examined; all {supers:,} super over deliveries "
+        f"excluded by both clauses independently; state model holds {stored:,} balls",
+        offenders,
     )
 
 
@@ -489,6 +584,127 @@ def check_19_every_squad_can_field_a_keeper(conn) -> Result:
     )
 
 
+def check_08_career_leaderboards(conn) -> Result:
+    """SPEC 8.8. The career leaderboards, and the three ways they break quietly.
+
+    SPEC asks for these to be printed for plausibility, and `--leaderboards` does that.
+    Printing alone cannot fail, so the automated half asserts the things a human
+    skimming ten names would not notice:
+
+    * **Kohli leads the run scorers.** The only external anchor available here. It is
+      robust to a 2026 revision in a way an exact total is not: the margin is over 2,000
+      runs, so no plausible season reorders it. Per A22's lesson the claim is the
+      ordering, which is what has been checked, not a figure standing next to it.
+    * **No name appears twice.** A leaderboard is where a `person_id` split surfaces as
+      one player wearing two rows, and no foreign key can see it.
+    * **Every dismissal kind is classified.** Bowler-credited plus not-credited must
+      account for all of them. A kind Cricsheet adds later - `handled the ball`, say -
+      would otherwise fall between the two and vanish from the wicket column silently,
+      which is the same failure shape as an unstorable outcome in the state model.
+    """
+    title = "career leaderboards are plausible and completely classified"
+    offenders: list[str] = []
+
+    batters = _rows(conn, TOP_RUN_SCORERS, (10,))
+    bowlers = _rows(conn, TOP_WICKET_TAKERS, (list(NOT_BOWLER_CREDITED), 10))
+
+    if not batters or batters[0][0] != LEADING_RUN_SCORER:
+        got = batters[0][0] if batters else "nobody"
+        offenders.append(f"leading run scorer is {got}, expected {LEADING_RUN_SCORER}")
+
+    for label, board in (("run scorers", batters), ("wicket takers", bowlers)):
+        names = [row[0] for row in board]
+        repeated = {n for n in names if names.count(n) > 1}
+        offenders += [f"{label}: {n} appears twice, so a person_id is split"
+                      for n in sorted(repeated)]
+
+    kinds = dict(_rows(conn, """
+        select wicket_kind, count(*) from deliveries
+        where not is_super_over and wicket_kind is not null group by 1
+    """))
+    unclassified = sorted(set(kinds) - set(BOWLER_CREDITED) - set(NOT_BOWLER_CREDITED))
+    offenders += [f"dismissal kind '{k}' ({kinds[k]}) is credited to nobody" for k in unclassified]
+
+    runs = batters[0][1] if batters else 0
+    return verdict(
+        8, title,
+        f"{len(kinds)} dismissal kinds all classified; "
+        f"{LEADING_RUN_SCORER} {runs:,} runs, "
+        f"{bowlers[0][0] if bowlers else '-'} {bowlers[0][1] if bowlers else 0} wickets",
+        offenders,
+    )
+
+
+def print_leaderboards(conn, top: int = 10) -> None:
+    """SPEC 8.8's other half: the lists a human reads for a name that looks wrong."""
+    print(f"\ntop {top} career run scorers (super overs excluded)")
+    print(f"    {'#':<4}{'player':<26}{'runs':>7}{'balls':>8}{'per ball':>10}")
+    for i, (name, runs, balls) in enumerate(_rows(conn, TOP_RUN_SCORERS, (top,)), 1):
+        print(f"    {i:<4}{name:<26}{runs:>7,}{balls:>8,}{runs / balls:>10.3f}")
+
+    print(f"\ntop {top} career wicket takers (bowler-credited dismissals only)")
+    print(f"    {'#':<4}{'player':<26}{'wickets':>8}")
+    rows = _rows(conn, TOP_WICKET_TAKERS, (list(NOT_BOWLER_CREDITED), top))
+    for i, (name, wickets) in enumerate(rows, 1):
+        print(f"    {i:<4}{name:<26}{wickets:>8,}")
+
+    print(f"\n    credited to the bowler: {', '.join(BOWLER_CREDITED)}")
+    print(f"    not credited:           {', '.join(NOT_BOWLER_CREDITED)}")
+
+
+def check_20_state_model_covers_every_state(conn) -> Result:
+    """SPEC 7.1. All 80 states present, and the fit reconciles with a fresh recount.
+
+    Two distinct claims. The first is about legibility: a state the archive has never
+    seen must be stored as `faced = 0`, not left out. An absent row and a zero row mean
+    different things to the simulator - "this table does not cover that" against "cricket
+    has never produced that" - and only one of them is true, so the table has to say
+    which rather than leaving it to be inferred from a missing key.
+
+    The second re-derives the fitting set straight from `deliveries` and demands the
+    stored totals match. That is what makes this more than a restatement of the loader:
+    it fails if the state model is ever left stale behind a reload, or refitted through a
+    filter that has drifted from A28's `innings_scheduled_balls = 120`.
+    """
+    title = "state model covers all 80 states and reconciles with the fitting set"
+    if not _table_exists(conn, "state_ball_outcomes"):
+        return skipped(20, title, "state_ball_outcomes absent - run etl.state_model --write")
+    offenders: list[str] = []
+
+    stored = {(over, bucket): faced for over, bucket, faced in _rows(
+        conn, "select over_no, wicket_bucket, faced from state_ball_outcomes")}
+    for over in range(20):
+        for bucket in WICKET_BUCKETS:
+            if (over, bucket) not in stored:
+                offenders.append(f"state (ov{over}, {bucket}) has no row at all")
+
+    (faced, runs, outs), = _rows(
+        conn, "select sum(faced), sum(runs_off_bat), sum(dismissals) from state_ball_outcomes")
+    (obs, remaining), = _rows(
+        conn, "select sum(observations), count(*) from state_runs_remaining")
+
+    # Recounted from deliveries through A28's filter, not read back from the fit.
+    (fit_faced, fit_runs, fit_all), = _rows(conn, f"""
+        select count(*) filter (where extra_wides = 0),
+               sum(runs_batter) filter (where extra_wides = 0),
+               count(*)
+        from deliveries where {FITTING_SET}
+    """)
+    for label, got, want in (("balls faced", faced, fit_faced),
+                             ("runs off the bat", runs, fit_runs),
+                             ("runs-remaining observations", obs, fit_all)):
+        if got != want:
+            offenders.append(f"{label}: state model holds {got:,}, deliveries gives {want:,}")
+
+    zeroes = sum(1 for n in stored.values() if n == 0)
+    return verdict(
+        20, title,
+        f"{len(stored)} of 80 states stored ({zeroes} never observed, kept as zeroes); "
+        f"{faced:,} balls faced, {outs:,} dismissals, {remaining} runs-remaining states",
+        offenders,
+    )
+
+
 def check_15_actual_delivery_is_reproducible(conn) -> Result:
     """A19. `legal_ball` regenerates the source's own scorecard reference.
 
@@ -614,9 +830,11 @@ CHECKS = (
     check_04_two_franchise_seasons,
     check_05_no_squad_member_without_appearances,
     check_06_super_overs_excluded,
+    check_08_career_leaderboards,
     check_15_actual_delivery_is_reproducible,
     check_16_scheduled_length_is_null_only_where_specified,
     check_17_balls_faced_convention,
     check_18_batting_order_is_complete,
     check_19_every_squad_can_field_a_keeper,
+    check_20_state_model_covers_every_state,
 )

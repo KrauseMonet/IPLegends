@@ -829,6 +829,36 @@ A batter's contribution on a delivery is the actual outcome minus the expected o
 that exact state, with dismissals priced by the wicket cost above. Sum across a season,
 divide by balls faced for a per-ball impact figure. Same for bowlers with signs reversed.
 
+**[A36, ratified 2026-07-30] Batting is charged only the striker's own dismissal.** The
+state model's `dismissals` column counts *any* wicket, so its rate is P(a wicket falls) —
+which prices 319 non-striker run outs (4.28% of fitting-set dismissals) to the player who
+did not cause them. Migration 009 therefore stores a **striker-only** grid,
+`player_out_id = batter_id`, and ratings consume that. The any-wicket reading stays fitted
+and printed **as a diagnostic only, clearly labelled, consumed by nothing.** In aggregate
+the choice is worth 0.001 runs per ball, which is the argument for not caring; per player it
+reaches **0.193** and moves top-20 membership by two player-seasons, which is the argument
+for caring, and in a game where players read individual ratings closely the
+defensible-per-player version beats the convenient-in-aggregate one. Bowling is charged on
+`credited_to_bowler` — bowled, caught, lbw, stumped, hit wicket, caught and bowled — which
+excludes run outs on the same principle.
+
+**[A37, ratified 2026-07-30] One state-resolution rule, both halves of the impact.** A
+ball's impact has a runs half and a wicket half, and each needs a reference state. Where the
+exact state is too thin to trust (12 of the 75 observed cells sit under 100 balls, and 5
+have never happened), **both halves fall back the same way: to the nearest state in the same
+over along the wicket axis.** `Grid` walks it at bucketed-wicket grain and `Costs` at
+exact-wicket grain — the A31 split — but it is the same walk. This is not tidiness. Two
+halves resolving differently would price one ball against two different reference states.
+
+*The bug this fixes.* Wicket cost already fell back; the runs baseline did not, and simply
+**dropped** any ball in a thin cell — 867 balls, 0.31%. That is not a rounding issue and not
+neutral: thin cells are early collapses and death overs, so the drop biased against exactly
+the players who batted in them. It surfaced as Kohli's 2016 reading **838 off 583** against
+a real **860 off 590**. Under A37 nothing is dropped, every scoring-set ball is priced,
+0.31% of batting balls and 0.33% of bowling balls resolve to a neighbour, and all 19 of
+Kohli's seasons reconcile exactly against the scoring set. `etl.impact --reconcile` is that
+check and it is the only place a silent drop would ever show.
+
 **What was actually fitted, measured 2026-07-30.** 151,175 deliveries = **146,159 balls
 faced** (A22: `extra_wides = 0`) + 5,016 wides, reconciling exactly with A28. 196,068 runs
 off the bat and 7,458 dismissals.
@@ -874,9 +904,93 @@ in one cameo. Apply empirical Bayes shrinkage toward a prior in proportion to sa
 
 The shrinkage constant is a named tunable, calibrated against the leaderboards it produces.
 
-**7.3 Draftability gate.** Exclude below a minimum threshold, provisionally four matches
-played. Stored as a constant. Excluded players stay in `squad_members` for completeness,
-they just do not appear as a pick.
+**[A32, ratified 2026-07-30] Shrinkage cannot carry the low-volume problem, and this
+paragraph used to imply it could.** The sentence above — "the top-rated batters will be
+fringe players who hit two sixes in one cameo" — named shrinkage as the fix. It is not one.
+Shrinkage pulls a season toward a prior in proportion to sample size, and for a thin season
+the own-career prior *is mostly that same thin season*, so no value of the constant helps:
+raising it makes the season climb. Measured, with no career-volume floor, BA Bhatt's 5-ball
+2011 rises from +2.003 at k = 50 to +2.206 at k = 800, because his prior is the other 2
+balls of his career. **Shrinkage protects against a thin career. It never protects against a
+thin season.** The clause "where they have meaningful career volume" above is what makes the
+first half true and it is load-bearing; `CAREER_FLOOR` is 300 balls.
+
+*The rule: two gates, not one.* §7.3's match gate stays, and a **balls floor** joins it.
+
+**7.3 Draftability gates.** Two, applied together. Both stored as named constants.
+
+| Gate | Value | Why this value |
+|---|---|---|
+| Matches played | **4** | SPEC's original, provisional and unratified |
+| Balls faced (batting) | **100** | where the raw list stabilises — see below |
+| Legal balls bowled (bowling) | **150** | 25 overs; bowling stabilises *later* than batting |
+
+Below a floor a player-season is **not rated at all** — not shrunk, not floored, simply not
+draftable from that franchise-season. This is the honest form: below the floor there is not
+enough signal to rate the season, so we do not pretend to. Since the deck is franchise-season
+grain, the consequence is a player you cannot draft from that specific team-year, which is
+the correct outcome rather than a loss. Excluded players stay in `squad_members` for
+completeness, they just do not appear as a pick.
+
+**The floors are measured, not assumed, and they are not the same number.** Reading the top
+5 of the raw list at each candidate cut, batting settles at 100 and bowling does not:
+
+| floor | batting top | bowling top |
+|---|---|---|
+| none | 1–2 ball seasons at +3.34 | 1–4 ball seasons at +7.28 |
+| 30 | 73b **+1.36** | 30b **+1.48** |
+| 50 | 73b **+1.36** | 96b **+1.11** |
+| **100** | 141b **+0.99** | 126b **+0.87** |
+| **150** | 313b +0.97 | 360b **+0.76** |
+| 200 | 313b +0.97 | 360b +0.76 |
+
+Batting's top stops moving between 100 and 150 (+0.99 → +0.97). Bowling's is still falling
+13% over the same step (+0.87 → +0.76) and only stops at 150. **Do not transfer one floor
+across disciplines**: a bowler is capped at 24 legal balls per match, so 100 balls is four
+matches of a frontline bowler but a whole season of a part-timer, and at a 100-ball bowling
+floor the top twelve contains RG Sharma's 138-ball 2009 — a batter who bowled a bit. 150
+removes it. The bowling floor implies roughly seven matches, which makes the four-match gate
+**non-binding for bowling**; it still binds for batting.
+
+Effect: **1,027 of 2,954** batting player-seasons and **787 of 2,195** bowling player-seasons
+are rateable; 123 in both. 1,642 player-seasons are rateable in neither, 802 of those past
+the match gate.
+
+**[A33] Known residual, accepted and flagged.** The floors remove the pathology in the form
+that motivated them — a thin season outranking the same player's own thick one, and a
+47-ball season reaching the top eight — but not entirely. Under the ratified k,
+Suryavanshi's 122-ball 2025 (raw +0.574) shrinks **up** to +0.754 and outranks Sehwag's
+240-ball 2011 (raw +0.615, shrunk +0.429), because its leave-one-season-out prior is his own
+outstanding 2026. Across all rateable batting seasons **4.56% of within-band pairs are
+strictly-dominated inversions** — fewer balls *and* a lower raw figure, yet a higher rating.
+This is empirical Bayes working as designed, but it imports career information into a number
+§7 opens by defining as season-only. Dropping the own-career prior for the band-season mean
+alone takes it to 3.71% and returns 80% of Kohli's raw spread instead of 68%, at the cost of
+A7. **Not decided.** Revisit with §7.4.
+
+**[A34, ratified 2026-07-30] The shrinkage constant is `k = 100` balls, provisionally.**
+`k >= 400` is ruled out on design grounds before any statistics: §7 opens by saying the
+season-to-season contrast "is the point of the game", and k = 400 retains 38% of Kohli's
+best-to-worst spread while k = 800 retains 23% and turns his genuinely poor 2008 *positive*.
+
+| | raw | k=50 | k=100 | k=200 | k=400 | k=800 |
+|---|---|---|---|---|---|---|
+| Kohli 2016 | +0.332 | +0.315 | **+0.300** | +0.275 | +0.241 | +0.203 |
+| Kohli 2022 | −0.259 | −0.200 | **−0.157** | −0.096 | −0.027 | +0.036 |
+| Kohli 2008 | −0.377 | −0.252 | **−0.175** | −0.087 | −0.006 | **+0.054** |
+| spread retained | 0.897 | 81% | **68%** | 53% | 38% | 23% |
+
+k = 50 and k = 100 both pass the within-player ordering test; k = 100 pulls harder on the
+noise and that is the trade taken. **Not settled.** It must be re-checked after §7.4's
+within-season normalisation, against normalised numbers, which may permit a lower value.
+
+**[A35] What Kohli can and cannot calibrate right now.** His 2016 reads as his *third* best
+season (+0.332) behind 2026 (+0.520) and 2024 (+0.414). That is not the model disagreeing
+with the record — the state baseline is fitted pooled across all 19 seasons, and the league
+mean impact runs **−0.188 (2009) to +0.205 (2026)**, so recent seasons beat a pooled baseline
+by construction. §7.4's within-season normalisation is exactly what removes it. **Absolute
+cross-season ordering therefore cannot calibrate the shrinkage constant until §7.4 lands.**
+Within-player spread and ordering can, and are what A34 used.
 
 **7.4 Normalise within season and within cohort. [A2]**
 

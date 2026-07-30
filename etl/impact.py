@@ -1,27 +1,34 @@
 """SPEC 7.1 per-ball impact, computed in memory and printed. No schema, no writes.
 
-    uv run python -m etl.impact                 the distributions
-    uv run python -m etl.impact --player "V Kohli"
+    uv run python -m etl.impact                        the distributions
+    uv run python -m etl.impact --player "V Kohli"     one player's seasons, batting
+    uv run python -m etl.impact --bowler "YS Chahal"   one player's seasons, bowling
+    uv run python -m etl.impact --reconcile "V Kohli"  scored totals vs the scorecard
 
-Deliberately writes nothing. The ratings grain (migration 009) is to be chosen against
-these numbers rather than guessed in advance, and the shrinkage constant with it, so this
-module exists to produce evidence and stops there. It has no `--write`.
+Deliberately writes nothing. The ratings grain is migration 009's to settle and the
+shrinkage constant with it, so this module produces evidence and stops. It has no
+`--write`.
 
 The formula, from SPEC 7.1:
 
-    impact = (runs_off_bat - E[runs | over, bucket])
-             - (was_dismissed - P[out | over, bucket]) * wicket_cost(over, exact wickets)
+    impact = (runs - E[runs | state]) - (was_out - P[out | state]) * wicket_cost(state)
 
-**Scoring set is not the fitting set.** Second innings are scored but not fitted, and
-miscounted overs are scored but not fitted. Reduced and unknown-length innings are in
-neither.
+reversed in sign for the bowler. **Scoring set is not the fitting set**: second innings and
+miscounted overs are scored but not fitted; reduced and unknown-length innings are neither.
 
-**Whose dismissal.** `state_ball_outcomes.dismissals` counts any wicket, so its rate is
-P(a wicket falls), which is not what a batter should be charged with: 555 non-striker run
-outs are somebody else's failure. This module therefore fits a second dismissal grid
-counting only `player_out_id = batter_id` and scores against that, and prints both so the
-difference is a measured quantity rather than an argument. Nothing here presumes which one
-migration 009 should store.
+**One state-resolution rule, both halves.** A ball's impact has a runs half and a wicket
+half, and each needs a reference state. Where the exact state is too thin to trust, both
+halves fall back the same way - to the nearest state in the *same over* along the wicket
+axis - because two halves resolving differently would price one ball against two different
+reference states. `Grid` does it at bucketed-wicket grain and `Costs` at exact-wicket
+grain, which is the A31 split, but the walk is the same walk. Every use is counted.
+
+**Whose dismissal.** [Ratified 2026-07-30] Batting is scored on `player_out_id = batter_id`
+only. A non-striker run out is priced to the player who did not cause it, and while the
+aggregate effect is 0.001 runs/ball the per-player effect reaches 0.193 and moves top-20
+membership. The any-wicket reading is still fitted and printed **as a diagnostic only** -
+nothing consumes it. Bowling is scored on `credited_to_bowler`, which excludes run outs on
+the same principle.
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from __future__ import annotations
 import argparse
 import statistics
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import NamedTuple
 
 from etl.db import connect
@@ -47,67 +54,102 @@ from etl.state_model import (
 # validation check 6 - and is kept because a reader should not have to know that.
 SCORING_SET = "not is_super_over and innings_scheduled_balls = 120"
 
+BUCKET_ORDER = tuple(label for label, _ in BUCKETS)
 
-class Baseline(NamedTuple):
-    """One (over, bucket) cell of the scoring baseline, both dismissal readings."""
+# [Ratified 2026-07-30] The shrinkage constant, in balls. **Provisional.** Chosen from the
+# spread-retained table: k >= 400 collapses the season-to-season contrast SPEC 7 is built
+# on (38% retained, and k = 800 turns Kohli's genuinely poor 2008 positive), while k = 50
+# and k = 100 both pass the within-player ordering test and k = 100 pulls harder on the
+# noise. **Not settled**: it must be re-checked after SPEC 7.4's within-season
+# normalisation, which may allow a lower value.
+SHRINKAGE_K = 100
 
-    faced: int
+# [Ratified 2026-07-30] Below these a player-season is not rated at all - not shrunk, not
+# floored, simply not draftable from that franchise-season. No value of the shrinkage
+# constant can fix a thin season, because shrinkage pulls toward a prior and for a thin
+# season the prior is mostly that same thin season. See `print_stability`, which is where
+# both numbers come from.
+BAT_FLOOR_BALLS = 100
+BOWL_FLOOR_BALLS = 150          # 25 overs; not 100 - see print_stability
+
+DRAFT_GATE_MATCHES = 4          # SPEC 7.3, provisional and unratified
+
+K_SWEEP = (50, 100, 200, 400, 800)
+
+
+class Cell(NamedTuple):
+    """One (over, wicket bucket) reference state for one discipline.
+
+    `balls` is the discipline's own denominator - balls faced for batting (A22:
+    `extra_wides = 0`), legal balls for bowling - and `runs`/`outs` are summed over **every**
+    delivery in the state, legal or not. The two differ for bowling: a no-ball is not a
+    legal ball but the four hit off it is still charged. So the rate is runs-per-legal-ball
+    including the runs that arrived on illegal ones, which is what an economy rate is.
+    """
+
+    balls: int
     runs: int
-    outs_any: int
-    outs_striker: int
+    outs: int
+    outs_any: int       # diagnostic only, and only meaningful for batting
 
     @property
     def runs_per_ball(self) -> float:
-        return self.runs / self.faced
+        return self.runs / self.balls
 
-    def out_rate(self, striker_only: bool) -> float:
-        return (self.outs_striker if striker_only else self.outs_any) / self.faced
+    @property
+    def out_rate(self) -> float:
+        return self.outs / self.balls
+
+    @property
+    def out_rate_any(self) -> float:
+        return self.outs_any / self.balls
 
 
-def fit_baseline(conn) -> dict[tuple[int, str], Baseline]:
-    """The per-ball grid over the fitting set, split by whose wicket it was."""
-    grid: dict[tuple[int, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
-    with conn.cursor(name="impact_baseline") as cur:
-        cur.itersize = 20_000
-        cur.execute(
-            f"""
-            with fit as (
-                select match_id, innings_no, over_no, ball_no, runs_batter, runs_extras,
-                       extra_wides, batter_id, player_out_id,
-                       (wicket_kind is not null and wicket_kind <> all(%s)) as is_wicket
-                from deliveries
-                where {FITTING_SET}
+class Grid:
+    """Reference states at bucketed-wicket grain, with the thin ones resolved away.
+
+    12 of the 75 observed cells sit under MIN_OBSERVATIONS and 5 have never happened, all
+    in the early-over-collapse corner plus `ov19 0-1`. Balls do land there, and dropping
+    them is not neutral: thin cells are collapse and death states, so dropping biases
+    against exactly the players who batted in them. They are resolved to the nearest
+    trustworthy bucket in the same over instead.
+    """
+
+    def __init__(self, cells: dict[tuple[int, str], Cell]) -> None:
+        self.cells = cells
+        self.fallbacks: Counter[tuple[int, str]] = Counter()
+        self._resolved: dict[tuple[int, str], tuple[int, str]] = {}
+
+    def _trustworthy(self, key) -> bool:
+        cell = self.cells.get(key)
+        return cell is not None and cell.balls >= MIN_OBSERVATIONS
+
+    def resolve(self, over: int, bucket: str) -> tuple[int, str]:
+        key = (over, bucket)
+        if self._trustworthy(key):
+            return key
+        if key not in self._resolved:
+            here = BUCKET_ORDER.index(bucket)
+            near = sorted(
+                (abs(BUCKET_ORDER.index(b) - here), b)
+                for (o, b) in self.cells
+                if o == over and self._trustworthy((o, b))
             )
-            select over_no, runs_batter, is_wicket,
-                   (is_wicket and player_out_id = batter_id) as striker_out,
-                   coalesce(sum(case when is_wicket then 1 else 0 end) over w, 0)
-                       as wickets_down
-            from fit
-            where extra_wides = 0
-            window w as (partition by match_id, innings_no order by over_no, ball_no
-                         rows between unbounded preceding and 1 preceding)
-            """,
-            (list(NOT_A_WICKET),),
-        )
-        for over_no, runs, is_wicket, striker_out, wickets in cur:
-            cell = grid[(over_no, bucket_of(wickets))]
-            cell[0] += 1
-            cell[1] += runs
-            cell[2] += int(is_wicket)
-            cell[3] += int(striker_out)
-    return {key: Baseline(*vals) for key, vals in sorted(grid.items())}
+            if not near:
+                raise SystemExit(
+                    f"over {over} has no state with {MIN_OBSERVATIONS}+ balls to fall back "
+                    "to, so no ball in that over can be priced at all"
+                )
+            self._resolved[key] = (over, near[0][1])
+        self.fallbacks[key] += 1
+        return self._resolved[key]
+
+    def of(self, over: int, wickets: int) -> Cell:
+        return self.cells[self.resolve(over, bucket_of(wickets))]
 
 
 class Costs:
-    """Wicket cost per (over, exact wickets), with the gaps made visible.
-
-    `wicket_cost` returns None wherever either side of the transition is under
-    MIN_OBSERVATIONS, which is 17 of the 80 cells - early-over collapses, plus the over
-    where nobody gets out. A ball landing there still has to be priced somehow. The
-    fallback is the nearest priced wicket count in the *same over*, and every use is
-    counted, so a fallback doing real work would show up as a large `fallback_balls`
-    rather than as a silently plausible number.
-    """
+    """Wicket cost at exact-wicket grain. Same fallback walk as `Grid`, finer grain."""
 
     def __init__(self, expected) -> None:
         self.priced = {
@@ -116,108 +158,174 @@ class Costs:
             for w in range(10)
             if (cost := wicket_cost(expected, over, w)) is not None
         }
-        self.fallback_balls = 0
-        self.unpriceable_balls = 0
+        self.fallbacks: Counter[tuple[int, int]] = Counter()
+        self._resolved: dict[tuple[int, int], tuple[int, int]] = {}
 
-    def of(self, over: int, wickets: int) -> float | None:
-        exact = self.priced.get((over, wickets))
-        if exact is not None:
-            return exact
-        near = sorted(
-            (abs(w - wickets), w) for (o, w) in self.priced if o == over
+    def of(self, over: int, wickets: int) -> float:
+        key = (over, wickets)
+        if key in self.priced:
+            return self.priced[key]
+        if key not in self._resolved:
+            near = sorted((abs(w - wickets), w) for (o, w) in self.priced if o == over)
+            if not near:
+                raise SystemExit(
+                    f"over {over} has no priced wicket transition, so no dismissal in that "
+                    "over can be costed"
+                )
+            self._resolved[key] = (over, near[0][1])
+        self.fallbacks[key] += 1
+        return self.priced[self._resolved[key]]
+
+
+def fit_grids(conn) -> tuple[Grid, Grid]:
+    """The batting and bowling reference grids, fitted over the SPEC 7.1 fitting set."""
+    bat: dict[tuple[int, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
+    bowl: dict[tuple[int, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
+    with conn.cursor(name="impact_baseline") as cur:
+        cur.itersize = 20_000
+        cur.execute(
+            f"""
+            with fit as (
+                select match_id, innings_no, over_no, ball_no, runs_batter,
+                       runs_extras, extra_wides, extra_noballs, legal_ball,
+                       batter_id, player_out_id, credited_to_bowler,
+                       (wicket_kind is not null and wicket_kind <> all(%s)) as is_wicket
+                from deliveries
+                where {FITTING_SET}
+            )
+            select over_no, runs_batter, extra_wides, extra_noballs, legal_ball,
+                   is_wicket,
+                   (is_wicket and player_out_id = batter_id) as striker_out,
+                   coalesce(credited_to_bowler, false) as bowler_out,
+                   coalesce(sum(case when is_wicket then 1 else 0 end) over w, 0)
+                       as wickets_down
+            from fit
+            window w as (partition by match_id, innings_no order by over_no, ball_no
+                         rows between unbounded preceding and 1 preceding)
+            """,
+            (list(NOT_A_WICKET),),
         )
-        if not near:
-            self.unpriceable_balls += 1
-            return None
-        self.fallback_balls += 1
-        return self.priced[(over, near[0][1])]
+        for (over, runs, wides, noballs, legal, is_wicket,
+             striker_out, bowler_out, wickets) in cur:
+            key = (over, bucket_of(wickets))
+            b = bowl[key]
+            b[0] += int(legal)
+            b[1] += runs + wides + noballs      # [A1] byes and legbyes are not the bowler's
+            b[2] += int(bowler_out)
+            if not wides:                       # [A22] a no-ball is a ball faced
+                a = bat[key]
+                a[0] += 1
+                a[1] += runs
+                a[2] += int(striker_out)
+                a[3] += int(is_wicket)
+    return (
+        Grid({k: Cell(*v) for k, v in sorted(bat.items())}),
+        Grid({k: Cell(*v) for k, v in sorted(bowl.items())}),
+    )
 
 
 class Tally:
-    __slots__ = ("faced", "runs", "outs", "impact_striker", "impact_any")
+    __slots__ = ("balls", "runs", "outs", "impact", "impact_any")
 
     def __init__(self) -> None:
-        self.faced = 0
+        self.balls = 0
         self.runs = 0
         self.outs = 0
-        self.impact_striker = 0.0
+        self.impact = 0.0
         self.impact_any = 0.0
 
-    def add(self, runs: int, striker_out: bool, i_striker: float, i_any: float) -> None:
-        self.faced += 1
-        self.runs += runs
-        self.outs += int(striker_out)
-        self.impact_striker += i_striker
-        self.impact_any += i_any
+    @property
+    def per_ball(self) -> float:
+        return self.impact / self.balls if self.balls else 0.0
 
-    def per_ball(self, striker_only: bool = True) -> float:
-        total = self.impact_striker if striker_only else self.impact_any
-        return total / self.faced if self.faced else 0.0
+    @property
+    def per_ball_any(self) -> float:
+        return self.impact_any / self.balls if self.balls else 0.0
 
 
 class Scored(NamedTuple):
-    seasons: dict[tuple[int, int], Tally]      # (person_id, season) -> tally
-    careers: dict[int, Tally]
+    bat: dict[tuple[int, int], Tally]           # (person_id, season) -> tally
+    bowl: dict[tuple[int, int], Tally]
+    bat_careers: dict[int, Tally]
+    bowl_careers: dict[int, Tally]
     names: dict[int, str]
-    bands: dict[tuple[int, int], str]          # (person_id, season) -> A6 batting band
-    matches: dict[tuple[int, int], int]        # (person_id, season) -> matches played
+    bands: dict[tuple[int, int], str]
+    matches: dict[tuple[int, int], int]
+    franchises: dict[tuple[int, int], set[int]]
+    bat_grid: Grid
+    bowl_grid: Grid
     costs: Costs
-    balls: int
-    skipped: int          # balls in a cell too thin to score against
 
 
-def score(conn, baseline, expected) -> Scored:
+def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
     costs = Costs(expected)
-    seasons: dict[tuple[int, int], Tally] = defaultdict(Tally)
-    careers: dict[int, Tally] = defaultdict(Tally)
-    names: dict[int, str] = {}
-    balls = skipped = 0
+    bat: dict[tuple[int, int], Tally] = defaultdict(Tally)
+    bowl: dict[tuple[int, int], Tally] = defaultdict(Tally)
+    bat_careers: dict[int, Tally] = defaultdict(Tally)
+    bowl_careers: dict[int, Tally] = defaultdict(Tally)
+    franchises: dict[tuple[int, int], set[int]] = defaultdict(set)
 
     with conn.cursor(name="impact_score") as cur:
         cur.itersize = 20_000
         cur.execute(
             f"""
             with scored as (
-                select d.match_id, d.innings_no, d.over_no, d.ball_no, d.batter_id,
-                       d.runs_batter, d.runs_extras, d.extra_wides, d.player_out_id,
-                       m.season_year,
+                select d.match_id, d.innings_no, d.over_no, d.ball_no,
+                       d.batter_id, d.bowler_id, d.batting_fs_id, d.bowling_fs_id,
+                       d.runs_batter, d.extra_wides, d.extra_noballs, d.legal_ball,
+                       d.player_out_id, d.credited_to_bowler, m.season_year,
                        (d.wicket_kind is not null
                         and d.wicket_kind <> all(%s)) as is_wicket
                 from deliveries d
                 join matches m using (match_id)
                 where {SCORING_SET}
             )
-            select season_year, batter_id, over_no, runs_batter, is_wicket,
+            select season_year, batter_id, bowler_id, batting_fs_id, bowling_fs_id,
+                   over_no, runs_batter, extra_wides, extra_noballs, legal_ball,
+                   is_wicket,
                    (is_wicket and player_out_id = batter_id) as striker_out,
+                   coalesce(credited_to_bowler, false) as bowler_out,
                    coalesce(sum(case when is_wicket then 1 else 0 end) over w, 0)
                        as wickets_down
             from scored
-            where extra_wides = 0
             window w as (partition by match_id, innings_no order by over_no, ball_no
                          rows between unbounded preceding and 1 preceding)
             """,
             (list(NOT_A_WICKET),),
         )
-        for season, person, over, runs, is_wicket, striker_out, wickets in cur:
-            cell = baseline.get((over, bucket_of(wickets)))
-            if cell is None or cell.faced < MIN_OBSERVATIONS:
-                # A thin cell has no baseline worth scoring against, so these balls are
-                # dropped. They are counted, because a silent drop makes a player's scored
-                # runs disagree with their scorecard for no visible reason - Kohli 2016
-                # came out 838 off 583 against a real 860 off 590, and the 22 runs went
-                # nowhere anyone could see.
-                skipped += 1
+        for (season, batter, bowler, bat_fs, bowl_fs, over, runs, wides, noballs,
+             legal, is_wicket, striker_out, bowler_out, wickets) in cur:
+            exact = min(wickets, 9)
+            cost = costs.of(over, exact)
+
+            charged = runs + wides + noballs
+            cell = bowl_grid.of(over, wickets)
+            # Expected terms count only on legal balls, actual terms on every delivery:
+            # the denominator is legal balls but a no-ball's runs are still conceded.
+            residual = charged - (cell.runs_per_ball if legal else 0.0)
+            wickets_residual = bowler_out - (cell.out_rate if legal else 0.0)
+            value = -(residual - wickets_residual * cost)
+            for t in (bowl[(bowler, season)], bowl_careers[bowler]):
+                t.balls += int(legal)
+                t.runs += charged
+                t.outs += int(bowler_out)
+                t.impact += value
+                t.impact_any += value
+            franchises[(bowler, season)].add(bowl_fs)
+
+            if wides:
                 continue
-            cost = costs.of(over, min(wickets, 9))
-            if cost is None:
-                skipped += 1
-                continue
+            cell = bat_grid.of(over, wickets)
             runs_part = runs - cell.runs_per_ball
-            i_striker = runs_part - (striker_out - cell.out_rate(True)) * cost
-            i_any = runs_part - (is_wicket - cell.out_rate(False)) * cost
-            seasons[(person, season)].add(runs, striker_out, i_striker, i_any)
-            careers[person].add(runs, striker_out, i_striker, i_any)
-            balls += 1
+            value = runs_part - (striker_out - cell.out_rate) * cost
+            diagnostic = runs_part - (is_wicket - cell.out_rate_any) * cost
+            for t in (bat[(batter, season)], bat_careers[batter]):
+                t.balls += 1
+                t.runs += runs
+                t.outs += int(striker_out)
+                t.impact += value
+                t.impact_any += diagnostic
+            franchises[(batter, season)].add(bat_fs)
 
     with conn.cursor() as cur:
         cur.execute("select person_id, primary_name from people")
@@ -235,40 +343,24 @@ def score(conn, baseline, expected) -> Scored:
                 bands[(person, season)] = band
             # A player can appear for two franchises in one season; take the larger.
             matches[(person, season)] = max(played, matches.get((person, season), 0))
-    return Scored(dict(seasons), dict(careers), names, bands, matches, costs,
-                  balls, skipped)
+
+    return Scored(dict(bat), dict(bowl), dict(bat_careers), dict(bowl_careers),
+                  names, bands, matches, dict(franchises),
+                  bat_grid, bowl_grid, costs)
 
 
-# --- shrinkage, explored rather than set -------------------------------------------------
+# --- shrinkage ---------------------------------------------------------------------------
 
 # [A7] The prior is the player's own career mean with this season's own contribution
 # removed. A season shrunk toward a mean containing itself is barely shrunk at all, and
 # exactly for the high-volume players where the prior is most informative.
 #
-# SPEC 7.2's clause "where they have meaningful career volume" is load-bearing and this
+# SPEC 7.2's clause "where they have meaningful career volume" is load-bearing, and this
 # module was first written without it, which is how the number below got measured rather
 # than assumed. Without a floor, a player whose whole career is seven balls shrinks toward
 # the other two balls of it, so shrinkage *raises* their rating and raises it further the
-# stronger it gets. CAREER_FLOOR is a diagnostic value, not a ratified one.
+# stronger it gets.
 CAREER_FLOOR = 300
-
-
-def band_league_means(scored: Scored, striker_only: bool = True) \
-        -> dict[tuple[int, str], float]:
-    """[SPEC 7.2] League mean per season x A6 batting band, the fallback prior.
-
-    Never the undifferentiated mean: shrinking a number 6 toward the all-batters average
-    drags every finisher toward top-order norms.
-    """
-    per: dict[tuple[int, str], list] = defaultdict(lambda: [0.0, 0])
-    for (person, season), t in scored.seasons.items():
-        band = scored.bands.get((person, season))
-        if band is None:
-            continue
-        acc = per[(season, band)]
-        acc[0] += t.impact_striker if striker_only else t.impact_any
-        acc[1] += t.faced
-    return {key: total / n for key, (total, n) in per.items() if n}
 
 
 class Prior(NamedTuple):
@@ -277,15 +369,39 @@ class Prior(NamedTuple):
     source: str         # 'loso' | 'band' | 'season'
 
 
-def loso_prior(scored: Scored, person: int, season: int, league, bands,
-               striker_only: bool = True, floor: int = CAREER_FLOOR) -> Prior:
-    career = scored.careers[person]
-    mine = scored.seasons[(person, season)]
-    total = (career.impact_striker if striker_only else career.impact_any) - \
-            (mine.impact_striker if striker_only else mine.impact_any)
-    n = career.faced - mine.faced
-    if n and n >= floor:        # a single-season career leaves nothing to shrink toward
-        return Prior(total / n, n, "loso")
+def band_league_means(scored: Scored, seasons, striker_only=True) \
+        -> dict[tuple[int, str], float]:
+    """[SPEC 7.2] League mean per season x A6 batting band, the fallback prior.
+
+    Never the undifferentiated mean: shrinking a number 6 toward the all-batters average
+    drags every finisher toward top-order norms.
+    """
+    per: dict[tuple[int, str], list] = defaultdict(lambda: [0.0, 0])
+    for (person, season), t in seasons.items():
+        band = scored.bands.get((person, season))
+        if band is None:
+            continue
+        acc = per[(season, band)]
+        acc[0] += t.impact
+        acc[1] += t.balls
+    return {key: total / n for key, (total, n) in per.items() if n}
+
+
+def league_means(seasons) -> dict[int, float]:
+    per: dict[int, list] = defaultdict(lambda: [0.0, 0])
+    for (_, season), t in seasons.items():
+        acc = per[season]
+        acc[0] += t.impact
+        acc[1] += t.balls
+    return {s: total / n for s, (total, n) in per.items() if n}
+
+
+def loso_prior(scored, seasons, careers, person, season, league, bands,
+               floor: int = CAREER_FLOOR) -> Prior:
+    career, mine = careers[person], seasons[(person, season)]
+    n = career.balls - mine.balls
+    if n and n >= floor:
+        return Prior((career.impact - mine.impact) / n, n, "loso")
     band = scored.bands.get((person, season))
     fallback = bands.get((season, band)) if band else None
     return (Prior(fallback, n, "band") if fallback is not None
@@ -296,228 +412,292 @@ def shrink(raw: float, n: int, prior: float, k: float) -> float:
     return (n * raw + k * prior) / (n + k)
 
 
-def league_means(scored: Scored, striker_only: bool = True) -> dict[int, float]:
-    per: dict[int, list[float]] = defaultdict(lambda: [0.0, 0])
-    for (_, season), t in scored.seasons.items():
-        acc = per[season]
-        acc[0] += t.impact_striker if striker_only else t.impact_any
-        acc[1] += t.faced
-    return {s: total / n for s, (total, n) in per.items()}
-
-
-K_SWEEP = (50, 100, 200, 400, 800)
-
-
 # --- reporting ---------------------------------------------------------------------------
 
-def print_attribution(baseline) -> None:
-    any_outs = sum(c.outs_any for c in baseline.values())
-    striker = sum(c.outs_striker for c in baseline.values())
-    print("\n=== whose dismissal the grid's rate describes ===")
-    print(f"fitting set: {any_outs:,} dismissals, {striker:,} of them the striker's, "
-          f"{any_outs - striker:,} ({(any_outs - striker) / any_outs:.2%}) somebody else's")
-    print("essentially all of the difference is non-striker run outs. Charging them to the")
-    print("striker is the only thing a single dismissals column can do.")
-
-    print("\n    dismissal probability per ball faced, by wicket bucket")
-    print(f"    {'over':<6}" + "".join(f"{lab + ' any':>10}{lab + ' str':>10}"
-                                       for lab, _ in BUCKETS[:2]))
-    for over in range(0, 20, 3):
-        row = f"    {over:<6}"
-        for label, _ in BUCKETS[:2]:
-            c = baseline.get((over, label))
-            ok = c and c.faced >= MIN_OBSERVATIONS
-            row += (f"{c.out_rate(False):>10.4f}{c.out_rate(True):>10.4f}" if ok
-                    else f"{'-':>10}{'-':>10}")
-        print(row)
+def _row(scored, key, t, extra=""):
+    person, season = key
+    return (f"    {scored.names.get(person, person)[:25]:<26}{season:>7}"
+            f"{t.balls:>7}{t.runs:>6}{t.outs:>5}{t.per_ball:>13.3f}"
+            f"{t.impact:>9.1f}{extra}")
 
 
-def print_raw(scored: Scored, floor: int) -> None:
-    rows = sorted(scored.seasons.items(), key=lambda kv: kv[1].per_ball(), reverse=True)
-    print(f"\n=== raw per-ball impact, no shrinkage: {len(rows):,} player-seasons, "
-          f"{scored.balls:,} balls scored ===")
+def print_resolution(scored: Scored, total_bat: int, total_bowl: int) -> None:
+    print("\n=== state resolution: one rule, both halves of the impact ===")
+    for name, grid, total in (("batting runs/out", scored.bat_grid, total_bat),
+                              ("bowling runs/out", scored.bowl_grid, total_bowl)):
+        used = sum(grid.fallbacks.values())
+        print(f"    {name:<18} {used:>7,} of {total:,} balls ({used / total:.2%}) "
+              f"resolved to a neighbouring bucket, across "
+              f"{len(grid.fallbacks)} thin states")
+    used = sum(scored.costs.fallbacks.values())
+    print(f"    {'wicket cost':<18} {used:>7,} lookups resolved to a neighbouring exact "
+          f"wicket count, {len(scored.costs.priced)} of 180 transitions priced directly")
+    print("    nothing is dropped: every scoring-set ball is priced.")
 
-    def show(title, subset, n=15):
+
+def print_raw(scored: Scored, seasons, floor: int, what: str) -> None:
+    rows = sorted(seasons.items(), key=lambda kv: kv[1].per_ball, reverse=True)
+    total = sum(t.balls for _, t in rows)
+    print(f"\n=== raw {what} impact, no shrinkage: {len(rows):,} player-seasons, "
+          f"{total:,} balls ===")
+
+    def show(title, subset, n=12):
         print(f"\n    {title}")
         print(f"    {'player':<26}{'season':>7}{'balls':>7}{'runs':>6}{'out':>5}"
               f"{'impact/ball':>13}{'total':>9}")
-        for (person, season), t in subset[:n]:
-            print(f"    {scored.names.get(person, person)[:25]:<26}{season:>7}"
-                  f"{t.faced:>7}{t.runs:>6}{t.outs:>5}{t.per_ball():>13.3f}"
-                  f"{t.impact_striker:>9.1f}")
+        for key, t in subset[:n]:
+            print(_row(scored, key, t))
 
-    show("TOP 15, no minimum balls - this is where the eight-ball wonders live", rows)
-    show("BOTTOM 15, no minimum balls", rows[::-1])
-    kept = [kv for kv in rows if kv[1].faced >= floor]
-    show(f"TOP 15 with at least {floor} balls faced", kept)
-    show(f"BOTTOM 15 with at least {floor} balls faced", kept[::-1])
+    show("TOP 12, no floor", rows)
+    show("BOTTOM 12, no floor", rows[::-1])
+    kept = [kv for kv in rows if kv[1].balls >= floor]
+    show(f"TOP 12 at or above the {floor}-ball floor", kept)
+    show(f"BOTTOM 12 at or above the {floor}-ball floor", kept[::-1])
 
-    print("\n    distribution of raw impact/ball, by balls faced")
-    print(f"    {'balls faced':<16}{'seasons':>9}{'p5':>8}{'p25':>8}{'median':>8}"
-          f"{'p75':>8}{'p95':>8}{'min':>8}{'max':>8}")
-    bands = ((1, 10), (11, 30), (31, 60), (61, 120), (121, 240), (241, 480), (481, 10_000))
+
+def print_stability(seasons, what: str) -> None:
+    """Where the raw list stops being noise. This is where the floors come from."""
+    rows = sorted(seasons.items(), key=lambda kv: kv[1].per_ball, reverse=True)
+    print(f"\n=== {what}: where does the raw list stabilise? ===")
+    print(f"    {'balls':<14}{'seasons':>9}{'p5':>8}{'p25':>8}{'median':>8}{'p75':>8}"
+          f"{'p95':>8}{'min':>8}{'max':>8}{'sd':>8}")
+    bands = ((1, 10), (11, 30), (31, 60), (61, 100), (101, 150), (151, 250),
+             (251, 400), (401, 10_000))
     for lo, hi in bands:
-        vals = sorted(t.per_ball() for _, t in rows if lo <= t.faced <= hi)
-        if not vals:
+        vals = sorted(t.per_ball for _, t in rows if lo <= t.balls <= hi)
+        if len(vals) < 2:
             continue
         q = statistics.quantiles(vals, n=20) if len(vals) > 20 else None
         label = f"{lo}-{hi if hi < 10_000 else '+'}"
-        print(f"    {label:<16}{len(vals):>9}"
+        print(f"    {label:<14}{len(vals):>9}"
               + (f"{q[0]:>8.2f}{q[4]:>8.2f}{statistics.median(vals):>8.2f}"
                  f"{q[14]:>8.2f}{q[18]:>8.2f}" if q else f"{'-':>8}" * 5)
-              + f"{vals[0]:>8.2f}{vals[-1]:>8.2f}")
+              + f"{vals[0]:>8.2f}{vals[-1]:>8.2f}{statistics.stdev(vals):>8.2f}")
+
+    print(f"\n    top 5 at each candidate floor - read for the floor above which the names"
+          f" stop\n    being one-innings artefacts")
+    for cut in (0, 30, 50, 100, 150, 200):
+        kept = [kv for kv in rows if kv[1].balls >= cut]
+        head = ", ".join(f"{t.balls}b {t.per_ball:+.2f}" for _, t in kept[:5])
+        print(f"    >= {cut:<4} {len(kept):>5} seasons   {head}")
 
 
-DRAFT_GATE_MATCHES = 4      # SPEC 7.3, provisional and unratified
+def print_floor_effect(scored, seasons, floor, what, k=SHRINKAGE_K) -> None:
+    """The floor and the ratified k together, which is what a rating will actually be."""
+    gated = {key: t for key, t in seasons.items() if t.balls >= floor}
+    league, bands = league_means(gated), band_league_means(scored, gated)
+    careers = scored.bat_careers if what == "batting" else scored.bowl_careers
+    ranked = sorted(
+        (shrink(t.per_ball, t.balls,
+                loso_prior(scored, gated, careers, p, s, league, bands).value, k),
+         t, (p, s))
+        for (p, s), t in gated.items()
+    )[::-1]
+    print(f"\n=== {what}: {floor}-ball floor + k = {k}, top 12 and bottom 6 ===")
+    print(f"    {len(gated):,} of {len(seasons):,} player-seasons are rateable")
+    print(f"    {'player':<26}{'season':>7}{'balls':>7}{'raw':>9}{'shrunk':>9}")
+    for value, t, (p, s) in ranked[:12] + ranked[-6:]:
+        print(f"    {scored.names.get(p, p)[:25]:<26}{s:>7}{t.balls:>7}"
+              f"{t.per_ball:>+9.3f}{value:>+9.3f}")
+    return {key: t for key, t in gated.items()}
 
 
-def print_gate(scored: Scored) -> None:
-    """What SPEC 7.3's provisional four-match gate does on its own, before any shrinkage.
+def print_prior_breadth(scored, seasons, careers, floor, what, k=SHRINKAGE_K) -> None:
+    """Does the LOSO prior rest on one other season, or on several?
 
-    Worth measuring separately, because shrinkage and the gate are often assumed to solve
-    the same problem and they do not: shrinkage toward an own-career prior protects against
-    a thin *career*, the gate against a thin *season*.
+    CAREER_FLOOR is a *volume* test and passes a two-season career, in which case the prior
+    for either season is the other one - a single observation. That is the thin-season
+    problem one level up, and it is the mechanism behind the only pathology that survived
+    the balls floor, so it is measured rather than argued about.
     """
-    rows = sorted(scored.seasons.items(), key=lambda kv: kv[1].per_ball(), reverse=True)
-    kept = [(k, t) for k, t in rows
-            if scored.matches.get(k, 0) >= DRAFT_GATE_MATCHES]
-    print(f"\n=== SPEC 7.3's {DRAFT_GATE_MATCHES}-match gate, applied to the RAW list ===")
-    print(f"    {len(kept):,} of {len(rows):,} player-seasons survive it")
-    thin = [t for _, t in kept if t.faced < 30]
-    print(f"    {len(thin)} survivors still under 30 balls faced "
-          f"(min {min((t.faced for t in thin), default=0)})")
-    print(f"    {'player':<26}{'season':>7}{'mts':>5}{'balls':>7}{'runs':>6}"
-          f"{'impact/ball':>13}")
-    for (person, season), t in kept[:12]:
-        print(f"    {scored.names.get(person, person)[:25]:<26}{season:>7}"
-              f"{scored.matches[(person, season)]:>5}{t.faced:>7}{t.runs:>6}"
-              f"{t.per_ball():>13.3f}")
+    gated = {key: t for key, t in seasons.items() if t.balls >= floor}
+    league, bands = league_means(gated), band_league_means(scored, gated)
+    others = Counter()
+    for person, _ in gated:
+        others[person] += 1
+    rows = []
+    for (person, season), t in gated.items():
+        prior = loso_prior(scored, seasons, careers, person, season, league, bands)
+        n_seasons = sum(1 for (p, s) in seasons if p == person and s != season
+                        and seasons[(p, s)].balls)
+        moved = shrink(t.per_ball, t.balls, prior.value, k) - t.per_ball
+        rows.append((n_seasons, prior.source, moved, t, (person, season)))
+
+    print(f"\n=== {what}: how broad is the prior behind each rateable season? ===")
+    print(f"    {'other seasons in the prior':<30}{'seasons':>9}{'mean |move|':>13}"
+          f"{'max up':>9}")
+    for label, keep in (("0 (fallback to band/season)", lambda n: n == 0),
+                        ("exactly 1", lambda n: n == 1),
+                        ("2 to 4", lambda n: 2 <= n <= 4),
+                        ("5 or more", lambda n: n >= 5)):
+        subset = [r for r in rows if keep(r[0])]
+        if not subset:
+            continue
+        moves = [r[2] for r in subset]
+        print(f"    {label:<30}{len(subset):>9}"
+              f"{statistics.mean(abs(m) for m in moves):>13.3f}{max(moves):>+9.3f}")
+
+    single = sorted((r for r in rows if r[0] == 1), key=lambda r: -r[2])[:5]
+    print(f"    biggest upward moves on a single-season prior:")
+    for n, src, moved, t, (p, s) in single:
+        print(f"        {scored.names.get(p, p)[:25]:<26}{s:>6}{t.balls:>6}b "
+              f"raw {t.per_ball:+.3f} -> {t.per_ball + moved:+.3f} ({moved:+.3f})")
 
 
-def print_attribution_effect(scored: Scored) -> None:
-    rows = [(kv[0], kv[1]) for kv in scored.seasons.items() if kv[1].faced >= 100]
-    diffs = [t.per_ball(True) - t.per_ball(False) for _, t in rows]
-    print("\n=== how much the attribution choice moves a rating (>= 100 balls) ===")
-    print(f"    striker-only minus any-wicket, per ball: mean {statistics.mean(diffs):+.4f}, "
-          f"max {max(diffs):+.4f}, min {min(diffs):+.4f}")
-    by_striker = [k for k, _ in sorted(rows, key=lambda kv: kv[1].per_ball(True),
-                                       reverse=True)][:20]
-    by_any = [k for k, _ in sorted(rows, key=lambda kv: kv[1].per_ball(False),
-                                   reverse=True)][:20]
-    moved = set(by_striker) ^ set(by_any)
-    print(f"    top 20 membership differs by {len(moved) // 2} player-season(s)"
-          + ("" if not moved else ": "
-             + ", ".join(f"{scored.names.get(p, p)} {s}" for p, s in sorted(moved))))
+def print_gate_overlap(scored: Scored) -> None:
+    """How the two floors and the match gate interact. Migration 009 has to store this."""
+    keys = set(scored.bat) | set(scored.bowl)
+    counts: Counter[str] = Counter()
+    for key in keys:
+        bat = scored.bat.get(key)
+        bowl = scored.bowl.get(key)
+        passes_bat = bat is not None and bat.balls >= BAT_FLOOR_BALLS
+        passes_bowl = bowl is not None and bowl.balls >= BOWL_FLOOR_BALLS
+        gate = scored.matches.get(key, 0) >= DRAFT_GATE_MATCHES
+        counts["player-seasons"] += 1
+        counts["passes 4-match gate"] += gate
+        counts["batting rateable"] += passes_bat
+        counts["bowling rateable"] += passes_bowl
+        counts["both"] += passes_bat and passes_bowl
+        counts["batting only"] += passes_bat and not passes_bowl
+        counts["bowling only"] += passes_bowl and not passes_bat
+        counts["neither"] += not passes_bat and not passes_bowl
+        counts["neither, but past the match gate"] += (
+            gate and not passes_bat and not passes_bowl)
+    print(f"\n=== the two floors and the match gate, together "
+          f"(bat {BAT_FLOOR_BALLS}, bowl {BOWL_FLOOR_BALLS}, "
+          f"{DRAFT_GATE_MATCHES} matches) ===")
+    for label in ("player-seasons", "passes 4-match gate", "batting rateable",
+                  "bowling rateable", "both", "batting only", "bowling only",
+                  "neither", "neither, but past the match gate"):
+        print(f"    {label:<36}{counts[label]:>7,}")
+
+    multi = [k for k, fs in scored.franchises.items() if len(fs) > 1]
+    print(f"\n    player-seasons spanning two franchise-seasons: {len(multi)} "
+          f"of {len(scored.franchises):,}")
+    for key in sorted(multi)[:6]:
+        print(f"        {scored.names.get(key[0], key[0])} {key[1]}: "
+              f"{len(scored.franchises[key])} franchises")
 
 
-def print_era_drift(scored: Scored) -> None:
-    """The league mean per season. Not zero, and SPEC 7.4 is why it must be normalised.
-
-    The baseline is fitted pooled across all 19 seasons, so a season that scored above the
-    pooled environment leaves a positive league mean behind. This column *is* era drift,
-    measured, and it is what 7.4's within-season normalisation removes.
-    """
-    league = league_means(scored)
+def print_era_drift(seasons) -> None:
+    league = league_means(seasons)
     print("\n=== league mean impact/ball by season (the era drift 7.4 normalises out) ===")
-    print(f"    {'season':<8}{'batters':>9}{'balls':>9}{'mean':>9}")
-    for season in sorted(league):
-        rows = [t for (_, s), t in scored.seasons.items() if s == season]
-        print(f"    {season:<8}{len(rows):>9}{sum(t.faced for t in rows):>9}"
-              f"{league[season]:>+9.3f}")
+    print(f"    {'season':<8}{'mean':>9}", end="")
+    for i, season in enumerate(sorted(league)):
+        print(f"   {season} {league[season]:+.3f}", end="\n" if i % 4 == 3 else "")
+    print()
 
 
-def print_player(scored: Scored, name: str, floor: int = CAREER_FLOOR) -> None:
+def print_player(scored, seasons, careers, name, what, floor) -> None:
     match = [p for p, n in scored.names.items() if n == name]
     if not match:
         print(f"\nno person named {name!r}")
         return
     person = match[0]
-    league, bands = league_means(scored), band_league_means(scored)
-    rows = sorted((s, t) for (p, s), t in scored.seasons.items() if p == person)
-    career = scored.careers[person]
+    league, bands = league_means(seasons), band_league_means(scored, seasons)
+    rows = sorted((s, t) for (p, s), t in seasons.items() if p == person)
+    career = careers[person]
+    if not rows:
+        print(f"\n{name} has no {what} in the scoring set")
+        return
 
-    print(f"\n=== {name}: leave-one-season-out shrinkage at five constants ===")
-    print(f"career {career.runs:,} runs off {career.faced:,} balls scored, "
-          f"raw impact/ball {career.per_ball():+.3f}")
+    print(f"\n=== {name}, {what}: leave-one-season-out shrinkage at five constants ===")
+    charged = "dismissals" if what == "batting" else "wickets"
+    print(f"career {career.runs:,} runs, {career.outs} {charged}, off {career.balls:,} "
+          f"scored balls, raw {career.per_ball:+.3f} per ball")
     print(f"    {'season':<8}{'balls':>7}{'runs':>6}{'raw':>8}{'prior':>8}{'src':>7}"
-          + "".join(f"{'k=' + str(k):>9}" for k in K_SWEEP))
+          + "".join(f"{'k=' + str(k):>9}" for k in K_SWEEP) + "   rateable")
     for season, t in rows:
-        prior = loso_prior(scored, person, season, league, bands, floor=floor)
-        raw = t.per_ball()
-        print(f"    {season:<8}{t.faced:>7}{t.runs:>6}{raw:>+8.3f}"
+        prior = loso_prior(scored, seasons, careers, person, season, league, bands)
+        print(f"    {season:<8}{t.balls:>7}{t.runs:>6}{t.per_ball:>+8.3f}"
               f"{prior.value:>+8.3f}{prior.source:>7}"
-              + "".join(f"{shrink(raw, t.faced, prior.value, k):>+9.3f}"
-                        for k in K_SWEEP))
+              + "".join(f"{shrink(t.per_ball, t.balls, prior.value, k):>+9.3f}"
+                        for k in K_SWEEP)
+              + ("       yes" if t.balls >= floor else "        NO"))
 
-    # How much of the season-to-season contrast survives each k. SPEC 7 opens by saying
-    # that contrast "is the point of the game", so it is a quantity to watch, not a
-    # side-effect: shrinkage strong enough to fix the cameos also flattens the career.
-    def spread(vals):
+    # How much season-to-season contrast survives each k. SPEC 7 opens by saying that
+    # contrast "is the point of the game", so it is a quantity to watch, not a side-effect.
+    def spread_at(k):
+        vals = [shrink(t.per_ball, t.balls,
+                       loso_prior(scored, seasons, careers, person, s, league,
+                                  bands).value, k)
+                for s, t in rows]
         return max(vals) - min(vals)
-    raws = [t.per_ball() for _, t in rows]
-    print(f"\n    best-to-worst season spread: raw {spread(raws):.3f}, then")
+    raw_spread = max(t.per_ball for _, t in rows) - min(t.per_ball for _, t in rows)
+    print(f"\n    best-to-worst season spread: raw {raw_spread:.3f}, then")
     print("    " + "".join(f"{'k=' + str(k):>9}" for k in K_SWEEP))
-    print("    " + "".join(
-        f"{spread([shrink(t.per_ball(), t.faced, loso_prior(scored, person, s, league, bands, floor=floor).value, k) for s, t in rows]):>9.3f}"
-        for k in K_SWEEP))
-    print("    " + "".join(
-        f"{spread([shrink(t.per_ball(), t.faced, loso_prior(scored, person, s, league, bands, floor=floor).value, k) for s, t in rows]) / spread(raws):>8.0%} "
-        for k in K_SWEEP) + " of the raw spread retained")
+    print("    " + "".join(f"{spread_at(k):>9.3f}" for k in K_SWEEP))
+    print("    " + "".join(f"{spread_at(k) / raw_spread:>8.0%} " for k in K_SWEEP)
+          + " of the raw spread retained")
 
 
-def print_sweep_top(scored: Scored, floor: int, label: str) -> None:
-    """What each candidate k does to the leaderboard. The calibration signal."""
-    league, bands = league_means(scored), band_league_means(scored)
-    print(f"\n=== top 8 player-seasons under each shrinkage constant, {label} ===")
-    print("   (no draftability gate - SPEC 7.3's four-match minimum is not applied yet)")
-    for k in K_SWEEP:
-        ranked = sorted(
-            (
-                shrink(t.per_ball(), t.faced,
-                       loso_prior(scored, p, s, league, bands, floor=floor).value, k),
-                t.faced, p, s,
-            )
-            for (p, s), t in scored.seasons.items()
-        )[::-1][:8]
-        print(f"\n    k = {k}")
-        for value, faced, p, s in ranked:
-            print(f"        {scored.names.get(p, p)[:25]:<26}{s:>6}{faced:>7} balls"
-                  f"{value:>+9.3f}")
+def print_reconcile(conn, scored: Scored, name: str) -> None:
+    """Scored totals against the scorecard. A silent drop shows up here and nowhere else."""
+    match = [p for p, n in scored.names.items() if n == name]
+    if not match:
+        print(f"\nno person named {name!r}")
+        return
+    person = match[0]
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            select m.season_year,
+                   sum(d.runs_batter) filter (where {SCORING_SET}) as runs,
+                   count(*) filter (where {SCORING_SET} and d.extra_wides = 0) as faced
+            from deliveries d join matches m using (match_id)
+            where d.batter_id = %s
+            group by 1 order by 1
+            """,
+            (person,),
+        )
+        truth = {season: (runs or 0, faced) for season, runs, faced in cur}
+    print(f"\n=== {name}: scored batting totals vs the scoring set, season by season ===")
+    print(f"    {'season':<8}{'runs':>7}{'expected':>10}{'balls':>7}{'expected':>10}"
+          f"{'ok':>5}")
+    bad = 0
+    for season, (runs, faced) in truth.items():
+        t = scored.bat.get((person, season))
+        got = (t.runs, t.balls) if t else (0, 0)
+        ok = got == (runs, faced)
+        bad += not ok
+        print(f"    {season:<8}{got[0]:>7}{runs:>10}{got[1]:>7}{faced:>10}"
+              f"{'yes' if ok else 'NO':>5}")
+    print(f"    {len(truth) - bad} of {len(truth)} seasons reconcile exactly")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--player", action="append", dest="players")
-    parser.add_argument("--floor", type=int, default=100,
-                        help="balls-faced cut for the second pair of raw lists")
+    parser.add_argument("--bowler", action="append", dest="bowlers")
+    parser.add_argument("--reconcile", action="append", dest="reconcile")
     args = parser.parse_args(argv)
 
     with connect(direct=True) as conn:
         _, expected = fetch(conn)
-        baseline = fit_baseline(conn)
-        scored = score(conn, baseline, expected)
+        bat_grid, bowl_grid = fit_grids(conn)
+        scored = score(conn, bat_grid, bowl_grid, expected)
 
-    print_attribution(baseline)
-    total = scored.balls + scored.skipped
-    print(f"\nwicket cost: {len(scored.costs.priced)} of 180 (over, wickets -> wickets+1) "
-          f"transitions priced directly")
-    print(f"    {scored.costs.fallback_balls:,} balls priced off the nearest wicket count "
-          f"in the same over, {scored.costs.unpriceable_balls:,} unpriceable")
-    print(f"    {scored.skipped:,} of {total:,} scoring-set balls faced "
-          f"({scored.skipped / total:.2%}) fell in a cell under {MIN_OBSERVATIONS} balls "
-          f"and are not scored at all")
-    print_raw(scored, args.floor)
-    print_gate(scored)
-    print_attribution_effect(scored)
-    print_era_drift(scored)
-    # Both, because the second is only legible against the first: without a career floor
-    # the prior for a tiny career is the rest of that tiny career, and shrinkage runs the
-    # wrong way. SPEC 7.2 already says "meaningful career volume"; this is what it buys.
-    print_sweep_top(scored, floor=0, label="NO career-volume floor on the prior")
-    print_sweep_top(scored, floor=CAREER_FLOOR,
-                    label=f"career floor {CAREER_FLOOR} balls, else the band-season mean")
-    for name in args.players or ["V Kohli"]:
-        print_player(scored, name)
+        total_bat = sum(t.balls for t in scored.bat.values())
+        total_bowl = sum(t.balls for t in scored.bowl.values())
+        print_resolution(scored, total_bat, total_bowl)
+        print_stability(scored.bat, "batting")
+        print_stability(scored.bowl, "bowling")
+        print_raw(scored, scored.bat, BAT_FLOOR_BALLS, "batting")
+        print_floor_effect(scored, scored.bat, BAT_FLOOR_BALLS, "batting")
+        print_floor_effect(scored, scored.bowl, BOWL_FLOOR_BALLS, "bowling")
+        print_prior_breadth(scored, scored.bat, scored.bat_careers,
+                            BAT_FLOOR_BALLS, "batting")
+        print_gate_overlap(scored)
+        print_era_drift(scored.bat)
+        for name in args.players or ["V Kohli"]:
+            print_player(scored, scored.bat, scored.bat_careers, name, "batting",
+                         BAT_FLOOR_BALLS)
+        for name in args.bowlers or []:
+            print_player(scored, scored.bowl, scored.bowl_careers, name, "bowling",
+                         BOWL_FLOOR_BALLS)
+        for name in args.reconcile or ["V Kohli"]:
+            print_reconcile(conn, scored, name)
     return 0
 
 

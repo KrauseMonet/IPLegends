@@ -1,346 +1,634 @@
-franchise_season_id,squad,person_id,name,stumpings,kept
-17,2008 Chennai Super Kings,b5da6c24,PA Patel,0,
-17,2008 Chennai Super Kings,4a8a2e3b,MS Dhoni,0,
-34,2008 Deccan Chargers,2b6e6dec,AC Gilchrist,1,y
-39,2008 Delhi Daredevils,c03f1114,KD Karthik,2,y
-39,2008 Delhi Daredevils,c4487b84,AB de Villiers,0,
-112,2008 Kings XI Punjab,6b71e6cf,KC Sangakkara,0,
-66,2008 Kolkata Knight Riders,fe11caa6,WP Saha,2,y
-66,2008 Kolkata Knight Riders,b8a55852,BB McCullum,0,
-90,2008 Mumbai Indians,4e04666c,YV Takawale,1,y
-90,2008 Mumbai Indians,1c17e270,RV Uthappa,0,
-90,2008 Mumbai Indians,0aadc906,PR Shah,0,
-131,2008 Rajasthan Royals,ff077124,Kamran Akmal,4,y
-131,2008 Rajasthan Royals,de8d3876,M Rawat,0,
-150,2008 Royal Challengers Bangalore,541f85c9,SP Goswami,2,y
-150,2008 Royal Challengers Bangalore,f3cb53a1,MV Boucher,1,y
-18,2009 Chennai Super Kings,4a8a2e3b,MS Dhoni,4,y
-18,2009 Chennai Super Kings,b5da6c24,PA Patel,0,
-35,2009 Deccan Chargers,2b6e6dec,AC Gilchrist,8,y
-40,2009 Delhi Daredevils,c03f1114,KD Karthik,5,y
-40,2009 Delhi Daredevils,c4487b84,AB de Villiers,0,
-113,2009 Kings XI Punjab,6b71e6cf,KC Sangakkara,2,y
-67,2009 Kolkata Knight Riders,fe11caa6,WP Saha,0,
-67,2009 Kolkata Knight Riders,b8a55852,BB McCullum,0,
-91,2009 Mumbai Indians,4e04666c,YV Takawale,2,y
-91,2009 Mumbai Indians,0aadc906,PR Shah,2,y
-132,2009 Rajasthan Royals,890946a0,NV Ojha,4,y
-132,2009 Rajasthan Royals,de8d3876,M Rawat,1,y
-151,2009 Royal Challengers Bangalore,1c17e270,RV Uthappa,1,y
-151,2009 Royal Challengers Bangalore,541f85c9,SP Goswami,0,
-151,2009 Royal Challengers Bangalore,f3cb53a1,MV Boucher,0,
-19,2010 Chennai Super Kings,4a8a2e3b,MS Dhoni,6,y
-19,2010 Chennai Super Kings,b5da6c24,PA Patel,2,y
-19,2010 Chennai Super Kings,7daedf2f,KB Arun Karthik,0,
-36,2010 Deccan Chargers,2b6e6dec,AC Gilchrist,4,y
-41,2010 Delhi Daredevils,c03f1114,KD Karthik,6,y
-41,2010 Delhi Daredevils,c4487b84,AB de Villiers,0,
-41,2010 Delhi Daredevils,99d63244,KM Jadhav,0,
-114,2010 Kings XI Punjab,6b71e6cf,KC Sangakkara,5,y
-114,2010 Kings XI Punjab,5afd4539,MS Bisla,0,
-68,2010 Kolkata Knight Riders,fe11caa6,WP Saha,3,y
-68,2010 Kolkata Knight Riders,b8a55852,BB McCullum,0,
-92,2010 Mumbai Indians,855a210c,AP Tare,2,y
-92,2010 Mumbai Indians,70d205c9,AT Rayudu,1,y
-133,2010 Rajasthan Royals,890946a0,NV Ojha,2,y
-152,2010 Royal Challengers Bangalore,1c17e270,RV Uthappa,3,y
-152,2010 Royal Challengers Bangalore,f3cb53a1,MV Boucher,2,y
-152,2010 Royal Challengers Bangalore,541f85c9,SP Goswami,0,
-20,2011 Chennai Super Kings,4a8a2e3b,MS Dhoni,5,y
-20,2011 Chennai Super Kings,fe11caa6,WP Saha,0,
-37,2011 Deccan Chargers,6b71e6cf,KC Sangakkara,2,y
-37,2011 Deccan Chargers,62e07f92,KH Devdhar,1,y
-42,2011 Delhi Daredevils,890946a0,NV Ojha,0,
-42,2011 Delhi Daredevils,afa7e784,MS Wade,0,
-115,2011 Kings XI Punjab,2b6e6dec,AC Gilchrist,3,y
-115,2011 Kings XI Punjab,c03f1114,KD Karthik,0,
-65,2011 Kochi Tuskers Kerala,b5da6c24,PA Patel,1,y
-65,2011 Kochi Tuskers Kerala,99d63244,KM Jadhav,0,
-65,2011 Kochi Tuskers Kerala,b8a55852,BB McCullum,0,
-69,2011 Kolkata Knight Riders,5afd4539,MS Bisla,2,y
-69,2011 Kolkata Knight Riders,541f85c9,SP Goswami,1,y
-69,2011 Kolkata Knight Riders,f3cb53a1,MV Boucher,0,
-93,2011 Mumbai Indians,a84468fe,DJ Jacobs,2,y
-93,2011 Mumbai Indians,70d205c9,AT Rayudu,1,y
-109,2011 Pune Warriors,1c17e270,RV Uthappa,3,y
-134,2011 Rajasthan Royals,063b3673,DH Yagnik,4,y
-134,2011 Rajasthan Royals,0aadc906,PR Shah,1,y
-153,2011 Royal Challengers Bangalore,c4487b84,AB de Villiers,2,y
-153,2011 Royal Challengers Bangalore,7daedf2f,KB Arun Karthik,0,
-21,2012 Chennai Super Kings,4a8a2e3b,MS Dhoni,2,y
-21,2012 Chennai Super Kings,fe11caa6,WP Saha,0,
-38,2012 Deccan Chargers,b5da6c24,PA Patel,1,y
-38,2012 Deccan Chargers,6b71e6cf,KC Sangakkara,0,
-43,2012 Delhi Daredevils,890946a0,NV Ojha,2,y
-116,2012 Kings XI Punjab,addbde6c,N Saini,2,y
-116,2012 Kings XI Punjab,6eb146d2,Gurkeerat Singh,0,
-116,2012 Kings XI Punjab,2b6e6dec,AC Gilchrist,0,
-70,2012 Kolkata Knight Riders,b8a55852,BB McCullum,6,y
-70,2012 Kolkata Knight Riders,5afd4539,MS Bisla,2,y
-94,2012 Mumbai Indians,c03f1114,KD Karthik,2,y
-94,2012 Mumbai Indians,a84468fe,DJ Jacobs,0,
-94,2012 Mumbai Indians,70d205c9,AT Rayudu,0,
-110,2012 Pune Warriors,1c17e270,RV Uthappa,3,y
-135,2012 Rajasthan Royals,541f85c9,SP Goswami,4,y
-135,2012 Rajasthan Royals,063b3673,DH Yagnik,0,
-154,2012 Royal Challengers Bangalore,c4487b84,AB de Villiers,5,y
-22,2013 Chennai Super Kings,4a8a2e3b,MS Dhoni,2,y
-22,2013 Chennai Super Kings,fe11caa6,WP Saha,0,
-44,2013 Delhi Daredevils,99d63244,KM Jadhav,2,y
-44,2013 Delhi Daredevils,890946a0,NV Ojha,0,
-44,2013 Delhi Daredevils,30a2649b,CM Gautam,0,
-117,2013 Kings XI Punjab,6eb146d2,Gurkeerat Singh,1,y
-117,2013 Kings XI Punjab,2b6e6dec,AC Gilchrist,0,
-71,2013 Kolkata Knight Riders,5afd4539,MS Bisla,3,y
-71,2013 Kolkata Knight Riders,b8a55852,BB McCullum,0,
-95,2013 Mumbai Indians,c03f1114,KD Karthik,2,y
-95,2013 Mumbai Indians,855a210c,AP Tare,0,
-95,2013 Mumbai Indians,70d205c9,AT Rayudu,0,
-111,2013 Pune Warriors,de8d3876,M Rawat,1,y
-111,2013 Pune Warriors,1c17e270,RV Uthappa,0,
-136,2013 Rajasthan Royals,063b3673,DH Yagnik,1,y
-136,2013 Rajasthan Royals,a4cc73aa,SV Samson,0,
-155,2013 Royal Challengers Bangalore,7daedf2f,KB Arun Karthik,2,y
-155,2013 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-155,2013 Royal Challengers Bangalore,b17e2f24,KL Rahul,0,
-169,2013 Sunrisers Hyderabad,b5da6c24,PA Patel,3,y
-169,2013 Sunrisers Hyderabad,372455c4,Q de Kock,1,y
-169,2013 Sunrisers Hyderabad,6b71e6cf,KC Sangakkara,0,
-23,2014 Chennai Super Kings,4a8a2e3b,MS Dhoni,1,y
-23,2014 Chennai Super Kings,b8a55852,BB McCullum,0,
-45,2014 Delhi Daredevils,c03f1114,KD Karthik,2,y
-45,2014 Delhi Daredevils,372455c4,Q de Kock,0,
-45,2014 Delhi Daredevils,99d63244,KM Jadhav,0,
-118,2014 Kings XI Punjab,fe11caa6,WP Saha,4,y
-72,2014 Kolkata Knight Riders,1c17e270,RV Uthappa,7,y
-72,2014 Kolkata Knight Riders,5afd4539,MS Bisla,0,
-96,2014 Mumbai Indians,855a210c,AP Tare,3,y
-96,2014 Mumbai Indians,30a2649b,CM Gautam,3,y
-96,2014 Mumbai Indians,70d205c9,AT Rayudu,0,
-137,2014 Rajasthan Royals,a4cc73aa,SV Samson,2,y
-137,2014 Rajasthan Royals,063b3673,DH Yagnik,0,
-156,2014 Royal Challengers Bangalore,4e04666c,YV Takawale,1,y
-156,2014 Royal Challengers Bangalore,b5da6c24,PA Patel,1,y
-156,2014 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-170,2014 Sunrisers Hyderabad,890946a0,NV Ojha,1,y
-170,2014 Sunrisers Hyderabad,b17e2f24,KL Rahul,0,
-24,2015 Chennai Super Kings,4a8a2e3b,MS Dhoni,3,y
-24,2015 Chennai Super Kings,b8a55852,BB McCullum,0,
-46,2015 Delhi Daredevils,99d63244,KM Jadhav,2,y
-46,2015 Delhi Daredevils,30a2649b,CM Gautam,1,y
-46,2015 Delhi Daredevils,372455c4,Q de Kock,0,
-119,2015 Kings XI Punjab,fe11caa6,WP Saha,3,y
-119,2015 Kings XI Punjab,6eb146d2,Gurkeerat Singh,0,
-73,2015 Kolkata Knight Riders,1c17e270,RV Uthappa,5,y
-97,2015 Mumbai Indians,b5da6c24,PA Patel,3,y
-97,2015 Mumbai Indians,855a210c,AP Tare,0,
-97,2015 Mumbai Indians,70d205c9,AT Rayudu,0,
-138,2015 Rajasthan Royals,a4cc73aa,SV Samson,0,
-157,2015 Royal Challengers Bangalore,c03f1114,KD Karthik,4,y
-157,2015 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-157,2015 Royal Challengers Bangalore,5afd4539,MS Bisla,0,
-171,2015 Sunrisers Hyderabad,890946a0,NV Ojha,1,y
-171,2015 Sunrisers Hyderabad,b17e2f24,KL Rahul,0,
-1,2016 Delhi Daredevils,372455c4,Q de Kock,2,y
-1,2016 Delhi Daredevils,a4cc73aa,SV Samson,1,y
-1,2016 Delhi Daredevils,919a3be2,RR Pant,0,
-1,2016 Delhi Daredevils,c16d4035,SW Billings,0,
-2,2016 Gujarat Lions,c03f1114,KD Karthik,3,y
-2,2016 Gujarat Lions,752f7486,Ishan Kishan,0,
-2,2016 Gujarat Lions,b8a55852,BB McCullum,0,
-5,2016 Kings XI Punjab,fe11caa6,WP Saha,3,y
-5,2016 Kings XI Punjab,6eb146d2,Gurkeerat Singh,0,
-3,2016 Kolkata Knight Riders,1c17e270,RV Uthappa,4,y
-4,2016 Mumbai Indians,b5da6c24,PA Patel,1,y
-4,2016 Mumbai Indians,99b75528,JC Buttler,0,
-4,2016 Mumbai Indians,70d205c9,AT Rayudu,0,
-6,2016 Rising Pune Supergiants,4a8a2e3b,MS Dhoni,4,y
-7,2016 Royal Challengers Bangalore,b17e2f24,KL Rahul,4,y
-7,2016 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-7,2016 Royal Challengers Bangalore,99d63244,KM Jadhav,0,
-8,2016 Sunrisers Hyderabad,890946a0,NV Ojha,0,
-8,2016 Sunrisers Hyderabad,855a210c,AP Tare,0,
-48,2017 Delhi Daredevils,919a3be2,RR Pant,3,y
-48,2017 Delhi Daredevils,855a210c,AP Tare,0,
-48,2017 Delhi Daredevils,a4cc73aa,SV Samson,0,
-48,2017 Delhi Daredevils,c16d4035,SW Billings,0,
-59,2017 Gujarat Lions,c03f1114,KD Karthik,0,
-59,2017 Gujarat Lions,752f7486,Ishan Kishan,0,
-59,2017 Gujarat Lions,b8a55852,BB McCullum,0,
-121,2017 Kings XI Punjab,fe11caa6,WP Saha,2,y
-75,2017 Kolkata Knight Riders,1c17e270,RV Uthappa,6,y
-75,2017 Kolkata Knight Riders,acc1aeda,SP Jackson,0,
-99,2017 Mumbai Indians,b5da6c24,PA Patel,2,y
-99,2017 Mumbai Indians,99b75528,JC Buttler,0,
-99,2017 Mumbai Indians,70d205c9,AT Rayudu,0,
-149,2017 Rising Pune Supergiant,4a8a2e3b,MS Dhoni,3,y
-159,2017 Royal Challengers Bangalore,99d63244,KM Jadhav,3,y
-159,2017 Royal Challengers Bangalore,0494fa6e,Vishnu Vinod,2,y
-159,2017 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-173,2017 Sunrisers Hyderabad,890946a0,NV Ojha,0,
-25,2018 Chennai Super Kings,4a8a2e3b,MS Dhoni,3,y
-25,2018 Chennai Super Kings,99d63244,KM Jadhav,0,
-25,2018 Chennai Super Kings,70d205c9,AT Rayudu,0,
-25,2018 Chennai Super Kings,c16d4035,SW Billings,0,
-49,2018 Delhi Daredevils,919a3be2,RR Pant,2,y
-49,2018 Delhi Daredevils,890946a0,NV Ojha,0,
-122,2018 Kings XI Punjab,b17e2f24,KL Rahul,1,y
-76,2018 Kolkata Knight Riders,c03f1114,KD Karthik,4,y
-76,2018 Kolkata Knight Riders,1c17e270,RV Uthappa,0,
-100,2018 Mumbai Indians,752f7486,Ishan Kishan,2,y
-100,2018 Mumbai Indians,855a210c,AP Tare,1,y
-139,2018 Rajasthan Royals,235c2bb6,H Klaasen,4,y
-139,2018 Rajasthan Royals,99b75528,JC Buttler,1,y
-139,2018 Rajasthan Royals,a4cc73aa,SV Samson,0,
-160,2018 Royal Challengers Bangalore,372455c4,Q de Kock,3,y
-160,2018 Royal Challengers Bangalore,b8a55852,BB McCullum,0,
-160,2018 Royal Challengers Bangalore,b5da6c24,PA Patel,0,
-160,2018 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-174,2018 Sunrisers Hyderabad,fe11caa6,WP Saha,1,y
-174,2018 Sunrisers Hyderabad,541f85c9,SP Goswami,0,
-26,2019 Chennai Super Kings,4a8a2e3b,MS Dhoni,5,y
-26,2019 Chennai Super Kings,99d63244,KM Jadhav,0,
-26,2019 Chennai Super Kings,70d205c9,AT Rayudu,0,
-26,2019 Chennai Super Kings,c16d4035,SW Billings,0,
-50,2019 Delhi Capitals,919a3be2,RR Pant,6,y
-123,2019 Kings XI Punjab,9418198b,P Simran Singh,0,
-123,2019 Kings XI Punjab,3241e3fd,N Pooran,0,
-123,2019 Kings XI Punjab,b17e2f24,KL Rahul,0,
-77,2019 Kolkata Knight Riders,1c17e270,RV Uthappa,0,
-77,2019 Kolkata Knight Riders,c03f1114,KD Karthik,0,
-101,2019 Mumbai Indians,372455c4,Q de Kock,2,y
-101,2019 Mumbai Indians,752f7486,Ishan Kishan,0,
-140,2019 Rajasthan Royals,a4cc73aa,SV Samson,1,y
-140,2019 Rajasthan Royals,99b75528,JC Buttler,0,
-161,2019 Royal Challengers Bangalore,b5da6c24,PA Patel,2,y
-161,2019 Royal Challengers Bangalore,235c2bb6,H Klaasen,0,
-161,2019 Royal Challengers Bangalore,6eb146d2,Gurkeerat Singh,0,
-161,2019 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-175,2019 Sunrisers Hyderabad,abb83e27,JM Bairstow,2,y
-175,2019 Sunrisers Hyderabad,fe11caa6,WP Saha,1,y
-27,2020 Chennai Super Kings,4a8a2e3b,MS Dhoni,1,y
-27,2020 Chennai Super Kings,70d205c9,AT Rayudu,0,
-27,2020 Chennai Super Kings,99d63244,KM Jadhav,0,
-51,2020 Delhi Capitals,919a3be2,RR Pant,0,
-124,2020 Kings XI Punjab,9418198b,P Simran Singh,0,
-124,2020 Kings XI Punjab,3241e3fd,N Pooran,0,
-124,2020 Kings XI Punjab,b17e2f24,KL Rahul,0,
-78,2020 Kolkata Knight Riders,c03f1114,KD Karthik,0,
-102,2020 Mumbai Indians,372455c4,Q de Kock,4,y
-102,2020 Mumbai Indians,752f7486,Ishan Kishan,0,
-141,2020 Rajasthan Royals,a4cc73aa,SV Samson,2,y
-141,2020 Rajasthan Royals,1c17e270,RV Uthappa,0,
-141,2020 Rajasthan Royals,99b75528,JC Buttler,0,
-162,2020 Royal Challengers Bangalore,c4487b84,AB de Villiers,1,y
-162,2020 Royal Challengers Bangalore,6eb146d2,Gurkeerat Singh,0,
-176,2020 Sunrisers Hyderabad,fe11caa6,WP Saha,1,y
-176,2020 Sunrisers Hyderabad,abb83e27,JM Bairstow,1,y
-176,2020 Sunrisers Hyderabad,541f85c9,SP Goswami,0,
-28,2021 Chennai Super Kings,4a8a2e3b,MS Dhoni,0,
-28,2021 Chennai Super Kings,1c17e270,RV Uthappa,0,
-28,2021 Chennai Super Kings,70d205c9,AT Rayudu,0,
-52,2021 Delhi Capitals,919a3be2,RR Pant,3,y
-79,2021 Kolkata Knight Riders,c03f1114,KD Karthik,2,y
-79,2021 Kolkata Knight Riders,4663bd23,TL Seifert,0,
-103,2021 Mumbai Indians,372455c4,Q de Kock,2,y
-103,2021 Mumbai Indians,752f7486,Ishan Kishan,0,
-125,2021 Punjab Kings,9418198b,P Simran Singh,0,
-125,2021 Punjab Kings,3241e3fd,N Pooran,0,
-125,2021 Punjab Kings,b17e2f24,KL Rahul,0,
-142,2021 Rajasthan Royals,a4cc73aa,SV Samson,4,y
-142,2021 Rajasthan Royals,99b75528,JC Buttler,0,
-163,2021 Royal Challengers Bangalore,44a89551,KS Bharat,1,y
-163,2021 Royal Challengers Bangalore,c4487b84,AB de Villiers,0,
-177,2021 Sunrisers Hyderabad,abb83e27,JM Bairstow,1,y
-177,2021 Sunrisers Hyderabad,fe11caa6,WP Saha,0,
-177,2021 Sunrisers Hyderabad,99d63244,KM Jadhav,0,
-29,2022 Chennai Super Kings,1c17e270,RV Uthappa,0,
-29,2022 Chennai Super Kings,4a8a2e3b,MS Dhoni,0,
-29,2022 Chennai Super Kings,70d205c9,AT Rayudu,0,
-53,2022 Delhi Capitals,919a3be2,RR Pant,4,y
-53,2022 Delhi Capitals,44a89551,KS Bharat,0,
-53,2022 Delhi Capitals,4663bd23,TL Seifert,0,
-60,2022 Gujarat Titans,fe11caa6,WP Saha,2,y
-60,2022 Gujarat Titans,afa7e784,MS Wade,1,y
-80,2022 Kolkata Knight Riders,acc1aeda,SP Jackson,2,y
-80,2022 Kolkata Knight Riders,c16d4035,SW Billings,1,y
-85,2022 Lucknow Super Giants,372455c4,Q de Kock,1,y
-85,2022 Lucknow Super Giants,b17e2f24,KL Rahul,0,
-104,2022 Mumbai Indians,85b3fab2,T Stubbs,0,
-104,2022 Mumbai Indians,752f7486,Ishan Kishan,0,
-126,2022 Punjab Kings,800d2d97,JM Sharma,2,y
-126,2022 Punjab Kings,abb83e27,JM Bairstow,0,
-126,2022 Punjab Kings,9418198b,P Simran Singh,0,
-143,2022 Rajasthan Royals,a4cc73aa,SV Samson,2,y
-143,2022 Rajasthan Royals,99b75528,JC Buttler,0,
-164,2022 Royal Challengers Bangalore,c03f1114,KD Karthik,2,y
-178,2022 Sunrisers Hyderabad,3241e3fd,N Pooran,1,y
-30,2023 Chennai Super Kings,4a8a2e3b,MS Dhoni,3,y
-30,2023 Chennai Super Kings,70d205c9,AT Rayudu,0,
-61,2023 Gujarat Titans,fe11caa6,WP Saha,2,y
-86,2023 Lucknow Super Giants,3241e3fd,N Pooran,3,y
-86,2023 Lucknow Super Giants,372455c4,Q de Kock,1,y
-86,2023 Lucknow Super Giants,b17e2f24,KL Rahul,0,
-105,2023 Mumbai Indians,752f7486,Ishan Kishan,3,y
-105,2023 Mumbai Indians,85b3fab2,T Stubbs,0,
-105,2023 Mumbai Indians,0494fa6e,Vishnu Vinod,0,
-127,2023 Punjab Kings,800d2d97,JM Sharma,2,y
-127,2023 Punjab Kings,9418198b,P Simran Singh,0,
-144,2023 Rajasthan Royals,a4cc73aa,SV Samson,3,y
-144,2023 Rajasthan Royals,bcf325d2,Dhruv Jurel,0,
-144,2023 Rajasthan Royals,99b75528,JC Buttler,0,
-165,2023 Royal Challengers Bangalore,c03f1114,KD Karthik,2,y
-165,2023 Royal Challengers Bangalore,99d63244,KM Jadhav,0,
-179,2023 Sunrisers Hyderabad,235c2bb6,H Klaasen,1,y
-31,2024 Chennai Super Kings,4a8a2e3b,MS Dhoni,0,
-55,2024 Delhi Capitals,919a3be2,RR Pant,5,y
-55,2024 Delhi Capitals,85b3fab2,T Stubbs,0,
-62,2024 Gujarat Titans,fe11caa6,WP Saha,2,y
-62,2024 Gujarat Titans,afa7e784,MS Wade,0,
-82,2024 Kolkata Knight Riders,d7017798,A Raghuvanshi,0,
-87,2024 Lucknow Super Giants,b17e2f24,KL Rahul,2,y
-87,2024 Lucknow Super Giants,3241e3fd,N Pooran,0,
-87,2024 Lucknow Super Giants,372455c4,Q de Kock,0,
-106,2024 Mumbai Indians,752f7486,Ishan Kishan,0,
-128,2024 Punjab Kings,abb83e27,JM Bairstow,0,
-128,2024 Punjab Kings,800d2d97,JM Sharma,0,
-128,2024 Punjab Kings,9418198b,P Simran Singh,0,
-145,2024 Rajasthan Royals,a4cc73aa,SV Samson,1,y
-145,2024 Rajasthan Royals,bcf325d2,Dhruv Jurel,0,
-145,2024 Rajasthan Royals,99b75528,JC Buttler,0,
-166,2024 Royal Challengers Bengaluru,c03f1114,KD Karthik,1,y
-180,2024 Sunrisers Hyderabad,235c2bb6,H Klaasen,2,y
-32,2025 Chennai Super Kings,4a8a2e3b,MS Dhoni,5,y
-56,2025 Delhi Capitals,85b3fab2,T Stubbs,1,y
-56,2025 Delhi Capitals,b17e2f24,KL Rahul,0,
-63,2025 Gujarat Titans,99b75528,JC Buttler,2,y
-83,2025 Kolkata Knight Riders,d7017798,A Raghuvanshi,0,
-83,2025 Kolkata Knight Riders,372455c4,Q de Kock,0,
-88,2025 Lucknow Super Giants,919a3be2,RR Pant,1,y
-88,2025 Lucknow Super Giants,3241e3fd,N Pooran,0,
-107,2025 Mumbai Indians,e66732f8,RD Rickelton,5,y
-107,2025 Mumbai Indians,abb83e27,JM Bairstow,0,
-129,2025 Punjab Kings,9418198b,P Simran Singh,1,y
-129,2025 Punjab Kings,989889ff,JP Inglis,1,y
-146,2025 Rajasthan Royals,a4cc73aa,SV Samson,1,y
-146,2025 Rajasthan Royals,bcf325d2,Dhruv Jurel,0,
-167,2025 Royal Challengers Bengaluru,800d2d97,JM Sharma,1,y
-181,2025 Sunrisers Hyderabad,235c2bb6,H Klaasen,0,
-181,2025 Sunrisers Hyderabad,752f7486,Ishan Kishan,0,
-33,2026 Chennai Super Kings,a4cc73aa,SV Samson,2,y
-57,2026 Delhi Capitals,b17e2f24,KL Rahul,1,y
-57,2026 Delhi Capitals,85b3fab2,T Stubbs,0,
-64,2026 Gujarat Titans,99b75528,JC Buttler,1,y
-84,2026 Kolkata Knight Riders,4663bd23,TL Seifert,1,y
-84,2026 Kolkata Knight Riders,d7017798,A Raghuvanshi,1,y
-89,2026 Lucknow Super Giants,919a3be2,RR Pant,0,
-89,2026 Lucknow Super Giants,3241e3fd,N Pooran,0,
-89,2026 Lucknow Super Giants,989889ff,JP Inglis,0,
-108,2026 Mumbai Indians,372455c4,Q de Kock,1,y
-108,2026 Mumbai Indians,e66732f8,RD Rickelton,0,
-130,2026 Punjab Kings,9418198b,P Simran Singh,1,y
-130,2026 Punjab Kings,0494fa6e,Vishnu Vinod,0,
-147,2026 Rajasthan Royals,bcf325d2,Dhruv Jurel,1,y
-168,2026 Royal Challengers Bengaluru,800d2d97,JM Sharma,2,y
-182,2026 Sunrisers Hyderabad,752f7486,Ishan Kishan,1,y
-182,2026 Sunrisers Hyderabad,235c2bb6,H Klaasen,0,
+franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,balls_bowled,keeper_elsewhere,cricinfo_id,kept
+17,2008 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,6,1,0,y,28081,
+17,2008 Chennai Super Kings,b5da6c24,PA Patel,13,0,6,2,0,y,32242,
+17,2008 Chennai Super Kings,3576e47e,S Badrinath,12,0,5,3,0,,26806,
+34,2008 Deccan Chargers,2b6e6dec,AC Gilchrist,14,1,6,1,0,y,5390,y
+34,2008 Deccan Chargers,e1d1b294,HH Gibbs,9,0,5,2,0,,45224,
+34,2008 Deccan Chargers,b9be6507,AS Yadav,6,0,1,3,0,,36110,
+39,2008 Delhi Daredevils,c03f1114,KD Karthik,10,2,6,2,0,y,30045,y
+39,2008 Delhi Daredevils,0a476045,S Dhawan,14,0,8,1,0,,28235,
+39,2008 Delhi Daredevils,c4487b84,AB de Villiers,7,0,3,3,0,y,44936,
+112,2008 Kings XI Punjab,6b71e6cf,KC Sangakkara,9,0,4,1,0,y,50710,
+112,2008 Kings XI Punjab,d18f9182,DPMD Jayawardene,13,0,3,2,0,,49289,
+112,2008 Kings XI Punjab,508a1ea7,SE Marsh,11,0,3,3,0,,6683,
+66,2008 Kolkata Knight Riders,fe11caa6,WP Saha,12,2,8,1,0,y,279810,y
+66,2008 Kolkata Knight Riders,e249fdaa,A Chopra,5,0,2,2,0,,27639,
+66,2008 Kolkata Knight Riders,7d415ea5,RT Ponting,4,0,2,3,0,,7133,
+66,2008 Kolkata Knight Riders,b8a55852,BB McCullum,4,0,1,5,0,y,37737,
+90,2008 Mumbai Indians,4e04666c,YV Takawale,7,1,10,1,0,y,35357,y
+90,2008 Mumbai Indians,1c17e270,RV Uthappa,14,0,9,2,0,y,35582,
+90,2008 Mumbai Indians,d2c2b2d5,SR Tendulkar,7,0,6,3,0,,35320,
+90,2008 Mumbai Indians,0aadc906,PR Shah,5,0,4,4,0,y,34282,
+131,2008 Rajasthan Royals,ff077124,Kamran Akmal,6,4,5,3,0,,41028,y
+131,2008 Rajasthan Royals,de8d3876,M Rawat,10,0,9,1,0,y,33440,
+131,2008 Rajasthan Royals,d84378a4,M Kaif,15,0,8,2,0,,29990,
+150,2008 Royal Challengers Bangalore,541f85c9,SP Goswami,4,2,2,5,0,y,302579,y
+150,2008 Royal Challengers Bangalore,f3cb53a1,MV Boucher,10,1,3,1,0,y,44111,y
+150,2008 Royal Challengers Bangalore,619aa81f,W Jaffer,6,0,3,2,0,,29646,
+150,2008 Royal Challengers Bangalore,f48cf4da,DT Patil,2,0,2,3,0,,32389,
+18,2009 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,4,4,3,0,y,28081,y
+18,2009 Chennai Super Kings,d8699ab7,ML Hayden,12,0,5,1,0,,5616,
+18,2009 Chennai Super Kings,3576e47e,S Badrinath,13,0,5,2,0,,26806,
+18,2009 Chennai Super Kings,b5da6c24,PA Patel,9,0,3,4,0,y,32242,
+35,2009 Deccan Chargers,2b6e6dec,AC Gilchrist,16,8,10,2,0,y,5390,y
+35,2009 Deccan Chargers,e1d1b294,HH Gibbs,14,0,11,1,0,,45224,
+35,2009 Deccan Chargers,b720a5d6,DB Ravi Teja,7,0,4,3,0,,237701,
+40,2009 Delhi Daredevils,c03f1114,KD Karthik,14,5,12,2,0,y,30045,y
+40,2009 Delhi Daredevils,c4487b84,AB de Villiers,14,0,13,1,0,y,44936,
+40,2009 Delhi Daredevils,dcce6f09,DA Warner,8,0,3,3,0,,219889,
+113,2009 Kings XI Punjab,6b71e6cf,KC Sangakkara,13,2,6,2,0,y,50710,y
+113,2009 Kings XI Punjab,d18f9182,DPMD Jayawardene,10,0,8,1,0,,49289,
+113,2009 Kings XI Punjab,3fca55af,S Sohal,8,0,2,3,0,,228943,
+67,2009 Kolkata Knight Riders,710dd98c,MN van Wyk,5,0,7,1,0,,47711,
+67,2009 Kolkata Knight Riders,b8a55852,BB McCullum,13,0,6,2,0,y,37737,
+67,2009 Kolkata Knight Riders,297b26da,Yashpal Singh,5,0,3,3,0,,36130,
+67,2009 Kolkata Knight Riders,fe11caa6,WP Saha,8,0,2,5,0,y,279810,
+91,2009 Mumbai Indians,0aadc906,PR Shah,8,2,6,1,0,y,34282,y
+91,2009 Mumbai Indians,4e04666c,YV Takawale,4,2,1,5,0,y,35357,y
+91,2009 Mumbai Indians,2bb09eb2,Mohammad Ashraful,1,0,2,2,0,,55988,
+91,2009 Mumbai Indians,0a476045,S Dhawan,4,0,2,3,0,,28235,
+132,2009 Rajasthan Royals,890946a0,NV Ojha,8,4,2,4,0,y,32102,y
+132,2009 Rajasthan Royals,de8d3876,M Rawat,4,1,6,1,0,y,33440,y
+132,2009 Rajasthan Royals,a2870fb7,Niraj Patel,3,0,4,2,0,,32240,
+132,2009 Rajasthan Royals,72861603,GC Smith,12,0,2,3,0,,47270,
+151,2009 Royal Challengers Bangalore,1c17e270,RV Uthappa,14,1,7,2,0,y,35582,y
+151,2009 Royal Challengers Bangalore,f3cb53a1,MV Boucher,12,0,7,1,0,y,44111,
+151,2009 Royal Challengers Bangalore,93b4fc78,MK Pandey,4,0,4,3,0,,290630,
+151,2009 Royal Challengers Bangalore,541f85c9,SP Goswami,2,0,1,6,0,y,302579,
+19,2010 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,6,5,3,0,y,28081,y
+19,2010 Chennai Super Kings,b5da6c24,PA Patel,4,2,0,,0,y,32242,y
+19,2010 Chennai Super Kings,4b57e452,M Vijay,15,0,12,1,0,,237095,
+19,2010 Chennai Super Kings,d8699ab7,ML Hayden,16,0,6,2,0,,5616,
+19,2010 Chennai Super Kings,7daedf2f,KB Arun Karthik,1,0,0,,0,y,319745,
+36,2010 Deccan Chargers,2b6e6dec,AC Gilchrist,16,4,9,1,0,y,5390,y
+36,2010 Deccan Chargers,e1d1b294,HH Gibbs,10,0,6,2,0,,45224,
+36,2010 Deccan Chargers,f4f0fafd,B Sumanth,5,0,4,3,0,,253798,
+41,2010 Delhi Daredevils,c03f1114,KD Karthik,14,6,6,3,0,y,30045,y
+41,2010 Delhi Daredevils,dcce6f09,DA Warner,11,0,8,1,0,,219889,
+41,2010 Delhi Daredevils,c4487b84,AB de Villiers,7,0,6,2,0,y,44936,
+41,2010 Delhi Daredevils,99d63244,KM Jadhav,5,0,0,,0,y,290716,
+114,2010 Kings XI Punjab,6b71e6cf,KC Sangakkara,12,5,6,2,0,y,50710,y
+114,2010 Kings XI Punjab,d18f9182,DPMD Jayawardene,13,0,6,1,0,,49289,
+114,2010 Kings XI Punjab,5afd4539,MS Bisla,10,0,4,3,0,y,27280,
+68,2010 Kolkata Knight Riders,fe11caa6,WP Saha,9,3,3,1,0,y,279810,y
+68,2010 Kolkata Knight Riders,b8a55852,BB McCullum,5,0,2,2,0,y,37737,
+68,2010 Kolkata Knight Riders,d4f9dbd4,CA Pujara,6,0,2,3,0,,32540,
+92,2010 Mumbai Indians,855a210c,AP Tare,5,2,1,6,0,y,333904,y
+92,2010 Mumbai Indians,70d205c9,AT Rayudu,14,1,6,1,0,y,33141,y
+92,2010 Mumbai Indians,0a476045,S Dhawan,11,0,4,2,0,,28235,
+92,2010 Mumbai Indians,d2c2b2d5,SR Tendulkar,15,0,3,3,0,,35320,
+133,2010 Rajasthan Royals,890946a0,NV Ojha,14,2,4,2,0,y,32102,y
+133,2010 Rajasthan Royals,11df3dc8,MJ Lumb,11,0,4,1,0,,16406,
+133,2010 Rajasthan Royals,c69a7b5c,AS Raut,7,0,2,3,0,,230593,
+152,2010 Royal Challengers Bangalore,1c17e270,RV Uthappa,16,3,7,1,0,y,35582,y
+152,2010 Royal Challengers Bangalore,f3cb53a1,MV Boucher,4,2,3,6,0,y,44111,y
+152,2010 Royal Challengers Bangalore,93b4fc78,MK Pandey,13,0,6,2,0,,290630,
+152,2010 Royal Challengers Bangalore,d2a6c0e6,EJG Morgan,5,0,4,3,0,,24598,
+152,2010 Royal Challengers Bangalore,541f85c9,SP Goswami,1,0,0,,0,y,302579,
+20,2011 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,5,5,4,0,y,28081,y
+20,2011 Chennai Super Kings,95a2ea61,S Anirudha,8,0,8,1,0,,26798,
+20,2011 Chennai Super Kings,48fd7349,MEK Hussey,14,0,6,2,0,,5939,
+20,2011 Chennai Super Kings,4b57e452,M Vijay,16,0,5,3,0,,237095,
+20,2011 Chennai Super Kings,fe11caa6,WP Saha,4,0,2,5,0,y,279810,
+37,2011 Deccan Chargers,6b71e6cf,KC Sangakkara,13,2,17,1,0,y,50710,y
+37,2011 Deccan Chargers,62e07f92,KH Devdhar,1,1,0,,0,,340063,y
+37,2011 Deccan Chargers,d0513f63,CL White,6,0,2,2,0,,8291,
+37,2011 Deccan Chargers,dded65e7,IR Jaggi,2,0,1,3,0,,279554,
+42,2011 Delhi Daredevils,8ba8195d,V Sehwag,11,0,9,1,0,,35263,
+42,2011 Delhi Daredevils,890946a0,NV Ojha,14,0,8,2,0,y,32102,
+42,2011 Delhi Daredevils,dcce6f09,DA Warner,13,0,4,3,0,,219889,
+42,2011 Delhi Daredevils,afa7e784,MS Wade,3,0,0,,0,y,230193,
+115,2011 Kings XI Punjab,2b6e6dec,AC Gilchrist,14,3,9,1,0,y,5390,y
+115,2011 Kings XI Punjab,c03f1114,KD Karthik,14,0,7,2,0,y,30045,
+115,2011 Kings XI Punjab,508a1ea7,SE Marsh,14,0,6,3,0,,6683,
+65,2011 Kochi Tuskers Kerala,b5da6c24,PA Patel,13,1,8,1,0,y,32242,y
+65,2011 Kochi Tuskers Kerala,d18f9182,DPMD Jayawardene,13,0,6,2,0,,49289,
+65,2011 Kochi Tuskers Kerala,b8a55852,BB McCullum,13,0,2,3,0,y,37737,
+65,2011 Kochi Tuskers Kerala,99d63244,KM Jadhav,4,0,2,4,0,y,290716,
+69,2011 Kolkata Knight Riders,5afd4539,MS Bisla,5,2,1,4,0,y,27280,y
+69,2011 Kolkata Knight Riders,541f85c9,SP Goswami,5,1,4,1,0,y,302579,y
+69,2011 Kolkata Knight Riders,d2a6c0e6,EJG Morgan,10,0,3,2,0,,24598,
+69,2011 Kolkata Knight Riders,bb345e0b,G Gambhir,15,0,1,3,0,,28763,
+69,2011 Kolkata Knight Riders,f3cb53a1,MV Boucher,4,0,1,5,0,y,44111,
+93,2011 Mumbai Indians,a84468fe,DJ Jacobs,6,2,2,4,0,,45782,y
+93,2011 Mumbai Indians,70d205c9,AT Rayudu,16,1,7,1,0,y,33141,y
+93,2011 Mumbai Indians,1efb8a28,AC Blizzard,6,0,4,2,0,,4498,
+93,2011 Mumbai Indians,d2c2b2d5,SR Tendulkar,16,0,4,3,0,,35320,
+109,2011 Pune Warriors,1c17e270,RV Uthappa,13,3,12,1,0,y,35582,y
+109,2011 Pune Warriors,93b4fc78,MK Pandey,9,0,5,2,0,,290630,
+109,2011 Pune Warriors,28c78fb3,Harpreet Singh,2,0,2,3,0,,340854,
+134,2011 Rajasthan Royals,063b3673,DH Yagnik,7,4,3,1,0,y,36071,y
+134,2011 Rajasthan Royals,0aadc906,PR Shah,2,1,0,,0,y,34282,y
+134,2011 Rajasthan Royals,0184dc35,R Dravid,12,0,2,2,0,,28114,
+134,2011 Rajasthan Royals,3a02626a,AG Paunikar,4,0,1,3,0,,324444,
+153,2011 Royal Challengers Bangalore,c4487b84,AB de Villiers,16,2,7,1,0,y,44936,y
+153,2011 Royal Challengers Bangalore,b63ab531,LA Pomersbach,5,0,5,2,0,,232284,
+153,2011 Royal Challengers Bangalore,d84378a4,M Kaif,6,0,5,3,0,,29990,
+153,2011 Royal Challengers Bangalore,7daedf2f,KB Arun Karthik,4,0,2,6,0,y,319745,
+21,2012 Chennai Super Kings,4a8a2e3b,MS Dhoni,18,2,12,1,0,y,28081,y
+21,2012 Chennai Super Kings,4b57e452,M Vijay,14,0,6,2,0,,237095,
+21,2012 Chennai Super Kings,48fd7349,MEK Hussey,8,0,4,3,0,,5939,
+21,2012 Chennai Super Kings,fe11caa6,WP Saha,2,0,0,,0,y,279810,
+38,2012 Deccan Chargers,b5da6c24,PA Patel,13,1,5,2,0,y,32242,y
+38,2012 Deccan Chargers,6b71e6cf,KC Sangakkara,12,0,9,1,0,y,50710,
+38,2012 Deccan Chargers,5451a2c1,B Chipli,4,0,1,3,0,,27685,
+43,2012 Delhi Daredevils,890946a0,NV Ojha,17,2,14,1,0,y,32102,y
+43,2012 Delhi Daredevils,d18f9182,DPMD Jayawardene,16,0,6,2,0,,49289,
+43,2012 Delhi Daredevils,b61a3e1a,LRPL Taylor,12,0,3,3,0,,38699,
+116,2012 Kings XI Punjab,addbde6c,N Saini,10,2,11,1,0,,274785,y
+116,2012 Kings XI Punjab,508a1ea7,SE Marsh,13,0,8,2,0,,6683,
+116,2012 Kings XI Punjab,2b6e6dec,AC Gilchrist,7,0,5,3,0,y,5390,
+116,2012 Kings XI Punjab,6eb146d2,Gurkeerat Singh,4,0,2,5,0,y,537124,
+70,2012 Kolkata Knight Riders,b8a55852,BB McCullum,12,6,9,2,0,,37737,y
+70,2012 Kolkata Knight Riders,5afd4539,MS Bisla,7,2,6,3,0,y,27280,y
+70,2012 Kolkata Knight Riders,26e5cabf,MK Tiwary,16,0,10,1,0,,35565,
+94,2012 Mumbai Indians,c03f1114,KD Karthik,16,2,5,1,0,y,30045,y
+94,2012 Mumbai Indians,70d205c9,AT Rayudu,15,0,2,2,0,y,33141,
+94,2012 Mumbai Indians,18c78b11,RE Levi,6,0,2,3,0,,46148,
+94,2012 Mumbai Indians,a84468fe,DJ Jacobs,1,0,1,4,0,y,45782,
+110,2012 Pune Warriors,1c17e270,RV Uthappa,16,3,6,1,0,y,35582,y
+110,2012 Pune Warriors,c42aaf71,M Manhas,7,0,4,2,0,,31001,
+110,2012 Pune Warriors,93b4fc78,MK Pandey,9,0,3,3,0,,290630,
+135,2012 Rajasthan Royals,541f85c9,SP Goswami,9,4,4,4,0,y,302579,y
+135,2012 Rajasthan Royals,29e95537,AM Rahane,16,0,11,1,0,,277916,
+135,2012 Rajasthan Royals,7bf96684,OA Shah,13,0,5,2,0,,20123,
+135,2012 Rajasthan Royals,0184dc35,R Dravid,16,0,5,3,0,,28114,
+135,2012 Rajasthan Royals,063b3673,DH Yagnik,4,0,2,5,0,y,36071,
+154,2012 Royal Challengers Bangalore,c4487b84,AB de Villiers,14,5,4,2,0,y,44936,y
+154,2012 Royal Challengers Bangalore,00ea847a,MA Agarwal,13,0,9,1,0,,398438,
+154,2012 Royal Challengers Bangalore,709b0bac,SS Tiwary,12,0,3,3,0,,35390,
+22,2013 Chennai Super Kings,4a8a2e3b,MS Dhoni,17,2,15,1,0,y,28081,y
+22,2013 Chennai Super Kings,48fd7349,MEK Hussey,17,0,10,2,0,,5939,
+22,2013 Chennai Super Kings,4b57e452,M Vijay,15,0,8,3,0,,237095,
+22,2013 Chennai Super Kings,fe11caa6,WP Saha,3,0,0,,0,y,279810,
+44,2013 Delhi Daredevils,99d63244,KM Jadhav,11,2,4,3,0,y,290716,y
+44,2013 Delhi Daredevils,dcce6f09,DA Warner,16,0,6,1,0,,219889,
+44,2013 Delhi Daredevils,d18f9182,DPMD Jayawardene,15,0,4,2,0,,49289,
+44,2013 Delhi Daredevils,890946a0,NV Ojha,2,0,1,5,0,y,32102,
+44,2013 Delhi Daredevils,30a2649b,CM Gautam,3,0,0,,0,y,302208,
+117,2013 Kings XI Punjab,6eb146d2,Gurkeerat Singh,11,1,4,3,0,,537124,y
+117,2013 Kings XI Punjab,d67d5f00,DA Miller,12,0,8,1,0,,321777,
+117,2013 Kings XI Punjab,c3a96caf,Mandeep Singh,15,0,6,2,0,,398506,
+117,2013 Kings XI Punjab,2b6e6dec,AC Gilchrist,13,0,12,,1,y,5390,
+71,2013 Kolkata Knight Riders,5afd4539,MS Bisla,14,3,7,2,0,y,27280,y
+71,2013 Kolkata Knight Riders,26e5cabf,MK Tiwary,10,0,10,1,0,,35565,
+71,2013 Kolkata Knight Riders,d2a6c0e6,EJG Morgan,13,0,6,3,0,,24598,
+71,2013 Kolkata Knight Riders,b8a55852,BB McCullum,2,0,0,,0,y,37737,
+95,2013 Mumbai Indians,c03f1114,KD Karthik,19,2,12,1,0,y,30045,y
+95,2013 Mumbai Indians,70d205c9,AT Rayudu,19,0,8,2,0,y,33141,
+95,2013 Mumbai Indians,d2c2b2d5,SR Tendulkar,14,0,4,3,0,,35320,
+95,2013 Mumbai Indians,855a210c,AP Tare,5,0,0,,0,y,333904,
+111,2013 Pune Warriors,de8d3876,M Rawat,2,1,1,6,0,y,33440,y
+111,2013 Pune Warriors,1c17e270,RV Uthappa,16,0,7,1,0,y,35582,
+111,2013 Pune Warriors,93b4fc78,MK Pandey,7,0,6,2,0,,290630,
+111,2013 Pune Warriors,30a45b23,SPD Smith,7,0,4,3,0,,267192,
+136,2013 Rajasthan Royals,063b3673,DH Yagnik,11,1,6,3,0,y,36071,y
+136,2013 Rajasthan Royals,a4cc73aa,SV Samson,11,0,13,1,0,y,425943,
+136,2013 Rajasthan Royals,29e95537,AM Rahane,18,0,10,2,0,,277916,
+155,2013 Royal Challengers Bangalore,7daedf2f,KB Arun Karthik,9,2,9,1,0,,319745,y
+155,2013 Royal Challengers Bangalore,c4487b84,AB de Villiers,14,0,8,2,0,y,44936,
+155,2013 Royal Challengers Bangalore,ba607b88,V Kohli,16,0,7,3,0,,253802,
+155,2013 Royal Challengers Bangalore,b17e2f24,KL Rahul,4,0,2,5,0,y,422108,
+169,2013 Sunrisers Hyderabad,b5da6c24,PA Patel,13,3,5,1,0,y,32242,y
+169,2013 Sunrisers Hyderabad,372455c4,Q de Kock,3,1,3,4,0,y,379143,y
+169,2013 Sunrisers Hyderabad,53f27a35,BB Samantray,7,0,3,2,0,,430125,
+169,2013 Sunrisers Hyderabad,6b71e6cf,KC Sangakkara,9,0,3,3,0,y,50710,
+23,2014 Chennai Super Kings,4a8a2e3b,MS Dhoni,15,1,3,4,0,y,28081,y
+23,2014 Chennai Super Kings,3355b542,F du Plessis,14,0,13,1,0,,44828,
+23,2014 Chennai Super Kings,b8a55852,BB McCullum,14,0,6,2,0,y,37737,
+23,2014 Chennai Super Kings,c42aaf71,M Manhas,6,0,3,3,0,,31001,
+45,2014 Delhi Daredevils,c03f1114,KD Karthik,14,2,7,1,0,y,30045,y
+45,2014 Delhi Daredevils,99d63244,KM Jadhav,10,0,3,2,0,y,290716,
+45,2014 Delhi Daredevils,39f01cdb,KP Pietersen,11,0,2,3,0,,19296,
+45,2014 Delhi Daredevils,372455c4,Q de Kock,7,0,2,5,0,y,379143,
+118,2014 Kings XI Punjab,fe11caa6,WP Saha,14,4,8,3,0,y,279810,y
+118,2014 Kings XI Punjab,d67d5f00,DA Miller,16,0,14,1,0,,321777,
+118,2014 Kings XI Punjab,5056011d,GJ Bailey,17,0,8,2,0,,4451,
+72,2014 Kolkata Knight Riders,1c17e270,RV Uthappa,16,7,1,5,0,y,35582,y
+72,2014 Kolkata Knight Riders,bb345e0b,G Gambhir,16,0,3,1,0,,28763,
+72,2014 Kolkata Knight Riders,93b4fc78,MK Pandey,16,0,3,2,0,,290630,
+72,2014 Kolkata Knight Riders,45eda7c8,CA Lynn,2,0,2,3,0,,326637,
+72,2014 Kolkata Knight Riders,5afd4539,MS Bisla,1,0,1,4,0,y,27280,
+96,2014 Mumbai Indians,30a2649b,CM Gautam,9,3,3,3,0,y,302208,y
+96,2014 Mumbai Indians,855a210c,AP Tare,13,3,0,,0,y,333904,y
+96,2014 Mumbai Indians,70d205c9,AT Rayudu,15,0,6,1,0,y,33141,
+96,2014 Mumbai Indians,272d796e,BR Dunk,4,0,3,2,0,,388678,
+137,2014 Rajasthan Royals,a4cc73aa,SV Samson,13,2,5,3,0,y,425943,y
+137,2014 Rajasthan Royals,30a45b23,SPD Smith,10,0,9,1,0,,267192,
+137,2014 Rajasthan Royals,29e95537,AM Rahane,12,0,6,2,0,,277916,
+137,2014 Rajasthan Royals,063b3673,DH Yagnik,1,0,1,7,0,y,36071,
+156,2014 Royal Challengers Bangalore,b5da6c24,PA Patel,12,1,11,1,0,y,32242,y
+156,2014 Royal Challengers Bangalore,4e04666c,YV Takawale,5,1,2,5,0,y,35357,y
+156,2014 Royal Challengers Bangalore,c4487b84,AB de Villiers,13,0,7,2,0,y,44936,
+156,2014 Royal Challengers Bangalore,ba607b88,V Kohli,14,0,7,3,0,,253802,
+170,2014 Sunrisers Hyderabad,890946a0,NV Ojha,10,1,6,3,0,y,32102,y
+170,2014 Sunrisers Hyderabad,dcce6f09,DA Warner,14,0,8,1,0,,219889,
+170,2014 Sunrisers Hyderabad,b8d490fd,AJ Finch,13,0,6,2,0,,5334,
+170,2014 Sunrisers Hyderabad,b17e2f24,KL Rahul,10,0,4,5,0,y,422108,
+24,2015 Chennai Super Kings,4a8a2e3b,MS Dhoni,17,3,8,2,0,y,28081,y
+24,2015 Chennai Super Kings,3355b542,F du Plessis,16,0,8,1,0,,44828,
+24,2015 Chennai Super Kings,b8a55852,BB McCullum,14,0,2,3,0,y,37737,
+46,2015 Delhi Daredevils,99d63244,KM Jadhav,14,2,6,1,0,y,290716,y
+46,2015 Delhi Daredevils,30a2649b,CM Gautam,1,1,0,,0,y,302208,y
+46,2015 Delhi Daredevils,709b0bac,SS Tiwary,6,0,5,2,0,,35390,
+46,2015 Delhi Daredevils,00ea847a,MA Agarwal,10,0,3,3,0,,398438,
+46,2015 Delhi Daredevils,372455c4,Q de Kock,3,0,0,,0,y,379143,
+119,2015 Kings XI Punjab,fe11caa6,WP Saha,14,3,11,1,0,y,279810,y
+119,2015 Kings XI Punjab,d67d5f00,DA Miller,13,0,7,2,0,,321777,
+119,2015 Kings XI Punjab,c03e2850,M Vohra,7,0,2,3,0,,532856,
+119,2015 Kings XI Punjab,6eb146d2,Gurkeerat Singh,5,0,1,,56,y,537124,
+73,2015 Kolkata Knight Riders,1c17e270,RV Uthappa,13,5,7,1,0,y,35582,y
+73,2015 Kolkata Knight Riders,271f83cd,SA Yadav,13,0,7,2,0,,446507,
+73,2015 Kolkata Knight Riders,93b4fc78,MK Pandey,12,0,5,3,0,,290630,
+97,2015 Mumbai Indians,b5da6c24,PA Patel,14,3,7,2,0,y,32242,y
+97,2015 Mumbai Indians,70d205c9,AT Rayudu,14,0,9,1,0,y,33141,
+97,2015 Mumbai Indians,89f64c19,LMP Simmons,13,0,6,3,0,,53116,
+97,2015 Mumbai Indians,855a210c,AP Tare,2,0,1,6,0,y,333904,
+138,2015 Rajasthan Royals,a4cc73aa,SV Samson,14,0,9,1,0,y,425943,
+138,2015 Rajasthan Royals,30a45b23,SPD Smith,13,0,7,2,0,,267192,
+138,2015 Rajasthan Royals,29e95537,AM Rahane,14,0,3,3,0,,277916,
+157,2015 Royal Challengers Bangalore,c03f1114,KD Karthik,16,4,14,1,0,y,30045,y
+157,2015 Royal Challengers Bangalore,c4487b84,AB de Villiers,15,0,8,2,0,y,44936,
+157,2015 Royal Challengers Bangalore,c3a96caf,Mandeep Singh,10,0,7,3,0,,398506,
+157,2015 Royal Challengers Bangalore,5afd4539,MS Bisla,2,0,1,5,0,y,27280,
+171,2015 Sunrisers Hyderabad,890946a0,NV Ojha,12,1,6,2,0,y,32102,y
+171,2015 Sunrisers Hyderabad,dcce6f09,DA Warner,14,0,8,1,0,,219889,
+171,2015 Sunrisers Hyderabad,0a476045,S Dhawan,14,0,6,3,0,,28235,
+171,2015 Sunrisers Hyderabad,b17e2f24,KL Rahul,8,0,1,7,0,y,422108,
+1,2016 Delhi Daredevils,372455c4,Q de Kock,13,2,2,6,0,y,379143,y
+1,2016 Delhi Daredevils,a4cc73aa,SV Samson,14,1,3,4,0,y,425943,y
+1,2016 Delhi Daredevils,85ec8e33,SS Iyer,6,0,4,1,0,,642519,
+1,2016 Delhi Daredevils,944533a5,KK Nair,13,0,3,2,0,,398439,
+1,2016 Delhi Daredevils,919a3be2,RR Pant,10,0,3,3,0,y,931581,
+1,2016 Delhi Daredevils,c16d4035,SW Billings,5,0,3,5,0,y,297628,
+2,2016 Gujarat Lions,c03f1114,KD Karthik,16,3,11,1,0,y,30045,y
+2,2016 Gujarat Lions,b8d490fd,AJ Finch,12,0,3,2,0,,5334,
+2,2016 Gujarat Lions,b274dbbd,ER Dwivedi,3,0,2,3,0,,340841,
+2,2016 Gujarat Lions,752f7486,Ishan Kishan,5,0,1,4,0,y,720471,
+2,2016 Gujarat Lions,b8a55852,BB McCullum,16,0,0,,0,y,37737,
+5,2016 Kings XI Punjab,fe11caa6,WP Saha,12,3,7,2,0,y,279810,y
+5,2016 Kings XI Punjab,d67d5f00,DA Miller,14,0,10,1,0,,321777,
+5,2016 Kings XI Punjab,c03e2850,M Vohra,7,0,3,3,0,,532856,
+5,2016 Kings XI Punjab,6eb146d2,Gurkeerat Singh,7,0,5,,26,y,537124,
+3,2016 Kolkata Knight Riders,1c17e270,RV Uthappa,15,4,10,1,0,y,35582,y
+3,2016 Kolkata Knight Riders,93b4fc78,MK Pandey,11,0,7,2,0,,290630,
+3,2016 Kolkata Knight Riders,271f83cd,SA Yadav,13,0,6,3,0,,446507,
+4,2016 Mumbai Indians,b5da6c24,PA Patel,10,1,9,1,0,y,32242,y
+4,2016 Mumbai Indians,99b75528,JC Buttler,14,0,7,2,0,y,308967,
+4,2016 Mumbai Indians,70d205c9,AT Rayudu,12,0,4,3,0,y,33141,
+6,2016 Rising Pune Supergiants,4a8a2e3b,MS Dhoni,14,4,8,1,0,y,28081,y
+6,2016 Rising Pune Supergiants,29e95537,AM Rahane,14,0,7,2,0,,277916,
+6,2016 Rising Pune Supergiants,3355b542,F du Plessis,6,0,4,3,0,,44828,
+7,2016 Royal Challengers Bangalore,b17e2f24,KL Rahul,13,4,5,2,0,y,422108,y
+7,2016 Royal Challengers Bangalore,c4487b84,AB de Villiers,16,0,19,1,0,y,44936,
+7,2016 Royal Challengers Bangalore,99d63244,KM Jadhav,3,0,1,3,0,y,290716,
+8,2016 Sunrisers Hyderabad,890946a0,NV Ojha,15,0,18,1,0,y,32102,
+8,2016 Sunrisers Hyderabad,0a476045,S Dhawan,17,0,5,2,0,,28235,
+8,2016 Sunrisers Hyderabad,dcce6f09,DA Warner,17,0,4,3,0,,219889,
+8,2016 Sunrisers Hyderabad,855a210c,AP Tare,2,0,1,5,0,y,333904,
+48,2017 Delhi Daredevils,919a3be2,RR Pant,14,3,8,1,0,y,931581,y
+48,2017 Delhi Daredevils,a4cc73aa,SV Samson,14,0,4,2,0,y,425943,
+48,2017 Delhi Daredevils,c16d4035,SW Billings,6,0,4,3,0,y,297628,
+48,2017 Delhi Daredevils,855a210c,AP Tare,3,0,0,,0,y,333904,
+59,2017 Gujarat Lions,b8a55852,BB McCullum,11,0,8,1,0,y,37737,
+59,2017 Gujarat Lions,c03f1114,KD Karthik,14,0,8,2,0,y,30045,
+59,2017 Gujarat Lions,b8d490fd,AJ Finch,13,0,6,3,0,,5334,
+59,2017 Gujarat Lions,752f7486,Ishan Kishan,11,0,4,4,0,y,720471,
+121,2017 Kings XI Punjab,fe11caa6,WP Saha,14,2,10,1,0,y,279810,y
+121,2017 Kings XI Punjab,2be41edb,MJ Guptill,7,0,6,2,0,,226492,
+121,2017 Kings XI Punjab,d2a6c0e6,EJG Morgan,4,0,3,3,0,,24598,
+75,2017 Kolkata Knight Riders,1c17e270,RV Uthappa,13,6,9,1,0,y,35582,y
+75,2017 Kolkata Knight Riders,93b4fc78,MK Pandey,13,0,8,2,0,,290630,
+75,2017 Kolkata Knight Riders,bb345e0b,G Gambhir,16,0,6,3,0,,28763,
+75,2017 Kolkata Knight Riders,acc1aeda,SP Jackson,3,0,2,6,0,y,237696,
+99,2017 Mumbai Indians,b5da6c24,PA Patel,16,2,6,2,0,y,32242,y
+99,2017 Mumbai Indians,740742ef,RG Sharma,16,0,10,1,0,,34102,
+99,2017 Mumbai Indians,fb2d1dda,N Rana,13,0,4,3,0,,604527,
+99,2017 Mumbai Indians,70d205c9,AT Rayudu,5,0,3,4,0,y,33141,
+99,2017 Mumbai Indians,99b75528,JC Buttler,10,0,1,6,0,y,308967,
+149,2017 Rising Pune Supergiant,4a8a2e3b,MS Dhoni,16,3,10,1,0,y,28081,y
+149,2017 Rising Pune Supergiant,30a45b23,SPD Smith,15,0,7,2,0,,267192,
+149,2017 Rising Pune Supergiant,29e95537,AM Rahane,16,0,6,3,0,,277916,
+159,2017 Royal Challengers Bangalore,99d63244,KM Jadhav,13,3,7,1,0,y,290716,y
+159,2017 Royal Challengers Bangalore,0494fa6e,Vishnu Vinod,3,2,0,,0,,732293,y
+159,2017 Royal Challengers Bangalore,c4487b84,AB de Villiers,9,0,6,2,0,y,44936,
+159,2017 Royal Challengers Bangalore,c3a96caf,Mandeep Singh,11,0,6,3,0,,398506,
+173,2017 Sunrisers Hyderabad,dcce6f09,DA Warner,14,0,10,1,0,,219889,
+173,2017 Sunrisers Hyderabad,0a476045,S Dhawan,14,0,7,2,0,,28235,
+173,2017 Sunrisers Hyderabad,890946a0,NV Ojha,8,0,6,3,0,y,32102,
+25,2018 Chennai Super Kings,4a8a2e3b,MS Dhoni,16,3,11,1,0,y,28081,y
+25,2018 Chennai Super Kings,1dc12ab9,SK Raina,15,0,9,2,0,,33335,
+25,2018 Chennai Super Kings,c16d4035,SW Billings,8,0,5,3,0,y,297628,
+25,2018 Chennai Super Kings,70d205c9,AT Rayudu,16,0,2,4,0,y,33141,
+25,2018 Chennai Super Kings,99d63244,KM Jadhav,1,0,0,,0,y,290716,
+49,2018 Delhi Daredevils,919a3be2,RR Pant,14,2,4,4,0,y,931581,y
+49,2018 Delhi Daredevils,85ec8e33,SS Iyer,14,0,5,1,0,,642519,
+49,2018 Delhi Daredevils,d1c36f5c,JJ Roy,5,0,4,2,0,,298438,
+49,2018 Delhi Daredevils,8b3e9c7c,PP Shaw,9,0,4,3,0,,1070168,
+49,2018 Delhi Daredevils,890946a0,NV Ojha,1,0,0,,0,y,32102,
+122,2018 Kings XI Punjab,b17e2f24,KL Rahul,14,1,10,1,0,y,422108,y
+122,2018 Kings XI Punjab,944533a5,KK Nair,13,0,9,2,0,,398439,
+122,2018 Kings XI Punjab,b8d490fd,AJ Finch,9,0,4,3,0,,5334,
+76,2018 Kolkata Knight Riders,c03f1114,KD Karthik,16,4,14,1,0,y,30045,y
+76,2018 Kolkata Knight Riders,1c17e270,RV Uthappa,16,0,5,2,0,y,35582,
+76,2018 Kolkata Knight Riders,0a509d6b,RK Singh,6,0,4,3,0,,723105,
+100,2018 Mumbai Indians,752f7486,Ishan Kishan,12,2,9,1,0,y,720471,y
+100,2018 Mumbai Indians,855a210c,AP Tare,1,1,0,,0,y,333904,y
+100,2018 Mumbai Indians,740742ef,RG Sharma,14,0,8,2,0,,34102,
+100,2018 Mumbai Indians,271f83cd,SA Yadav,14,0,8,3,0,,446507,
+139,2018 Rajasthan Royals,235c2bb6,H Klaasen,4,4,3,5,0,y,436757,y
+139,2018 Rajasthan Royals,99b75528,JC Buttler,13,1,9,1,0,y,308967,y
+139,2018 Rajasthan Royals,a4cc73aa,SV Samson,15,0,5,2,0,y,425943,
+139,2018 Rajasthan Royals,29e95537,AM Rahane,14,0,4,3,0,,277916,
+160,2018 Royal Challengers Bangalore,372455c4,Q de Kock,8,3,7,2,0,y,379143,y
+160,2018 Royal Challengers Bangalore,ba607b88,V Kohli,14,0,8,1,0,,253802,
+160,2018 Royal Challengers Bangalore,c4487b84,AB de Villiers,11,0,6,3,0,y,44936,
+160,2018 Royal Challengers Bangalore,b5da6c24,PA Patel,6,0,3,5,0,y,32242,
+160,2018 Royal Challengers Bangalore,b8a55852,BB McCullum,6,0,1,7,0,y,37737,
+174,2018 Sunrisers Hyderabad,fe11caa6,WP Saha,10,1,5,5,0,y,279810,y
+174,2018 Sunrisers Hyderabad,0a476045,S Dhawan,16,0,12,1,0,,28235,
+174,2018 Sunrisers Hyderabad,93b4fc78,MK Pandey,14,0,9,2,0,,290630,
+174,2018 Sunrisers Hyderabad,d027ba9f,KS Williamson,17,0,6,3,0,,277906,
+174,2018 Sunrisers Hyderabad,541f85c9,SP Goswami,5,0,5,4,0,y,302579,
+26,2019 Chennai Super Kings,4a8a2e3b,MS Dhoni,15,5,11,2,0,y,28081,y
+26,2019 Chennai Super Kings,3355b542,F du Plessis,12,0,12,1,0,,44828,
+26,2019 Chennai Super Kings,70d205c9,AT Rayudu,17,0,6,3,0,y,33141,
+26,2019 Chennai Super Kings,99d63244,KM Jadhav,12,0,4,5,0,y,290716,
+26,2019 Chennai Super Kings,c16d4035,SW Billings,1,0,1,7,0,y,297628,
+50,2019 Delhi Capitals,919a3be2,RR Pant,16,6,18,1,0,y,931581,y
+50,2019 Delhi Capitals,85ec8e33,SS Iyer,16,0,8,2,0,,642519,
+50,2019 Delhi Capitals,0a476045,S Dhawan,16,0,5,3,0,,28235,
+123,2019 Kings XI Punjab,d67d5f00,DA Miller,10,0,7,1,0,,321777,
+123,2019 Kings XI Punjab,b17e2f24,KL Rahul,14,0,7,2,0,y,422108,
+123,2019 Kings XI Punjab,00ea847a,MA Agarwal,13,0,7,3,0,,398438,
+123,2019 Kings XI Punjab,3241e3fd,N Pooran,6,0,1,4,0,y,604302,
+123,2019 Kings XI Punjab,9418198b,P Simran Singh,1,0,1,5,0,y,1161024,
+77,2019 Kolkata Knight Riders,c03f1114,KD Karthik,13,0,7,1,0,y,30045,
+77,2019 Kolkata Knight Riders,b4b99816,Shubman Gill,13,0,7,2,0,,1070173,
+77,2019 Kolkata Knight Riders,1c17e270,RV Uthappa,11,0,4,3,0,y,35582,
+101,2019 Mumbai Indians,372455c4,Q de Kock,16,2,17,1,0,y,379143,y
+101,2019 Mumbai Indians,271f83cd,SA Yadav,16,0,9,2,0,,446507,
+101,2019 Mumbai Indians,a757b0d8,KA Pollard,15,0,8,3,0,,230559,
+101,2019 Mumbai Indians,752f7486,Ishan Kishan,6,0,2,6,0,y,720471,
+140,2019 Rajasthan Royals,a4cc73aa,SV Samson,12,1,4,3,0,y,425943,y
+140,2019 Rajasthan Royals,99b75528,JC Buttler,8,0,8,1,0,y,308967,
+140,2019 Rajasthan Royals,29e95537,AM Rahane,13,0,5,2,0,,277916,
+161,2019 Royal Challengers Bangalore,b5da6c24,PA Patel,14,2,6,2,0,y,32242,y
+161,2019 Royal Challengers Bangalore,c4487b84,AB de Villiers,13,0,6,1,0,y,44936,
+161,2019 Royal Challengers Bangalore,ba607b88,V Kohli,14,0,5,3,0,,253802,
+161,2019 Royal Challengers Bangalore,6eb146d2,Gurkeerat Singh,3,0,1,6,0,y,537124,
+161,2019 Royal Challengers Bangalore,235c2bb6,H Klaasen,3,0,0,,0,y,436757,
+175,2019 Sunrisers Hyderabad,abb83e27,JM Bairstow,10,2,9,1,0,y,297433,y
+175,2019 Sunrisers Hyderabad,fe11caa6,WP Saha,5,1,3,3,0,y,279810,y
+175,2019 Sunrisers Hyderabad,93b4fc78,MK Pandey,12,0,7,2,0,,290630,
+27,2020 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,1,15,1,0,y,28081,y
+27,2020 Chennai Super Kings,3355b542,F du Plessis,13,0,12,2,0,,44828,
+27,2020 Chennai Super Kings,45a43fe2,RD Gaikwad,6,0,4,3,0,,1060380,
+27,2020 Chennai Super Kings,70d205c9,AT Rayudu,12,0,3,4,0,y,33141,
+27,2020 Chennai Super Kings,99d63244,KM Jadhav,5,0,1,6,0,y,290716,
+51,2020 Delhi Capitals,919a3be2,RR Pant,14,0,13,1,0,y,931581,
+51,2020 Delhi Capitals,48a1d7b7,SO Hetmyer,12,0,7,2,0,,670025,
+51,2020 Delhi Capitals,85ec8e33,SS Iyer,17,0,6,3,0,,642519,
+124,2020 Kings XI Punjab,b17e2f24,KL Rahul,14,0,10,1,0,y,422108,
+124,2020 Kings XI Punjab,3241e3fd,N Pooran,14,0,7,2,0,y,604302,
+124,2020 Kings XI Punjab,00ea847a,MA Agarwal,11,0,6,3,0,,398438,
+124,2020 Kings XI Punjab,9418198b,P Simran Singh,2,0,1,7,0,y,1161024,
+78,2020 Kolkata Knight Riders,c03f1114,KD Karthik,14,0,9,1,0,y,30045,
+78,2020 Kolkata Knight Riders,b4b99816,Shubman Gill,14,0,7,2,0,,1070173,
+78,2020 Kolkata Knight Riders,d2a6c0e6,EJG Morgan,14,0,3,3,0,,24598,
+102,2020 Mumbai Indians,372455c4,Q de Kock,16,4,18,1,0,y,379143,y
+102,2020 Mumbai Indians,271f83cd,SA Yadav,16,0,8,2,0,,446507,
+102,2020 Mumbai Indians,dbe50b21,HH Pandya,13,0,6,3,0,,625371,
+102,2020 Mumbai Indians,752f7486,Ishan Kishan,13,0,1,5,0,y,720471,
+141,2020 Rajasthan Royals,a4cc73aa,SV Samson,14,2,9,1,0,y,425943,y
+141,2020 Rajasthan Royals,99b75528,JC Buttler,12,0,6,2,0,y,308967,
+141,2020 Rajasthan Royals,1c17e270,RV Uthappa,12,0,3,3,0,y,35582,
+162,2020 Royal Challengers Bangalore,c4487b84,AB de Villiers,15,1,10,1,0,y,44936,y
+162,2020 Royal Challengers Bangalore,2c25d4f5,D Padikkal,15,0,8,2,0,,1119026,
+162,2020 Royal Challengers Bangalore,6eb146d2,Gurkeerat Singh,6,0,6,3,0,y,537124,
+176,2020 Sunrisers Hyderabad,abb83e27,JM Bairstow,11,1,7,1,0,y,297433,y
+176,2020 Sunrisers Hyderabad,fe11caa6,WP Saha,4,1,2,4,0,y,279810,y
+176,2020 Sunrisers Hyderabad,93b4fc78,MK Pandey,15,0,7,2,0,,290630,
+176,2020 Sunrisers Hyderabad,bb965e9a,PK Garg,13,0,6,3,0,,1070180,
+176,2020 Sunrisers Hyderabad,541f85c9,SP Goswami,3,0,1,5,0,y,302579,
+28,2021 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,13,1,0,y,28081,
+28,2021 Chennai Super Kings,3355b542,F du Plessis,16,0,12,2,0,,44828,
+28,2021 Chennai Super Kings,1dc12ab9,SK Raina,11,0,7,3,0,,33335,
+28,2021 Chennai Super Kings,70d205c9,AT Rayudu,14,0,2,5,0,y,33141,
+28,2021 Chennai Super Kings,1c17e270,RV Uthappa,4,0,0,,0,y,35582,
+52,2021 Delhi Capitals,919a3be2,RR Pant,16,3,10,1,0,y,931581,y
+52,2021 Delhi Capitals,0a476045,S Dhawan,16,0,9,2,0,,28235,
+52,2021 Delhi Capitals,30a45b23,SPD Smith,10,0,9,3,0,,267192,
+79,2021 Kolkata Knight Riders,c03f1114,KD Karthik,17,2,5,4,0,y,30045,y
+79,2021 Kolkata Knight Riders,d2a6c0e6,EJG Morgan,16,0,9,1,0,,24598,
+79,2021 Kolkata Knight Riders,77255a9e,RA Tripathi,16,0,8,2,0,,446763,
+79,2021 Kolkata Knight Riders,b4b99816,Shubman Gill,17,0,6,3,0,,1070173,
+79,2021 Kolkata Knight Riders,4663bd23,TL Seifert,1,0,0,,0,y,625964,
+103,2021 Mumbai Indians,372455c4,Q de Kock,11,2,4,3,0,y,379143,y
+103,2021 Mumbai Indians,271f83cd,SA Yadav,14,0,5,1,0,,446507,
+103,2021 Mumbai Indians,dbe50b21,HH Pandya,11,0,4,2,0,,625371,
+103,2021 Mumbai Indians,752f7486,Ishan Kishan,10,0,3,4,0,y,720471,
+125,2021 Punjab Kings,b17e2f24,KL Rahul,13,0,11,1,0,y,422108,
+125,2021 Punjab Kings,00ea847a,MA Agarwal,12,0,5,2,0,,398438,
+125,2021 Punjab Kings,7dcb9bc9,M Shahrukh Khan,10,0,4,3,0,,719719,
+125,2021 Punjab Kings,3241e3fd,N Pooran,12,0,3,5,0,y,604302,
+125,2021 Punjab Kings,9418198b,P Simran Singh,2,0,0,,0,y,1161024,
+142,2021 Rajasthan Royals,a4cc73aa,SV Samson,14,4,7,1,0,y,425943,y
+142,2021 Rajasthan Royals,d67d5f00,DA Miller,8,0,4,2,0,,321777,
+142,2021 Rajasthan Royals,c8f5f961,Anuj Rawat,3,0,3,3,0,,1123073,
+142,2021 Rajasthan Royals,99b75528,JC Buttler,7,0,3,4,0,y,308967,
+163,2021 Royal Challengers Bangalore,44a89551,KS Bharat,7,1,4,4,0,,529436,y
+163,2021 Royal Challengers Bangalore,c4487b84,AB de Villiers,15,0,15,1,0,y,44936,
+163,2021 Royal Challengers Bangalore,ba607b88,V Kohli,15,0,8,2,0,,253802,
+163,2021 Royal Challengers Bangalore,2c25d4f5,D Padikkal,14,0,7,3,0,,1119026,
+177,2021 Sunrisers Hyderabad,abb83e27,JM Bairstow,7,1,2,6,0,y,297433,y
+177,2021 Sunrisers Hyderabad,d027ba9f,KS Williamson,10,0,7,1,0,,277906,
+177,2021 Sunrisers Hyderabad,fe11caa6,WP Saha,9,0,6,2,0,y,279810,
+177,2021 Sunrisers Hyderabad,93b4fc78,MK Pandey,8,0,5,3,0,,290630,
+177,2021 Sunrisers Hyderabad,99d63244,KM Jadhav,6,0,2,7,0,y,290716,
+29,2022 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,9,1,0,y,28081,
+29,2022 Chennai Super Kings,1c17e270,RV Uthappa,11,0,5,2,0,y,35582,
+29,2022 Chennai Super Kings,70d205c9,AT Rayudu,12,0,4,3,0,y,33141,
+53,2022 Delhi Capitals,919a3be2,RR Pant,14,4,8,1,0,y,931581,y
+53,2022 Delhi Capitals,dcce6f09,DA Warner,12,0,6,2,0,,219889,
+53,2022 Delhi Capitals,8b3e9c7c,PP Shaw,10,0,4,3,0,,1070168,
+53,2022 Delhi Capitals,4663bd23,TL Seifert,2,0,1,7,0,y,625964,
+53,2022 Delhi Capitals,44a89551,KS Bharat,2,0,0,,0,y,529436,
+60,2022 Gujarat Titans,fe11caa6,WP Saha,11,2,11,1,0,y,279810,y
+60,2022 Gujarat Titans,afa7e784,MS Wade,10,1,7,2,0,,230193,y
+60,2022 Gujarat Titans,b4b99816,Shubman Gill,16,0,7,3,0,,1070173,
+80,2022 Kolkata Knight Riders,acc1aeda,SP Jackson,5,2,5,3,0,,237696,y
+80,2022 Kolkata Knight Riders,c16d4035,SW Billings,8,1,6,2,0,,297628,y
+80,2022 Kolkata Knight Riders,0a509d6b,RK Singh,8,0,8,1,0,,723105,
+85,2022 Lucknow Super Giants,372455c4,Q de Kock,15,1,12,1,0,y,379143,y
+85,2022 Lucknow Super Giants,b17e2f24,KL Rahul,15,0,9,2,0,y,422108,
+85,2022 Lucknow Super Giants,0ebfb1ad,E Lewis,6,0,3,3,0,,431901,
+104,2022 Mumbai Indians,752f7486,Ishan Kishan,14,0,13,1,0,y,720471,
+104,2022 Mumbai Indians,740742ef,RG Sharma,14,0,7,2,0,,34102,
+104,2022 Mumbai Indians,f1f99156,TH David,8,0,6,3,0,,892749,
+104,2022 Mumbai Indians,85b3fab2,T Stubbs,2,0,0,,0,y,595978,
+126,2022 Punjab Kings,800d2d97,JM Sharma,11,2,9,3,0,y,721867,y
+126,2022 Punjab Kings,00ea847a,MA Agarwal,13,0,10,1,0,,398438,
+126,2022 Punjab Kings,0a476045,S Dhawan,14,0,10,2,0,,28235,
+126,2022 Punjab Kings,abb83e27,JM Bairstow,11,0,2,6,0,y,297433,
+126,2022 Punjab Kings,9418198b,P Simran Singh,1,0,0,,0,y,1161024,
+143,2022 Rajasthan Royals,a4cc73aa,SV Samson,17,2,14,1,0,y,425943,y
+143,2022 Rajasthan Royals,99b75528,JC Buttler,17,0,9,2,0,y,308967,
+143,2022 Rajasthan Royals,2c25d4f5,D Padikkal,17,0,5,3,0,,1119026,
+164,2022 Royal Challengers Bangalore,c03f1114,KD Karthik,16,2,10,1,0,y,30045,y
+164,2022 Royal Challengers Bangalore,ba607b88,V Kohli,16,0,9,2,0,,253802,
+164,2022 Royal Challengers Bangalore,c8f5f961,Anuj Rawat,9,0,5,3,0,,1123073,
+178,2022 Sunrisers Hyderabad,3241e3fd,N Pooran,14,1,8,2,0,y,604302,y
+178,2022 Sunrisers Hyderabad,d027ba9f,KS Williamson,13,0,10,1,0,,277906,
+178,2022 Sunrisers Hyderabad,77255a9e,RA Tripathi,14,0,6,3,0,,446763,
+30,2023 Chennai Super Kings,4a8a2e3b,MS Dhoni,15,3,7,3,0,y,28081,y
+30,2023 Chennai Super Kings,45a43fe2,RD Gaikwad,16,0,17,1,0,,1060380,
+30,2023 Chennai Super Kings,29e95537,AM Rahane,13,0,8,2,0,,277916,
+30,2023 Chennai Super Kings,70d205c9,AT Rayudu,14,0,2,6,0,y,33141,
+54,2023 Delhi Capitals,378daa89,Aman Hakim Khan,10,0,9,1,0,,1254269,
+54,2023 Delhi Capitals,dcce6f09,DA Warner,14,0,7,2,0,,219889,
+54,2023 Delhi Capitals,3d284ca3,PD Salt,9,0,5,3,0,,669365,
+61,2023 Gujarat Titans,fe11caa6,WP Saha,17,2,9,2,0,y,279810,y
+61,2023 Gujarat Titans,d67d5f00,DA Miller,15,0,11,1,0,,321777,
+61,2023 Gujarat Titans,b4b99816,Shubman Gill,17,0,6,3,0,,1070173,
+81,2023 Kolkata Knight Riders,0bacade8,Rahmanullah Gurbaz,11,0,10,1,0,,974087,
+81,2023 Kolkata Knight Riders,0a509d6b,RK Singh,14,0,8,2,0,,723105,
+81,2023 Kolkata Knight Riders,a24be938,VR Iyer,14,0,3,3,0,,851403,
+86,2023 Lucknow Super Giants,3241e3fd,N Pooran,15,3,6,1,0,y,604302,y
+86,2023 Lucknow Super Giants,372455c4,Q de Kock,4,1,2,4,0,y,379143,y
+86,2023 Lucknow Super Giants,b17e2f24,KL Rahul,9,0,4,2,0,y,422108,
+86,2023 Lucknow Super Giants,663b5e34,PN Mankad,8,0,2,3,0,,956871,
+105,2023 Mumbai Indians,752f7486,Ishan Kishan,16,3,10,1,0,y,720471,y
+105,2023 Mumbai Indians,f1f99156,TH David,15,0,10,2,0,,892749,
+105,2023 Mumbai Indians,271f83cd,SA Yadav,16,0,6,3,0,,446507,
+105,2023 Mumbai Indians,85b3fab2,T Stubbs,2,0,0,,12,y,595978,
+105,2023 Mumbai Indians,0494fa6e,Vishnu Vinod,4,0,0,,0,y,732293,
+127,2023 Punjab Kings,800d2d97,JM Sharma,14,2,3,4,0,y,721867,y
+127,2023 Punjab Kings,7dcb9bc9,M Shahrukh Khan,13,0,7,1,0,,719719,
+127,2023 Punjab Kings,1ac746c8,Atharva Taide,7,0,5,2,0,,1125958,
+127,2023 Punjab Kings,0a476045,S Dhawan,11,0,4,3,0,,28235,
+127,2023 Punjab Kings,9418198b,P Simran Singh,14,0,1,6,0,y,1161024,
+144,2023 Rajasthan Royals,a4cc73aa,SV Samson,14,3,3,5,0,y,425943,y
+144,2023 Rajasthan Royals,48a1d7b7,SO Hetmyer,14,0,11,1,0,,670025,
+144,2023 Rajasthan Royals,99b75528,JC Buttler,14,0,9,2,0,y,308967,
+144,2023 Rajasthan Royals,6c19c6e5,YBK Jaiswal,14,0,8,3,0,,1151278,
+144,2023 Rajasthan Royals,bcf325d2,Dhruv Jurel,11,0,1,6,0,y,1175488,
+165,2023 Royal Challengers Bangalore,c03f1114,KD Karthik,13,2,8,2,0,y,30045,y
+165,2023 Royal Challengers Bangalore,ba607b88,V Kohli,14,0,13,1,0,,253802,
+165,2023 Royal Challengers Bangalore,c8f5f961,Anuj Rawat,7,0,3,3,0,,1123073,
+165,2023 Royal Challengers Bangalore,99d63244,KM Jadhav,1,0,1,6,0,y,290716,
+179,2023 Sunrisers Hyderabad,235c2bb6,H Klaasen,11,1,3,3,0,y,436757,y
+179,2023 Sunrisers Hyderabad,00ea847a,MA Agarwal,10,0,6,1,0,,398438,
+179,2023 Sunrisers Hyderabad,8e514b4c,Abdul Samad,8,0,4,2,0,,1175485,
+31,2024 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,10,1,0,y,28081,
+31,2024 Chennai Super Kings,45a43fe2,RD Gaikwad,14,0,5,2,0,,1060380,
+31,2024 Chennai Super Kings,29e95537,AM Rahane,12,0,1,3,0,,277916,
+55,2024 Delhi Capitals,919a3be2,RR Pant,13,5,11,1,0,y,931581,y
+55,2024 Delhi Capitals,1fc6ef83,SD Hope,9,0,6,2,0,,581379,
+55,2024 Delhi Capitals,dcce6f09,DA Warner,8,0,5,3,0,,219889,
+55,2024 Delhi Capitals,85b3fab2,T Stubbs,14,0,7,,13,y,595978,
+62,2024 Gujarat Titans,fe11caa6,WP Saha,9,2,5,3,0,y,279810,y
+62,2024 Gujarat Titans,39a2dfa8,R Tewatia,11,0,6,1,0,,423838,
+62,2024 Gujarat Titans,d67d5f00,DA Miller,9,0,5,2,0,,321777,
+62,2024 Gujarat Titans,afa7e784,MS Wade,1,0,1,8,0,y,230193,
+82,2024 Kolkata Knight Riders,3d284ca3,PD Salt,12,0,12,1,0,,669365,
+82,2024 Kolkata Knight Riders,85ec8e33,SS Iyer,14,0,10,2,0,,642519,
+82,2024 Kolkata Knight Riders,0a509d6b,RK Singh,13,0,7,3,0,,723105,
+82,2024 Kolkata Knight Riders,d7017798,A Raghuvanshi,9,0,4,5,0,y,1292495,
+87,2024 Lucknow Super Giants,b17e2f24,KL Rahul,14,2,15,1,0,y,422108,y
+87,2024 Lucknow Super Giants,3241e3fd,N Pooran,14,0,7,2,0,y,604302,
+87,2024 Lucknow Super Giants,2c25d4f5,D Padikkal,8,0,3,3,0,,1119026,
+87,2024 Lucknow Super Giants,372455c4,Q de Kock,11,0,3,4,0,y,379143,
+106,2024 Mumbai Indians,752f7486,Ishan Kishan,14,0,9,1,0,y,720471,
+106,2024 Mumbai Indians,f1f99156,TH David,12,0,6,2,0,,892749,
+106,2024 Mumbai Indians,271f83cd,SA Yadav,11,0,4,3,0,,446507,
+128,2024 Punjab Kings,800d2d97,JM Sharma,14,0,13,1,0,y,721867,
+128,2024 Punjab Kings,abb83e27,JM Bairstow,11,0,8,2,0,y,297433,
+128,2024 Punjab Kings,cad00a4d,RR Rossouw,8,0,4,3,0,,318845,
+128,2024 Punjab Kings,9418198b,P Simran Singh,14,0,1,7,0,y,1161024,
+145,2024 Rajasthan Royals,a4cc73aa,SV Samson,15,1,6,3,0,y,425943,y
+145,2024 Rajasthan Royals,bcf325d2,Dhruv Jurel,11,0,11,1,0,y,1175488,
+145,2024 Rajasthan Royals,650d5e49,R Powell,10,0,7,2,0,,820351,
+145,2024 Rajasthan Royals,99b75528,JC Buttler,11,0,3,6,0,y,308967,
+166,2024 Royal Challengers Bengaluru,c03f1114,KD Karthik,14,1,4,4,0,y,30045,y
+166,2024 Royal Challengers Bengaluru,3355b542,F du Plessis,15,0,8,1,0,,44828,
+166,2024 Royal Challengers Bengaluru,ba607b88,V Kohli,15,0,8,2,0,,253802,
+166,2024 Royal Challengers Bengaluru,c8f5f961,Anuj Rawat,5,0,5,3,0,,1123073,
+180,2024 Sunrisers Hyderabad,235c2bb6,H Klaasen,15,2,8,2,0,y,436757,y
+180,2024 Sunrisers Hyderabad,8e514b4c,Abdul Samad,13,0,9,1,0,,1175485,
+180,2024 Sunrisers Hyderabad,b0f2baf4,Sanvir Singh,4,0,3,3,0,,1132219,
+32,2025 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,5,6,2,0,y,28081,y
+32,2025 Chennai Super Kings,844e79d1,D Brevis,6,0,6,1,0,,1070665,
+32,2025 Chennai Super Kings,b2b4f545,A Mhatre,7,0,4,3,0,,1452455,
+56,2025 Delhi Capitals,85b3fab2,T Stubbs,14,1,10,,12,,595978,y
+56,2025 Delhi Capitals,3355b542,F du Plessis,9,0,4,1,0,,44828,
+56,2025 Delhi Capitals,ad3b6e95,Abishek Porel,13,0,3,2,0,,1277545,
+56,2025 Delhi Capitals,9b6e1b3f,J Fraser-McGurk,6,0,3,3,0,,1168049,
+56,2025 Delhi Capitals,b17e2f24,KL Rahul,13,0,3,4,0,y,422108,
+63,2025 Gujarat Titans,99b75528,JC Buttler,14,2,8,1,0,y,308967,y
+63,2025 Gujarat Titans,b4b99816,Shubman Gill,15,0,8,2,0,,1070173,
+63,2025 Gujarat Titans,d5130a30,B Sai Sudharsan,15,0,7,3,0,,1151288,
+83,2025 Kolkata Knight Riders,0a509d6b,RK Singh,11,0,9,1,0,,723105,
+83,2025 Kolkata Knight Riders,29e95537,AM Rahane,12,0,5,2,0,,277916,
+83,2025 Kolkata Knight Riders,be24ead0,Ramandeep Singh,7,0,5,3,0,,1079470,
+83,2025 Kolkata Knight Riders,372455c4,Q de Kock,8,0,3,5,0,y,379143,
+83,2025 Kolkata Knight Riders,d7017798,A Raghuvanshi,12,0,2,6,0,y,1292495,
+88,2025 Lucknow Super Giants,919a3be2,RR Pant,14,1,5,3,0,y,931581,y
+88,2025 Lucknow Super Giants,3241e3fd,N Pooran,14,0,8,1,0,y,604302,
+88,2025 Lucknow Super Giants,d67d5f00,DA Miller,11,0,5,2,0,,321777,
+107,2025 Mumbai Indians,e66732f8,RD Rickelton,14,5,11,1,0,,605661,y
+107,2025 Mumbai Indians,b0482a1d,Tilak Varma,16,0,9,2,0,,1170265,
+107,2025 Mumbai Indians,271f83cd,SA Yadav,16,0,6,3,0,,446507,
+107,2025 Mumbai Indians,abb83e27,JM Bairstow,2,0,1,4,0,y,297433,
+129,2025 Punjab Kings,989889ff,JP Inglis,11,1,9,1,0,,662235,y
+129,2025 Punjab Kings,9418198b,P Simran Singh,18,1,2,5,0,y,1161024,y
+129,2025 Punjab Kings,b5797845,Priyansh Arya,18,0,8,2,0,,1175456,
+129,2025 Punjab Kings,85ec8e33,SS Iyer,17,0,7,3,0,,642519,
+146,2025 Rajasthan Royals,a4cc73aa,SV Samson,9,1,4,4,0,y,425943,y
+146,2025 Rajasthan Royals,48a1d7b7,SO Hetmyer,14,0,13,1,0,,670025,
+146,2025 Rajasthan Royals,6c19c6e5,YBK Jaiswal,14,0,10,2,0,,1151278,
+146,2025 Rajasthan Royals,bcf325d2,Dhruv Jurel,13,0,7,3,0,y,1175488,
+167,2025 Royal Challengers Bengaluru,800d2d97,JM Sharma,15,1,19,1,0,y,721867,y
+167,2025 Royal Challengers Bengaluru,3d284ca3,PD Salt,13,0,9,2,0,,669365,
+167,2025 Royal Challengers Bengaluru,f1f99156,TH David,10,0,7,3,0,,892749,
+181,2025 Sunrisers Hyderabad,0890552f,A Manohar,8,0,7,1,0,,778963,
+181,2025 Sunrisers Hyderabad,235c2bb6,H Klaasen,13,0,7,2,0,y,436757,
+181,2025 Sunrisers Hyderabad,a3b0600d,Aniket Verma,13,0,6,3,0,,1409976,
+181,2025 Sunrisers Hyderabad,752f7486,Ishan Kishan,14,0,8,,1,y,720471,
+33,2026 Chennai Super Kings,a4cc73aa,SV Samson,14,2,4,5,0,y,425943,y
+33,2026 Chennai Super Kings,844e79d1,D Brevis,11,0,12,1,0,,1070665,
+33,2026 Chennai Super Kings,cf59b3f0,Urvil Patel,7,0,6,2,0,,1131570,
+33,2026 Chennai Super Kings,45a43fe2,RD Gaikwad,14,0,5,3,0,,1060380,
+57,2026 Delhi Capitals,b17e2f24,KL Rahul,14,1,2,5,0,y,422108,y
+57,2026 Delhi Capitals,d67d5f00,DA Miller,11,0,7,1,0,,321777,
+57,2026 Delhi Capitals,85b3fab2,T Stubbs,13,0,7,2,0,y,595978,
+57,2026 Delhi Capitals,f89d3b11,Sameer Rizvi,11,0,3,3,0,,1175489,
+64,2026 Gujarat Titans,99b75528,JC Buttler,17,1,25,1,0,y,308967,y
+64,2026 Gujarat Titans,b4b99816,Shubman Gill,16,0,12,2,0,,1070173,
+64,2026 Gujarat Titans,9a46c4e5,GD Phillips,6,0,8,3,0,,823509,
+84,2026 Kolkata Knight Riders,d7017798,A Raghuvanshi,13,1,5,4,0,,1292495,y
+84,2026 Kolkata Knight Riders,4663bd23,TL Seifert,3,1,2,6,0,,625964,y
+84,2026 Kolkata Knight Riders,0a509d6b,RK Singh,11,0,11,1,0,,723105,
+84,2026 Kolkata Knight Riders,29e95537,AM Rahane,14,0,8,2,0,,277916,
+84,2026 Kolkata Knight Riders,650d5e49,R Powell,9,0,6,3,0,,820351,
+89,2026 Lucknow Super Giants,919a3be2,RR Pant,13,0,10,1,0,y,931581,
+89,2026 Lucknow Super Giants,3241e3fd,N Pooran,14,0,5,2,0,y,604302,
+89,2026 Lucknow Super Giants,3d8feaf8,MR Marsh,13,0,4,3,0,,272450,
+89,2026 Lucknow Super Giants,989889ff,JP Inglis,5,0,1,6,0,y,662235,
+108,2026 Mumbai Indians,372455c4,Q de Kock,3,1,2,5,0,y,379143,y
+108,2026 Mumbai Indians,b0482a1d,Tilak Varma,14,0,12,1,0,,1170265,
+108,2026 Mumbai Indians,fffa744b,Naman Dhir,14,0,9,2,0,,1287032,
+108,2026 Mumbai Indians,e66732f8,RD Rickelton,12,0,9,3,0,y,605661,
+130,2026 Punjab Kings,9418198b,P Simran Singh,14,1,7,2,0,y,1161024,y
+130,2026 Punjab Kings,85ec8e33,SS Iyer,13,0,8,1,0,,642519,
+130,2026 Punjab Kings,fe366f34,C Connolly,13,0,4,3,0,,1210488,
+130,2026 Punjab Kings,0494fa6e,Vishnu Vinod,1,0,0,,0,y,732293,
+147,2026 Rajasthan Royals,bcf325d2,Dhruv Jurel,16,1,18,1,0,,1175488,y
+147,2026 Rajasthan Royals,48a1d7b7,SO Hetmyer,8,0,5,2,0,,670025,
+147,2026 Rajasthan Royals,6c19c6e5,YBK Jaiswal,16,0,4,3,0,,1151278,
+168,2026 Royal Challengers Bengaluru,800d2d97,JM Sharma,15,2,15,1,0,y,721867,y
+168,2026 Royal Challengers Bengaluru,2c25d4f5,D Padikkal,15,0,13,2,0,,1119026,
+168,2026 Royal Challengers Bengaluru,c740ea83,RM Patidar,14,0,10,3,0,,823703,
+182,2026 Sunrisers Hyderabad,752f7486,Ishan Kishan,15,1,8,2,0,y,720471,y
+182,2026 Sunrisers Hyderabad,235c2bb6,H Klaasen,15,0,13,1,0,y,436757,
+182,2026 Sunrisers Hyderabad,a3b0600d,Aniket Verma,10,0,5,3,0,,1409976,

@@ -271,6 +271,7 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A27 | A player who neither batted nor bowled gets no `squad_members` row. `role` is NOT NULL and fielding a dismissal implies no role. 47 of 3,384 pairs excluded, 3,337 written. |
 | A28 | §7.1 fitting filter is `innings_scheduled_balls = 120` alone; the `not was_reduced` clause is dropped. It excluded 12 first innings that were themselves scheduled for and played to a full twenty — the reduction fell on the chase, after they ended. 149,697 -> **151,175** deliveries. Refines A21, which remains correct about *why* `= 120` is the right predicate. |
 | A29 | `deliveries_phase_idx` dropped in migration `006`. Three distinct values over 295,732 rows: the planner will not choose it, and every query that filters on phase also filters on match or franchise-season. `deliveries` is 63 MB, down from 65. |
+| A30 | **The four override CSVs cannot be narrowed further by derivation, and that was measured rather than assumed.** Afghanistan's absence is documented Cricsheet *policy* — 158 matches withheld — so no re-download will ever close it. No nationality-restricted competition exists among the 1,115 published archives. Catches name the proven keeper 51% of the time (86% within the top 3), and the career-keeper cross-reference is **wrong for 5 of the 39 squads it is confident about**, failing in the A23 shape. So the generators emit **evidence and a ranking, never a verdict**: `merge_override` now takes the decision column by name, preserves it untouched, and refreshes every other column. `cricinfo_id` added to all four files. No migration was needed — A19 stands unchanged. |
 
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
@@ -283,13 +284,14 @@ treat the current values as ratified beyond the twelve.
 
 - **`wickets_down` on `deliveries`** — deliberately not added. Derivable with a window
   function; revisit as a migration when §7.1 lands if the recompute cost is annoying.
-- **Fielders on `deliveries`, as the fallback keeper signal.** Not stored, per A19, which
-  is fine for phase 1 but forecloses the better signal: catches taken behind the stumps.
-  Stumpings prove a keeper but are rare, which is why 26 franchise-seasons have no proof
-  and `keepers_by_season.csv` has to be filled by hand. **If that hand-fill turns out to
-  be painful, store fielder ids and mine dismissals where the keeper took the catch
-  instead.** Not now — it is a migration plus a full reload, and the hand-fill may well
-  be cheaper. Filed so the option is not forgotten if the CSV becomes a slog.
+- ~~**Fielders on `deliveries`, as the fallback keeper signal.**~~ **Closed 2026-07-30,
+  A30 — the idea was tested and does not work.** It was filed as the better keeper
+  signal, needing a migration and a full reload. It needed neither: keeper derivation
+  already reads the archive, so catches were measured for free. Cricsheet has **no keeper
+  flag** on `fielders[]` — only `substitute` — so a catch behind the stumps cannot be
+  told from one at slip, and the top non-bowling catch-taker is the proven keeper only
+  51% of the time. It survives as a *ranking* in `keepers_by_season.csv`, nothing more.
+  **Do not reopen this as a way to avoid the hand-fill; it was already tried.**
 
 ## Stage status
 
@@ -336,20 +338,35 @@ uv run python -m etl.derive_people --all    # nationality, keepers, bowling styl
 uv run python -m etl.derive_squads          # squad_members, ~30s
 ```
 
-Both are re-runnable. `derive_squads` truncates and rewrites; `derive_people` **appends
-only missing rows** to the override CSVs and never rewrites one that exists, because the
-hand-filled columns cannot be recomputed. Run `derive_people` before `derive_squads` —
-the keeper role reads `keepers_by_season.csv`, which the first command generates.
+Both are re-runnable and `derive_people` is idempotent to the byte. `derive_squads`
+truncates and rewrites. Run `derive_people` before `derive_squads` — the keeper role
+reads `keepers_by_season.csv`, which the first command generates.
 
-| CSV | Rows awaiting a human | Blocks |
-|---|---|---|
-| `nationality.csv` | 314 | the four-overseas rule |
-| `keepers.csv` | 440 blank of 489 | the keeper slot |
-| `keepers_by_season.csv` | 179 blank of 345, covering the 26 squads with no stumping all season plus backup-keeper candidates elsewhere | the keeper slot |
-| `bowling_style.csv` | 479 | A8 pace/spin slots |
+**One column per file is the decision; the rest is evidence** (A30). `merge_override`
+takes the decision column by name, carries it across untouched, and refreshes everything
+else, so adding a new signal reaches rows that already exist. **Nothing else in the repo
+may write a decision column.**
+
+| CSV | Decision column | Rows awaiting a human | Blocks |
+|---|---|---|---|
+| `nationality.csv` | `nationality` | 314 of 314 | the four-overseas rule |
+| `keepers.csv` | `is_keeper` | 440 of 489 | the keeper slot |
+| `keepers_by_season.csv` | `kept` | 467 of 633 | the keeper slot |
+| `bowling_style.csv` | `bowling_style` | 479 of 479 | A8 pace/spin slots (not a legal draft) |
 
 Blank means undecided in all four. Nothing is guessed and nothing is defaulted, so an
-unfilled row shows up as a NULL or a missing keeper rather than as a wrong answer.
+unfilled row shows up as a NULL or a missing keeper rather than as a wrong answer. Every
+row carries a `cricinfo_id` so a reviewer identifies the player instead of searching for
+one; coverage is complete and a test enforces it.
+
+`keepers_by_season.csv` grew from 345 rows to 633 because each squad now also lists its
+top three non-bowling catch-takers as candidates. **The ranking is not the answer** — for
+2011 Delhi it puts Sehwag first and Ojha, who kept, second. Read `catch_rank`,
+`keeper_elsewhere` and `balls_bowled` together, not `catch_rank` alone.
+
+A typo in a decision column reads as a silent "no" rather than an error, so
+`tests/test_overrides.py` pins the vocabulary each reader accepts: `kept` and `is_keeper`
+take y/yes/true/1 or n/no/false/0, `bowling_style` takes pace or spin.
 
 A **SKIP is not a pass** and the runner says so. Checks 5 and 6 target tables SPEC 6 and 7
 build; they skip with a reason rather than reporting green against an empty table. Check 6

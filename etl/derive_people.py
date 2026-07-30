@@ -5,11 +5,15 @@
     uv run python -m etl.derive_people --bowling-style
     uv run python -m etl.derive_people --all
 
-Each override CSV under etl/overrides/ is hand-maintained and authoritative. These
-generators therefore **never overwrite an existing row** - they append people who are
-missing and leave everything already in the file exactly as it is. A generator that
-clobbered a hand-filled column would destroy the only copy of work that cannot be
-recomputed.
+Each override CSV under etl/overrides/ has exactly one column a human fills in and
+several this code derives. The hand-filled one is the only copy of work that cannot be
+recomputed, so it is **never written over**; the derived ones are refreshed on every run,
+because a signal added later is useless if it can only reach rows that did not exist yet.
+`merge_override` takes the decision column by name so the two cannot be confused. A30.
+
+None of these generators decides anything a human is meant to decide. Where the archive
+proves an answer they record it; where it merely suggests one they rank the candidates
+and leave the column blank, and blank means undecided rather than no.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import sys
 import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 from etl.db import REPO_ROOT, connect, data_dir
 
@@ -53,6 +58,25 @@ FULL_MEMBERS = (
     "Afghanistan", "Australia", "Bangladesh", "England", "India", "Ireland",
     "New Zealand", "Pakistan", "South Africa", "Sri Lanka", "West Indies", "Zimbabwe",
 )
+
+
+def cricinfo_ids() -> dict[str, str]:
+    """Cricsheet person_id -> Cricinfo player id, from the register we already fetch.
+
+    Every row in these four CSVs is a question only a human can answer, and the slow
+    part of answering is not the judgement but finding the right player: initials-only
+    names are ambiguous and several are shared outright. The register resolves that
+    for free, and it covers all four files completely, so a reviewer identifies the
+    player rather than searching for them. Nothing here fills a value in.
+    """
+    path = data_dir() / "people.csv"
+    if not path.exists():
+        raise SystemExit(f"{path} not found. Run: uv run python -m etl.download")
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {
+            row["identifier"]: row.get("key_cricinfo", "")
+            for row in csv.DictReader(handle)
+        }
 
 
 def ipl_people(conn) -> dict[str, str]:
@@ -133,13 +157,28 @@ def national_teams(wanted: set[str]) -> tuple[dict[str, str], list[str]]:
     return resolved, conflicts
 
 
-def keeper_stumpings() -> tuple[Counter, dict[tuple[str, str], Counter]]:
-    """Stumpings by person, and by (match_id, fielding team name).
+class Fielding(NamedTuple):
+    """Everything one pass over the IPL archive can say about who kept wicket."""
+
+    career_stumpings: Counter
+    stumpings: dict[tuple[str, str], Counter]
+    catches: dict[tuple[str, str], Counter]
+    bowled: dict[tuple[str, str], Counter]
+
+
+def fielding_evidence() -> Fielding:
+    """Stumpings, catches and balls bowled by person and (match_id, fielding team).
 
     The keeper is the *fielder* on a stumping, and fielders are not stored - see A19,
     they are derivable and nothing else in this phase needs them. So this reads the
-    archive rather than the database. It is a narrow signal by design: it proves a
-    keeper but cannot disprove one, which is why keepers.csv exists.
+    archive rather than the database. Stumpings are a narrow signal by design: they
+    prove a keeper but cannot disprove one, which is why keepers.csv exists.
+
+    Catches and balls bowled are here to rank the *candidates* for the squads no
+    stumping reaches, and they are not evidence of the same strength. Measured against
+    the 140 squad-seasons a stumping does settle, the top non-bowling catch-taker is
+    the proven keeper only 51% of the time, though one of the top three is 86% of the
+    time. So they order a review list and must never decide one - see A30.
 
     The per-match breakdown is what SPEC 6.6 needs: 'keeper if flagged as a keeper
     *and they kept for that squad*'. A career flag alone puts a keeper in every squad
@@ -150,7 +189,9 @@ def keeper_stumpings() -> tuple[Counter, dict[tuple[str, str], Counter]]:
         raise SystemExit(f"{path} not found. Run: uv run python -m etl.download")
 
     career: Counter = Counter()
-    per_match: dict[tuple[str, str], Counter] = defaultdict(Counter)
+    stumpings: dict[tuple[str, str], Counter] = defaultdict(Counter)
+    catches: dict[tuple[str, str], Counter] = defaultdict(Counter)
+    bowled: dict[tuple[str, str], Counter] = defaultdict(Counter)
     with zipfile.ZipFile(path) as zf:
         for name in zf.namelist():
             if not name.endswith(".json"):
@@ -161,41 +202,87 @@ def keeper_stumpings() -> tuple[Counter, dict[tuple[str, str], Counter]]:
             registry = raw["info"].get("registry", {}).get("people", {})
             for innings in raw.get("innings", []):
                 fielding = [t for t in teams if t != innings.get("team")]
+                squad = (match_id, fielding[0]) if len(fielding) == 1 else None
                 for over in innings.get("overs", []):
                     for delivery in over["deliveries"]:
+                        bowler = registry.get(delivery.get("bowler", ""))
+                        if bowler is not None and squad is not None:
+                            bowled[squad][bowler] += 1
                         for wicket in delivery.get("wickets", []):
-                            if wicket["kind"] != "stumped":
+                            if wicket["kind"] not in ("stumped", "caught"):
                                 continue
                             for fielder in wicket.get("fielders", []):
                                 person_id = registry.get(fielder.get("name", ""))
                                 if person_id is None:
                                     continue
+                                if wicket["kind"] == "caught":
+                                    # A fielding substitute is not the squad's keeper
+                                    # and would only add noise to the ranking. The
+                                    # stumping path deliberately keeps its original
+                                    # behaviour, which A24 was ratified against.
+                                    if not fielder.get("substitute") and squad:
+                                        catches[squad][person_id] += 1
+                                    continue
                                 career[person_id] += 1
-                                if len(fielding) == 1:
-                                    per_match[(match_id, fielding[0])][person_id] += 1
-    return career, per_match
+                                if squad is not None:
+                                    stumpings[squad][person_id] += 1
+    return Fielding(career, stumpings, catches, bowled)
 
 
 def merge_override(
-    path: Path, columns: list[str], rows: list[dict], key: tuple[str, ...] = ("person_id",)
-) -> tuple[int, int]:
-    """Append rows whose key is absent. Never touch a row already present."""
+    path: Path,
+    columns: list[str],
+    rows: list[dict],
+    key: tuple[str, ...] = ("person_id",),
+    *,
+    decided: str,
+) -> tuple[int, int, int]:
+    """Rewrite the file, refreshing evidence and preserving every decision.
+
+    Each override CSV mixes two kinds of column and they need opposite treatment.
+    `decided` names the one a human fills in: it is the only copy of work that cannot
+    be recomputed, so it is carried across untouched and never written over, not even
+    with an equal value. Every other column is evidence we derived, so it is refreshed
+    from this run - otherwise adding a new signal could never reach a row that already
+    existed, which is the whole point of the exercise.
+
+    Rows come out in the order given, so a caller that sorts by likelihood gets a file
+    whose top row is the one most worth reading. An existing row with no counterpart in
+    `rows` is kept verbatim at the end rather than dropped: it may hold a decision, and
+    a generator that can silently delete one is a generator that will.
+    """
     OVERRIDES.mkdir(parents=True, exist_ok=True)
     existing: list[dict] = []
     if path.exists():
         with path.open(newline="", encoding="utf-8") as handle:
             existing = list(csv.DictReader(handle))
-    known = {tuple(row[c] for c in key) for row in existing}
-    added = [row for row in rows if tuple(str(row[c]) for c in key) not in known]
+    by_key = {tuple(row.get(c, "") for c in key): row for row in existing}
+
+    merged, added = [], 0
+    for row in rows:
+        out = {c: str(row.get(c, "")) for c in columns}
+        was = by_key.pop(tuple(str(row.get(c, "")) for c in key), None)
+        if was is None:
+            added += 1
+        else:
+            out[decided] = was.get(decided, "")
+        merged.append(out)
+    orphans = [{c: row.get(c, "") for c in columns} for row in by_key.values()]
 
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
-        for row in existing:
-            writer.writerow({c: row.get(c, "") for c in columns})
-        for row in added:
-            writer.writerow({c: row.get(c, "") for c in columns})
-    return len(existing), len(added)
+        writer.writerows(merged)
+        writer.writerows(orphans)
+    return len(merged) - added, added, len(orphans)
+
+
+def report_merge(path: Path, counts: tuple[int, int, int]) -> None:
+    kept, added, orphans = counts
+    print(f"\n  {path.relative_to(REPO_ROOT)}: {kept} existing rows kept, "
+          f"{added} appended, evidence refreshed")
+    if orphans:
+        print(f"  {orphans} row(s) no longer derived, kept at the end of the file")
 
 
 def read_override(path: Path) -> list[dict]:
@@ -275,8 +362,15 @@ def do_nationality(conn) -> None:
     for label, low, high in bands:
         n = sum(1 for m, _, _ in unknown if low <= m <= high)
         print(f"    {label:<14} {n:>4}")
+    cricinfo = cricinfo_ids()
     rows = [
-        {"person_id": pid, "name": name, "matches": m, "nationality": ""}
+        {
+            "person_id": pid,
+            "name": name,
+            "matches": m,
+            "cricinfo_id": cricinfo.get(pid, ""),
+            "nationality": "",
+        }
         for m, name, pid in sorted(unknown, reverse=True)
     ]
     for row in rows[:25]:
@@ -285,18 +379,20 @@ def do_nationality(conn) -> None:
         print(f"    ... {len(rows) - 25} more, all written to the CSV")
 
     path = OVERRIDES / "nationality.csv"
-    before, added = merge_override(
-        path, ["person_id", "name", "matches", "nationality"], rows
-    )
-    print(f"\n  {path.relative_to(REPO_ROOT)}: {before} existing rows kept, "
-          f"{added} appended")
+    report_merge(path, merge_override(
+        path,
+        ["person_id", "name", "matches", "cricinfo_id", "nationality"],
+        rows,
+        decided="nationality",
+    ))
 
 
 def do_keepers(conn) -> None:
     people = ipl_people(conn)
     played = matches_played(conn)
-    print("Scanning the IPL archive for stumpings ...")
-    stumpings, per_match = keeper_stumpings()
+    print("Scanning the IPL archive for stumpings, catches and overs ...")
+    fielding = fielding_evidence()
+    stumpings = fielding.career_stumpings
     derived = {pid for pid in stumpings if pid in people}
 
     overrides = read_override(OVERRIDES / "keepers.csv")
@@ -330,33 +426,63 @@ def do_keepers(conn) -> None:
         ),
         reverse=True,
     )
+    career_catches: Counter = Counter()
+    for counts in fielding.catches.values():
+        career_catches.update(counts)
+    career_bowled: Counter = Counter()
+    for counts in fielding.bowled.values():
+        career_bowled.update(counts)
+    cricinfo = cricinfo_ids()
+
     rows = [
         {
             "person_id": pid,
             "name": name,
             "matches": m,
             "stumpings": stumpings.get(pid, 0),
+            "catches": career_catches.get(pid, 0),
+            "balls_bowled": career_bowled.get(pid, 0),
+            "cricinfo_id": cricinfo.get(pid, ""),
             "is_keeper": "y" if pid in derived else "",
         }
         for m, name, pid in candidates
     ]
     path = OVERRIDES / "keepers.csv"
-    before, added = merge_override(
-        path, ["person_id", "name", "matches", "stumpings", "is_keeper"], rows
-    )
-    print(f"\n  {path.relative_to(REPO_ROOT)}: {before} existing rows kept, "
-          f"{added} appended")
+    report_merge(path, merge_override(
+        path,
+        ["person_id", "name", "matches", "stumpings", "catches", "balls_bowled",
+         "cricinfo_id", "is_keeper"],
+        rows,
+        decided="is_keeper",
+    ))
     print("  Blank is_keeper means undecided, not 'no'. Fill it in by hand.")
 
-    do_keepers_by_season(conn, people, keepers, per_match)
+    do_keepers_by_season(conn, people, keepers, fielding)
 
 
-def do_keepers_by_season(conn, people, keepers, per_match) -> None:
+# How many of the leading catch-takers to put in front of a reviewer for a squad no
+# stumping reaches. Three because that is where the measurement landed: one of the top
+# three is the proven keeper 86% of the time, against 51% for the top one alone. A
+# fourth adds rows faster than it adds answers.
+CATCH_CANDIDATES = 3
+
+
+def do_keepers_by_season(conn, people, keepers, fielding: Fielding) -> None:
     """SPEC 6.6's 'kept for that squad' clause, as a reviewable CSV.
 
     A stumping proves someone kept for a given squad in a given season. Nothing
     disproves it, so a squad with no stumping all season leaves its keeper unproved
     rather than unkeepered - those rows go out blank for a human to settle.
+
+    The rest of the columns exist to make settling them quick. They are ranked, not
+    ratified: `catch_rank` orders the non-bowlers by catches taken, and
+    `keeper_elsewhere` marks someone a stumping proved in a *different* season. Both
+    were tested against the 140 squads a stumping does settle and both are too weak to
+    decide - the career cross-reference names a unique candidate for only 39 of them
+    and is wrong for 5, picking de Villiers over KS Bharat for 2021 RCB. That is the
+    A23 failure exactly: a famous keeper playing a season as a pure batter is
+    indistinguishable from the man who actually kept. So `kept` still starts blank
+    unless a stumping proved it, and blank still means undecided.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -378,41 +504,92 @@ def do_keepers_by_season(conn, people, keepers, per_match) -> None:
         for fs_id, person_id in cur:
             squad[fs_id].add(person_id)
 
-    proved: dict[int, Counter] = defaultdict(Counter)
-    for (match_id, team), counts in per_match.items():
-        fs_id = by_match.get(match_id, {}).get(team)
-        if fs_id is not None:
-            proved[fs_id].update(counts)
+        cur.execute(
+            """
+            select franchise_season_id, person_id, count(*)
+            from appearances where participated group by 1, 2
+            """
+        )
+        appeared = {(fs_id, pid): n for fs_id, pid, n in cur}
 
+    def by_squad(source: dict[tuple[str, str], Counter]) -> dict[int, Counter]:
+        out: dict[int, Counter] = defaultdict(Counter)
+        for (match_id, team), counts in source.items():
+            fs_id = by_match.get(match_id, {}).get(team)
+            if fs_id is not None:
+                out[fs_id].update(counts)
+        return out
+
+    proved = by_squad(fielding.stumpings)
+    caught = by_squad(fielding.catches)
+    bowled = by_squad(fielding.bowled)
+
+    # Proved in some *other* season. Scoped this way on purpose: within the season it
+    # would simply restate `stumpings`, and a check that restates its own input is no
+    # check at all.
+    seasons_kept: dict[str, set[int]] = defaultdict(set)
+    for fs_id, counts in proved.items():
+        for person_id in counts:
+            seasons_kept[person_id].add(fs_id)
+
+    cricinfo = cricinfo_ids()
     rows = []
     unproved_seasons = 0
     for fs_id in sorted(squad, key=lambda f: label.get(f, "")):
-        candidates = set(proved.get(fs_id, ())) | (squad[fs_id] & keepers)
         unproved_seasons += not proved.get(fs_id)
-        for person_id in sorted(candidates, key=lambda p: -proved[fs_id][p]):
+        ranked = sorted(
+            (
+                p for p in squad[fs_id]
+                if not bowled[fs_id].get(p) and caught[fs_id][p]
+            ),
+            key=lambda p: (-caught[fs_id][p], people.get(p, "")),
+        )
+        rank = {p: i + 1 for i, p in enumerate(ranked)}
+        candidates = (
+            set(proved.get(fs_id, ()))
+            | (squad[fs_id] & keepers)
+            | set(ranked[:CATCH_CANDIDATES])
+        )
+        for person_id in sorted(
+            candidates,
+            key=lambda p: (
+                -proved[fs_id][p],
+                rank.get(p, len(ranked) + 1),
+                -caught[fs_id][p],
+                people.get(p, ""),
+            ),
+        ):
+            elsewhere = seasons_kept.get(person_id, set()) - {fs_id}
             rows.append(
                 {
                     "franchise_season_id": fs_id,
                     "squad": label.get(fs_id, ""),
                     "person_id": person_id,
                     "name": people.get(person_id, ""),
+                    "matches": appeared.get((fs_id, person_id), 0),
                     "stumpings": proved[fs_id][person_id],
+                    "catches": caught[fs_id][person_id],
+                    "catch_rank": rank.get(person_id, ""),
+                    "balls_bowled": bowled[fs_id].get(person_id, 0),
+                    "keeper_elsewhere": "y" if elsewhere else "",
+                    "cricinfo_id": cricinfo.get(person_id, ""),
                     "kept": "y" if proved[fs_id][person_id] else "",
                 }
             )
 
     path = OVERRIDES / "keepers_by_season.csv"
-    before, added = merge_override(
+    report_merge(path, merge_override(
         path,
-        ["franchise_season_id", "squad", "person_id", "name", "stumpings", "kept"],
+        ["franchise_season_id", "squad", "person_id", "name", "matches", "stumpings",
+         "catches", "catch_rank", "balls_bowled", "keeper_elsewhere", "cricinfo_id",
+         "kept"],
         rows,
         key=("franchise_season_id", "person_id"),
-    )
+        decided="kept",
+    ))
     print(f"\n  franchise-seasons              {len(squad):>5}")
     print(f"  with a stumping to prove one   {len(squad) - unproved_seasons:>5}")
     print(f"  with none, keeper unproved     {unproved_seasons:>5}")
-    print(f"  {path.relative_to(REPO_ROOT)}: {before} existing rows kept, "
-          f"{added} appended")
 
 
 def do_bowling_style(conn) -> None:
@@ -443,24 +620,31 @@ def do_bowling_style(conn) -> None:
         )
     conn.commit()
 
+    cricinfo = cricinfo_ids()
     rows = [
         {
             "person_id": pid,
             "name": name,
             "legal_balls": legal,
-            "bowling_style": overrides.get(pid, ""),
+            "cricinfo_id": cricinfo.get(pid, ""),
+            "bowling_style": "",
         }
         for pid, name, legal in bowlers
     ]
     path = OVERRIDES / "bowling_style.csv"
-    before, added = merge_override(
-        path, ["person_id", "name", "legal_balls", "bowling_style"], rows
-    )
     print(f"\n  bowlers with >= {MIN_LEGAL_BALLS_FOR_STYLE} legal balls {len(bowlers):>5}")
     print(f"  styles filled in                  {len(filled):>5}")
     print(f"  still blank                       {len(bowlers) - len(filled):>5}")
-    print(f"\n  {path.relative_to(REPO_ROOT)}: {before} existing rows kept, "
-          f"{added} appended")
+    report_merge(path, merge_override(
+        path,
+        ["person_id", "name", "legal_balls", "cricinfo_id", "bowling_style"],
+        rows,
+        decided="bowling_style",
+    ))
+    # Nothing in Cricsheet carries a bowling action, and no signal in the archive
+    # implies one: economy and phase usage correlate with pace or spin without ever
+    # determining it. This file is the one of the four that cannot be narrowed by
+    # derivation at all, only filled.
     if len(filled) < len(bowlers):
         print("  A8: pace/spin slots collapse to a generic bowler slot until this "
               "is filled.\n  Blank stays NULL in the database - never guessed.")

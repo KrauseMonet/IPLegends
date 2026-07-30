@@ -484,6 +484,23 @@ Derived stat tables land at the end of the phase: `player_season_stats` and
 
 Do not invent any of them.
 
+**[A30] The override CSVs hold two kinds of column and they get opposite treatment.**
+Exactly one column per file is the **decision** — `nationality`, `is_keeper`, `kept`,
+`bowling_style` — and it is the only copy of work that cannot be recomputed. It is
+carried across every regeneration untouched and is never written over, not even with an
+identical value. Every other column is **evidence** we derived, and it is refreshed on
+each run; otherwise a newly added signal could only ever reach rows that did not exist
+yet, which defeats the point of adding one. `merge_override` takes the decision column
+by name so the distinction is enforced rather than remembered. A row that stops being
+derived is kept at the end of the file rather than dropped: it may hold a decision, and a
+generator that can silently delete one eventually will.
+
+Every row in all four files carries a **`cricinfo_id`**, joined from the Cricsheet people
+register we already download. It fills nothing in. The slow part of answering these
+questions is not the judgement but identifying the player — initials-only names are
+ambiguous and several are shared outright — and the register resolves that for all 1,627
+rows needing a human, with no gaps.
+
 **6.1 Nationality and overseas status. [A3]** Build a person → national-team map from the
 men's **Test, ODI and T20I** archives combined. T20I alone misses anyone whose caps
 predate the format or came only in longer forms.
@@ -524,6 +541,25 @@ associate nations that actually supply IPL players are covered. Re-run this audi
 a fresh download before the deck is final; a second missing nation would be invisible
 otherwise. `etl.derive_people --nationality` prints it.
 
+**[A30] The Afghanistan gap is deliberate and permanent, so no download will close it.**
+It reads like a truncated archive and is not one. The T20I zip's own `README.txt` says:
+*"A further 158 matches have been withheld due to either featuring the Afghanistan men's
+team or being played in the Afghanistan Premier League, due to the Cricsheet policy to no
+longer feature matches involving Afghanistan men"* (`cricsheet.org/withheld-matches`).
+The standing instruction to re-verify against a fresh download therefore does **not**
+apply here — it will report the same absence forever, and `nationality.csv` must carry
+every Afghan player by hand permanently. This is worth stating because the failure mode
+is a future reader "fixing" the gap by re-downloading and concluding the audit is broken.
+
+**There is no second source on Cricsheet.** All 1,115 published JSON archives were
+scanned for a competition whose team membership is nationality-restricted — a Ranji,
+Mushtaq Ali, County Championship or Sheffield Shield archive would prove an Indian or
+English or Australian by positive observation. **None exists.** Cricsheet publishes
+internationals and franchise T20 leagues, and a franchise league proves nothing: its
+squads are deliberately mixed. Tests + ODIs + T20Is is the whole of the derivable
+signal and it is already fully exploited. The residual 314 cannot be narrowed further by
+any means available in this project; they can only be filled.
+
 Measured 2026-07-30: 502 resolved from international caps, **314 unknown**. By IPL
 footprint — matches actually participated in — the unknown ones are 13 with 50+, 61 with
 20–49, 126 with 5–19, 112 with 1–4, and 2 who never took the field. **The 74 at 20
@@ -551,10 +587,49 @@ all season. The per-squad answer lives in `etl/overrides/keepers_by_season.csv`,
 where it does not. **Blank is undecided, and undecided is not a yes** — an unproved squad
 gets no keeper rather than a guessed one.
 
+**[A30] Catches rank the candidates. They may not pick one.** The 26 unproved squads
+were the case for mining catches behind the stumps, filed earlier as the better keeper
+signal. It was tested before it was trusted, against the 140 squad-seasons a stumping
+already settles, and it does not survive the test:
+
+| Signal | Measured against 140 proven squad-seasons |
+|---|---|
+| Top catch-taker who bowled no ball that season | **72/140 — 51%**, a coin flip |
+| One of the **top three** such catch-takers | 121/140 — 86% |
+| Career keeper in the squad, proved in another season, leave-one-season-out | names a **unique** candidate for only 39, and is **wrong for 5 of those 39** |
+
+The last row disqualifies the tempting rule. Its errors are the A23 shape exactly — it
+picks de Villiers over KS Bharat for 2021 RCB, Bairstow over Rickelton for 2025 MI, KL
+Rahul over Stubbs for 2025 DC. **A famous keeper playing a season as a pure batter is
+indistinguishable from the man who actually kept**, and the wrong answer is the plausible
+one. A 13% error rate on the cases it is confident about is worse than 26 honest blanks.
+
+The archive cannot break the tie either: Cricsheet's `fielders[]` carries only `name` and
+`substitute`. There is **no keeper flag**, so a catch behind the stumps is not
+distinguishable from one at slip. The signal was never as strong as it was filed as.
+
+So `keepers_by_season.csv` carries the evidence and withholds the verdict. Each squad
+lists everyone a stumping proved, plus every career keeper in it, plus its top **3**
+non-bowling catch-takers, ordered most-likely first, with `matches`, `catches`,
+`catch_rank`, `balls_bowled` and `keeper_elsewhere` alongside. 2011 Delhi is the worked
+example of why the ranking is not the answer: Sehwag ranks first on catches and Ojha,
+who kept, is second — visible only because `keeper_elsewhere` is on his row too.
+
+**Neither is this a schema question.** The fallback assumed storing fielder ids, a
+migration and a full reload. It needed none: keeper derivation already reads the archive
+directly (A19), so catches were measured for free and A19 stands unchanged.
+
 **6.3 Pace versus spin.** Not derivable from the data at all. Generate
 `etl/overrides/bowling_style.csv` pre-populated with every person who has bowled ≥30 legal
 deliveries, style column blank. **The CSV is the only source of truth.** Until filled,
 `bowling_style` stays NULL and pace/spin splits return NULL, never a guess.
+
+**[A30]** This is the one of the four files that no derivation can narrow even partly.
+Cricsheet records no bowling action anywhere, and nothing in the ball-by-ball data
+implies one — economy and phase usage correlate with pace or spin without ever
+determining it, and a correlation is not a value. It is also the least urgent: per A8
+pace and spin slots collapse to a generic bowler slot of 5, so unlike the keeper file
+this one does not gate a legal draft.
 
 **6.4 Batting position.** Derivable. Within each innings, the two batters on the first
 delivery occupy positions 1 and 2. Every subsequent batter takes their position from the

@@ -232,7 +232,7 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 |---|---|
 | A1 | Extras split into 5 smallint columns. Byes/legbyes are not charged to the bowler, so one column makes economy wrong. |
 | A2 | Cohort offsets pooled across seasons, not per-cell z-scoring. Validation 10/11 replaced with predictive under/over-shrinkage tests; new check 13 for cohort era-drift. |
-| A3 | Nationality from Test + ODI + T20I archives combined. Defaulted list gets full review, sorted by matches played desc. |
+| A3 | Nationality from Test + ODI + T20I archives combined. Unknown list gets full review, sorted by matches played desc. **Superseded in part by A23 — the India default is gone.** |
 | A4 | Batting position scans both `batter` and `non_striker`. Retired hurt/out, concussion subs and Impact Player entrants keep their original position. |
 | A5 | Display phase: death = final 25% of *that innings'* scheduled overs. State model is separate: exact over x wickets bucketed 0-1/2-3/4-5/6+, fitted on full-length innings only, reduced innings mapped by balls remaining. |
 | A6 | Slot template revised. Keeper is orthogonal to batting band. Bands from 6.4 are canonical. |
@@ -252,6 +252,11 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A20 | `matches.decided_by` (runs / wickets / eliminator / dls / null) makes the result row self-describing. Takes `dls` over the margin type, since the margin type is already in `result_type` and D/L is recorded nowhere else. |
 | A21 | §7.1 fitting filter tests `innings_scheduled_balls = 120`, not `not was_reduced`. The latter leaked 148 deliveries from 3 matches abandoned in innings 1 with no chase to mark them reduced. |
 | A22 | Balls faced = `extra_wides = 0`. A no-ball is a ball faced, a wide is not, so `legal_ball` is the wrong predicate and undercounts. Corrects Kohli 2016 from 637 balls to 640. No new column (A19); migration `005` fixes the wrong comment in the immutable `003`. Pinned by validation check 17. |
+| A23 | **Corrects A3.** Unknown nationality is NULL, never a default to India. The three international archives contain **no Afghanistan team at all**, so the default was systematically wrong for a whole nation — 8 Afghan internationals were being written down as Indian and not overseas. `is_overseas` is NULL too, since it was a claim derived from a value never observed. Composite sides (ICC World XI, World XI, Africa XI, Asia XI) excluded from the vote: Rashid Khan resolved to `ICC World XI` on one cap. 502 resolved, 314 unknown. |
+| A24 | Keeper role is per franchise-season, from stumpings attributed to the season they happened in — not the career `people.is_keeper` flag, which gave exactly one keeper to only 41 of 166 franchise-seasons. Now 116 with one, 24 with two, 26 unproved. `keepers_by_season.csv` carries the per-squad answer; blank is undecided, not yes. |
+| A25 | Two phases level on the same count is `mixed`, not whichever the tie-break picks. A tie for the lead among three phases can only be 50/50, which passes the >= 50% dominance test, so the naive rule names a phase by coin toss. |
+| A26 | Role thresholds asymmetric and calibrated, not chosen: `BAT_MIN = 9.0` balls faced/match, `BOWL_MIN = 6.0` legal balls bowled/match. Symmetric cutoffs gave 2.9% or 12.6% all-rounders with a "neither" bucket. Falsifiable window pinned by a 12-player calibration table in `etl/roles.py`. |
+| A27 | A player who neither batted nor bowled gets no `squad_members` row. `role` is NOT NULL and fielding a dismissal implies no role. 47 of 3,384 pairs excluded, 3,337 written. |
 
 ## Open questions
 
@@ -273,7 +278,8 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | 4b. Migrations applied | done; 4 applied to Neon, 8 tables / 14 checks / 21 indexes, runner idempotent |
 | 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
 | 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
-| 5. Validation 1-7 | done; 5 pass, 0 fail, 2 skip (checks 5 and 6 await SPEC 6/7) |
+| 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 still awaits SPEC 7 |
+| 6. Squads, roles and bands | code done; **three override CSVs are unfilled and block the deck** |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
 **640** balls (the all-time single-season record — recorded here as 637 until check 7
@@ -289,11 +295,33 @@ figure matched what the parser had reported before any database existed.
 ## Validation
 
 ```bash
-uv run python -m validation                 # checks 1-6 and 17
+uv run python -m validation                 # checks 1-6, 17 and 18
 uv run python -m validation --check 3       # one check
 uv run python -m validation --scorecards    # check 7, for reading by hand
 uv run python -m validation --match 598027  # one scorecard
 ```
+
+## Section 6: squads, and the four CSVs that gate the deck
+
+```bash
+uv run python -m etl.derive_people --all    # nationality, keepers, bowling style
+uv run python -m etl.derive_squads          # squad_members, ~30s
+```
+
+Both are re-runnable. `derive_squads` truncates and rewrites; `derive_people` **appends
+only missing rows** to the override CSVs and never rewrites one that exists, because the
+hand-filled columns cannot be recomputed. Run `derive_people` before `derive_squads` —
+the keeper role reads `keepers_by_season.csv`, which the first command generates.
+
+| CSV | Rows awaiting a human | Blocks |
+|---|---|---|
+| `nationality.csv` | 314 | the four-overseas rule |
+| `keepers.csv` | 440 blank of 489 | the keeper slot |
+| `keepers_by_season.csv` | 179 blank of 345, covering the 26 squads with no stumping all season plus backup-keeper candidates elsewhere | the keeper slot |
+| `bowling_style.csv` | 479 | A8 pace/spin slots |
+
+Blank means undecided in all four. Nothing is guessed and nothing is defaulted, so an
+unfilled row shows up as a NULL or a missing keeper rather than as a wrong answer.
 
 A **SKIP is not a pass** and the runner says so. Checks 5 and 6 target tables SPEC 6 and 7
 build; they skip with a reason rather than reporting green against an empty table. Check 6

@@ -394,6 +394,70 @@ def check_17_balls_faced_convention(conn) -> Result:
     )
 
 
+def check_18_batting_order_is_complete(conn) -> Result:
+    """SPEC 6.4/A4. An innings that lost ten wickets used exactly eleven batters.
+
+    The wicket count comes from `player_out_id`, which the batting-position rule never
+    reads, so this predicts the size of the order from a column outside the rule
+    rather than restating it. Dropping the `non_striker` scan, or letting an Impact
+    Player entrant take a twelfth position, both break it.
+    """
+    title = "an all-out innings used exactly eleven batters"
+    (all_out,), = _rows(
+        conn,
+        """
+        select count(*) from (
+            select match_id, innings_no
+            from deliveries where not is_super_over
+            group by 1, 2
+            having count(*) filter (where player_out_id is not null) = 10
+        ) t
+        """,
+    )
+    if not all_out:
+        return skipped(18, title, "no innings in the database lost ten wickets")
+
+    offenders = [
+        f"{match_id} innings {innings_no}: 10 wickets but {used} batters"
+        for match_id, innings_no, used in _rows(
+            conn,
+            """
+            with batters as (
+                select match_id, innings_no, batter_id as person_id
+                from deliveries where not is_super_over
+                union
+                select match_id, innings_no, non_striker_id
+                from deliveries where not is_super_over
+            ),
+            used as (
+                select match_id, innings_no, count(*) as n from batters group by 1, 2
+            ),
+            wickets as (
+                select match_id, innings_no,
+                       count(*) filter (where player_out_id is not null) as w
+                from deliveries where not is_super_over group by 1, 2
+            )
+            select match_id, innings_no, used.n
+            from wickets join used using (match_id, innings_no)
+            where wickets.w = 10 and used.n <> 11
+            """,
+        )
+    ]
+    offenders += [
+        f"franchise-season {fs_id} {person_id}: position {low}-{high}"
+        for fs_id, person_id, low, high in _rows(
+            conn,
+            """
+            select franchise_season_id, person_id,
+                   batting_position_min, batting_position_max
+            from squad_members
+            where batting_position_max > 11 or batting_position_min < 1
+            """,
+        )
+    ]
+    return verdict(18, title, f"{all_out} all-out innings checked", offenders)
+
+
 CHECKS = (
     check_01_runs_total,
     check_02_participants_are_recorded,
@@ -402,4 +466,5 @@ CHECKS = (
     check_05_no_squad_member_without_appearances,
     check_06_super_overs_excluded,
     check_17_balls_faced_convention,
+    check_18_batting_order_is_complete,
 )

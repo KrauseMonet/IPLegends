@@ -488,17 +488,45 @@ Do not invent any of them.
 men's **Test, ODI and T20I** archives combined. T20I alone misses anyone whose caps
 predate the format or came only in longer forms.
 
-Anyone not found defaults provisionally to Indian with
-`nationality_source = 'default'`. **Uncapped overseas players exist in the IPL and will
-still default to Indian — this is the exact failure mode that breaks the four-overseas
-rule.** So the defaulted list needs **full review, not a spot check**. Print it **sorted
-by matches played descending** so the ones that matter surface first.
+**[A23 — corrects A3, 2026-07-30] Anyone not found is NULL, not Indian.** A3 said to
+default them to India with `nationality_source = 'default'`, with the review list as the
+safety net. That default cannot be used, because the failure it produces is systematic
+rather than scattered: **the three archives contain no Afghanistan team at all**, so every
+Afghan without other caps was written down as Indian *and* as not overseas. Eight were
+found by name in one pass — Mohammad Nabi, Rashid Khan, Mujeeb Ur Rahman, Rahmanullah
+Gurbaz, Noor Ahmad, Naveen-ul-Haq, Fazalhaq Farooqi, Karim Janat. `nationality`,
+`nationality_source` and `is_overseas` all stay NULL until a human fills the CSV in.
+`is_overseas` in particular is a claim, and must not be derived from a value never
+observed. `nationality_source = 'default'` is now never written.
+
+**Composite sides are not nationalities.** ICC World XI, World XI, Africa XI and Asia XI
+are excluded before the most-frequent-team vote. Rashid Khan resolved to `ICC World XI`
+on a single cap, which is how this surfaced: with Afghanistan missing, that was his only
+appearance in any of the three archives.
+
+Measured 2026-07-30: 502 resolved from international caps, **314 unknown**. The unknown
+list needs **full review, not a spot check**, printed **sorted by matches played
+descending** so the ones that matter surface first.
 
 `etl/overrides/nationality.csv` is authoritative over the derivation.
 
 **6.2 Wicketkeepers.** Mine `wicket_kind = 'stumped'` for positive signals. That misses
 keepers who never stumped anyone. Produce the derived list, then complete
 `etl/overrides/keepers.csv` by hand (~50–70 players, tractable).
+
+The keeper is the **fielder** on a stumping, not the bowler, and fielders are not stored
+(A19), so this reads the archive. 388 stumpings prove **49** keepers.
+
+**[A24] A career keeper flag cannot answer 6.6's "kept for that squad".**
+`people.is_keeper` is a career fact; using it alone made a keeper of every squad the
+player ever appeared in, including seasons they played purely as a batter, and gave
+exactly one keeper to only **41 of 166** franchise-seasons. Attributing each stumping to
+the franchise-season it happened in gives **116 with exactly one, 24 with two** (real —
+squads do rotate keepers) and **26 with none**, those being squads that took no stumping
+all season. The per-squad answer lives in `etl/overrides/keepers_by_season.csv`, keyed on
+`(franchise_season_id, person_id)`, pre-filled `y` where a stumping proves it and blank
+where it does not. **Blank is undecided, and undecided is not a yes** — an unproved squad
+gets no keeper rather than a guessed one.
 
 **6.3 Pace versus spin.** Not derivable from the data at all. Generate
 `etl/overrides/bowling_style.csv` pre-populated with every person who has bowled ≥30 legal
@@ -528,11 +556,22 @@ Take each player's **modal** position per franchise-season, and store the spread
 
 **6.5 Bowling usage phase.** Derive from where a bowler's legal deliveries actually came:
 `powerplay`, `middle`, `death`, or `mixed` when no phase dominates. Store per
-franchise-season.
+franchise-season. Dominance is **≥ 50%** of that bowler's classifiable legal deliveries.
+
+**[A25] Two phases level on the same count is `mixed`, whatever the threshold says.**
+With three phases a tie for the lead can only be 50/50, which passes a ≥ 50% test — so
+the naive rule names a phase, and which one it names is decided by whatever the tie-break
+happens to be. That is a coin toss dressed up as a finding. A tie means the bowler split
+their work, and `mixed` is what that is called.
+
+A delivery with a NULL phase is unknown and is left out of the denominator rather than
+counted anywhere. A bowler with no classifiable delivery gets NULL, never `mixed`:
+`mixed` is a finding about a bowler, not a place to put missing data. One bowler in the
+archive is in this position.
 
 **6.6 Roles.** Derive per franchise-season, not per career:
 
-- `keeper` if flagged as a keeper and they kept for that squad
+- `keeper` if flagged as a keeper and they kept for that squad (A24)
 - `bowler` if they bowled a meaningful share of team overs and faced few balls
 - `batter` if they faced a meaningful share of balls and bowled little
 - `allrounder` if both
@@ -540,6 +579,28 @@ franchise-season.
 Thresholds are named constants at the top of the file. Show the resulting distribution.
 Something like 40% all-rounders means the thresholds are wrong. The slot template depends
 on this being sane.
+
+**[A26] The thresholds are asymmetric, and calibrated rather than chosen.** A team faces
+about 120 balls over eleven batters and bowls 120 over five or six bowlers, so the median
+squad member faces ~6 balls a match and bowls ~12. One symmetric cutoff either calls half
+the deck all-rounders or almost none: 12 balls/match both ways gave 2.9% all-rounders, 6
+gave 12.6% *plus* a 5.9% bucket that was neither. `BAT_MIN = 9.0` balls faced per match
+(A22 predicate: excludes wides only) and `BOWL_MIN = 6.0` legal balls bowled per match —
+one over a match — are the values that classify all twelve players in `etl/roles.py`'s
+calibration table correctly. The window is narrow enough to be falsifiable: `BAT_MIN`
+must be ≤ 10.5 to keep Jadeja an all-rounder and > 5.4 to keep Narine a bowler;
+`BOWL_MIN` must be ≤ 7.8 to keep Pollard an all-rounder and > 0.9 to keep Kohli a batter.
+
+Below **both** thresholds but not idle, the larger workload *relative to its own
+threshold* wins, so the asymmetry is not quietly reintroduced by comparing raw counts.
+
+**[A27] A player who neither batted nor bowled gets no row.** `squad_members.role` is
+`NOT NULL` and fielding a dismissal says nothing about whether someone is a batter or a
+bowler, so there is no honest role to assign. **47** of 3,384 (franchise-season, person)
+pairs are in this position and are excluded, leaving **3,337** rows.
+
+Measured 2026-07-30: bowler 49.8%, batter 36.8%, all-rounder 8.5%, keeper 4.9%. 483 rows
+(14.5%) had a tied modal position, broken towards the lower number; 352 never batted.
 
 ---
 
@@ -754,6 +815,13 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     de Villiers 687 off 407. The two candidate predicates differ only by the no-balls a
     batter faced, which is small but never zero across a season, so a wrong predicate
     cannot coincidentally satisfy all three. This is the check that caught A22.
+
+18. **[A4/6.4] An innings that lost ten wickets used exactly eleven batters.** The wicket
+    count comes from `player_out_id`, a column the batting-position rule never reads, so
+    this predicts the size of the order from outside the rule rather than restating it.
+    Dropping the `non_striker` scan, or letting an Impact Player entrant take a twelfth
+    position, both break it. Currently exact on all 227 all-out innings. Carries a bounds
+    assertion on `squad_members` in the same check: no stored position outside 1–11.
 
 ---
 

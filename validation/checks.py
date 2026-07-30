@@ -489,6 +489,124 @@ def check_19_every_squad_can_field_a_keeper(conn) -> Result:
     )
 
 
+def check_15_actual_delivery_is_reproducible(conn) -> Result:
+    """A19. `legal_ball` regenerates the source's own scorecard reference.
+
+    The second of the two checks that can tell us we misread the source rather than
+    merely contradicted ourselves. `actual_delivery` is the over.legal-ball label a
+    scorecard prints, and A19 declines to store it precisely so it can be used this
+    way: reproducing it exactly is a statement that our wide and no-ball
+    classification agrees with Cricsheet's, tested against 295,732 independent
+    assertions rather than against our own parser.
+
+    The label is the *next* legal-ball index, which is why it repeats after a wide -
+    the wide does not advance the count, so the following legal ball reuses the label.
+    Those repeats are the informative part: get wides wrong and the duplicates land in
+    the wrong places even though the count of them stays plausible.
+    """
+    title = "legal_ball reproduces the source's actual_delivery"
+    if not ARCHIVE.exists():
+        return skipped(15, title, f"{ARCHIVE} absent; run: uv run python -m etl.download")
+
+    loaded = {m for (m,) in _rows(conn, "select match_id from matches")}
+    if not loaded:
+        return skipped(15, title, "no matches loaded")
+
+    source: dict[tuple, str] = {}
+    with zipfile.ZipFile(ARCHIVE) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".json"):
+                continue
+            match_id = name[:-5]
+            if match_id not in loaded:
+                continue
+            raw = json.loads(zf.read(name))
+            for innings_no, innings in enumerate(raw.get("innings", []), start=1):
+                is_super = bool(innings.get("super_over"))
+                for over in innings.get("overs", []):
+                    for ball_no, d in enumerate(over["deliveries"], start=1):
+                        label = d.get("actual_delivery")
+                        if label is not None:
+                            key = (match_id, innings_no, is_super, over["over"], ball_no)
+                            source[key] = label
+
+    offenders: list[str] = []
+    compared = 0
+    legal_so_far = 0
+    previous = None
+    with conn.cursor(name="check_15") as cur:
+        cur.itersize = 20_000
+        cur.execute(
+            """
+            select match_id, innings_no, is_super_over, over_no, ball_no, legal_ball
+            from deliveries
+            order by match_id, innings_no, is_super_over, over_no, ball_no
+            """
+        )
+        for match_id, innings_no, is_super, over_no, ball_no, legal in cur:
+            over_key = (match_id, innings_no, is_super, over_no)
+            if over_key != previous:
+                legal_so_far = 0
+                previous = over_key
+            # The label always names the ball this one would be if it counted, so it
+            # is read before the increment, not after.
+            derived = f"{over_no}.{legal_so_far + 1}"
+            if legal:
+                legal_so_far += 1
+
+            expected = source.pop((*over_key, ball_no), None)
+            if expected is None:
+                continue  # the source omits the field on this delivery
+            compared += 1
+            if derived != expected:
+                offenders.append(
+                    f"{match_id} inn{innings_no} ov{over_no} ball{ball_no}: "
+                    f"derived {derived} vs source {expected}"
+                )
+
+    if not compared:
+        return skipped(15, title, "the archive carries no actual_delivery field")
+    return verdict(
+        15, title, f"{compared} scorecard references regenerated from legal_ball",
+        offenders,
+    )
+
+
+def check_16_scheduled_length_is_null_only_where_specified(conn) -> Result:
+    """A17. Exactly six innings may have an unknown scheduled length.
+
+    A null here is load-bearing: §7.1 filters on `innings_scheduled_balls = 120`, and
+    a null fails that equality by construction, so an innings of unknown length falls
+    out of the fitting set without anyone remembering to exclude it. That protection
+    is only as good as the null being rare and accounted for. A seventh null would
+    mean the A17 rule had quietly stopped matching the archive, and it would remove
+    deliveries from the fit silently rather than loudly.
+
+    Super overs are excluded from the count rather than listed as offenders: they have
+    no scheduled length by nature, and 34 of them are null for that reason.
+    """
+    title = "scheduled length is null only for the six A17 innings"
+    expected = {
+        ("1136566", 1), ("1136592", 1), ("980989", 1),   # shortened, abandoned mid-over
+        ("1473495", 1), ("1527685", 1), ("501265", 1),   # abandoned, no second innings
+    }
+    found = {
+        (match_id, innings_no)
+        for match_id, innings_no in _rows(
+            conn,
+            """
+            select distinct match_id, innings_no from deliveries
+            where innings_scheduled_balls is null and not is_super_over
+            """,
+        )
+    }
+    offenders = [f"{m} inn{i}: unknown length, not one of the six" for m, i in sorted(found - expected)]
+    offenders += [f"{m} inn{i}: expected unknown, now has a length" for m, i in sorted(expected - found)]
+    return verdict(
+        16, title, f"{len(found)} innings of unknown scheduled length", offenders
+    )
+
+
 CHECKS = (
     check_01_runs_total,
     check_02_participants_are_recorded,
@@ -496,6 +614,8 @@ CHECKS = (
     check_04_two_franchise_seasons,
     check_05_no_squad_member_without_appearances,
     check_06_super_overs_excluded,
+    check_15_actual_delivery_is_reproducible,
+    check_16_scheduled_length_is_null_only_where_specified,
     check_17_balls_faced_convention,
     check_18_batting_order_is_complete,
     check_19_every_squad_can_field_a_keeper,

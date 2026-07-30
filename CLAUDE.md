@@ -305,6 +305,7 @@ treat the current values as ratified beyond the twelve.
 | 4c. Loader, 2016 only | done; 60 matches, 14,096 deliveries, 1,324 appearances, 160 people, 8 franchise-seasons |
 | 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
 | 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 still awaits SPEC 7 |
+| 5b. Checks 15 and 16 | done 2026-07-30; both had been asserted in SPEC as measured fact with no standing check behind them. 15 regenerates all 295,732 scorecard references from `legal_ball`; 16 pins the unknown-length innings at exactly 6. **Checks 8-14 remain unwritten and all depend on SPEC 7.** |
 | 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
@@ -321,7 +322,7 @@ figure matched what the parser had reported before any database existed.
 ## Validation
 
 ```bash
-uv run python -m validation                 # checks 1-6, 17, 18, 19
+uv run python -m validation                 # checks 1-6, 15, 16, 17, 18, 19
 uv run python -m validation --check 17      # one check, BY ITS SPEC 8 NUMBER
 uv run python -m validation --scorecards    # check 7, for reading by hand
 uv run python -m validation --match 598027  # one scorecard

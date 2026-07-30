@@ -6,6 +6,11 @@ the deal-time guarantee's unstated assumption -- that every slot type is fillabl
 enough of the deck that a draft can always finish -- is no longer safe to assume.
 
 This module does not check per-slot counts. It runs the draft.
+
+A40 resolved the template against what it found here: `middle` and `finisher` are one band
+covering positions 5-8, because the separate finisher slot mandated a scarcity the deal-time
+guarantee then had to enforce by steering every drafter toward the same 29 people, which is
+the opposite of what uniform sampling is for.
 """
 
 from __future__ import annotations
@@ -19,19 +24,35 @@ from dataclasses import dataclass, field
 import psycopg
 from dotenv import load_dotenv
 
-# SPEC 1.1, with A8's interim collapse of pace 3 + spin 2 into a generic bowler 5.
+# SPEC 1.1, with A8's interim collapse of pace 3 + spin 2 into a generic bowler 5, and
+# A40's merge of middle and finisher into one band. The merge is a widening, not a
+# reshuffle: the three slots that were 2 middle + 1 finisher are now 3 drawn from the union,
+# so it cannot be tighter than what it replaced.
 TEMPLATE: dict[str, int] = {
     "keeper": 1,
     "opener": 2,
     "top_order": 2,
-    "middle": 2,
-    "finisher": 1,
+    "middle_or_finisher": 3,
     "bowler": 5,
     "open": 2,
 }
 SQUAD_SIZE = sum(TEMPLATE.values())
 
-BAND_SLOTS = {"opener", "top_order", "middle", "finisher"}
+# SPEC 6.4 band -> the slot it fills. `tail` is absent by design (A39): a tail batter has no
+# rateable batting season and is drafted for bowling.
+BAND_SLOT: dict[str, str] = {
+    "opener": "opener",
+    "top_order": "top_order",
+    "middle": "middle_or_finisher",
+    "finisher": "middle_or_finisher",
+}
+
+# Kept only so the A40 decision stays auditable: this is the template the merge replaced.
+PRE_MERGE_TEMPLATE: dict[str, int] = {
+    "keeper": 1, "opener": 2, "top_order": 2, "middle": 2, "finisher": 1,
+    "bowler": 5, "open": 2,
+}
+PRE_MERGE_BAND_SLOT = {b: b for b in ("opener", "top_order", "middle", "finisher")}
 
 # The guarantee re-draws silently. It cannot re-draw forever, and a cap that is hit is
 # itself the finding, so it is generous rather than tight.
@@ -50,6 +71,8 @@ class Card:
     band: str | None = None
     role: str | None = None
     career_keeper: bool = False
+    has_bat: bool = False
+    has_bowl: bool = False
 
 
 @dataclass
@@ -90,77 +113,57 @@ def load_deck(conn) -> Deck:
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for fs_id, person_id, name, role, band, career_keeper, bat, bowl in rows:
-        slots = {"open"}
-        if role == "keeper":
-            slots.add("keeper")
-        if bat is not None and band in BAND_SLOTS:
-            slots.add(band)
-        if bowl is not None:
-            slots.add("bowler")
         best = max(v for v in (bat, bowl) if v is not None)
         cards_by_fs[fs_id].append(
-            Card(fs_id, person_id, name, frozenset(slots), best, band, role, career_keeper)
+            Card(fs_id, person_id, name, frozenset(), best, band, role, career_keeper,
+                 bat is not None, bowl is not None)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]
-    return Deck(dict(cards_by_fs), sorted(all_fs))
+    return label(Deck(dict(cards_by_fs), sorted(all_fs)))
+
+
+def label(deck: Deck, band_slot: dict[str, str] | None = None,
+          keeper_hand_filled: bool = False) -> Deck:
+    """Attach eligible slots to every card under a given band mapping.
+
+    Separated from loading so a template change is a re-label rather than a re-query, and
+    so the pre-merge template can still be evaluated against the same deck.
+    """
+    band_slot = BAND_SLOT if band_slot is None else band_slot
+
+    def slots_for(card: Card) -> frozenset[str]:
+        slots = {"open"}
+        if card.role == "keeper" or (keeper_hand_filled and card.career_keeper):
+            slots.add("keeper")
+        if card.has_bat and card.band in band_slot:
+            slots.add(band_slot[card.band])
+        if card.has_bowl:
+            slots.add("bowler")
+        return frozenset(slots)
+
+    return Deck(
+        {fs: [Card(c.fs_id, c.person_id, c.name, slots_for(c), c.rating, c.band, c.role,
+                   c.career_keeper, c.has_bat, c.has_bowl)
+              for c in cards]
+         for fs, cards in deck.cards_by_fs.items()},
+        deck.fs_ids,
+    )
 
 
 # --- template variants ----------------------------------------------------------------
 #
-# Each variant re-labels which slots a card can fill and/or reshapes the template. They are
-# the candidate repairs named in the A39 discussion, measured rather than argued about.
+# The ratified template is the first row. The rest exist so A40 stays auditable: the merge
+# was chosen against these numbers, and a future reader can re-run them rather than take the
+# decision on trust. `keeper_hand_filled` is an optimistic upper bound on the CSV (A24 showed
+# the career flag is wrong for a per-season question), so it brackets rather than predicts.
 
-def variant_spec(card: Card) -> frozenset[str]:
-    return card.slots
-
-
-def variant_finisher_or_middle(card: Card) -> frozenset[str]:
-    """A rated middle-order batter may fill the finisher slot.
-
-    Bands 5-6 and 7-8 are adjacent and the distinction is partly opportunity, so this is
-    the mildest repair that touches only the slot that strands.
-    """
-    if "middle" in card.slots:
-        return card.slots | {"finisher"}
-    return card.slots
-
-
-def variant_keeper_hand_filled(card: Card) -> frozenset[str]:
-    """Upper bound on what finishing `keepers_by_season.csv` could buy the keeper slot.
-
-    Uses the career keeper flag, which A24 showed is wrong for a per-season question, so
-    this is deliberately optimistic. If the slot still strands here it cannot be fixed by
-    the hand-fill.
-    """
-    if card.career_keeper:
-        return card.slots | {"keeper"}
-    return card.slots
-
-
-def variant_both(card: Card) -> frozenset[str]:
-    return variant_finisher_or_middle(card) | variant_keeper_hand_filled(card)
-
-
-VARIANTS = {
-    "spec": (variant_spec, TEMPLATE),
-    "finisher<-middle": (variant_finisher_or_middle, TEMPLATE),
-    "keeper hand-filled": (variant_keeper_hand_filled, TEMPLATE),
-    "both": (variant_both, TEMPLATE),
-    "finisher->open": (variant_spec, {**TEMPLATE, "finisher": 0, "open": 3}),
+VARIANTS: dict[str, tuple[dict[str, str], bool, dict[str, int]]] = {
+    "A40 ratified":            (BAND_SLOT,           False, TEMPLATE),
+    "A40 + keeper CSV":        (BAND_SLOT,           True,  TEMPLATE),
+    "pre-merge (superseded)":  (PRE_MERGE_BAND_SLOT, False, PRE_MERGE_TEMPLATE),
+    "pre-merge + keeper CSV":  (PRE_MERGE_BAND_SLOT, True,  PRE_MERGE_TEMPLATE),
 }
-
-
-def apply_variant(deck: Deck, relabel) -> Deck:
-    return Deck(
-        {
-            fs: [Card(c.fs_id, c.person_id, c.name, relabel(c), c.rating,
-                      c.band, c.role, c.career_keeper)
-                 for c in cards]
-            for fs, cards in deck.cards_by_fs.items()
-        },
-        deck.fs_ids,
-    )
 
 
 # --- the drafter ---------------------------------------------------------------------
@@ -299,44 +302,44 @@ def report(deck: Deck, trials: int, seed: int) -> None:
                   f"{len(results) - len(failed):10} {len(failed):8} "
                   f"{len(failed) / len(results):9.1%}   {mean:8.1f} {worst:6}   {summary}")
 
-    # The scarce slots, named. A slot the whole 19-year archive can fill from 29 people is
-    # a slot whose pick is nearly predetermined however well the ratings behind it work.
-    for slot in ("finisher", "keeper"):
-        names = sorted({(c.name, c.person_id) for cards in deck.cards_by_fs.values()
+    # The slot that used to strand, named. Kept in the report after the merge resolved it,
+    # because the merge is only defensible if you can see what it widened.
+    for slot in ("middle_or_finisher", "keeper"):
+        names = sorted({c.name for cards in deck.cards_by_fs.values()
                         for c in cards if slot in c.slots})
-        print(f"\n    every person who can fill '{slot}' in nineteen seasons ({len(names)})")
-        for i in range(0, len(names), 4):
-            print("      " + "  ".join(f"{n:22}" for n, _ in names[i:i + 4]))
+        print(f"\n    distinct people who can fill '{slot}' in nineteen seasons: {len(names)}")
+        if len(names) <= 40:
+            for i in range(0, len(names), 4):
+                print("      " + "  ".join(f"{n:22}" for n in names[i:i + 4]))
 
     print(f"\n=== template variants, {trials} drafts each, guarantee OFF ===")
     print("    guarantee-off is the honest measure: it asks whether the template is\n"
           "    feasible on its own rather than whether the safety net can rescue it.\n")
-    print(f"    {'variant':20} {'rational':>10} {'naive':>10} {'random':>10}   strands on")
-    for label, (relabel, template) in VARIANTS.items():
-        v_deck = apply_variant(deck, relabel)
+    print(f"    {'variant':24} {'rational':>9} {'naive':>9} {'random':>9}   strands on")
+    for name, (bands, keeper_csv, template) in VARIANTS.items():
+        v_deck = label(deck, bands, keeper_csv)
         rates, strands = [], Counter()
-        for name in ("rational", "naive", "random"):
-            results = simulate(v_deck, name, trials, seed, guarantee=False, template=template)
+        for policy in ("rational", "naive", "random"):
+            results = simulate(v_deck, policy, trials, seed, guarantee=False,
+                               template=template)
             failed = [r for r in results if not r.completed]
             rates.append(len(failed) / len(results))
             strands.update(s for r in failed for s in r.stranded_on)
         top = ", ".join(f"{s} x{n}" for s, n in strands.most_common(2)) or "-"
-        print(f"    {label:20} {rates[0]:9.1%} {rates[1]:9.1%} {rates[2]:9.1%}   {top}")
+        print(f"    {name:24} {rates[0]:8.1%} {rates[1]:8.1%} {rates[2]:8.1%}   {top}")
 
-    # Where the re-draws land is the finding the completion rate hides.
-    print("\n    re-draws burned by the deal-time guarantee, by pick number (rational)")
-    results = simulate(deck, "rational", trials, seed)
-    by_pick = defaultdict(list)
-    for r in results:
-        for i, n in enumerate(r.redraws, start=1):
-            by_pick[i].append(n)
-    print(f"      {'pick':>4} {'mean':>8} {'p95':>8} {'max':>8}   "
-          f"distinct franchise-seasons actually served")
-    for pick in range(1, SQUAD_SIZE + 1):
-        vals = sorted(by_pick.get(pick, [0]))
-        p95 = vals[int(len(vals) * 0.95) - 1] if vals else 0
-        distinct = len({r.fs_served[pick - 1] for r in results if len(r.fs_served) >= pick})
-        print(f"      {pick:4} {sum(vals) / len(vals):8.1f} {p95:8} {max(vals):8}   {distinct:4}")
+    # SPEC 1.1 requires the guarantee to log every time it fires, so that real play can be
+    # compared against this prediction. These are the numbers that log should reproduce.
+    print(f"\n=== how often the guarantee fires (the net's real load) ===\n")
+    print(f"    {'policy':10} {'drafts where it fired':>22} {'picks where it fired':>21} "
+          f"{'worst single pick':>18}")
+    for policy in ("rational", "naive", "random"):
+        results = simulate(deck, policy, trials, seed, guarantee=True)
+        picks = [n for r in results for n in r.redraws]
+        fired_draft = sum(any(n > 0 for n in r.redraws) for r in results)
+        fired_pick = sum(n > 0 for n in picks)
+        print(f"    {policy:10} {fired_draft / len(results):21.1%} "
+              f"{fired_pick / len(picks):20.2%} {max(picks, default=0):18}")
 
 
 def main() -> None:

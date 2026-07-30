@@ -90,11 +90,13 @@ once. Dedupe on `person_id`, not on the franchise-season entry.
 | Wicketkeeper | 1 |
 | Opener (1–2) | 2 |
 | Top order (3–4) | 2 |
-| Middle (5–6) | 2 |
-| Finisher (7–8) | 1 |
+| **Middle or finisher (5–8)** | **3** |
 | Pace bowler | 3 |
 | Spin bowler | 2 |
 | Open (any) | 2 |
+
+**[A40, closed 2026-07-30] `middle` (5–6) x2 and `finisher` (7–8) x1 were separate slots
+and are now one band of three.** The old split is named here so the change is auditable.
 
 Keeper is a **role, orthogonal to batting band** — the keeper slot is filled by any keeper
 regardless of where they bat. Batting-band slots apply to specialist batters. Bowlers fill
@@ -103,47 +105,61 @@ bowling slots regardless of their batting band, which is why `tail` gets no slot
 Bands are the §6.4 canonical bands. All-rounders may fill either a batting or a bowling
 slot, decided by the drafter at pick time.
 
-**[A40, 2026-07-30] The slot template is PROVISIONAL pending feasibility retuning.** It
-was written before coverage was known, in the same way `k` was chosen before normalisation
-existed. Coverage is now known (A39), so the template gets validated against it rather than
-assumed. `uv run python -m etl.feasibility` plays the draft out; check 12 asserts it.
+**[A40, ratified and CLOSED 2026-07-30] The template was provisional pending feasibility;
+it is now measured, repaired and settled.** It had been written before coverage was known,
+in the same way `k` was chosen before normalisation existed. `uv run python -m
+etl.feasibility` plays the draft out; check 12 asserts it.
 
-*What the simulation found.* With the deal-time guarantee on — which is the game — the
-draft completes **100% of the time under every drafter policy**, so the template is
-feasible and nothing is stranded. But the guarantee is doing all of that work:
+*What the simulation found, and why the completion rate was the wrong headline.* With the
+deal-time guarantee on — which is the game — the draft completed **100% of the time under
+every drafter policy**, which reads as "feasible" and is not. Removing the guarantee is the
+honest measure, because it asks whether the template stands on its own rather than whether
+the net can rescue it. Guarantee-off, the template as written failed **1.7% of rational
+drafts and 55.5% of naive ones**, stranding on `finisher` and then `keeper`. **SPEC called
+the guarantee a safety net and it was a load-bearing beam.** A guarantee that fires
+constantly is also silently collapsing the variety uniform sampling exists to create.
 
-| policy | guarantee on | guarantee off | strands on |
-|---|---|---|---|
-| rational (fills scarcest slot first, hoards `open`) | 100% | 98.3% | finisher |
-| naive (best available, spends `open` early) | 100% | 44.5% | finisher, then keeper |
-| random | 100% | 45.6% | finisher, then keeper |
+*The repair, ratified: two changes.*
 
-**SPEC calls the guarantee a safety net and it is currently a load-bearing beam.** That is
-the finding, not the completion rate. Two consequences worth naming before §7.4:
+- **`finisher` accepts `middle` too — one `middle-or-finisher` band of three covering
+  positions 5–8.** `finisher` alone was servable from **43 of 166 franchise-seasons and 29
+  distinct people in nineteen years**; a mandatory slot drawn from 29 people has a nearly
+  predetermined pick. Cricket backs the merge — the 5-to-8 order is a continuum, not two
+  jobs.
+- **`keeper` is treated as resolved by the hand-filled `keepers_by_season.csv`**, not by a
+  template change. It is servable from **126 of 166 with 35 people** *while the CSV is
+  unfilled*; filling it is the fix. Check 19 remains the gate on that.
 
-- **`finisher` is servable from 43 of 166 franchise-seasons and has 29 distinct people in
-  nineteen years.** A mandatory slot drawn from 29 people is a slot whose pick is close to
-  predetermined, which is in direct tension with the variety §1.1 sampling exists to create.
-  The list is also dominated by all-rounders (Warne, Ashwin, Cummins, Jadeja sit in it
-  alongside Dhoni, Karthik, Russell, Bravo), which is worth reading against A26's unsettled
-  role thresholds.
-- **`keeper` is servable from 126 of 166 and has 35 people**, and that is *with*
-  `keepers_by_season.csv` unfilled. Simulating the hand-fill at its optimistic upper bound
-  removes keeper from the stranding list entirely, so this one is fixed by finishing the
-  CSV and needs no template change.
+*Measured on the real merged template (2,000 drafts per policy, seed 7), not on a simulated
+variant:*
 
-*Candidate repairs, measured guarantee-off so the template is judged on its own:*
+| | pre-merge | post-merge |
+|---|---|---|
+| slot supply | `middle` 150 fs / 102 people + `finisher` 43 / 29 | **`middle_or_finisher` 154 fs / 117 people** |
+| rational, guarantee off | 1.7% | **0.0% — 0 of 2,000** |
+| naive, guarantee off | 55.5% | 10.7% |
+| random, guarantee off | 54.4% | 16.2% |
+| guarantee fires, rational | — | **0.0% of drafts, 0.00% of picks** |
 
-| variant | rational | naive | random | then strands on |
-|---|---|---|---|---|
-| template as written | 1.7% | 55.5% | 54.4% | finisher, keeper |
-| finisher slot accepts `middle` too | 0.1% | 20.2% | 15.9% | keeper, middle |
-| keeper CSV hand-filled | 1.7% | 51.4% | 53.7% | finisher |
-| both | **0.1%** | **12.7%** | **11.6%** | middle, keeper |
-| finisher slot folded into `open` (x3) | 0.1% | 19.5% | 14.2% | keeper, middle |
+**The bottleneck did not move up one position, and that was checked rather than assumed.**
+Widening the 5–8 band draws from the `middle` pool, so the concern was that `middle`'s
+upstream neighbours would become the new constraint. `opener` (**166 of 166 fs, 108
+people**) and `top_order` (**165 of 166, 134**) are numerically *identical* pre- and
+post-merge — the merge added supply to the band and took none from anywhere else. The
+thinnest slot is now `keeper` at 126 of 166, which is the CSV, not the template.
 
-Not decided here. The numbers exist so the template can be retuned against them rather than
-guessed at, the same way every other constant in this document was sized.
+*The guarantee stays, as the net it was meant to be, under two conditions:*
+
+1. **It must log every time it fires.** A net that silently becomes a beam again is the
+   exact failure this exercise found, and the only way to notice is a firing count. The
+   feasibility report prints drafts-where-it-fired, picks-where-it-fired and worst-single-
+   pick for this reason.
+2. **The free-pass fallback stays.** Rerolls 1–3 plus a free pass are unchanged.
+
+*Filed, not closed:* the `finisher` list was dominated by all-rounders (Warne, Ashwin,
+Cummins and Jadeja sat in it alongside Dhoni, Karthik, Russell and Bravo). **When A26's
+role thresholds are revisited against the §7.7 lists, ask whether retuning the all-rounder
+threshold changes 5–8 coverage.** The merge makes this non-urgent; it does not answer it.
 
 **[A8] Interim bowling slots.** Until `etl/overrides/bowling_style.csv` is filled, collapse
 the pace (3) and spin (2) slots into a single generic **bowler slot of 5**, so the draft
@@ -1165,12 +1181,12 @@ three things follow.
    that cannot field a rated finisher from 123 of 166 franchise-seasons is a draft-legality
    problem, not a presentation one.
 3. ~~**The deck may nonetheless be fine, and this has not been verified.**~~ **Verified
-   2026-07-30 — see A40.** The draft completes 100% of the time under the deal-time
-   guarantee, so the template is feasible; **393 of 730 tail player-seasons are
-   bowling-rateable** and `tail` never strands anyone. What the simulation *did* find is
-   that the guarantee has stopped being a safety net, and that `finisher` is the slot
-   carrying the risk. §7.4 may proceed on the feasibility question; the template retune is
-   a separate open decision.
+   2026-07-30, and the template was repaired — see A40, now closed.** `tail` never strands
+   anyone: **393 of 730 tail player-seasons are bowling-rateable**, so a number 9 is drafted
+   on the rating that is real. What the simulation found instead was that the deal-time
+   guarantee had become load-bearing and `finisher` was carrying the risk. Merging `middle`
+   and `finisher` into one 5–8 band of three took rational guarantee-off failure from 1.7%
+   to **0 of 2,000**. §7.4 may now proceed; the template is settled, not deferred.
 
 Do not resolve any of this by lowering a floor. A33 measured both and they sit where the
 lists stop moving; moving them to fill a slot would be fitting the evidence to the deck.
@@ -1237,10 +1253,14 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     seeded drafts against each of three drafter policies — and fails if any of them
     strands. It reports the guarantee-off failure rate beside the result, because that is
     the number that says whether the guarantee is the safety net SPEC calls it. It reads
-    the template from `etl.feasibility` so a retune moves the check with it. Currently
-    passes: 100% completion on the guarantee, 1%/55%/51% failure without it, thinnest slot
-    `finisher` at 43 of 166. **Verified falsifiable** — emptying the finisher pool or the
-    keeper pool strands 30 of 30 drafts while the unmodified deck completes 30 of 30.
+    the template from `etl.feasibility` so a retune moves the check with it — which it
+    already did once, when A40 merged `middle` and `finisher`. Currently passes on the
+    merged template: 100% completion on the guarantee, **0%/13%/20%** without it, thinnest
+    slot now **`keeper` at 126 of 166**, which is `keepers_by_season.csv` and check 19's
+    business rather than the template's. **Verified falsifiable** — emptying the finisher
+    pool or the keeper pool strands 30 of 30 drafts while the unmodified deck completes 30
+    of 30. Property-based on purpose: it follows the template rather than pinning today's
+    numbers, so the assertion survives a retune and the reported figures move with it.
 
 13. **[A2] Cohort offset era-drift diagnostic.** Check whether the pooled cohort offsets
     drift across eras. Pooling assumes "finisher" means the same thing in 2010 and 2024,

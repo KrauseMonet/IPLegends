@@ -19,7 +19,7 @@ import argparse
 import os
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import psycopg
 from dotenv import load_dotenv
@@ -61,18 +61,41 @@ REDRAW_CAP = 2_000
 
 @dataclass(frozen=True)
 class Card:
-    """One draftable player-season: a person, in a franchise-season, and what it can fill."""
+    """One draftable player-season: a person, in a franchise-season, and what it can fill.
+
+    `bat` and `bowl` are the two normalised per-ball ratings, either of which may be None
+    when that discipline did not clear A33's floor. They are carried rather than a pair of
+    has-a-rating booleans because the simulator needs the numbers themselves, and a boolean
+    beside the number it was derived from is two copies of one fact (A19).
+    """
 
     fs_id: int
     person_id: str
     name: str
     slots: frozenset[str]
-    rating: float
+    bat: float | None = None
+    bowl: float | None = None
     band: str | None = None
     role: str | None = None
     career_keeper: bool = False
-    has_bat: bool = False
-    has_bowl: bool = False
+    season_year: int | None = None
+    franchise: str | None = None
+    # NULL is a real and common value here, never False (A23): nationality is unfilled for
+    # 314 people, and an unknown passport must not read as an Indian one.
+    overseas: bool | None = None
+
+    @property
+    def has_bat(self) -> bool:
+        return self.bat is not None
+
+    @property
+    def has_bowl(self) -> bool:
+        return self.bowl is not None
+
+    @property
+    def rating(self) -> float:
+        """What a drafter ranks on: the better of the two disciplines."""
+        return max(v for v in (self.bat, self.bowl) if v is not None)
 
 
 @dataclass
@@ -100,6 +123,7 @@ def load_deck(conn) -> Deck:
         """
         select s.franchise_season_id, s.person_id, p.primary_name,
                s.role, s.batting_band, coalesce(p.is_keeper, false),
+               f.season_year, f.display_name, p.is_overseas,
                -- The normalised value, not the shrunk one: a drafter ranking on the
                -- pre-normalisation number would prefer recent seasons for the era drift
                -- alone (7.4), which is a season bias dressed up as a preference.
@@ -107,19 +131,20 @@ def load_deck(conn) -> Deck:
                max(r.normalised_per_ball) filter (where r.discipline = 'bowling') as bowl
           from squad_members s
           join people p on p.person_id = s.person_id
+          join franchise_seasons f on f.franchise_season_id = s.franchise_season_id
           join player_season_rating r
             on r.franchise_season_id = s.franchise_season_id
            and r.person_id = s.person_id
-         group by 1, 2, 3, 4, 5, 6
+         group by 1, 2, 3, 4, 5, 6, 7, 8, 9
         """
     ).fetchall()
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
-    for fs_id, person_id, name, role, band, career_keeper, bat, bowl in rows:
-        best = max(v for v in (bat, bowl) if v is not None)
+    for (fs_id, person_id, name, role, band, career_keeper,
+         season_year, franchise, overseas, bat, bowl) in rows:
         cards_by_fs[fs_id].append(
-            Card(fs_id, person_id, name, frozenset(), best, band, role, career_keeper,
-                 bat is not None, bowl is not None)
+            Card(fs_id, person_id, name, frozenset(), bat, bowl, band, role,
+                 career_keeper, season_year, franchise, overseas)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]
@@ -146,9 +171,7 @@ def label(deck: Deck, band_slot: dict[str, str] | None = None,
         return frozenset(slots)
 
     return Deck(
-        {fs: [Card(c.fs_id, c.person_id, c.name, slots_for(c), c.rating, c.band, c.role,
-                   c.career_keeper, c.has_bat, c.has_bowl)
-              for c in cards]
+        {fs: [replace(c, slots=slots_for(c)) for c in cards]
          for fs, cards in deck.cards_by_fs.items()},
         deck.fs_ids,
     )
@@ -212,6 +235,10 @@ class Result:
     stranded_on: tuple[str, ...] = ()
     redraws: list[int] = field(default_factory=list)
     fs_served: list[int] = field(default_factory=list)
+    # The squad itself, in pick order. Feasibility only ever counted completions, but the
+    # game has to hand the drafted fifteen to a match, and re-deriving them from `fs_served`
+    # would mean re-running the policy and hoping it landed the same way.
+    picks: list[tuple[Card, str]] = field(default_factory=list)
 
 
 def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
@@ -255,6 +282,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         unfilled[slot] -= 1
         result.redraws.append(attempt)
         result.fs_served.append(fs_id)
+        result.picks.append((card, slot))
 
     result.completed = True
     return result

@@ -1453,11 +1453,131 @@ trimmed so nobody mistakes the explicit clause for the thing doing the work.
 
 ## 9. Out of scope for this phase
 
-- The simulator or any probability model
-- The draft loop
+**The simulator and the draft loop were the first two entries on this list and were moved
+off it on 2026-07-30.** Recorded rather than quietly deleted, because it is a change to the
+phasing this document set. The reason is that §7.4's normalisation, A46's prior and A35's
+`k` were every one of them settled on internal evidence, and a rating that nothing consumes
+cannot be judged: the only external test available is whether the numbers play a match that
+looks like cricket. They are specified in §10. Nothing in `etl` imports `game`, so the
+dependency runs one way and the pipeline is exactly as testable as it was.
+
 - Any web UI, Next.js app or API route
 - Authentication, leaderboards, daily challenge
 - Any AI or LLM integration
 - Any franchise logo, crest, kit colour or player photograph. IPL and BCCI marks are
   aggressively enforced and player likeness rights are live litigation territory in India.
   **Text only.**
+
+## 10. The match engine
+
+`uv run python -m game` drafts two squads off the real deck, picks two XIs and plays twenty
+overs a side. It is the consumer §7's ratings were missing. It reads the stored §7.1 grids
+and the `player_season_rating` view; it fits nothing and writes nothing.
+
+### 10.1 The outcome space
+
+A ball resolves to one of eight things: a dismissal, or 0-6 off the bat. That is the whole
+archive — 32 fives off overthrows and no sevens (§7.1's outcome guard) — so the space is
+measured, not chosen, and it is the same seven columns `state_ball_outcomes` stores plus
+the dismissal the same row counts.
+
+Wides are drawn **before** the delivery and are not balls faced, so they do not advance the
+over. Every other extra is a flat per-ball rate charged to the team and not to either
+player. Both rates come from the §7.1 fitting set: **0.0343 wides per ball faced at 1.193
+runs each**, and **0.0296 non-wide extras per ball faced**. They are league constants
+because no rating in §7 is an extras rating — inventing a per-player one would be A23's
+error in a new place.
+
+### 10.2 The tilt
+
+The state model gives a distribution per (over × bucketed wickets). A rating is runs per
+ball above the league. The engine has to turn "this batter is +0.15 and this bowler is
++0.08" into a distribution, and it does it by **exponential tilting**:
+
+```
+q(x) = p(x) · e^(θx) / Z,   θ solved so that   E_q[x] = E_p[x] + bat − bowl
+```
+
+This is the minimum-KL distribution with the mean requested, which is the property that
+matters: **it adds no information beyond the mean**, so the state's own shape decides how a
+rating splits between more runs and fewer dismissals rather than a hand-written rule
+deciding it. The dismissal sits in the same distribution at value `−wicket_cost(state)`, so
+one θ moves both halves in the proportion the state implies. Solved by bisection on θ, which
+needs no starting point because the tilted mean is strictly increasing in θ.
+
+Three consequences worth stating, all pinned by `tests/test_simulator.py`:
+
+- **θ = 0 is the identity.** With every rating at league average the engine reduces exactly
+  to the state model, which is what makes §10.5 a real test rather than a tautology.
+- **A zero stays zero.** The tilt multiplies, so it cannot invent a five off the bat in a
+  state that has never produced one. An additive adjustment would not have this property.
+- **An unreachable target saturates** at the nearest extreme instead of diverging.
+
+### 10.3 Four named simplifications
+
+Named because each is a place the engine is knowingly not cricket, and an unnamed
+simplification is indistinguishable from a bug:
+
+1. **No partnership, no fatigue, no set batter.** A batter's rating is the same on ball 1
+   as on ball 40. §7 rates a season, not an innings, so there is no per-innings shape to
+   consume yet.
+2. **No captaincy.** `choose_bowler` gives the next over to whoever has bowled least, best
+   bowler breaking the tie, and never twice running. A real captain saves his best for the
+   death. Bowling order is a tactical layer and adding one before the engine underneath it
+   has been read would bury the engine's behaviour under a policy's.
+3. **No chase pressure.** The second innings uses the same first-innings grids and stops
+   at the target. §7.1 fitted first innings only (A15) and there is no second-innings table
+   to consume; A15 says one gets built if check 14 fires.
+4. **Extras are a league constant** (§10.1).
+
+### 10.4 The XI
+
+Eleven from fifteen: the keeper first, then the five best bowlers, then the best bats.
+**Five bowlers is the count rather than a preference** — twenty overs at a maximum of four
+each is exactly five. The attack is *capped* at five for the same reason: `choose_bowler`
+equalises workload, so an XI holding seven bowlers would give all seven three overs and hand
+the best bowler in the side a quarter of his allocation, flattening exactly the rating
+differences the draft is about.
+
+**The four-overseas rule is enforced on the KNOWN count and nowhere else.** A23 left 314
+people with a NULL nationality, so the engine enforces a lower bound and reports how far
+above it the truth could sit — `legal`, `CANNOT BE CERTIFIED` with the interval, or `NO
+LEGAL XI EXISTS`. Both sides of a repair read A23 the same way: an overseas player may only
+be swapped out for a **known domestic** one. Swapping in an unknown lowers the count this
+code can see without lowering the count that matters.
+
+Measured over 400 drafted XIs, known-domestic-only against unknown-eligible: **legal 127 vs
+118, uncertain 179 vs 224, no legal XI 94 vs 58**. The strict rule certifies *more* XIs, not
+fewer — the loose one was manufacturing uncertainty by design.
+
+The 94 are a real finding and not an engine bug: **§1.1's draft template carries no
+nationality constraint at all**, so the deck can hand a drafter a squad that cannot be
+fielded. This belongs with A40's retune and is recorded here rather than patched, because
+lowering it means changing the template, which is a §1.1 decision.
+
+### 10.5 `--validate`, and what it does not cover
+
+`uv run python -m game --validate` plays league-average innings — every rating zero, so
+every θ zero — and compares them against the same 1,218 first innings §7.1 was fitted on.
+3,000 innings, seed 7:
+
+| | simulated | archive |
+|---|---|---|
+| mean total | **169.5** | **169.4** |
+| of which extras | 8.5 | 8.5 |
+| mean wickets | 6.0 | 6.1 |
+| all out | 7.7% | 7.1% |
+| **SD of totals** | **27.1** | **33.2** |
+
+The first four are the check passing. **The fifth is the engine failing and it is recorded
+rather than tuned away**: simulated innings are ~18% too tightly bunched. The cause is not
+mysterious and is the same simplification four times over — every innings is played by
+league-average players on a league-average pitch, so the between-team, between-venue and
+between-day variation that widens the real distribution is absent by construction. Widening
+it with a fudge factor would fit the number while making the engine less honest, and the
+real repair is ratings on both sides, which is what the game supplies.
+
+`--validate` is the engine's own arithmetic against the archive. It cannot check the tilt,
+because at league average the tilt is the identity: `tests/test_simulator.py` is the other
+half and covers what no aggregate can — that the tilt hits the mean it was asked for, that a
+better batter both scores more and is dismissed less, and that the XI rules hold.

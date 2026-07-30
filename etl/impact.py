@@ -448,8 +448,157 @@ def loso_prior(cohorts, seasons, careers, person, season, league, bands,
             else Prior(league[season], n, "season"))
 
 
+def band_prior(cohorts, seasons, careers, person, season, league, bands,
+               floor: int = CAREER_FLOOR) -> Prior:
+    """[A34 candidate] The cohort-season mean alone, ignoring the player's own career.
+
+    Same signature as `loso_prior` so the two are interchangeable in the sweep. This is the
+    option A34 named: it cannot inflate a thin season, because the prior no longer contains
+    that season's own evidence at any remove. The cost is A7 - a player with a long, atypical
+    career is pulled toward their cohort rather than toward themselves.
+    """
+    cohort = cohorts.get((person, season))
+    fallback = bands.get((season, cohort)) if cohort else None
+    return (Prior(fallback, 0, "band") if fallback is not None
+            else Prior(league[season], 0, "season"))
+
+
+PRIORS = {"loso": loso_prior, "band": band_prior}
+
+# [A46] THE RATIFIED PRIOR, and it is `band` - which reverses A7. Decided against the
+# normalised numbers `--calibrate` prints, where the cohort-season mean beat the
+# leave-one-season-out career mean on all three criteria at every k tested:
+#
+#     prior  k=100   Kohli spread retained    thinnest season in the top 5    inversions
+#     loso                    56%                        122 balls              10.97%
+#     band                    63%                        249 balls               9.87%
+#
+# Not a close call and not a trade. The mechanism is that shrinking a player toward their
+# own career mean pulls every one of their seasons toward the SAME point, which is
+# precisely the within-player contrast SPEC 7 opens by calling "the point of the game".
+# Shrinking toward the cohort pulls all players toward a common point instead, so a
+# player's seasons keep their distance from each other. A7 reasoned that a player is their
+# own best comparison and that is true of the LEVEL; it is exactly wrong for the SPREAD.
+#
+# A7's protection is not lost, only relocated: A33's balls floor is what stops a thin
+# season being rated at all, and the floor does that job without touching the spread.
+RATED_PRIOR = band_prior
+
+
 def shrink(raw: float, n: int, prior: float, k: float) -> float:
     return (n * raw + k * prior) / (n + k)
+
+
+# [A43] Migration 010's threshold, mirrored. A cohort thinner than this gets an offset of
+# zero because there is not enough evidence to estimate one, not because it measured zero.
+MIN_COHORT_N = 20
+
+
+def normalise(values: dict, cohorts) -> dict:
+    """[A42/A43] SPEC 7.4 as migration 010 implements it: centre within season, then
+    subtract a cohort offset pooled across all seasons.
+
+    Kept in step with the view by hand, which is a duplication and is deliberate: this is
+    the only way to evaluate a k the view does not yet hold. Nothing consumes the result
+    but the calibration print below.
+    """
+    by_season: dict[int, list] = defaultdict(list)
+    for (_, season), v in values.items():
+        by_season[season].append(v)
+    season_mean = {s: statistics.mean(v) for s, v in by_season.items()}
+    centred = {key: v - season_mean[key[1]] for key, v in values.items()}
+
+    by_cohort: dict[str | None, list] = defaultdict(list)
+    for key, v in centred.items():
+        by_cohort[cohorts.get(key)].append(v)
+    offset = {c: (statistics.mean(v) if len(v) >= MIN_COHORT_N else 0.0)
+              for c, v in by_cohort.items()}
+    return {key: v - offset[cohorts.get(key)] for key, v in centred.items()}
+
+
+def dominated_inversions(rated: dict, seasons, cohorts) -> tuple[int, int]:
+    """A34's pathology, counted. A strictly dominates B - more balls AND a higher raw
+    per-ball - yet B outranks A. Within cohort, because across cohorts the offset is
+    supposed to reorder.
+    """
+    groups: dict[str | None, list] = defaultdict(list)
+    for key, value in rated.items():
+        t = seasons[key]
+        groups[cohorts.get(key)].append((t.balls, t.per_ball, value))
+    bad = pairs = 0
+    for members in groups.values():
+        for i, (bi, ri, vi) in enumerate(members):
+            for bj, rj, vj in members[i + 1:]:
+                if (bi > bj and ri > rj) or (bj > bi and rj > ri):
+                    pairs += 1
+                    dominant_value = vi if (bi > bj and ri > rj) else vj
+                    other = vj if (bi > bj and ri > rj) else vi
+                    bad += dominant_value < other
+    return bad, pairs
+
+
+def print_calibration(scored: Scored, k_grid=(50, 100, 150, 200, 300, 400)) -> None:
+    """[A34 + A35, one pass] Prior and k decided together against NORMALISED numbers.
+
+    Every figure A32-A35 quoted was measured pre-normalisation, and normalisation changes
+    the quantity the constants are judged against: it subtracts a per-season constant, so
+    a player's within-career spread is not the number it was. That is exactly why the two
+    were held for this pass rather than settled when they were first noticed.
+
+    Three things are watched, and they pull against each other:
+      - Kohli's retained season spread. SPEC 7 opens by saying the contrast between a
+        great season and an ordinary one "is the point of the game", so it is the thing
+        being bought.
+      - the smallest ball count in the top five. A34's residual is a thin season floating
+        into a list it has not earned, and it is the thing being paid.
+      - strictly-dominated inversions, which is the same pathology counted over every pair
+        rather than at the top of one list.
+    """
+    print("\n=== [A34/A35] prior and k, judged on normalised numbers ===")
+    print("    'spread' is Kohli's best-to-worst normalised batting season as a share of")
+    print("    his raw spread; 'min balls top5/20' is the thinnest season in the combined")
+    print("    normalised list; 'inv' is strictly-dominated pairs within cohort.")
+
+    kohli = next((p for p, n in scored.names.items() if n == "V Kohli"), None)
+    discs = (("batting", scored.bat, scored.bat_careers, BAT_FLOOR_BALLS),
+             ("bowling", scored.bowl, scored.bowl_careers, BOWL_FLOOR_BALLS))
+
+    print(f"\n    {'prior':<7}{'k':>5}{'spread':>9}{'min balls top5':>16}"
+          f"{'top20':>8}{'inv %':>8}{'top-5 names':>16}")
+    for mode, prior_fn in PRIORS.items():
+        for k in k_grid:
+            combined, kohli_vals, inv_bad, inv_pairs = [], [], 0, 0
+            for what, seasons, careers, floor in discs:
+                cohorts = cohorts_for(scored, what)
+                gated = {key: t for key, t in seasons.items() if t.balls >= floor}
+                league = league_means(gated)
+                bands = band_league_means(cohorts, gated)
+                shrunk = {
+                    key: shrink(t.per_ball, t.balls,
+                                prior_fn(cohorts, gated, careers, key[0], key[1],
+                                         league, bands).value, k)
+                    for key, t in gated.items()
+                }
+                rated = normalise(shrunk, cohorts)
+                bad, pairs = dominated_inversions(rated, gated, cohorts)
+                inv_bad += bad
+                inv_pairs += pairs
+                for key, value in rated.items():
+                    combined.append((value, gated[key].balls, key[0], key[1]))
+                if what == "batting" and kohli is not None:
+                    kohli_vals = [(v, gated[key].per_ball)
+                                  for key, v in rated.items() if key[0] == kohli]
+
+            combined.sort(reverse=True)
+            top5, top20 = combined[:5], combined[:20]
+            spread = ((max(v for v, _ in kohli_vals) - min(v for v, _ in kohli_vals))
+                      / (max(r for _, r in kohli_vals) - min(r for _, r in kohli_vals))
+                      if len(kohli_vals) > 1 else float("nan"))
+            names = ", ".join(f"{scored.names.get(p, p).split()[-1]} {s}"
+                              for _, _, p, s in top5[:2])
+            print(f"    {mode:<7}{k:>5}{spread:>8.0%}{min(b for _, b, _, _ in top5):>16}"
+                  f"{min(b for _, b, _, _ in top20):>8}"
+                  f"{inv_bad / inv_pairs * 100:>7.2f}%   {names}")
 
 
 def gate_reason(balls: int, matches: int, floor: int) -> str | None:
@@ -544,7 +693,7 @@ def print_floor_effect(scored, seasons, floor, what, k=SHRINKAGE_K) -> None:
     careers = scored.bat_careers if what == "batting" else scored.bowl_careers
     ranked = sorted(
         (shrink(t.per_ball, t.balls,
-                loso_prior(cohorts, gated, careers, p, s, league, bands).value, k),
+                RATED_PRIOR(cohorts, gated, careers, p, s, league, bands).value, k),
          t, (p, s))
         for (p, s), t in gated.items()
     )[::-1]
@@ -744,7 +893,7 @@ def rows_for(scored: Scored, what: str):
                 "franchise-seasons, so the ratings grain assumption is broken; "
                 "migration 009 keys on franchise_season_id and cannot hold this row"
             )
-        prior = loso_prior(cohorts, seasons, careers, person, season, league, bands)
+        prior = RATED_PRIOR(cohorts, seasons, careers, person, season, league, bands)
         matches = scored.matches.get((person, season), 0)
         yield (next(iter(fs)), person, what, t.balls, t.impact,
                t.impact_any if what == "batting" else None,
@@ -824,7 +973,7 @@ def print_cohort_tops(scored: Scored, what: str, n: int = 20) -> None:
     by_cohort: dict[str, list] = defaultdict(list)
     for key, t in gated.items():
         person, season = key
-        prior = loso_prior(cohorts, gated, careers, person, season, league, bands)
+        prior = RATED_PRIOR(cohorts, gated, careers, person, season, league, bands)
         value = shrink(t.per_ball, t.balls, prior.value, SHRINKAGE_K)
         by_cohort[cohorts.get(key) or "(uncohorted)"].append((value, t, key))
 
@@ -853,12 +1002,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="SPEC 7.7 top-20 per cohort, and nothing else")
     parser.add_argument("--gate-gap", action="store_true",
                         help="the seasons the scoring-set match count newly gates")
+    parser.add_argument("--calibrate", action="store_true",
+                        help="A34/A35: prior and k swept against normalised numbers")
     args = parser.parse_args(argv)
 
     with connect(direct=True) as conn:
         _, expected = fetch(conn)
         bat_grid, bowl_grid = fit_grids(conn)
         scored = score(conn, bat_grid, bowl_grid, expected)
+
+        if args.calibrate:
+            print_calibration(scored)
+            return 0
 
         if args.cohorts or args.gate_gap:
             if args.gate_gap:

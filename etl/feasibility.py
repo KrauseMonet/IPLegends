@@ -100,8 +100,11 @@ def load_deck(conn) -> Deck:
         """
         select s.franchise_season_id, s.person_id, p.primary_name,
                s.role, s.batting_band, coalesce(p.is_keeper, false),
-               max(r.shrunk_per_ball) filter (where r.discipline = 'batting')  as bat,
-               max(r.shrunk_per_ball) filter (where r.discipline = 'bowling')  as bowl
+               -- The normalised value, not the shrunk one: a drafter ranking on the
+               -- pre-normalisation number would prefer recent seasons for the era drift
+               -- alone (7.4), which is a season bias dressed up as a preference.
+               max(r.normalised_per_ball) filter (where r.discipline = 'batting') as bat,
+               max(r.normalised_per_ball) filter (where r.discipline = 'bowling') as bowl
           from squad_members s
           join people p on p.person_id = s.person_id
           join player_season_rating r

@@ -229,14 +229,25 @@ derived database.
 **[A9] Scope is 2008–2026, 19 seasons, 1,243 matches, 166 franchise-seasons.**
 
 2026 is complete (74 matches, consistent with the current format) and is in scope.
-Excluding it would date the game immediately. Two conditions attach:
+Excluding it would date the game immediately. Two conditions attached, and **both are now
+discharged — A9 is CLOSED (2026-07-30).**
 
 1. **Cricsheet is contributor-driven and recent matches get revised after the fact.**
-   The archive SHA256 is recorded in `data/manifest.json`, and the 2026 files must be
-   **re-verified against a fresh download before ratings are finalised**.
+   The archive SHA256 is recorded in `data/manifest.json`, and the 2026 files had to be
+   **re-verified against a fresh download before ratings were finalised**. *Discharged:*
+   `ipl_json.zip` was re-fetched from cricsheet.org on 2026-07-30 and is bit-identical to
+   the archive every figure in this spec was measured from — SHA256 `841b9829…6ea2a79`,
+   5,180,977 bytes. **Verified by re-downloading, not by re-reading the recorded hash**,
+   which would only have confirmed the file on disk had not changed locally.
 2. If any 2026 playing condition materially changed scoring, within-season normalisation
    (§7.4) absorbs it — but **flag it** if that season's baseline sits far off trend
-   rather than letting it pass silently.
+   rather than letting it pass silently. *Discharged:* 2026's batting baseline is
+   **+0.2567** runs/ball against 2025's **+0.2149** and 2024's **+0.1869** — the last step
+   in a monotone climb, the same size as the two before it. On trend, so there is nothing
+   to flag, and §7.4's centring removes the level either way.
+
+**Closing A9 does not make the archive permanent.** A future re-download that differs is a
+reload and a refit, not a discrepancy to reconcile; the hash is what tells the two apart.
 
 ### 3.2 Match JSON shape
 
@@ -1065,6 +1076,49 @@ twice** — how hard to pull a thin season toward a prior, and which prior to pu
 so they are decided together, in one pass, after §7.4, against normalised numbers. Neither
 may be ratified alone.
 
+**[A46, RESOLVED 2026-07-30 — A34 and A35 closed together, post-§7.4. The prior is the
+cohort-season mean, and `k` stays 100.] This reverses A7.**
+
+Swept both priors across six constants against normalised numbers
+(`uv run python -m etl.impact --calibrate`). The cohort-season prior beat leave-one-season-
+out on **all three** criteria at **every** k — it is not a trade:
+
+| prior | k | Kohli spread retained | thinnest season in the top 5 | dominated inversions |
+|---|---|---|---|---|
+| loso | 50 | 65% | 141 | 9.36% |
+| loso | **100** | 56% | **122** | 10.97% |
+| loso | 200 | 46% | 122 | 15.09% |
+| band | 50 | **71%** | **141** | 9.24% |
+| band | **100** | **63%** | **249** | **9.87%** |
+| band | 200 | 55% | 180 | 11.15% |
+| band | 300 | 50% | **104** | 12.55% |
+
+`band` + `k = 100` is the pick: the highest retained spread among the rows that keep every
+sub-150-ball season out of the top five, and the lowest inversion rate among those. **`k`
+therefore does not move** — normalisation did not buy a lower constant, which was the open
+possibility A35 named. k = 50 retains more spread but floats a 141-ball season into the top
+five, and k ≥ 300 lets a 104-ball season in.
+
+**Why the own-career prior was the wrong one, stated as a mechanism rather than a
+measurement.** Shrinking a player toward their own career mean pulls every one of their
+seasons toward **the same point**, which is precisely the within-player contrast §7 opens by
+calling the point of the game. Shrinking toward the cohort pulls all players toward a
+*common* point instead, so a player's seasons keep their distance from one another. A7
+reasoned that a player is their own best comparison — true of the **level**, and exactly
+wrong for the **spread**. A7's protection is not lost, only relocated: A33's balls floor is
+what stops a thin season being rated at all, and it does that job without touching spread.
+
+*One caveat on the inversion figures.* A34's 4.56%/3.71% were measured pre-normalisation
+over a pair set that is not reconstructed here; the table above counts every strictly-
+dominating within-cohort pair on normalised numbers, so the **levels are not comparable to
+A34's** and only the ordering (band below loso) reproduces. Stated rather than quietly
+presented as the same measurement.
+
+*Result.* Suryavanshi's 122-ball 2025 leaves the top five entirely; the thinnest of the top
+five is Russell 2019 at **249 balls**. Kohli runs **2016: 75** (his best) down to **2022: 30**
+and **2008: 30** on the display scale, a 45.7-point spread — the contrast the deck is built
+on, intact.
+
 **[A35, ratified 2026-07-30] The shrinkage constant is `k = 100` balls, provisionally.**
 `k >= 400` is ruled out on design grounds before any statistics: §7 opens by saying the
 season-to-season contrast "is the point of the game", and k = 400 retains 38% of Kohli's
@@ -1130,10 +1184,79 @@ against death bowlers. Never against the whole population.
 **Method:** normalise within season globally, then apply **cohort offsets estimated pooled
 across all seasons** (partial pooling). Do **not** z-score independently within each
 (season × cohort) cell — cells like "tail batters, 2011" may hold four players after the
-§7.3 gate, and standardising four observations produces noise.
+§7.3 gate, and standardising four observations produces noise. Measured: 20 of the 75
+batting (season × cohort) cells hold fewer than ten players and the smallest holds one.
 
-Map the result to a 0–100 display scale. A great finisher should surface at 92 as a
-finisher, not be compressed to 61 for facing fewer balls than an opener.
+**[A41, 2026-07-30] The cohort correction is a small residual, and the reason this section
+originally gave for it was wrong.** This paragraph used to read *"a great finisher should
+surface at 92 as a finisher, not be compressed to 61 for facing fewer balls than an
+opener"* — and that describes **raw strike rates**, where a finisher genuinely does look
+worse than an opener. It is not true of this rating. Impact is scored per ball against the
+exact (over, wickets) state, so **the state model has already made the situational
+correction before cohorts are reached**; by the time §7.4 runs, the thing the cohort offset
+was invented to fix is gone. Measured, after within-season centring:
+
+| batting | offset | | bowling | offset |
+|---|---|---|---|---|
+| opener | −0.016 | | middle | +0.011 |
+| top_order | −0.008 | | mixed | −0.011 |
+| middle | **+0.033** | | powerplay | −0.004 |
+| finisher | **+0.019** | | death | +0.002 |
+
+Finishers score **above** average per ball, not below. The entire cohort spread is 0.049
+runs/ball against a within-cohort SD of 0.185, and against a season drift of 0.25 — **five
+times the whole cohort effect**. The offsets are kept, because they are cheap and still
+move 27 ranks of 1,025, but they are a residual correction applied *after* the expensive
+work, not a large correction for facing fewer balls. **The old framing is deleted rather
+than softened: a reader acting on it would over-correct by roughly a factor of five.**
+
+**[A42] Centre within season. Do not divide by the season's standard deviation.** The level
+drift is real and large — batting runs +0.007 (2008) to +0.257 (2026), bowling mirrors it
+from +0.083 to −0.111. The *spread* drift is not real: season SDs range 0.136–0.216, but
+only **1 of 19** seasons per discipline sits more than two sampling standard errors from
+the pooled SD, so the variation is estimation noise off ~50 observations. Dividing by it
+reorders **564 of 1,025** batting seasons by more than ten places on nothing at all. This
+is A2's argument against per-cell z-scoring one level up, and it holds at both levels: do
+not normalise by a quantity you cannot estimate stably.
+
+The season mean is **unweighted** — one entry per player-season, not per ball. The rating
+is a statement about players, so the reference population is players. Ball-weighting would
+let a handful of high-volume players define the baseline everyone else is measured against,
+tilting the reference toward exactly the players who least need correcting. The two differ
+by about 0.03; unweighted is the principled choice and not merely the close one.
+
+**[A43] A cohort below the evidence threshold gets zero, and that is not the same statement
+as measuring zero.** `death` holds 8 rateable seasons over 7 at +0.002 ± 0.125 — a coin
+flip near zero, and fitting it would be fitting noise. `tail` holds none at all (A39). Both
+are **zero-by-insufficient-evidence**, and the distinction is kept legible by expressing it
+as a **threshold (≥ 20 observations) rather than a hardcoded list of two cohort names**: a
+name list would silently go stale if a revised archive gave `death` forty seasons. The
+threshold sits in a wide empty gap — `death` has 8, the next smallest cohort has 45 — so
+any value in (8, 45] behaves identically today and it is a rule about evidence, the same
+shape as A33's floors, not a tuned constant.
+
+**[A44] The 0–100 display scale is LINEAR on the normalised value, globally anchored.**
+
+Percentile is more legible one number at a time and destroys the only thing that makes the
+ratings worth building — **the gaps**. Bumrah 2020 standing clear of the field is real
+information and is the whole reason a knowledgeable drafter reaches for him; percentile
+flattens that into "near the top, like several others". Worse, under percentile two players
+a hair apart and two a chasm apart show the same gap, so **the drafter cannot see which
+pick is the real edge**.
+
+One anchor for the whole deck: a single SD across both disciplines, every season and every
+cohort. Rescaling per cohort or per season would break the one thing a display number is
+for — a 92 has to mean the same thing on every card. Batting's SD is 0.1838 and bowling's
+0.1766, a 4% difference, so sharing costs almost nothing and buys the comparison a drafter
+actually makes: a batting 92 and a bowling 92 are the same distance in runs per ball.
+
+`rating = 50 + 50 × clip(normalised / (3.5 × SD), −1, +1)`. **S = 3.5, and the clip is a
+guard rather than a transform** — it touches **1 of 1,812 rows**. The observed range is
+−3.12 to +3.60 SD, near-symmetric with no fat tail, because shrinkage already pulled every
+extreme season (all of them 120–360 balls) toward its prior before it could run away.
+S = 3.0 would clip seven, and clipping is percentile's sin applied locally: two clipped
+seasons both read 100 and the gap between them is gone. Resulting scale: min 6.7, mean
+50.0, SD 14.3, p99 85, p95 74.
 
 **7.5 Do not fold volume into the rating.** Opportunity is not quality. Balls faced belongs
 in the draft interface as context and in the simulator as batting position, not as a

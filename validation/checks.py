@@ -682,6 +682,12 @@ def check_20_state_model_covers_every_state(conn) -> Result:
         conn, "select sum(faced), sum(runs_off_bat), sum(dismissals) from state_ball_outcomes")
     (obs, remaining), = _rows(
         conn, "select sum(observations), count(*) from state_runs_remaining")
+    # A31/008: the wicket cost is the drop in expected FINAL total, so both halves of it
+    # have to be present. An empty table after migration 008 lands here as a mismatch.
+    (final_at_start,), = _rows(conn, """
+        select (runs_so_far_total + runs_remaining_total)::float / observations
+        from state_runs_remaining where over_no = 0 and wickets = 0
+    """) or [(None,)]
 
     # Recounted from deliveries through A28's filter, not read back from the fit.
     (fit_faced, fit_runs, fit_all), = _rows(conn, f"""
@@ -690,17 +696,25 @@ def check_20_state_model_covers_every_state(conn) -> Result:
                count(*)
         from deliveries where {FITTING_SET}
     """)
+    # `sum` over an empty table is null, which is the state right after a migration that
+    # truncated one. That has to read as "not fitted yet", not crash the runner: a check
+    # that raises is a check whose verdict nobody gets.
     for label, got, want in (("balls faced", faced, fit_faced),
                              ("runs off the bat", runs, fit_runs),
                              ("runs-remaining observations", obs, fit_all)):
-        if got != want:
+        if got is None:
+            offenders.append(
+                f"{label}: nothing stored — refit with `etl.state_model --write`")
+        elif got != want:
             offenders.append(f"{label}: state model holds {got:,}, deliveries gives {want:,}")
 
     zeroes = sum(1 for n in stored.values() if n == 0)
+    anchor = f"{final_at_start:.1f}" if final_at_start else "MISSING"
     return verdict(
         20, title,
         f"{len(stored)} of 80 states stored ({zeroes} never observed, kept as zeroes); "
-        f"{faced:,} balls faced, {outs:,} dismissals, {remaining} runs-remaining states",
+        f"{faced:,} balls faced, {outs:,} dismissals, {remaining} runs-remaining states; "
+        f"expected first-innings total {anchor}",
         offenders,
     )
 

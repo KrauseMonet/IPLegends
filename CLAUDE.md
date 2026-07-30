@@ -84,6 +84,16 @@ for p in sorted(pathlib.Path('migrations').glob('*.sql')):
   records including an `is_overseas = false` that would have let a legal XI field five
   overseas players while the check reported compliance. **If a field can be unobserved, it
   must be able to be NULL.**
+- **When a rule and the schema that serves it are decided together, verify the schema
+  carries every input the rule names — before applying the migration.** This is a standing
+  check, not a note about one bug. Migration 007 stored `runs_remaining_total`, and the
+  *same message* corrected SPEC 7.1 to price a wicket by expected **final** total, which is
+  `runs_so_far + runs_remaining`. Both halves were reasoned about carefully and separately;
+  nobody put them side by side, so a rule went into the spec that the table just applied
+  could not compute. Migration 008 added the column. **The fix was two lines and is not the
+  lesson.** The reconciliation step is the one that got skipped, and it gets skipped
+  precisely when both halves feel already-decided. Expect this to recur in the simulator,
+  where the parameters it consumes and the tables that hold them will be specified together.
 - No LLM or AI API call anywhere in this codebase.
 - **A migration is immutable the moment it has been applied to any database, including a
   local or personal one. Until then it is a draft and may be edited freely.** The runner

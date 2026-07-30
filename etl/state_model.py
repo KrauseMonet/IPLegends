@@ -72,6 +72,23 @@ class Cell(NamedTuple):
         return {r: n for r, n in self.outcomes.items() if r not in OFF_THE_BAT}
 
 
+class Remaining(NamedTuple):
+    """One (over, exact wickets) state, in counts. Migration 008's three columns."""
+
+    observations: int
+    runs_so_far: int        # summed over observations, not per innings
+    runs_remaining: int
+
+    @property
+    def mean_remaining(self) -> float:
+        return self.runs_remaining / self.observations
+
+    @property
+    def mean_final(self) -> float:
+        """What the innings ends on from here. **This** is what prices a wicket."""
+        return (self.runs_so_far + self.runs_remaining) / self.observations
+
+
 def unexpected_outcomes(cells: list[Cell]) -> dict[int, int]:
     total: Counter[int] = Counter()
     for cell in cells:
@@ -87,7 +104,7 @@ def bucket_of(wickets: int) -> str:
     return label
 
 
-def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], tuple[int, int]]]:
+def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], Remaining]]:
     """Fit the per-ball grid and the expected-runs-remaining grid in one pass.
 
     The two grids deliberately use different wicket grains. Per-ball rates are noisy
@@ -100,7 +117,7 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], tuple[int, int]]]:
     per_ball: dict[tuple[int, str], list] = defaultdict(
         lambda: [0, 0, 0, defaultdict(int)]
     )
-    remaining: dict[tuple[int, int], list] = defaultdict(lambda: [0, 0])
+    remaining: dict[tuple[int, int], list] = defaultdict(lambda: [0, 0, 0])
 
     with conn.cursor(name="state_fit") as cur:
         cur.itersize = 20_000
@@ -117,6 +134,7 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], tuple[int, int]]]:
             select over_no, runs_batter, extra_wides, is_wicket,
                    coalesce(sum(case when is_wicket then 1 else 0 end) over w, 0)
                        as wickets_down,
+                   coalesce(sum(runs_batter + runs_extras) over w, 0) as runs_so_far,
                    sum(runs_batter + runs_extras) over r as runs_remaining
             from fit
             window
@@ -127,10 +145,11 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], tuple[int, int]]]:
             """,
             (list(NOT_A_WICKET),),
         )
-        for over_no, runs, wides, is_wicket, wickets, runs_left in cur:
+        for over_no, runs, wides, is_wicket, wickets, runs_before, runs_left in cur:
             exact = remaining[(over_no, min(wickets, 9))]
             exact[0] += 1
-            exact[1] += runs_left
+            exact[1] += runs_before
+            exact[2] += runs_left
 
             if wides:
                 continue  # not a ball faced (A22), so not a state observation either
@@ -144,30 +163,45 @@ def fetch(conn) -> tuple[list[Cell], dict[tuple[int, int], tuple[int, int]]]:
         Cell(over_no, bucket, faced, runs, outs, dict(dist))
         for (over_no, bucket), (faced, runs, outs, dist) in sorted(per_ball.items())
     ]
-    # (observations, total) rather than (observations, mean): the same counts-only rule
-    # migration 007 stores under. The mean is one division away wherever it is wanted.
-    expected = {key: (n, total) for key, (n, total) in sorted(remaining.items()) if n}
+    # Counts, not means - the rule migrations 007 and 008 store under. Every mean is one
+    # division away wherever it is wanted, and there is only ever one copy of the fact.
+    expected = {
+        key: Remaining(*totals) for key, totals in sorted(remaining.items()) if totals[0]
+    }
     return cells, expected
 
 
 MIN_OBSERVATIONS = 100   # below this a cell is printed as '-' rather than as a number
 
 
-def mean_remaining(expected, over: int, wickets: int) -> float | None:
+def _seen(expected, over: int, wickets: int) -> Remaining | None:
     got = expected.get((over, wickets))
-    return got[1] / got[0] if got and got[0] >= MIN_OBSERVATIONS else None
+    return got if got and got.observations >= MIN_OBSERVATIONS else None
+
+
+def mean_remaining(expected, over: int, wickets: int) -> float | None:
+    got = _seen(expected, over, wickets)
+    return got.mean_remaining if got else None
 
 
 def wicket_cost(expected, over: int, wickets: int) -> float | None:
-    """Runs the innings gives up by losing a wicket here, at exact wickets.
+    """**The** cost of a wicket: the drop in expected final total. SPEC 7.1, A31.
 
-    **Not a causal cost, and not what SPEC 7.1 prices a dismissal with.** A team 4 down in
-    over 12 is not a team that was 3 down and lost one: it is disproportionately a team
-    being bowled at well, or one taking risks. Differencing runs remaining across wicket
-    states measures that selection alongside the wicket, and the selection is strong enough
-    to flip the sign - over 12 at 0 down comes out at -2.0 runs. Use the drop in expected
-    FINAL total instead, which is strictly monotone; see SPEC 7.1. This function stays
-    because the diagnostic printout is how the confounding was found and shown.
+    Verified strictly positive on all 99 transitions with at least MIN_OBSERVATIONS either
+    side - range 2.7 to 24.8 runs, mean 12.3 - and monotone in wickets at every over.
+    """
+    here, worse = _seen(expected, over, wickets), _seen(expected, over, wickets + 1)
+    return None if here is None or worse is None else here.mean_final - worse.mean_final
+
+
+def confounded_wicket_cost(expected, over: int, wickets: int) -> float | None:
+    """The wrong way to price a wicket, kept because the printout is how we found it out.
+
+    A team 4 down in over 12 is not a team that was 3 down and lost one: it is
+    disproportionately a team being bowled at well, or one taking risks. Differencing runs
+    remaining measures that selection alongside the wicket, strongly enough to flip the
+    sign - over 12 at 0 down comes out at -2.0 runs, and three cells land indistinguishable
+    from zero. Nothing may price a dismissal with this.
     """
     here, worse = mean_remaining(expected, over, wickets), \
         mean_remaining(expected, over, wickets + 1)
@@ -224,12 +258,13 @@ def write(conn, cells: list[Cell], expected) -> tuple[int, int]:
         with cur.copy(
             """
             copy state_runs_remaining (
-                over_no, wickets, observations, runs_remaining_total
+                over_no, wickets, observations, runs_so_far_total, runs_remaining_total
             ) from stdin
             """
         ) as copy:
-            for (over_no, wickets), (n, total) in sorted(expected.items()):
-                copy.write_row((over_no, wickets, n, total))
+            for (over_no, wickets), r in sorted(expected.items()):
+                copy.write_row((over_no, wickets, r.observations,
+                                r.runs_so_far, r.runs_remaining))
     conn.commit()
     return len(rows), len(expected)
 
@@ -272,19 +307,24 @@ def report(cells: list[Cell], expected, show_cells: bool) -> None:
             row += f"{c.dismissal_rate:>10.4f}" if ok else f"{'-':>10}"
         print(row)
 
-    print("\nexpected runs remaining at exact wickets, and the CONFOUNDED difference")
-    print("(the difference is printed to show why SPEC 7.1 does not price a wicket "
-          "with it)")
+    print("\nexpected FINAL total at exact wickets, and the cost of a wicket (A31)")
     print(f"    {'over':<6}{'0 down':>10}{'2 down':>10}{'4 down':>10}{'6 down':>10}"
-          f"{'diff@2':>10}")
+          f"{'cost@2':>10}{'confounded':>12}")
     for over in range(0, 20, 2):
         row = f"    {over:<6}"
         for w in (0, 2, 4, 6):
-            mean = mean_remaining(expected, over, w)
-            row += f"{mean:>10.1f}" if mean is not None else f"{'-':>10}"
-        cost = wicket_cost(expected, over, 2)
-        row += f"{cost:>10.1f}" if cost is not None else f"{'-':>10}"
+            got = _seen(expected, over, w)
+            row += f"{got.mean_final:>10.1f}" if got else f"{'-':>10}"
+        for fn, width in ((wicket_cost, 10), (confounded_wicket_cost, 12)):
+            cost = fn(expected, over, 2)
+            row += f"{cost:>{width}.1f}" if cost is not None else f"{'-':>{width}}"
         print(row)
+
+    costs = [c for over in range(20) for w in range(9)
+             if (c := wicket_cost(expected, over, w)) is not None]
+    negative = [c for c in costs if c <= 0]
+    print(f"    {len(costs)} priced transitions, {min(costs):.1f} to {max(costs):.1f} runs, "
+          f"mean {sum(costs) / len(costs):.1f}, {len(negative)} non-positive")
 
     if show_cells:
         print("\nall 80 cells, with the outcome distribution the simulator needs")

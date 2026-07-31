@@ -3,271 +3,326 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IPLegends — build your all-time IPL XI</title>
+<title>The Legends Almanack — an all-time IPL draft</title>
 <style>
-/* Floodlit night cricket: deep blue-black ground, sodium-lamp gold, a pitch-tan strip.
-   Deliberately not 7a0's football green -- same energy, different sport. */
+/* ---------------------------------------------------------------------------------------
+   THE ALMANACK.
+
+   Cricket's own visual culture is print: the almanack, the ruled scorecard, the agate
+   column of tabular figures. So this is paper and ink rather than a lit board -- serif
+   headlines, hairline rules instead of boxes, right-aligned figures, and one accent taken
+   from a cricket ball. Deliberately the opposite of a dark neon draft screen.
+--------------------------------------------------------------------------------------- */
 :root{
-  --bg:#08111c; --panel:#0d1a2a; --panel-2:#122234; --line:#1d3348; --ink:#eef2f7; --dim:#7f93ab; --gold:#f0b429; --mint:#39d98a;
-  --red:#e0452b; --pitch:#c8a878;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --paper:#f3efe4; --paper-2:#eae4d4; --card:#fbf9f3;
+  --ink:#191714; --ink-2:#4a453c; --ink-3:#8b8375;
+  --rule:#cdc4ae; --rule-soft:#e0d8c5;
+  --ball:#8c2f22;        /* leather red - the only loud colour */
+  --ball-soft:#b8543f;
+  --willow:#4e6242;      /* bat willow green, for confirmations */
+  --serif:"Iowan Old Style","Hoefler Text",Georgia,"Times New Roman",serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --fig:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  background:var(--bg); color:var(--ink); min-height:100vh;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background-image:radial-gradient(1100px 520px at 78% -12%, rgba(240,180,41,.10), transparent 60%),
-                   radial-gradient(900px 460px at 8% 106%, rgba(57,217,138,.07), transparent 60%);
+  background:var(--paper); color:var(--ink);
+  font-family:var(--serif); font-size:17px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(25,23,20,.014) 0 1px, transparent 1px 3px),
+    radial-gradient(900px 500px at 85% -10%, rgba(140,47,34,.05), transparent 65%);
 }
-.wrap{max-width:1220px;margin:0 auto;padding:20px 22px 80px}
+.sheet{max-width:1080px;margin:0 auto;padding:0 26px 90px}
 
-/* --- chrome --- */
-header{display:flex;align-items:center;gap:18px;padding:6px 0 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.mark{display:flex;align-items:baseline;gap:10px;cursor:pointer}
-.mark b{font-size:40px;font-weight:800;letter-spacing:-2px;color:var(--gold);line-height:1}
-.mark .dots{display:flex;flex-direction:column;gap:5px;padding:0 3px}
-.mark .dots i{width:8px;height:8px;background:var(--mint);display:block;border-radius:1px}
-.mark span{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
-.spacer{flex:1}
-.pill{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;
-  border:1px solid var(--line);color:var(--dim);padding:9px 14px;border-radius:999px;background:transparent}
+/* --- masthead: a wordmark with a rule, not a logo lockup --- */
+.masthead{display:flex;align-items:flex-end;gap:16px;padding:28px 0 10px;
+  border-bottom:2px solid var(--ink);flex-wrap:wrap}
+.wordmark{cursor:pointer}
+.wordmark .the{font-family:var(--sans);font-size:10px;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--ink-3);display:block;margin-bottom:1px}
+.wordmark h1{font-size:34px;margin:0;font-weight:600;letter-spacing:-.4px;line-height:1}
+.masthead .edition{margin-left:auto;font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--ink-3);text-align:right;line-height:1.7}
+.rule-thin{height:1px;background:var(--ink);opacity:.35;margin-top:3px}
 
-/* --- hero --- */
-.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center;padding:52px 0 30px}
-.kicker{font-family:var(--mono);font-size:11px;letter-spacing:4px;color:var(--dim);text-transform:uppercase;margin-bottom:20px}
-h1{font-size:58px;line-height:1.02;margin:0 0 20px;font-weight:800;letter-spacing:-1.6px}
-h1 em{font-style:normal;color:var(--gold)}
-.lede{color:#b6c6d8;font-size:17px;line-height:1.62;max-width:48ch;margin:0 0 30px}
-.cta{display:flex;gap:12px;flex-wrap:wrap}
-button{font:inherit;cursor:pointer;border:0;border-radius:4px}
-.btn{padding:15px 26px;font-weight:750;letter-spacing:.4px;background:var(--panel-2);color:var(--ink);
-  border:1px solid var(--line)}
-.btn:hover{border-color:var(--gold)}
-.btn-primary{background:var(--red);color:#fff;border:1px solid var(--red);
-  box-shadow:0 0 0 1px rgba(240,180,41,.5), 0 10px 30px -12px rgba(224,69,43,.8)}
-.btn-primary:hover{filter:brightness(1.09)}
-.btn:disabled{opacity:.35;cursor:not-allowed}
-.stat-line{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:22px}
-.stat-line b{color:var(--ink);font-weight:600}
+/* --- opening spread --- */
+.spread{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;padding:46px 0 30px;align-items:start}
+.standfirst{font-family:var(--sans);font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;
+  color:var(--ball);margin-bottom:18px}
+.headline{font-size:52px;line-height:1.06;margin:0 0 22px;font-weight:600;letter-spacing:-1px}
+.headline i{font-style:italic;color:var(--ball)}
+.deck{font-size:19px;line-height:1.6;color:var(--ink-2);margin:0 0 28px;max-width:46ch}
+.deck .drop{float:left;font-size:58px;line-height:.82;padding:5px 9px 0 0;font-weight:600;color:var(--ball)}
 
-/* the ground */
-.ground{aspect-ratio:1/1;border:1px solid var(--line);border-radius:50%;position:relative;
-  background:radial-gradient(circle at 50% 50%, rgba(57,217,138,.09), rgba(8,17,28,.2) 70%);
-  display:flex;align-items:center;justify-content:center}
-.ground::before{content:"";position:absolute;inset:9%;border:1px dashed rgba(127,147,171,.28);border-radius:50%}
-.strip{width:11%;height:33%;background:linear-gradient(180deg,rgba(200,168,120,.30),rgba(200,168,120,.16));
-  border:1px solid rgba(200,168,120,.45);border-radius:2px;position:relative}
-.strip::before,.strip::after{content:"";position:absolute;left:22%;right:22%;height:2px;background:rgba(238,242,247,.5)}
-.strip::before{top:11%} .strip::after{bottom:11%}
-.chip{position:absolute;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--mint);
-  border:1px solid rgba(57,217,138,.4);background:rgba(8,17,28,.85);padding:3px 7px;border-radius:999px;
-  transform:translate(-50%,-50%);white-space:nowrap}
+.actions{display:flex;gap:0;align-items:stretch;border:1.5px solid var(--ink);width:fit-content;max-width:100%;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.act{font-family:var(--sans);font-size:13px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;
+  padding:15px 26px;background:transparent}
+.act:hover{background:var(--paper-2)}
+.act.lead{background:var(--ball);color:var(--paper);border-right:1.5px solid var(--ink)}
+.act.lead:hover{background:var(--ball-soft)}
+.act:disabled{opacity:.4;cursor:not-allowed}
 
-/* --- three steps --- */
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:38px 0 10px}
-.step{border:1px solid var(--line);background:var(--panel);padding:20px 22px;display:flex;gap:16px;align-items:flex-start}
-.step .n{font-family:var(--mono);font-size:26px;color:var(--gold);font-weight:700;line-height:1}
-.step h4{margin:0 0 5px;font-size:15px;letter-spacing:.4px}
-.step p{margin:0;color:var(--dim);font-size:13px;line-height:1.5}
+.colophon{font-family:var(--fig);font-size:11.5px;color:var(--ink-3);margin-top:20px;letter-spacing:.02em}
+.colophon b{color:var(--ink);font-weight:600}
 
-/* --- board --- */
-.board{display:grid;grid-template-columns:340px 1fr 300px;gap:18px;padding-top:22px}
-.card{border:1px solid var(--line);background:var(--panel)}
-.card h3{margin:0;padding:14px 16px;border-bottom:1px solid var(--line);font-family:var(--mono);
-  font-size:11px;letter-spacing:2.5px;color:var(--dim);text-transform:uppercase;font-weight:600;
-  display:flex;justify-content:space-between;align-items:center}
-.card .body{padding:14px 16px}
-.deal-head{padding:16px}
-.deal-head .sub{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
-.deal-head .team{font-size:22px;font-weight:750;margin-top:7px;letter-spacing:-.3px}
-.deal-head .yr{color:var(--gold)}
+/* the field: a fine engraved oval, drawn not glowing */
+.field{position:relative;aspect-ratio:1/1.06;border:1.5px solid var(--ink);border-radius:50%;
+  background:var(--card);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 7px var(--paper), 0 0 0 8px var(--rule-soft)}
+.field::before{content:"";position:absolute;inset:12%;border:1px solid var(--rule);border-radius:50%}
+.wicket{width:8%;height:26%;border-left:1px solid var(--ink-3);border-right:1px solid var(--ink-3);
+  position:relative;background:repeating-linear-gradient(90deg,transparent 0 3px,rgba(25,23,20,.05) 3px 4px)}
+.wicket::before,.wicket::after{content:"";position:absolute;left:-3px;right:-3px;height:1.5px;background:var(--ink)}
+.wicket::before{top:8%} .wicket::after{bottom:8%}
+.pos{position:absolute;transform:translate(-50%,-50%);font-family:var(--sans);font-size:9px;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+.pos::before{content:"";display:block;width:3px;height:3px;background:var(--ball);border-radius:50%;
+  margin:0 auto 4px}
+.field-cap{font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;margin-top:16px}
 
-.opt{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid rgba(29,51,72,.65);
-  background:transparent;flex-wrap:wrap}
-.opt:hover{background:var(--panel-2)}
-.slots-inline{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto}
-.sl.pickable{cursor:pointer;background:transparent;color:var(--dim);font-family:var(--mono);
-  font-size:9.5px;letter-spacing:1px;text-transform:uppercase;border:1px solid var(--line);
-  padding:3px 7px;border-radius:3px}
-.sl.pickable:hover{border-color:var(--gold);color:var(--gold);background:rgba(240,180,41,.07)}
-.opt .nm{flex:1 1 auto;min-width:104px;font-size:14px;font-weight:600;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.opt .sl{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;
-  border:1px solid var(--line);padding:2px 6px;border-radius:3px}
-.opt .rt{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--mint);min-width:30px;text-align:right}
-.opt .ov{width:6px;height:6px;border-radius:50%;background:var(--gold);flex:none}
-.opt .ov.dom{background:transparent;border:1px solid var(--line)}
+/* --- how it works: an editorial run-in list, not three boxes --- */
+.method{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:24px 0;margin:22px 0 0;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:38px}
+.method section{padding-right:10px}
+.method h3{font-family:var(--sans);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
+  margin:0 0 8px;color:var(--ball)}
+.method h3 span{color:var(--ink-3);margin-right:8px}
+.method p{margin:0;font-size:15.5px;line-height:1.55;color:var(--ink-2)}
 
-.slots{display:flex;flex-direction:column}
-.slot{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid rgba(29,51,72,.65);font-size:13px}
-.slot:first-child{border-top:0}
-.slot .lb{font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--dim);text-transform:uppercase;width:112px;flex:none}
-.slot .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
-.slot.done .who{color:var(--ink);font-weight:600}
-.slot .rt{font-family:var(--mono);font-size:13px;color:var(--mint)}
+/* --- the draft: three ruled columns --- */
+.folio{display:grid;grid-template-columns:1fr 1.25fr .8fr;gap:0;padding-top:26px;
+  border-top:2px solid var(--ink)}
+.col{padding:0 26px;border-right:1px solid var(--rule)}
+.col:first-child{padding-left:0}
+.col:last-child{border-right:0;padding-right:0}
+.col-head{font-family:var(--sans);font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--ink-3);padding-bottom:9px;border-bottom:1px solid var(--ink);margin-bottom:2px;
+  display:flex;justify-content:space-between;align-items:baseline}
+.col-head em{font-style:normal;color:var(--ball);font-family:var(--fig);letter-spacing:0}
 
-.meter{display:flex;align-items:baseline;gap:10px;padding:16px}
-.meter .big{font-family:var(--mono);font-size:40px;font-weight:700;color:var(--gold);line-height:1}
-.meter .lb{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
-.bar{height:3px;background:var(--panel-2);margin:0 16px 14px}
-.bar i{display:block;height:100%;background:var(--gold);transition:width .3s}
+.fixture{padding:16px 0 14px;border-bottom:1px solid var(--rule)}
+.fixture .yr{font-family:var(--fig);font-size:12px;color:var(--ball);letter-spacing:.1em}
+.fixture .club{font-size:27px;line-height:1.12;font-weight:600;letter-spacing:-.4px;margin-top:2px}
 
-.xi-row{display:flex;align-items:center;gap:10px;padding:8px 16px;border-top:1px solid rgba(29,51,72,.65);font-size:13px}
-.xi-row .pos{font-family:var(--mono);font-size:10px;color:var(--dim);width:20px}
-.xi-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.xi-row .tm{font-family:var(--mono);font-size:10px;color:var(--dim)}
-.xi-row .rt{font-family:var(--mono);font-weight:700;color:var(--mint)}
+/* an entry line, set like an index of names */
+/* Grid, not flex: the figure must hold its column even when a man can fill three places
+   and the chips wrap. In flex the chips pushed the rating onto a line of its own. */
+.entry{display:grid;grid-template-columns:1fr auto 2.6em;align-items:baseline;column-gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--rule-soft)}
+.entry .nm{font-size:16.5px;min-width:0}
+.entry .nm .flag{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ball);
+  margin-right:7px;vertical-align:middle}
+.entry .nm .flag.home{background:transparent;border:1px solid var(--rule)}
+.entry .fig{font-family:var(--fig);font-size:16px;font-variant-numeric:tabular-nums;color:var(--ink);
+  min-width:2.4em;text-align:right}
+.picks{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.pk{font-family:var(--sans);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid var(--rule);padding:3px 8px;color:var(--ink-2);background:var(--card)}
+.pk:hover{border-color:var(--ball);color:var(--ball);background:#fff}
 
-.legal{font-family:var(--mono);font-size:11px;padding:12px 16px;border-top:1px solid var(--line);color:var(--mint)}
-.legal.bad{color:var(--red)}
+/* the squad sheet, ruled like a scorecard */
+.tally{display:flex;align-items:baseline;gap:12px;padding:16px 0 8px}
+.tally .n{font-family:var(--fig);font-size:38px;font-variant-numeric:tabular-nums;line-height:1;color:var(--ball)}
+.tally .of{font-family:var(--sans);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);line-height:1.6}
+.gauge{height:2px;background:var(--rule-soft);margin-bottom:6px}
+.gauge i{display:block;height:100%;background:var(--ball);transition:width .35s}
+/* Grid so the CLUB gives way first. Under flex the player's name was the thing that got
+   truncated, which is the one column a reader is actually scanning. */
+.line{display:grid;grid-template-columns:92px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
+  align-items:baseline;column-gap:12px;padding:7px 0;
+  border-bottom:1px solid var(--rule-soft);font-size:15px}
+.line .role{font-family:var(--sans);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-3)}
+.line .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-3);font-style:italic}
+.line.set .who{color:var(--ink);font-style:normal}
+.line .fig{font-family:var(--fig);font-size:14px;font-variant-numeric:tabular-nums;
+  color:var(--ink-2);text-align:right}
+.line .club{font-family:var(--sans);font-size:10px;color:var(--ink-3);letter-spacing:.04em;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 
-/* --- result --- */
-.result{text-align:center;padding:46px 20px}
-.result .seedline{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
-.result .verdict{font-size:34px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
-.result .score{font-family:var(--mono);font-weight:700;color:var(--gold);line-height:1.05;
-  letter-spacing:-3px;font-size:clamp(34px,8vw,74px);white-space:nowrap}
-.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:620px;margin:30px auto 0}
-.tile{border:1px solid var(--line);background:var(--panel);padding:16px 10px}
-.tile b{display:block;font-family:var(--mono);font-size:23px;color:var(--mint);font-weight:700;margin-bottom:4px}
-.tile span{font-family:var(--mono);font-size:9.5px;letter-spacing:1.6px;color:var(--dim);text-transform:uppercase}
-.cards2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--dim);text-transform:uppercase;
-  text-align:left;padding:9px 16px;border-bottom:1px solid var(--line);font-weight:600}
-td{padding:7px 16px;border-bottom:1px solid rgba(29,51,72,.5)}
-td.num{font-family:var(--mono);text-align:right}
-tr.unrated td{color:var(--dim)}
+.verdict-note{font-family:var(--sans);font-size:11px;letter-spacing:.04em;padding:12px 0;
+  border-top:1px solid var(--ink);color:var(--willow)}
+.verdict-note.no{color:var(--ball)}
+.note{font-size:15px;color:var(--ink-3);font-style:italic;padding:14px 0}
+
+.foot-actions{display:flex;gap:14px;align-items:center;padding-top:20px;flex-wrap:wrap}
+.stamp{margin-left:auto;font-family:var(--fig);font-size:11px;color:var(--ink-3);
+  border:1px solid var(--rule);padding:6px 12px}
+
+/* --- the report --- */
+.report{padding:44px 0 10px;text-align:center;border-bottom:2px solid var(--ink)}
+.report .over-line{font-family:var(--sans);font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink-3)}
+.report .call{font-size:15px;letter-spacing:.3em;text-transform:uppercase;font-family:var(--sans);
+  font-weight:650;margin:16px 0 8px;color:var(--ball)}
+.report .call.won{color:var(--willow)}
+.report .figures{font-family:var(--fig);font-variant-numeric:tabular-nums;font-weight:500;
+  font-size:clamp(30px,6.4vw,58px);letter-spacing:-1px;line-height:1.1;white-space:nowrap}
+.report .margin{font-size:19px;font-style:italic;color:var(--ink-2);margin-top:10px}
+.ledger{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--rule);margin-top:30px}
+.ledger div{padding:16px 8px;border-right:1px solid var(--rule-soft)}
+.ledger div:last-child{border-right:0}
+.ledger b{display:block;font-family:var(--fig);font-size:21px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ledger span{font-family:var(--sans);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:34px}
+.cards2 > div{padding:0 26px;border-right:1px solid var(--rule)}
+.cards2 > div:first-child{padding-left:0}
+.cards2 > div:last-child{border-right:0;padding-right:0}
+table{width:100%;border-collapse:collapse;font-size:15px}
+caption{font-family:var(--fig);font-size:12.5px;letter-spacing:.04em;text-align:left;
+  padding-bottom:8px;border-bottom:1px solid var(--ink);color:var(--ink)}
+th{font-family:var(--sans);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
+  text-align:left;padding:9px 0 6px;font-weight:600}
+th.n,td.n{text-align:right;font-family:var(--fig);font-variant-numeric:tabular-nums}
+td{padding:5px 0;border-bottom:1px solid var(--rule-soft)}
+tr.tail td{color:var(--ink-3);font-style:italic}
 
 .hide{display:none!important}
-.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel-2);
-  border:1px solid var(--red);color:var(--ink);padding:12px 20px;font-size:13px;z-index:50}
-footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);
-  font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;line-height:2}
-@media (max-width:1080px){
-  .board{grid-template-columns:1fr}
-  .hero{grid-template-columns:1fr;gap:28px}
-  .ground{max-width:420px;margin:0 auto;width:100%}
-  h1{font-size:42px}
-  .steps,.cards2{grid-template-columns:1fr}
-  .tiles{grid-template-columns:1fr 1fr}
-  .result{padding:30px 4px}
-  .result .verdict{font-size:26px}
-  table{font-size:12px}
-  th,td{padding-left:10px;padding-right:10px}
+.slip{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);
+  color:var(--paper);padding:12px 22px;font-family:var(--sans);font-size:13px;z-index:60}
+.imprint{margin-top:54px;padding-top:18px;border-top:1px solid var(--rule);
+  font-family:var(--sans);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;line-height:2.1}
+
+@media (max-width:900px){
+  .spread{grid-template-columns:1fr;gap:34px}
+  .headline{font-size:38px}
+  .field{max-width:360px;margin:0 auto;width:100%}
+  .method{grid-template-columns:1fr;gap:22px}
+  .folio,.cards2{grid-template-columns:1fr}
+  .col,.cards2 > div{padding:0;border-right:0;border-bottom:1px solid var(--rule);
+    padding-bottom:22px;margin-bottom:22px}
+  .col:last-child,.cards2 > div:last-child{border-bottom:0}
+  .ledger{grid-template-columns:1fr 1fr}
+  .ledger div:nth-child(2){border-right:0}
+  .line .club{display:none}
+  /* The two-up button bar wraps into an L shape at this width; stack it instead so the
+     lead action keeps its full-width emphasis. */
+  .actions{width:100%;flex-direction:column;flex-wrap:nowrap}
+  .act{text-align:center;padding:16px 20px}
+  .act.lead{border-right:0;border-bottom:1.5px solid var(--ink)}
 }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="sheet">
 
-  <header>
-    <div class="mark" onclick="go('home')">
-      <b>20</b><div class="dots"><i></i><i></i></div><b>0</b>
-      <span>IPLegends<br>draft · simulate</span>
+  <div class="masthead">
+    <div class="wordmark" onclick="go('home')">
+      <span class="the">The</span>
+      <h1>Legends Almanack</h1>
+      <div class="rule-thin"></div>
     </div>
-    <div class="spacer"></div>
-    <div class="pill" id="deckPill">loading…</div>
-  </header>
+    <div class="edition">
+      Indian Premier League<br>
+      <span id="deckPill">…</span>
+    </div>
+  </div>
 
-  <!-- ============ HOME ============ -->
+  <!-- ============ OPENING ============ -->
   <section id="home">
-    <div class="hero">
+    <div class="spread">
       <div>
-        <div class="kicker">All-time IPL · 2008 — 2026</div>
-        <h1>Deal the seasons.<br>Build your <em>greatest XI</em>.</h1>
-        <p class="lede">You're dealt one franchise-season at a time — Mumbai 2013, Chennai 2010,
-          Rajasthan 2008. Pick a player who actually played it. Fill fifteen slots, field a
-          legal eleven, and see whether it beats the house.</p>
-        <div class="cta">
-          <button class="btn btn-primary" onclick="newDraft()">PLAY NOW &rarr;</button>
-          <button class="btn" onclick="promptSeed()">ENTER A SEED</button>
+        <div class="standfirst">Nineteen seasons · one eleven</div>
+        <h2 class="headline">Every season is a hand.<br>Play the <i>best eleven</i> ever dealt.</h2>
+        <p class="deck"><span class="drop">Y</span>ou are dealt one franchise-season at a time —
+          Chennai 2010, Kolkata 2008, Rajasthan 2022 — and you may take one player from it,
+          for a place you still need. Fifteen selections, no more than four overseas. Then your
+          eleven takes the field for twenty overs against the house.</p>
+        <div class="actions">
+          <button class="act lead" onclick="newDraft()">Begin a draft</button>
+          <button class="act" onclick="promptSeed()">Open by seed</button>
         </div>
-        <div class="stat-line" id="homeStats"></div>
+        <div class="colophon" id="homeStats"></div>
       </div>
-      <div class="ground" id="homeGround"><div class="strip"></div></div>
+      <div>
+        <div class="field" id="homeGround"><div class="wicket"></div></div>
+        <div class="field-cap">Field placings · illustrative</div>
+      </div>
     </div>
 
-    <div class="steps">
-      <div class="step"><div class="n">01</div><div>
-        <h4>DEAL</h4><p>A franchise-season, drawn uniformly from all 166. Mumbai comes up
-        nineteen times; Kochi Tuskers Kerala once.</p></div></div>
-      <div class="step"><div class="n">02</div><div>
-        <h4>BUILD</h4><p>Pick a player from that squad, for a slot you still need.
-        Fifteen picks, at most four overseas.</p></div></div>
-      <div class="step"><div class="n">03</div><div>
-        <h4>SIMULATE</h4><p>Twenty overs a side, ball by ball, off nineteen seasons of
-        real deliveries.</p></div></div>
+    <div class="method">
+      <section><h3><span>I.</span> The deal</h3>
+        <p>A franchise-season drawn evenly from all one hundred and sixty-six. Mumbai answers
+           nineteen times; Kochi Tuskers Kerala, once only.</p></section>
+      <section><h3><span>II.</span> The selection</h3>
+        <p>One man from that squad, for a place still open. He must have played that season —
+           there are no imaginary teams here.</p></section>
+      <section><h3><span>III.</span> The match</h3>
+        <p>Twenty overs a side, delivery by delivery, priced from every ball bowled in the
+           competition since 2008.</p></section>
     </div>
   </section>
 
   <!-- ============ DRAFT ============ -->
   <section id="draft" class="hide">
-    <div class="board">
-      <div>
-        <div class="card">
-          <div class="deal-head">
-            <div class="sub">Dealt to you</div>
-            <div class="team" id="dealTeam">—</div>
-          </div>
-          <h3>Pick a player <span id="optCount"></span></h3>
-          <div id="options"></div>
+    <div class="folio">
+      <div class="col">
+        <div class="col-head"><span>Dealt to you</span></div>
+        <div class="fixture">
+          <div class="yr" id="dealYear"></div>
+          <div class="club" id="dealTeam">—</div>
+        </div>
+        <div class="col-head" style="border-bottom:0;padding-top:14px">
+          <span>Available</span><em id="optCount"></em></div>
+        <div id="options"></div>
+      </div>
+
+      <div class="col">
+        <div class="col-head"><span>Your selection</span><em id="pickCount">0/15</em></div>
+        <div class="tally">
+          <div class="n" id="pickBig">0</div>
+          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
+        </div>
+        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
+        <div id="slots"></div>
+        <div class="foot-actions">
+          <button class="act lead hide" id="simBtn"
+            style="border:1.5px solid var(--ink)" onclick="simulate()">Play the match</button>
+          <button class="act" style="border:1.5px solid var(--rule)" onclick="go('home')">Abandon</button>
+          <span class="stamp" id="seedPill"></span>
         </div>
       </div>
 
-      <div>
-        <div class="card">
-          <h3>Your squad <span id="pickCount">0 / 15</span></h3>
-          <div class="meter">
-            <div class="big" id="pickBig">0</div>
-            <div class="lb">picks made<br><span id="oversLine">0 of 4 overseas</span></div>
-          </div>
-          <div class="bar"><i id="progBar" style="width:0%"></i></div>
-          <div class="slots" id="slots"></div>
-        </div>
-        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary hide" id="simBtn" onclick="simulate()">SIMULATE THE MATCH &rarr;</button>
-          <button class="btn" onclick="go('home')">ABANDON</button>
-          <div class="pill" id="seedPill" style="margin-left:auto"></div>
-        </div>
-      </div>
-
-      <div>
-        <div class="card">
-          <h3>Playing XI</h3>
-          <div id="xiList" class="body" style="color:var(--dim);font-size:13px">
-            Fill all fifteen slots and the engine picks your best legal eleven —
-            a keeper, five bowlers, then the best bats.
-          </div>
-          <div class="legal hide" id="legalLine"></div>
-        </div>
+      <div class="col">
+        <div class="col-head"><span>The eleven</span></div>
+        <div id="xiList" class="note">Named once fifteen are chosen: a wicketkeeper, five
+          bowlers, and the best of the bats.</div>
+        <div class="verdict-note hide" id="legalLine"></div>
       </div>
     </div>
   </section>
 
-  <!-- ============ RESULT ============ -->
+  <!-- ============ REPORT ============ -->
   <section id="result" class="hide">
-    <div class="result">
-      <div class="seedline" id="resSeed"></div>
-      <div class="verdict" id="resVerdict"></div>
-      <div class="score" id="resScore"></div>
-      <div class="tiles" id="resTiles"></div>
-      <div style="margin-top:30px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="newDraft()">PLAY AGAIN &rarr;</button>
-        <button class="btn" onclick="copyLink()">COPY THIS GAME'S LINK</button>
+    <div class="report">
+      <div class="over-line" id="resSeed"></div>
+      <div class="call" id="resVerdict"></div>
+      <div class="figures" id="resScore"></div>
+      <div class="margin" id="resMargin"></div>
+      <div class="ledger" id="resTiles"></div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <div class="actions">
+          <button class="act lead" onclick="newDraft()">Draft again</button>
+          <button class="act" onclick="copyLink()">Copy this game</button>
+        </div>
       </div>
     </div>
     <div class="cards2">
-      <div class="card"><h3 id="inn1Head"></h3><table id="inn1"></table></div>
-      <div class="card"><h3 id="inn2Head"></h3><table id="inn2"></table></div>
+      <div><table id="inn1"></table></div>
+      <div><table id="inn2"></table></div>
     </div>
   </section>
 
-  <footer>
-    <div>IPLEGENDS · DEAL · BUILD · SIMULATE</div>
+  <div class="imprint">
+    <div>The Legends Almanack · deal · select · play</div>
     <div id="footStats"></div>
-  </footer>
+  </div>
 </div>
 
 <script>
@@ -280,38 +335,40 @@ async function api(path, opts){
   if (!r.ok) throw new Error(body.detail || r.statusText);
   return body;
 }
-function toast(msg){
+function slip(msg){
   const t = document.createElement('div');
-  t.className = 'toast'; t.textContent = msg;
+  t.className = 'slip'; t.textContent = msg;
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
 }
 function go(id){
   for (const s of ['home','draft','result']) $('#'+s).classList.toggle('hide', s !== id);
   window.scrollTo(0,0);
 }
-const SLOT_LABEL = {keeper:'Keeper', opener:'Opener', top_order:'Top order',
-                    middle_or_finisher:'Middle / finisher', bowler:'Bowler', open:'Open'};
+const ROLE = {keeper:'Wicketkeeper', opener:'Opener', top_order:'Top order',
+              middle_or_finisher:'Middle', bowler:'Bowler', open:'Any'};
+// Chips sit in a narrow column beside the name, so they get the short form. 'Wicketkeeper'
+// alone was wide enough to wrap 'MS Dhoni' onto two lines.
+const CHIP = {keeper:'Kpr', opener:'Open', top_order:'Top', middle_or_finisher:'Mid',
+              bowler:'Bowl', open:'Any'};
 
 async function boot(){
   META = await api('/api/meta');
-  $('#deckPill').textContent = META.cards.toLocaleString() + ' cards';
   const s = META.seasons;
+  $('#deckPill').textContent = `${s[0]}–${s[s.length-1]} · ${META.franchise_seasons} squads`;
   $('#homeStats').innerHTML =
-    `<b>${META.franchise_seasons}</b> franchise-seasons · <b>${META.cards.toLocaleString()}</b> rated player-seasons · <b>${s[0]}–${s[s.length-1]}</b>`;
+    `<b>${META.cards.toLocaleString()}</b> rated player-seasons · <b>${META.franchise_seasons}</b> franchise-seasons · <b>${s.length}</b> seasons`;
   $('#footStats').textContent =
-    `${META.franchise_seasons} FRANCHISE-SEASONS · ${META.cards.toLocaleString()} CARDS · ${s.length} SEASONS`;
-  drawGround();
+    `${META.cards.toLocaleString()} player-seasons · ${META.franchise_seasons} squads · ${s.length} seasons`;
+  drawField();
 }
 
-/* The eleven as they'd stand on a ground: keeper behind the strip, the rest ringed. */
-function drawGround(){
+function drawField(){
   const g = $('#homeGround');
-  const pos = [['WK',50,72],['SLIP',60,70],['POINT',76,53],['COVER',72,36],['MID-OFF',58,25],
-               ['MID-ON',42,25],['MID-WKT',27,36],['SQ LEG',24,53],['FINE LEG',40,80],
-               ['THIRD',63,82],['DEEP',50,12]];
-  for (const [t,x,y] of pos){
+  for (const [t,x,y] of [['Keeper',50,74],['Slip',61,72],['Point',78,54],['Cover',73,37],
+      ['Mid-off',58,26],['Mid-on',42,26],['Midwicket',26,37],['Square leg',22,54],
+      ['Fine leg',39,81],['Third',63,83],['Long-on',50,13]]){
     const c = document.createElement('div');
-    c.className = 'chip'; c.textContent = t;
+    c.className = 'pos'; c.textContent = t;
     c.style.left = x + '%'; c.style.top = y + '%';
     g.appendChild(c);
   }
@@ -320,73 +377,71 @@ function drawGround(){
 /* --- draft --- */
 async function newDraft(){ render(await api('/api/draft', {method:'POST'})); go('draft'); }
 function promptSeed(){
-  const v = prompt('Seed (any whole number). The same seed deals the same cards to everyone.');
+  const v = prompt('Seed — the same number deals the same cards to everyone.');
   if (v !== null && v.trim() !== '') openSeed(v.trim());
 }
 async function openSeed(v){
   try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
-  catch(e){ toast(e.message); }
+  catch(e){ slip(e.message); }
 }
 async function pick(i){
   try {
     S = await api(`/api/draft/${S.state}/pick`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:i})});
     render(S);
-  } catch(e){ toast(e.message); }
+  } catch(e){ slip(e.message); }
 }
 
 function render(s){
   S = s;
   history.replaceState(null, '', '#' + s.state);
   $('#seedPill').textContent = 'seed ' + s.state.split('-')[0];
-  $('#pickCount').textContent = `${s.picks_made} / ${s.picks_total}`;
+  $('#pickCount').textContent = `${s.picks_made}/${s.picks_total}`;
   $('#pickBig').textContent = s.picks_made;
   $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;
   $('#progBar').style.width = (100 * s.picks_made / s.picks_total) + '%';
 
-  // slots: template order, filled first
-  const rows = [];
-  const used = [...s.squad];
+  const used = [...s.squad], rows = [];
   for (const [slot, n] of Object.entries(META.template)){
     for (let k = 0; k < n; k++){
       const idx = used.findIndex(c => c.slot === slot);
       const got = idx >= 0 ? used.splice(idx,1)[0] : null;
-      rows.push(`<div class="slot ${got?'done':''}">
-        <div class="lb">${SLOT_LABEL[slot]||slot}</div>
-        <div class="who">${got ? got.name + ' · ' + got.franchise + ' ' + got.season_year : '—'}</div>
-        <div class="rt">${got ? got.rating : ''}</div></div>`);
+      rows.push(`<div class="line ${got?'set':''}">
+        <span class="role">${ROLE[slot]||slot}</span>
+        <span class="who">${got ? got.name : 'to be named'}</span>
+        <span class="club">${got ? got.franchise + ' ' + got.season_year : ''}</span>
+        <span class="fig">${got ? got.rating : ''}</span></div>`);
     }
   }
   $('#slots').innerHTML = rows.join('');
 
   if (s.deal){
-    $('#dealTeam').innerHTML = `${s.deal.franchise} <span class="yr">${s.deal.season_year}</span>`;
-    // Group by player. The API returns one entry per (player, slot) because that is what
-    // the draft consumes, but a list showing WP Saha three times reads as a bug -- so the
-    // player is the row and the slots he could fill are the buttons.
+    $('#dealYear').textContent = s.deal.season_year;
+    $('#dealTeam').textContent = s.deal.franchise;
+    // Grouped by player: the API returns one entry per (player, place) because that is what
+    // the draft consumes, but a list repeating a name three times reads as a fault.
     const byPlayer = new Map();
     s.deal.options.forEach((o,i) => {
       if (!byPlayer.has(o.person_id)) byPlayer.set(o.person_id, {card:o, choices:[]});
       byPlayer.get(o.person_id).choices.push({slot:o.slot, index:i});
     });
-    $('#optCount').textContent = byPlayer.size + ' players';
+    $('#optCount').textContent = byPlayer.size;
     $('#options').innerHTML = [...byPlayer.values()].map(({card,choices}) => `
-      <div class="opt">
-        <span class="ov ${card.overseas ? '' : 'dom'}" title="${card.overseas ? 'overseas' : 'domestic'}"></span>
-        <span class="nm">${card.name}</span>
-        <span class="slots-inline">${choices.map(c =>
-          `<button class="sl pickable" onclick="pick(${c.index})">${SLOT_LABEL[c.slot]||c.slot}</button>`
-        ).join('')}</span>
-        <span class="rt">${card.rating ?? '—'}</span>
+      <div class="entry">
+        <span class="nm"><span class="flag ${card.overseas ? '' : 'home'}"
+          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
+        <span class="picks">${choices.map(c =>
+          `<button class="pk" title="${ROLE[c.slot]||c.slot}"
+             onclick="pick(${c.index})">${CHIP[c.slot]||c.slot}</button>`).join('')}</span>
+        <span class="fig">${card.rating ?? '—'}</span>
       </div>`).join('');
     $('#simBtn').classList.add('hide');
-    $('#xiList').classList.remove('hide');
     $('#legalLine').classList.add('hide');
   } else {
-    $('#dealTeam').textContent = 'Squad complete';
+    $('#dealYear').textContent = '';
+    $('#dealTeam').textContent = 'Selection closed';
     $('#optCount').textContent = '';
-    $('#options').innerHTML = '<div class="body" style="color:var(--dim);font-size:13px">' +
-      'Fifteen picks made. Simulate when you are ready.</div>';
+    $('#options').innerHTML = '<div class="note">Fifteen chosen. Play when ready.</div>';
     $('#simBtn').classList.remove('hide');
     loadXI();
   }
@@ -395,60 +450,62 @@ function render(s){
 async function loadXI(){
   const x = await api('/api/xi/' + S.state);
   $('#xiList').outerHTML = '<div id="xiList">' + x.xi.map((p,i) =>
-    `<div class="xi-row"><span class="pos">${i+1}</span><span class="nm">${p.name}</span>
-     <span class="tm">${p.season_year}</span><span class="rt">${p.rating ?? ''}</span></div>`
-    ).join('') + '</div>';
+    `<div class="line set" style="grid-template-columns:22px minmax(0,1fr) 3em 2.4em">
+     <span class="role">${i+1}</span>
+     <span class="who">${p.name}</span><span class="club">${p.season_year}</span>
+     <span class="fig">${p.rating ?? ''}</span></div>`).join('') + '</div>';
   const line = $('#legalLine');
   line.classList.remove('hide');
-  line.classList.toggle('bad', !x.overseas.startsWith('4 overseas') && x.overseas.includes('NO LEGAL'));
-  line.textContent = 'four-overseas rule: ' + x.overseas;
+  line.classList.toggle('no', x.overseas.includes('NO LEGAL'));
+  line.textContent = x.overseas.charAt(0).toUpperCase() + x.overseas.slice(1);
 }
 
 /* --- match --- */
 async function simulate(){
   $('#simBtn').disabled = true;
-  try {
-    const m = await api('/api/match/' + S.state);
-    showResult(m);
-  } catch(e){ toast(e.message); }
+  try { showResult(await api('/api/match/' + S.state)); }
+  catch(e){ slip(e.message); }
   finally { $('#simBtn').disabled = false; }
 }
 
 function showResult(m){
-  $('#resSeed').textContent = 'seed ' + m.state.split('-')[0];
-  const you = m.first, them = m.second;
-  const won = m.result.startsWith('YOU');
-  $('#resVerdict').textContent = won ? 'YOU WIN' : (m.result === 'tied' ? 'TIED' : 'YOU LOSE');
-  $('#resVerdict').style.color = won ? 'var(--mint)' : 'var(--gold)';
-  $('#resScore').textContent = `${you.runs}/${you.wickets} — ${them.runs}/${them.wickets}`;
-  // `first.bowling` is who bowled AT you, i.e. the opponent's attack. Your bowlers appear
-  // in the second innings. Getting this backwards credited their best bowler to you.
+  $('#resSeed').textContent = 'Seed ' + m.state.split('-')[0];
+  const you = m.first, them = m.second, won = m.result.startsWith('YOU');
+  $('#resVerdict').textContent = won ? 'Your eleven prevail'
+    : (m.result === 'tied' ? 'A tie' : 'Beaten');
+  $('#resVerdict').classList.toggle('won', won);
+  $('#resScore').textContent = `${you.runs}/${you.wickets} · ${them.runs}/${them.wickets}`;
+  $('#resMargin').textContent = m.result.replace('YOU', 'You').replace('OPPONENT', 'The house');
+  // `first.bowling` is who bowled AT you. Your own attack appears in the second innings.
   const top = [...you.batting].sort((a,b)=>b.runs-a.runs)[0] || {name:'—',runs:0};
   const best = [...them.bowling].sort((a,b)=>b.wickets-a.wickets || a.runs-b.runs)[0]
                || {name:'—',wickets:0,runs:0};
   $('#resTiles').innerHTML = `
-    <div class="tile"><b>${you.runs}/${you.wickets}</b><span>your total</span></div>
-    <div class="tile"><b>${them.runs}/${them.wickets}</b><span>they made</span></div>
-    <div class="tile"><b>${top.runs}</b><span>top score · ${top.name}</span></div>
-    <div class="tile"><b>${best.wickets}–${best.runs}</b><span>best bowl · ${best.name}</span></div>`;
-  $('#inn1Head').textContent = `YOU — ${you.runs}/${you.wickets} (${you.overs})`;
-  $('#inn2Head').textContent = `OPPONENT — ${them.runs}/${them.wickets} (${them.overs})`;
-  $('#inn1').innerHTML = battingTable(you) + bowlingTable(them);
-  $('#inn2').innerHTML = battingTable(them) + bowlingTable(you);
+    <div><b>${you.runs}/${you.wickets}</b><span>your innings</span></div>
+    <div><b>${them.runs}/${them.wickets}</b><span>the house</span></div>
+    <div><b>${top.runs}</b><span>${top.name}</span></div>
+    <div><b>${best.wickets}–${best.runs}</b><span>${best.name}</span></div>`;
+  $('#inn1').innerHTML =
+    `<caption>Your eleven — ${you.runs}/${you.wickets} (${you.overs} ov)</caption>` + card(you);
+  $('#inn2').innerHTML =
+    `<caption>The house — ${them.runs}/${them.wickets} (${them.overs} ov)</caption>` + card(them);
   go('result');
 }
-const battingTable = inn => `<tr><th>Batting</th><th class="num">R</th><th class="num">B</th></tr>` +
-  inn.batting.map(b => `<tr class="${b.rated?'':'unrated'}"><td>${b.name}${b.out?'':'*'}</td>
-    <td class="num">${b.runs}</td><td class="num">${b.balls}</td></tr>`).join('') +
-  `<tr><td>extras</td><td class="num">${inn.extras}</td><td class="num"></td></tr>`;
-const bowlingTable = inn => `<tr><th>Bowling</th><th class="num">O</th><th class="num">R–W</th></tr>` +
-  inn.bowling.map(b => `<tr><td>${b.name}</td><td class="num">${b.overs}</td>
-    <td class="num">${b.runs}–${b.wickets}</td></tr>`).join('');
+const card = inn =>
+  `<tr><th>Batting</th><th class="n">R</th><th class="n">B</th></tr>` +
+  inn.batting.map(b => `<tr class="${b.rated?'':'tail'}"><td>${b.name}${b.out?'':' *'}</td>
+    <td class="n">${b.runs}</td><td class="n">${b.balls}</td></tr>`).join('') +
+  `<tr><td>Extras</td><td class="n">${inn.extras}</td><td class="n"></td></tr>` +
+  `<tr><th style="padding-top:18px">Bowling</th><th class="n" style="padding-top:18px">O</th>
+       <th class="n" style="padding-top:18px">R–W</th></tr>` +
+  inn.bowling.map(b => `<tr><td>${b.name}</td><td class="n">${b.overs}</td>
+    <td class="n">${b.runs}–${b.wickets}</td></tr>`).join('');
 
 function copyLink(){
-  navigator.clipboard.writeText(location.origin + '/#' + S.state)
-    .then(() => toast('Link copied — it replays this exact game.'))
-    .catch(() => toast(location.origin + '/#' + S.state));
+  const url = location.origin + '/#' + S.state;
+  navigator.clipboard.writeText(url)
+    .then(() => slip('Copied — this link replays the same game.'))
+    .catch(() => slip(url));
 }
 
 boot().then(() => {

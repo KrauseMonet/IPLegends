@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPLegends — build your all-time IPL XI</title>
+<style>
+/* Floodlit night cricket: deep blue-black ground, sodium-lamp gold, a pitch-tan strip.
+   Deliberately not 7a0's football green -- same energy, different sport. */
+:root{
+  --bg:#08111c; --panel:#0d1a2a; --panel-2:#122234; --line:#1d3348; --ink:#eef2f7; --dim:#7f93ab; --gold:#f0b429; --mint:#39d98a;
+  --red:#e0452b; --pitch:#c8a878;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink); min-height:100vh;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background-image:radial-gradient(1100px 520px at 78% -12%, rgba(240,180,41,.10), transparent 60%),
+                   radial-gradient(900px 460px at 8% 106%, rgba(57,217,138,.07), transparent 60%);
+}
+.wrap{max-width:1220px;margin:0 auto;padding:20px 22px 80px}
+
+/* --- chrome --- */
+header{display:flex;align-items:center;gap:18px;padding:6px 0 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.mark{display:flex;align-items:baseline;gap:10px;cursor:pointer}
+.mark b{font-size:40px;font-weight:800;letter-spacing:-2px;color:var(--gold);line-height:1}
+.mark .dots{display:flex;flex-direction:column;gap:5px;padding:0 3px}
+.mark .dots i{width:8px;height:8px;background:var(--mint);display:block;border-radius:1px}
+.mark span{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
+.spacer{flex:1}
+.pill{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;
+  border:1px solid var(--line);color:var(--dim);padding:9px 14px;border-radius:999px;background:transparent}
+
+/* --- hero --- */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center;padding:52px 0 30px}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:4px;color:var(--dim);text-transform:uppercase;margin-bottom:20px}
+h1{font-size:58px;line-height:1.02;margin:0 0 20px;font-weight:800;letter-spacing:-1.6px}
+h1 em{font-style:normal;color:var(--gold)}
+.lede{color:#b6c6d8;font-size:17px;line-height:1.62;max-width:48ch;margin:0 0 30px}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:0;border-radius:4px}
+.btn{padding:15px 26px;font-weight:750;letter-spacing:.4px;background:var(--panel-2);color:var(--ink);
+  border:1px solid var(--line)}
+.btn:hover{border-color:var(--gold)}
+.btn-primary{background:var(--red);color:#fff;border:1px solid var(--red);
+  box-shadow:0 0 0 1px rgba(240,180,41,.5), 0 10px 30px -12px rgba(224,69,43,.8)}
+.btn-primary:hover{filter:brightness(1.09)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.stat-line{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:22px}
+.stat-line b{color:var(--ink);font-weight:600}
+
+/* the ground */
+.ground{aspect-ratio:1/1;border:1px solid var(--line);border-radius:50%;position:relative;
+  background:radial-gradient(circle at 50% 50%, rgba(57,217,138,.09), rgba(8,17,28,.2) 70%);
+  display:flex;align-items:center;justify-content:center}
+.ground::before{content:"";position:absolute;inset:9%;border:1px dashed rgba(127,147,171,.28);border-radius:50%}
+.strip{width:11%;height:33%;background:linear-gradient(180deg,rgba(200,168,120,.30),rgba(200,168,120,.16));
+  border:1px solid rgba(200,168,120,.45);border-radius:2px;position:relative}
+.strip::before,.strip::after{content:"";position:absolute;left:22%;right:22%;height:2px;background:rgba(238,242,247,.5)}
+.strip::before{top:11%} .strip::after{bottom:11%}
+.chip{position:absolute;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--mint);
+  border:1px solid rgba(57,217,138,.4);background:rgba(8,17,28,.85);padding:3px 7px;border-radius:999px;
+  transform:translate(-50%,-50%);white-space:nowrap}
+
+/* --- three steps --- */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:38px 0 10px}
+.step{border:1px solid var(--line);background:var(--panel);padding:20px 22px;display:flex;gap:16px;align-items:flex-start}
+.step .n{font-family:var(--mono);font-size:26px;color:var(--gold);font-weight:700;line-height:1}
+.step h4{margin:0 0 5px;font-size:15px;letter-spacing:.4px}
+.step p{margin:0;color:var(--dim);font-size:13px;line-height:1.5}
+
+/* --- board --- */
+.board{display:grid;grid-template-columns:340px 1fr 300px;gap:18px;padding-top:22px}
+.card{border:1px solid var(--line);background:var(--panel)}
+.card h3{margin:0;padding:14px 16px;border-bottom:1px solid var(--line);font-family:var(--mono);
+  font-size:11px;letter-spacing:2.5px;color:var(--dim);text-transform:uppercase;font-weight:600;
+  display:flex;justify-content:space-between;align-items:center}
+.card .body{padding:14px 16px}
+.deal-head{padding:16px}
+.deal-head .sub{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
+.deal-head .team{font-size:22px;font-weight:750;margin-top:7px;letter-spacing:-.3px}
+.deal-head .yr{color:var(--gold)}
+
+.opt{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid rgba(29,51,72,.65);
+  background:transparent;flex-wrap:wrap}
+.opt:hover{background:var(--panel-2)}
+.slots-inline{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto}
+.sl.pickable{cursor:pointer;background:transparent;color:var(--dim);font-family:var(--mono);
+  font-size:9.5px;letter-spacing:1px;text-transform:uppercase;border:1px solid var(--line);
+  padding:3px 7px;border-radius:3px}
+.sl.pickable:hover{border-color:var(--gold);color:var(--gold);background:rgba(240,180,41,.07)}
+.opt .nm{flex:1 1 auto;min-width:104px;font-size:14px;font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opt .sl{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;
+  border:1px solid var(--line);padding:2px 6px;border-radius:3px}
+.opt .rt{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--mint);min-width:30px;text-align:right}
+.opt .ov{width:6px;height:6px;border-radius:50%;background:var(--gold);flex:none}
+.opt .ov.dom{background:transparent;border:1px solid var(--line)}
+
+.slots{display:flex;flex-direction:column}
+.slot{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid rgba(29,51,72,.65);font-size:13px}
+.slot:first-child{border-top:0}
+.slot .lb{font-family:var(--mono);font-size:10px;letter-spacing:1.4px;color:var(--dim);text-transform:uppercase;width:112px;flex:none}
+.slot .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+.slot.done .who{color:var(--ink);font-weight:600}
+.slot .rt{font-family:var(--mono);font-size:13px;color:var(--mint)}
+
+.meter{display:flex;align-items:baseline;gap:10px;padding:16px}
+.meter .big{font-family:var(--mono);font-size:40px;font-weight:700;color:var(--gold);line-height:1}
+.meter .lb{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
+.bar{height:3px;background:var(--panel-2);margin:0 16px 14px}
+.bar i{display:block;height:100%;background:var(--gold);transition:width .3s}
+
+.xi-row{display:flex;align-items:center;gap:10px;padding:8px 16px;border-top:1px solid rgba(29,51,72,.65);font-size:13px}
+.xi-row .pos{font-family:var(--mono);font-size:10px;color:var(--dim);width:20px}
+.xi-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xi-row .tm{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.xi-row .rt{font-family:var(--mono);font-weight:700;color:var(--mint)}
+
+.legal{font-family:var(--mono);font-size:11px;padding:12px 16px;border-top:1px solid var(--line);color:var(--mint)}
+.legal.bad{color:var(--red)}
+
+/* --- result --- */
+.result{text-align:center;padding:46px 20px}
+.result .seedline{font-family:var(--mono);font-size:11px;letter-spacing:3px;color:var(--dim);text-transform:uppercase}
+.result .verdict{font-size:34px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
+.result .score{font-family:var(--mono);font-weight:700;color:var(--gold);line-height:1.05;
+  letter-spacing:-3px;font-size:clamp(34px,8vw,74px);white-space:nowrap}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:620px;margin:30px auto 0}
+.tile{border:1px solid var(--line);background:var(--panel);padding:16px 10px}
+.tile b{display:block;font-family:var(--mono);font-size:23px;color:var(--mint);font-weight:700;margin-bottom:4px}
+.tile span{font-family:var(--mono);font-size:9.5px;letter-spacing:1.6px;color:var(--dim);text-transform:uppercase}
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--dim);text-transform:uppercase;
+  text-align:left;padding:9px 16px;border-bottom:1px solid var(--line);font-weight:600}
+td{padding:7px 16px;border-bottom:1px solid rgba(29,51,72,.5)}
+td.num{font-family:var(--mono);text-align:right}
+tr.unrated td{color:var(--dim)}
+
+.hide{display:none!important}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel-2);
+  border:1px solid var(--red);color:var(--ink);padding:12px 20px;font-size:13px;z-index:50}
+footer{margin-top:56px;padding-top:22px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;line-height:2}
+@media (max-width:1080px){
+  .board{grid-template-columns:1fr}
+  .hero{grid-template-columns:1fr;gap:28px}
+  .ground{max-width:420px;margin:0 auto;width:100%}
+  h1{font-size:42px}
+  .steps,.cards2{grid-template-columns:1fr}
+  .tiles{grid-template-columns:1fr 1fr}
+  .result{padding:30px 4px}
+  .result .verdict{font-size:26px}
+  table{font-size:12px}
+  th,td{padding-left:10px;padding-right:10px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="mark" onclick="go('home')">
+      <b>20</b><div class="dots"><i></i><i></i></div><b>0</b>
+      <span>IPLegends<br>draft · simulate</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill" id="deckPill">loading…</div>
+  </header>
+
+  <!-- ============ HOME ============ -->
+  <section id="home">
+    <div class="hero">
+      <div>
+        <div class="kicker">All-time IPL · 2008 — 2026</div>
+        <h1>Deal the seasons.<br>Build your <em>greatest XI</em>.</h1>
+        <p class="lede">You're dealt one franchise-season at a time — Mumbai 2013, Chennai 2010,
+          Rajasthan 2008. Pick a player who actually played it. Fill fifteen slots, field a
+          legal eleven, and see whether it beats the house.</p>
+        <div class="cta">
+          <button class="btn btn-primary" onclick="newDraft()">PLAY NOW &rarr;</button>
+          <button class="btn" onclick="promptSeed()">ENTER A SEED</button>
+        </div>
+        <div class="stat-line" id="homeStats"></div>
+      </div>
+      <div class="ground" id="homeGround"><div class="strip"></div></div>
+    </div>
+
+    <div class="steps">
+      <div class="step"><div class="n">01</div><div>
+        <h4>DEAL</h4><p>A franchise-season, drawn uniformly from all 166. Mumbai comes up
+        nineteen times; Kochi Tuskers Kerala once.</p></div></div>
+      <div class="step"><div class="n">02</div><div>
+        <h4>BUILD</h4><p>Pick a player from that squad, for a slot you still need.
+        Fifteen picks, at most four overseas.</p></div></div>
+      <div class="step"><div class="n">03</div><div>
+        <h4>SIMULATE</h4><p>Twenty overs a side, ball by ball, off nineteen seasons of
+        real deliveries.</p></div></div>
+    </div>
+  </section>
+
+  <!-- ============ DRAFT ============ -->
+  <section id="draft" class="hide">
+    <div class="board">
+      <div>
+        <div class="card">
+          <div class="deal-head">
+            <div class="sub">Dealt to you</div>
+            <div class="team" id="dealTeam">—</div>
+          </div>
+          <h3>Pick a player <span id="optCount"></span></h3>
+          <div id="options"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Your squad <span id="pickCount">0 / 15</span></h3>
+          <div class="meter">
+            <div class="big" id="pickBig">0</div>
+            <div class="lb">picks made<br><span id="oversLine">0 of 4 overseas</span></div>
+          </div>
+          <div class="bar"><i id="progBar" style="width:0%"></i></div>
+          <div class="slots" id="slots"></div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary hide" id="simBtn" onclick="simulate()">SIMULATE THE MATCH &rarr;</button>
+          <button class="btn" onclick="go('home')">ABANDON</button>
+          <div class="pill" id="seedPill" style="margin-left:auto"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Playing XI</h3>
+          <div id="xiList" class="body" style="color:var(--dim);font-size:13px">
+            Fill all fifteen slots and the engine picks your best legal eleven —
+            a keeper, five bowlers, then the best bats.
+          </div>
+          <div class="legal hide" id="legalLine"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RESULT ============ -->
+  <section id="result" class="hide">
+    <div class="result">
+      <div class="seedline" id="resSeed"></div>
+      <div class="verdict" id="resVerdict"></div>
+      <div class="score" id="resScore"></div>
+      <div class="tiles" id="resTiles"></div>
+      <div style="margin-top:30px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="newDraft()">PLAY AGAIN &rarr;</button>
+        <button class="btn" onclick="copyLink()">COPY THIS GAME'S LINK</button>
+      </div>
+    </div>
+    <div class="cards2">
+      <div class="card"><h3 id="inn1Head"></h3><table id="inn1"></table></div>
+      <div class="card"><h3 id="inn2Head"></h3><table id="inn2"></table></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>IPLEGENDS · DEAL · BUILD · SIMULATE</div>
+    <div id="footStats"></div>
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let META = null, S = null;
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
+}
+function go(id){
+  for (const s of ['home','draft','result']) $('#'+s).classList.toggle('hide', s !== id);
+  window.scrollTo(0,0);
+}
+const SLOT_LABEL = {keeper:'Keeper', opener:'Opener', top_order:'Top order',
+                    middle_or_finisher:'Middle / finisher', bowler:'Bowler', open:'Open'};
+
+async function boot(){
+  META = await api('/api/meta');
+  $('#deckPill').textContent = META.cards.toLocaleString() + ' cards';
+  const s = META.seasons;
+  $('#homeStats').innerHTML =
+    `<b>${META.franchise_seasons}</b> franchise-seasons · <b>${META.cards.toLocaleString()}</b> rated player-seasons · <b>${s[0]}–${s[s.length-1]}</b>`;
+  $('#footStats').textContent =
+    `${META.franchise_seasons} FRANCHISE-SEASONS · ${META.cards.toLocaleString()} CARDS · ${s.length} SEASONS`;
+  drawGround();
+}
+
+/* The eleven as they'd stand on a ground: keeper behind the strip, the rest ringed. */
+function drawGround(){
+  const g = $('#homeGround');
+  const pos = [['WK',50,72],['SLIP',60,70],['POINT',76,53],['COVER',72,36],['MID-OFF',58,25],
+               ['MID-ON',42,25],['MID-WKT',27,36],['SQ LEG',24,53],['FINE LEG',40,80],
+               ['THIRD',63,82],['DEEP',50,12]];
+  for (const [t,x,y] of pos){
+    const c = document.createElement('div');
+    c.className = 'chip'; c.textContent = t;
+    c.style.left = x + '%'; c.style.top = y + '%';
+    g.appendChild(c);
+  }
+}
+
+/* --- draft --- */
+async function newDraft(){ render(await api('/api/draft', {method:'POST'})); go('draft'); }
+function promptSeed(){
+  const v = prompt('Seed (any whole number). The same seed deals the same cards to everyone.');
+  if (v !== null && v.trim() !== '') openSeed(v.trim());
+}
+async function openSeed(v){
+  try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
+  catch(e){ toast(e.message); }
+}
+async function pick(i){
+  try {
+    S = await api(`/api/draft/${S.state}/pick`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:i})});
+    render(S);
+  } catch(e){ toast(e.message); }
+}
+
+function render(s){
+  S = s;
+  history.replaceState(null, '', '#' + s.state);
+  $('#seedPill').textContent = 'seed ' + s.state.split('-')[0];
+  $('#pickCount').textContent = `${s.picks_made} / ${s.picks_total}`;
+  $('#pickBig').textContent = s.picks_made;
+  $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;
+  $('#progBar').style.width = (100 * s.picks_made / s.picks_total) + '%';
+
+  // slots: template order, filled first
+  const rows = [];
+  const used = [...s.squad];
+  for (const [slot, n] of Object.entries(META.template)){
+    for (let k = 0; k < n; k++){
+      const idx = used.findIndex(c => c.slot === slot);
+      const got = idx >= 0 ? used.splice(idx,1)[0] : null;
+      rows.push(`<div class="slot ${got?'done':''}">
+        <div class="lb">${SLOT_LABEL[slot]||slot}</div>
+        <div class="who">${got ? got.name + ' · ' + got.franchise + ' ' + got.season_year : '—'}</div>
+        <div class="rt">${got ? got.rating : ''}</div></div>`);
+    }
+  }
+  $('#slots').innerHTML = rows.join('');
+
+  if (s.deal){
+    $('#dealTeam').innerHTML = `${s.deal.franchise} <span class="yr">${s.deal.season_year}</span>`;
+    // Group by player. The API returns one entry per (player, slot) because that is what
+    // the draft consumes, but a list showing WP Saha three times reads as a bug -- so the
+    // player is the row and the slots he could fill are the buttons.
+    const byPlayer = new Map();
+    s.deal.options.forEach((o,i) => {
+      if (!byPlayer.has(o.person_id)) byPlayer.set(o.person_id, {card:o, choices:[]});
+      byPlayer.get(o.person_id).choices.push({slot:o.slot, index:i});
+    });
+    $('#optCount').textContent = byPlayer.size + ' players';
+    $('#options').innerHTML = [...byPlayer.values()].map(({card,choices}) => `
+      <div class="opt">
+        <span class="ov ${card.overseas ? '' : 'dom'}" title="${card.overseas ? 'overseas' : 'domestic'}"></span>
+        <span class="nm">${card.name}</span>
+        <span class="slots-inline">${choices.map(c =>
+          `<button class="sl pickable" onclick="pick(${c.index})">${SLOT_LABEL[c.slot]||c.slot}</button>`
+        ).join('')}</span>
+        <span class="rt">${card.rating ?? '—'}</span>
+      </div>`).join('');
+    $('#simBtn').classList.add('hide');
+    $('#xiList').classList.remove('hide');
+    $('#legalLine').classList.add('hide');
+  } else {
+    $('#dealTeam').textContent = 'Squad complete';
+    $('#optCount').textContent = '';
+    $('#options').innerHTML = '<div class="body" style="color:var(--dim);font-size:13px">' +
+      'Fifteen picks made. Simulate when you are ready.</div>';
+    $('#simBtn').classList.remove('hide');
+    loadXI();
+  }
+}
+
+async function loadXI(){
+  const x = await api('/api/xi/' + S.state);
+  $('#xiList').outerHTML = '<div id="xiList">' + x.xi.map((p,i) =>
+    `<div class="xi-row"><span class="pos">${i+1}</span><span class="nm">${p.name}</span>
+     <span class="tm">${p.season_year}</span><span class="rt">${p.rating ?? ''}</span></div>`
+    ).join('') + '</div>';
+  const line = $('#legalLine');
+  line.classList.remove('hide');
+  line.classList.toggle('bad', !x.overseas.startsWith('4 overseas') && x.overseas.includes('NO LEGAL'));
+  line.textContent = 'four-overseas rule: ' + x.overseas;
+}
+
+/* --- match --- */
+async function simulate(){
+  $('#simBtn').disabled = true;
+  try {
+    const m = await api('/api/match/' + S.state);
+    showResult(m);
+  } catch(e){ toast(e.message); }
+  finally { $('#simBtn').disabled = false; }
+}
+
+function showResult(m){
+  $('#resSeed').textContent = 'seed ' + m.state.split('-')[0];
+  const you = m.first, them = m.second;
+  const won = m.result.startsWith('YOU');
+  $('#resVerdict').textContent = won ? 'YOU WIN' : (m.result === 'tied' ? 'TIED' : 'YOU LOSE');
+  $('#resVerdict').style.color = won ? 'var(--mint)' : 'var(--gold)';
+  $('#resScore').textContent = `${you.runs}/${you.wickets} — ${them.runs}/${them.wickets}`;
+  // `first.bowling` is who bowled AT you, i.e. the opponent's attack. Your bowlers appear
+  // in the second innings. Getting this backwards credited their best bowler to you.
+  const top = [...you.batting].sort((a,b)=>b.runs-a.runs)[0] || {name:'—',runs:0};
+  const best = [...them.bowling].sort((a,b)=>b.wickets-a.wickets || a.runs-b.runs)[0]
+               || {name:'—',wickets:0,runs:0};
+  $('#resTiles').innerHTML = `
+    <div class="tile"><b>${you.runs}/${you.wickets}</b><span>your total</span></div>
+    <div class="tile"><b>${them.runs}/${them.wickets}</b><span>they made</span></div>
+    <div class="tile"><b>${top.runs}</b><span>top score · ${top.name}</span></div>
+    <div class="tile"><b>${best.wickets}–${best.runs}</b><span>best bowl · ${best.name}</span></div>`;
+  $('#inn1Head').textContent = `YOU — ${you.runs}/${you.wickets} (${you.overs})`;
+  $('#inn2Head').textContent = `OPPONENT — ${them.runs}/${them.wickets} (${them.overs})`;
+  $('#inn1').innerHTML = battingTable(you) + bowlingTable(them);
+  $('#inn2').innerHTML = battingTable(them) + bowlingTable(you);
+  go('result');
+}
+const battingTable = inn => `<tr><th>Batting</th><th class="num">R</th><th class="num">B</th></tr>` +
+  inn.batting.map(b => `<tr class="${b.rated?'':'unrated'}"><td>${b.name}${b.out?'':'*'}</td>
+    <td class="num">${b.runs}</td><td class="num">${b.balls}</td></tr>`).join('') +
+  `<tr><td>extras</td><td class="num">${inn.extras}</td><td class="num"></td></tr>`;
+const bowlingTable = inn => `<tr><th>Bowling</th><th class="num">O</th><th class="num">R–W</th></tr>` +
+  inn.bowling.map(b => `<tr><td>${b.name}</td><td class="num">${b.overs}</td>
+    <td class="num">${b.runs}–${b.wickets}</td></tr>`).join('');
+
+function copyLink(){
+  navigator.clipboard.writeText(location.origin + '/#' + S.state)
+    .then(() => toast('Link copied — it replays this exact game.'))
+    .catch(() => toast(location.origin + '/#' + S.state));
+}
+
+boot().then(() => {
+  const h = location.hash.slice(1);
+  if (h && h.includes('-')) api('/api/draft/' + h).then(s => { render(s); go('draft'); }).catch(()=>{});
+});
+</script>
+</body>
+</html>

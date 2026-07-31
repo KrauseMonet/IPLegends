@@ -12,12 +12,15 @@ re-queried, so a request touches the database exactly never (SPEC 11.3).
 from __future__ import annotations
 
 import os
+import pathlib
 import random
 from contextlib import asynccontextmanager
 
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import SQUAD_SIZE, Card
@@ -47,6 +50,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
+
+STATIC = pathlib.Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    """One page, served from disk. The client is a static file with no build step: it
+    reads `/api/meta` for the template rather than embedding a copy of it (A19)."""
+    return FileResponse(STATIC / "index.html")
 
 
 # --- wire format ----------------------------------------------------------------------
@@ -159,6 +172,27 @@ def health() -> dict:
         "ok": deck is not None,
         "cards": sum(len(v) for v in deck.cards_by_fs.values()) if deck else 0,
         "franchise_seasons": len(deck.fs_ids) if deck else 0,
+    }
+
+
+@app.get("/api/meta")
+def meta() -> dict:
+    """Everything a front end needs to render the board before a game starts.
+
+    Served rather than hardcoded in the client for the reason A19 gives about columns: a
+    template baked into JavaScript is a second copy of `TEMPLATE`, and the day A40 is
+    retuned again the board would show the old shape with nothing to catch it.
+    """
+    from etl.feasibility import OVERSEAS_CAP, TEMPLATE
+    deck = STATE["deck"]
+    seasons = {c.season_year for cards in deck.cards_by_fs.values() for c in cards}
+    return {
+        "template": TEMPLATE,
+        "squad_size": SQUAD_SIZE,
+        "overseas_cap": OVERSEAS_CAP,
+        "cards": sum(len(v) for v in deck.cards_by_fs.values()),
+        "franchise_seasons": len(deck.fs_ids),
+        "seasons": sorted(s for s in seasons if s),
     }
 
 

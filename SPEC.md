@@ -642,10 +642,10 @@ played descending** so the ones that matter surface first.
 *derived* half answers a different question from the one the draft asks.** Every figure
 above stands as measured; what follows is what filling them exposed.
 
-The override file is now complete — **816 people: 502 international, 314 override, 0
-unknown** — and the game reports no uncertainty at all: over 400 drafted XIs, **312 legal,
-0 uncertain, 88 with no legal XI**, against **127 / 179 / 94** when the file was empty.
-The 88 are §1.1's missing nationality constraint (§10.4), not a gap in this section.
+The override file is now complete — **816 people: 489 international, 327 override, 0
+unknown** — and the game reports no uncertainty at all: over 400 drafted XIs, **313 legal,
+0 uncertain, 87 with no legal XI**, against **127 / 179 / 94** when the file was empty.
+The 87 are §1.1's missing nationality constraint (§10.4), not a gap in this section.
 
 Three of the 314 were checked and rejected before loading, and the check that rejected them
 is now **validation check 21**: the IPL has capped a playing XI at four overseas players in
@@ -664,15 +664,32 @@ States, so the vote marks him overseas for seasons in which he was domestic. A23
 unknown defaulting to domestic; this marks a genuine Indian overseas, which wrongly
 constrains an XI rather than illegally permitting one. Safer direction, still wrong.
 
-**13 archive-resolved players are affected and are now offered in the CSV** rather than
-corrected in code, because an override already outranks the derivation and so a filled row
-is the whole repair. They are exactly the players resolved to a non-full-member nation:
-ten Doeschate, van der Merwe, Sohal, Wiese, Theron, Nath, Rana, Lamichhane, Jaskaran Singh,
-Harpreet Singh, T Mishra, Milind Kumar, Harmeet Singh (2). Some are genuinely overseas and
-merely mislabelled (Wiese, Lamichhane, ten Doeschate); the label still needs to be right,
-because `is_overseas` is derived from it. Check 21 stands at **99 illegal XIs of 2,486**
-and **fails by design** until they are filled — 53 would remain even then, so the file is
-not yet the whole story and the check is what will say when it is.
+**RATIFIED: nationality is the one held DURING the IPL career, not the career vote.** A
+player who was uncapped-domestic in an IPL season stays domestic for that season however
+many caps he wins for another country afterwards. All 13 affected players were checked
+against the public record and filled: eight resolve to India (Sohal, Akshdeep Nath, Sachin
+Rana, Harpreet Singh Bhatia, Jaskaran Singh, Milind Kumar, Harmeet Singh (2), Tanmay
+Mishra), three to South Africa (van der Merwe, Wiese, Theron — all capped by South Africa
+while they played, and mislabelled by a later move), and two stand as genuine overseas
+slots (ten Doeschate, Lamichhane).
+
+Two are worth keeping for the reasoning rather than the answer. **Tanmay Mishra was a
+capped Kenya international and still domestic**: Deccan signed him as a local player on his
+Indian passport, so the question the draft asks is not "has he a cap" but "did he occupy an
+overseas slot". **Sachin Rana was never a Seychelles player at all** — the vote had matched
+a different Rana, so that one was a registry collision rather than an emigration.
+
+**Check 21 also had a bug of its own, and it was inflating the alarm by a third.** It
+counted everyone who *participated*, which includes a fielding substitute who took a catch
+— someone never in the XI and never against the cap. On the named-XI basis the same data
+read 63 illegal XIs, not 99. The Impact Player is still counted deliberately: from 2023 a
+team names twelve, and four overseas in the XI obliges an Indian Impact Player, so four
+across the twelve remains the right bound.
+
+**Check 21 now PASSES: 0 illegal XIs of 2,486.** Nationality is complete and internally
+consistent with the IPL's own rule — 816 people, 489 international, 327 override, 0 unknown.
+Falsified rather than assumed: marking Kohli as Australian implicates 82 players, so the
+zero is a measurement and not a check that stopped looking.
 
 The generator emits **evidence and never a verdict** (A30), and the evidence has two
 strengths that must not be confused. Sitting in an illegal XI is a *suspicion*: five

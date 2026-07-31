@@ -1,17 +1,17 @@
 person_id,name,matches,cricinfo_id,archive_says,illegal_xis,cap_proves_domestic,nationality
-4ec07775,RN ten Doeschate,26,47660,Netherlands,1,,
-05c2ca46,RE van der Merwe,21,47850,Netherlands,0,,
-3fca55af,S Sohal,20,228943,United States of America,19,,
-aa8d28ae,D Wiese,19,221140,Namibia,1,,
-dec8e038,J Theron,10,223642,United States of America,1,,
-f10e94c4,AD Nath,10,500360,United Arab Emirates,9,,
-90edaaa9,S Rana,9,33757,Seychelles,9,,
-b410bd3d,S Lamichhane,9,960361,Nepal,0,,
-d7b3a420,Jaskaran Singh,8,376102,Canada,8,,
-28c78fb3,Harpreet Singh,8,340854,United Arab Emirates,8,,
-c9cac448,T Mishra,1,24790,Kenya,1,,
-b4296080,Milind Kumar,1,451947,United States of America,1,,
-0bf15e52,Harmeet Singh (2),1,422847,United States of America,0,,
+4ec07775,RN ten Doeschate,26,47660,Netherlands,1,,Netherlands
+05c2ca46,RE van der Merwe,21,47850,Netherlands,0,,South Africa
+3fca55af,S Sohal,20,228943,United States of America,19,,India
+aa8d28ae,D Wiese,19,221140,Namibia,1,,South Africa
+dec8e038,J Theron,10,223642,United States of America,1,,South Africa
+f10e94c4,AD Nath,10,500360,United Arab Emirates,9,,India
+90edaaa9,S Rana,9,33757,Seychelles,9,,India
+b410bd3d,S Lamichhane,9,960361,Nepal,0,,Nepal
+d7b3a420,Jaskaran Singh,8,376102,Canada,8,,India
+28c78fb3,Harpreet Singh,8,340854,United Arab Emirates,8,,India
+c9cac448,T Mishra,1,24790,Kenya,1,,India
+b4296080,Milind Kumar,1,451947,United States of America,1,,India
+0bf15e52,Harmeet Singh (2),1,422847,United States of America,0,,India
 5f547c8b,Rashid Khan,153,793463,,,,Afghanistan
 39a2dfa8,R Tewatia,118,423838,,,,India
 33a364a6,R Bhatia,95,26907,,,,India

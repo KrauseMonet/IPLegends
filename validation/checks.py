@@ -831,12 +831,14 @@ def check_21_no_real_xi_fielded_five_overseas(conn) -> Result:
     if not nationality:
         return skipped(21, title, "no nationalities derived - run etl.derive_people")
 
+    # The named XI, not everyone who took the field: a substitute fielder never counted
+    # against the cap. See etl.derive_people.real_xis.
     xis = _rows(conn, """
         select f.season_year, m.match_id, a.franchise_season_id, array_agg(a.person_id)
         from appearances a
         join franchise_seasons f on f.franchise_season_id = a.franchise_season_id
         join matches m on m.match_id = a.match_id
-        where a.participated
+        where a.named_in_squad
         group by 1, 2, 3
     """)
     names = dict(_rows(conn, "select person_id, primary_name from people"))

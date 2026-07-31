@@ -68,10 +68,21 @@ OVERSEAS_PER_XI = 4
 
 
 def real_xis(conn) -> list[list[str]]:
-    """Every team sheet in the archive, one row per team per match."""
+    """Every team sheet in the archive, one row per team per match.
+
+    `named_in_squad`, not `participated`, and the difference is the check's correctness.
+    The cap applies to the eleven a team NAMES, and `participated` also counts a fielding
+    substitute who took a catch -- someone never in the XI and never against the limit.
+    Counting them read 99 XIs as illegal against a true 63, so a third of the alarm was
+    the check misreading its own basis.
+
+    The Impact Player is deliberately still counted. From 2023 a team names twelve here,
+    and the cap covers the XI and the Impact Player together: four overseas in the XI
+    obliges an Indian Impact Player, so four across the twelve is still the right bound.
+    """
     return [row[0] for row in conn.execute("""
         select array_agg(person_id)
-        from appearances where participated
+        from appearances where named_in_squad
         group by franchise_season_id, match_id
     """).fetchall()]
 

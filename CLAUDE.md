@@ -394,6 +394,7 @@ them has been measured. The merge makes this non-urgent — it does not answer i
 | **7.4-7.6 Normalisation + rating scale** | **done 2026-07-30**, migration 010 applied. **A view replacement and nothing else — no table, no column, no stored number.** Within-season centring (unweighted, no SD division), pooled cohort offsets zeroed below 20 observations, one global SD, linear 0-100 clipped at S = 3.5. **1,812 rateable rows; scale min 6.7, max 100.0, mean 50.0, SD 14.3.** A34/A35 resolved in the same pass (A46): band prior, k = 100, `etl.impact --write` re-run, all 5,149 rows `prior_source = 'band'`, Kohli 19 of 19 still reconcile. `etl.feasibility` now ranks on `normalised_per_ball`. A9 closed. |
 | **10. The game** | **done 2026-07-30**, and it was out of scope until it was — SPEC §9 records the move rather than deleting the line. Draft, XI selection and a twenty-over-a-side match off the stored grids; no writes, no migration, nothing in `etl` imports it. Ratified: the tilt (A47), the band below-floor batting delta (A48), the known-count overseas bound on both sides of a repair (A49), the five-bowler cap (A50). `--validate` matches the archive on total, extras and wickets and **misses on SD, 27.1 vs 33.2, recorded not tuned.** `tests/test_simulator.py`, 19 tests, all verified falsifiable — three had to be rewritten because they were not. |
 | **7.8-7.9 The card** | **done 2026-07-31**, migrations 011 and 012 applied. Runs per MATCH (A54), disciplines added (A55), Player of the Match priced in (A56), a declared reputation blend (A57), integer 70-100 percentile-anchored scale (A58). **A view replacement only.** `etl.feasibility` now reads `rated_per_ball`; check 22 pins the card against the engine. Then 012: a continuous all-rounder term (A59) and a 70-**99** scale (A60). Kohli 2016 75.4 -> **96**, Bumrah's range 37.6-92.9 -> **77-96**, Narine 2024 69.7 -> **99**, finishers 20% -> **0%** of the top 20. |
+| **11. The API** | **done 2026-07-31.** Stateless, seed-based (A62), five routes in `web/app.py` over `web/session.py`. No storage, no accounts, no migration. `run_draft` reused verbatim rather than reimplemented. Verified end to end against the real deck: 1,689 cards, a 15-pick draft, a legal XI and a scorecard; the same state returns an identical match on repeat requests. **The HMAC in SPEC 11 was dropped while building** — replay makes the state self-validating, so a signature protected nothing. `tests/test_web.py`, 19 tests, all verified falsifiable (one had to be rewritten). |
 | 7.7 Ratings read + checks | **not started.** The top-20-per-cohort print against normalised numbers, and **checks 9-11, 13 and 14, which §7.4 has now unblocked** — write them against the real normalised rating, not before. A26's thresholds get re-read against those lists at the same time (watch for a pure batter tagged all-rounder), together with A40's filed question about all-rounders dominating the 5-8 band. |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
@@ -594,6 +595,39 @@ were rewritten rather than kept:
 
 That is three of nineteen, written carefully, passing, and protecting nothing. Break the
 line before believing the test.
+
+## Section 11: the API
+
+```bash
+uv run uvicorn web.app:app --reload          # http://127.0.0.1:8000, docs at /docs
+```
+
+Stateless and seed-based (A62). Boot reads the deck and the state model once — about 4
+seconds — and **a request touches the database never**. No session store, no accounts, no
+table.
+
+| route | |
+|---|---|
+| `GET /api/health` | deck size |
+| `POST /api/draft?seed=` | start; omit the seed for a fresh one |
+| `GET /api/draft/{state}` | current deal, or the finished squad |
+| `POST /api/draft/{state}/pick` | `{"index": n}` |
+| `GET /api/xi/{state}` | the eleven, and its overseas status |
+| `GET /api/match/{state}` | the scorecard |
+
+State is `7-0.3.14` — seed then choices, **unsigned**, and SPEC 11.2 records why that
+corrects the original design: replay refuses an index the server never dealt, so there is
+nothing a signature would protect. **It goes back the day a leaderboard lands**, because a
+result that outlives its request can be submitted without being played.
+
+**`web/session.py` reuses `run_draft` verbatim** — the human is injected as a policy that
+replays recorded choices and raises to pause. Do not reimplement the loop here: A61's cap and
+A40's guarantee live in `run_draft` and a second copy is a second place for them to drift.
+
+**The match continues the session's LIVE rng** (player draft -> opponent -> innings), which
+is the order `game.__main__` uses. Re-seeding would give the API a different match from the
+CLI for the same seed with nothing to notice it; `tests/test_web.py` pins it by comparing
+against exactly that mistake.
 
 ## Section 6: squads, and the four CSVs that gate the deck
 

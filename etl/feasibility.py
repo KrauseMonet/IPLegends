@@ -81,8 +81,13 @@ class Card:
     season_year: int | None = None
     franchise: str | None = None
     # NULL is a real and common value here, never False (A23): nationality is unfilled for
-    # 314 people, and an unknown passport must not read as an Indian one.
+    # 314 people, and an unknown passport must not read as an Indian one. A51 filled them
+    # all, so it is NULL for nobody today; the type stays because a revised archive can
+    # reintroduce one and A49/A61 both depend on being able to tell unknown from domestic.
     overseas: bool | None = None
+    # A58/A60's integer 70-99. The card's face value, carried so the API can show the
+    # drafter the number the rating actually is, rather than a per-ball figure nobody reads.
+    display: int | None = None
 
     @property
     def has_bat(self) -> bool:
@@ -130,7 +135,10 @@ def load_deck(conn) -> Deck:
                -- another; and not `shrunk_per_ball`, which carries the era drift 7.4
                -- removes and is a season bias dressed up as a preference.
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,
-               max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl
+               max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl,
+               -- Identical on both discipline rows by construction: the card is the
+               -- player-season, not the discipline (A55).
+               max(r.display_rating) as display
           from squad_members s
           join people p on p.person_id = s.person_id
           join franchise_seasons f on f.franchise_season_id = s.franchise_season_id
@@ -143,10 +151,10 @@ def load_deck(conn) -> Deck:
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for (fs_id, person_id, name, role, band, career_keeper,
-         season_year, franchise, overseas, bat, bowl) in rows:
+         season_year, franchise, overseas, bat, bowl, display) in rows:
         cards_by_fs[fs_id].append(
             Card(fs_id, person_id, name, frozenset(), bat, bowl, band, role,
-                 career_keeper, season_year, franchise, overseas)
+                 career_keeper, season_year, franchise, overseas, display)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]

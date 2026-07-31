@@ -1839,8 +1839,23 @@ and the partly-drafted squad has to exist somewhere between pick 3 and pick 4. T
 
 ### 11.2 The decision, and the property it rests on
 
-The client carries **the seed and the choice indices made so far**, signed so it cannot be
-forged. Each request replays the draft from scratch and serves the next deal.
+The client carries **the seed and the choice indices made so far**. Each request replays the
+draft from scratch and serves the next deal. The state string is `7-0.3.14` — seed, then
+choices, in the open.
+
+**[Corrected 2026-07-31 while building it] The state is NOT signed.** This section first
+called for an HMAC. Writing the replay showed there is nothing for a signature to protect:
+every choice is an index into options the server itself dealt, so replay either lands on a
+legal pick or the index is out of range and the state is refused. There is no privilege to
+forge — a player can already ask for any seed, and the score is computed by the server from
+the state rather than submitted alongside it. A signature would have protected nothing while
+reading as though it protected something, which is worse than leaving it off. **It goes back
+on the day a result outlives the request that produced it**, because a leaderboard would let
+a client submit a state it never played.
+
+Parsing is strict: an empty segment is malformed, not an omitted choice. `7-1..2` and
+`7-1.2` must not be the same session, or two URLs silently mean one game and the first looks
+like it lost a pick. Same instinct as A23 — a string we cannot read is not one to guess at.
 
 This rests on the draft being fully deterministic given a seed and a sequence of choices,
 which was **verified rather than assumed** before the design was ratified: **200 of 200
@@ -1866,7 +1881,38 @@ part of the state and the seed alone is not enough.
   franchise-seasons** and loads once at boot in **3.8 s**, so it is held in memory and never
   re-queried per request.
 
-### 11.4 What is deferred, and why it stays cheap
+### 11.4 The surface
+
+Five routes, in `web/app.py`, and **nothing in them decides anything about cricket**. The
+overseas cap, the deal-time guarantee, the five-bowler attack and the four-overseas XI are
+all reached by calling `etl.feasibility` and `game`, never by restating them.
+
+| route | |
+|---|---|
+| `GET /api/health` | deck size, for a load balancer |
+| `POST /api/draft?seed=` | start a game; omit the seed for a fresh one |
+| `GET /api/draft/{state}` | the current deal, or the finished squad |
+| `POST /api/draft/{state}/pick` | `{"index": n}` into the deal's options |
+| `GET /api/xi/{state}` | the eleven the engine would field, and its overseas status |
+| `GET /api/match/{state}` | the scorecard |
+
+`web/session.py` does the work, and it **reuses `run_draft` verbatim** rather than
+reimplementing the loop: the human is injected as a policy that replays recorded choices and
+then raises to pause. A second implementation of the draft would be a second place for A61's
+cap and A40's guarantee to drift, which is what A19 refuses for columns and what check 12's
+`TEMPLATE` import refuses for the template.
+
+The match continues the session's **live** rng — player's draft, then opponent, then the
+innings — which is the order `game.__main__` uses. Re-seeding for the match would have given
+the API a different game from the CLI for the same seed with nothing to notice it; a test
+pins it by comparing against exactly that mistake.
+
+Measured end to end against the real deck: **1,689 cards over 166 franchise-seasons**, a
+first deal of 24 options, a full fifteen-pick draft, a legal XI, and a scoreboard. The same
+state returns an identical match on repeated requests, and the same seed deals identical
+cards to different players.
+
+### 11.5 What is deferred, and why it stays cheap
 
 **Daily challenge** and **login** are explicitly later stages. Both are additive here rather
 than a rewrite: a daily challenge is one shared seed per date instead of a random one, and

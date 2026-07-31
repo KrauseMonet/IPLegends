@@ -638,6 +638,52 @@ played descending** so the ones that matter surface first.
 
 `etl/overrides/nationality.csv` is authoritative over the derivation.
 
+**[A51] The 314 were filled by hand on 2026-07-31, and checking them found that the
+*derived* half answers a different question from the one the draft asks.** Every figure
+above stands as measured; what follows is what filling them exposed.
+
+The override file is now complete — **816 people: 502 international, 314 override, 0
+unknown** — and the game reports no uncertainty at all: over 400 drafted XIs, **312 legal,
+0 uncertain, 88 with no legal XI**, against **127 / 179 / 94** when the file was empty.
+The 88 are §1.1's missing nationality constraint (§10.4), not a gap in this section.
+
+Three of the 314 were checked and rejected before loading, and the check that rejected them
+is now **validation check 21**: the IPL has capped a playing XI at four overseas players in
+every season since 2008, so replaying our nationality data against **2,486 real team
+sheets** tests it against a rule the archive never states. `VS Malik` and `Shoaib Ahmed`
+were entered as Pakistan but played in 2009 and later, and no Pakistani has played the IPL
+since 2008; `AG Murtaza` was entered as Afghanistan but played 2010–2013, and the first
+Afghan in the league was 2017. A fourth, `WA Mota`, was entered as Australia and sits in
+**10 of his 12 XIs** as an illegal fifth overseas player. All four are recorded as India.
+
+**The derived half has a systematic flaw of the same family as A23, running the other way.**
+The archive vote resolves *which nation a player has ever represented*; the draft needs
+*which nation he held that season*. They come apart for a player who emigrated after his
+IPL career — `S Sohal` opened for Punjab from 2008 and later played T20Is for the United
+States, so the vote marks him overseas for seasons in which he was domestic. A23 stopped an
+unknown defaulting to domestic; this marks a genuine Indian overseas, which wrongly
+constrains an XI rather than illegally permitting one. Safer direction, still wrong.
+
+**13 archive-resolved players are affected and are now offered in the CSV** rather than
+corrected in code, because an override already outranks the derivation and so a filled row
+is the whole repair. They are exactly the players resolved to a non-full-member nation:
+ten Doeschate, van der Merwe, Sohal, Wiese, Theron, Nath, Rana, Lamichhane, Jaskaran Singh,
+Harpreet Singh, T Mishra, Milind Kumar, Harmeet Singh (2). Some are genuinely overseas and
+merely mislabelled (Wiese, Lamichhane, ten Doeschate); the label still needs to be right,
+because `is_overseas` is derived from it. Check 21 stands at **99 illegal XIs of 2,486**
+and **fails by design** until they are filled — 53 would remain even then, so the file is
+not yet the whole story and the check is what will say when it is.
+
+The generator emits **evidence and never a verdict** (A30), and the evidence has two
+strengths that must not be confused. Sitting in an illegal XI is a *suspicion*: five
+overseas players means one of the five is wrong and does not say which, so every genuine
+overseas player in that XI is named alongside the culprit — 158 players over 99 XIs, mostly
+Sangakkara and de Villiers. Four *other* players being overseas is a *proof*: the cap
+leaves no room, so this player is domestic whatever any archive says. The proof is drawn
+only from full-member labels and only from XIs already consistent, and both restrictions
+are load-bearing — reading it inside a contradicted XI proves every player in that XI
+domestic, Warner and Pollard included, which is how the first version was caught.
+
 **6.2 Wicketkeepers.** Mine `wicket_kind = 'stumped'` for positive signals. That misses
 keepers who never stumped anyone. Produce the derived list, then complete
 `etl/overrides/keepers.csv` by hand (~50–70 players, tractable).
@@ -1546,11 +1592,15 @@ LEGAL XI EXISTS`. Both sides of a repair read A23 the same way: an overseas play
 be swapped out for a **known domestic** one. Swapping in an unknown lowers the count this
 code can see without lowering the count that matters.
 
-Measured over 400 drafted XIs, known-domestic-only against unknown-eligible: **legal 127 vs
-118, uncertain 179 vs 224, no legal XI 94 vs 58**. The strict rule certifies *more* XIs, not
-fewer — the loose one was manufacturing uncertainty by design.
+Measured over 400 drafted XIs *while `nationality.csv` was empty*, known-domestic-only
+against unknown-eligible: **legal 127 vs 118, uncertain 179 vs 224, no legal XI 94 vs 58**.
+The strict rule certifies *more* XIs, not fewer — the loose one was manufacturing
+uncertainty by design. **Since the file was filled (A51) the same 400 XIs read 312 legal, 0
+uncertain, 88 with no legal XI**, so the uncertainty branch is now unexercised in practice
+and the rule above is what keeps it that way rather than something to delete: the 13
+disputed rows are still open and any future archive revision reintroduces unknowns.
 
-The 94 are a real finding and not an engine bug: **§1.1's draft template carries no
+The 88 (94 before the fill) are a real finding and not an engine bug: **§1.1's draft template carries no
 nationality constraint at all**, so the deck can hand a drafter a squad that cannot be
 fielded. This belongs with A40's retune and is recorded here rather than patched, because
 lowering it means changing the template, which is a §1.1 decision.

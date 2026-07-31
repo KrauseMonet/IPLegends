@@ -60,6 +60,61 @@ FULL_MEMBERS = (
 )
 
 
+# The IPL has capped a playing XI at four overseas players in every season since 2008.
+# That cap is the only EXTERNAL test this file has: everything else in SPEC 6.1 checks our
+# reading of the archives against the archives. An XI our data says fielded five overseas
+# players is our data being wrong, and it is wrong about somebody in that XI specifically.
+OVERSEAS_PER_XI = 4
+
+
+def real_xis(conn) -> list[list[str]]:
+    """Every team sheet in the archive, one row per team per match."""
+    return [row[0] for row in conn.execute("""
+        select array_agg(person_id)
+        from appearances where participated
+        group by franchise_season_id, match_id
+    """).fetchall()]
+
+
+def team_sheet_evidence(
+    conn, nationality: dict[str, str]
+) -> tuple[dict[str, int], set[str]]:
+    """What the four-overseas cap says about a nationality map. Evidence, never a verdict.
+
+    Two different strengths come out of the same walk and they must not be confused.
+
+    `contradicted` counts, per player, the illegal XIs they appear in. It is a SUSPICION:
+    five overseas in an XI means at least one of the five is wrong, and it does not say
+    which, so every genuine overseas player in that XI is named alongside the culprit.
+
+    `must_be_domestic` is a PROOF. If four players *other than* this one are overseas, the
+    cap leaves no room, so this player is domestic whatever any archive says. Two
+    restrictions keep it from cascading, and both are load-bearing:
+
+    - the four are counted from FULL MEMBER nations only, because an associate label is
+      exactly the kind we are here to doubt and admitting one would let a wrong answer
+      certify the next one;
+    - the proof is drawn only from XIs our data already calls LEGAL. Inside a contradicted
+      XI at least one nationality is known to be wrong, so 'four others are overseas' is
+      the very claim under suspicion -- and reading it anyway proves every player in that
+      XI domestic, Warner and Pollard included, which is how this was caught.
+    """
+    contradicted: dict[str, int] = {}
+    must_be_domestic: set[str] = set()
+    for xi in real_xis(conn):
+        overseas = [p for p in xi
+                    if nationality.get(p) not in (None, HOME_NATION)]
+        if len(overseas) > OVERSEAS_PER_XI:
+            for p in overseas:
+                contradicted[p] = contradicted.get(p, 0) + 1
+            continue
+        trusted = {p for p in overseas if nationality.get(p) in FULL_MEMBERS}
+        for p in xi:
+            if len(trusted - {p}) >= OVERSEAS_PER_XI:
+                must_be_domestic.add(p)
+    return contradicted, must_be_domestic
+
+
 def cricinfo_ids() -> dict[str, str]:
     """Cricsheet person_id -> Cricinfo player id, from the register we already fetch.
 
@@ -362,6 +417,35 @@ def do_nationality(conn) -> None:
     for label, low, high in bands:
         n = sum(1 for m, _, _ in unknown if low <= m <= high)
         print(f"    {label:<14} {n:>4}")
+    # The archive vote answers 'which nation has this player ever represented', and the
+    # draft asks 'was he overseas THAT season'. They come apart for a player who emigrated
+    # after his IPL career: S Sohal batted for Punjab from 2008 and later played T20Is for
+    # the United States, so the vote marks him overseas for seasons in which he was not.
+    # The four-overseas cap catches this from outside, so the contradicted rows join the
+    # unknown ones in the CSV and a human decides. Nothing here fills a value in - an
+    # override already outranks the archive, so a filled row is the whole repair.
+    contradicted, must_be_domestic = team_sheet_evidence(
+        conn, {pid: nat for nat, _, _, pid in updates if nat})
+    # Being named in an illegal XI is not enough to be offered: five overseas in an XI
+    # names every genuine overseas player in it alongside the culprit, which is 152
+    # players and mostly Pollard and Warner. A row is offered only where the archive is
+    # positively contradicted -- the cap PROVES the player domestic and the archive calls
+    # him overseas -- or where the archive's answer is an associate nation, which is the
+    # shape a post-IPL emigration leaves and never the shape an IPL overseas slot has.
+    disputed = sorted(
+        ((played.get(pid, 0), people[pid], pid) for pid in resolved
+         if pid not in overrides and resolved[pid] != HOME_NATION
+         and (pid in must_be_domestic or resolved[pid] not in FULL_MEMBERS)),
+        reverse=True,
+    )
+    print(f"\n  {len(contradicted)} player(s) sit in an XI our data says fielded more "
+          f"than {OVERSEAS_PER_XI} overseas players.")
+    print(f"  {len(must_be_domestic)} player(s) are PROVEN domestic by the cap. "
+          f"{len(disputed)} archive-resolved row(s) now offered for review:")
+    for m, name, pid in disputed:
+        why = "cap proves domestic" if pid in must_be_domestic else "associate nation"
+        print(f"    {m:>4}  {name:<24} archive says {resolved[pid]:<26} {why}")
+
     cricinfo = cricinfo_ids()
     rows = [
         {
@@ -369,9 +453,12 @@ def do_nationality(conn) -> None:
             "name": name,
             "matches": m,
             "cricinfo_id": cricinfo.get(pid, ""),
+            "archive_says": resolved.get(pid, ""),
+            "illegal_xis": contradicted.get(pid, 0),
+            "cap_proves_domestic": "yes" if pid in must_be_domestic else "",
             "nationality": "",
         }
-        for m, name, pid in sorted(unknown, reverse=True)
+        for m, name, pid in sorted(unknown, reverse=True) + disputed
     ]
     for row in rows[:25]:
         print(f"    {row['matches']:>4}  {row['name']}")
@@ -381,7 +468,8 @@ def do_nationality(conn) -> None:
     path = OVERRIDES / "nationality.csv"
     report_merge(path, merge_override(
         path,
-        ["person_id", "name", "matches", "cricinfo_id", "nationality"],
+        ["person_id", "name", "matches", "cricinfo_id", "archive_says",
+         "illegal_xis", "cap_proves_domestic", "nationality"],
         rows,
         decided="nationality",
     ))

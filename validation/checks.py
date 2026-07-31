@@ -25,6 +25,7 @@ from etl.feasibility import load_deck, simulate
 # Imported rather than restated. The fitting filter and the bucket labels live in one
 # place, so check 20 cannot drift into validating the state model against a copy of the
 # rule the state model no longer uses. A19's habit applied to code instead of columns.
+from etl.derive_people import HOME_NATION, OVERSEAS_PER_XI
 from etl.impact import SCORING_SET
 from etl.state_model import BUCKETS, FITTING_SET
 from validation.harness import Result, bad, skipped, verdict
@@ -804,6 +805,70 @@ def check_20_state_model_covers_every_state(conn) -> Result:
     )
 
 
+def check_21_no_real_xi_fielded_five_overseas(conn) -> Result:
+    """A51. Our nationality data replayed against the IPL's own four-overseas cap.
+
+    The third check in this file that can tell us we are WRONG rather than merely
+    inconsistent, and the only one that tests SPEC 6.1. Checks 1 and 15 read the archive
+    for facts it states outright; this one reads a rule the archive never states and the
+    IPL has enforced in every season since 2008, then replays 2,486 real team sheets
+    against it. An XI our data says fielded five overseas players is our data being wrong
+    about somebody in that XI, because the match was played and the XI was legal.
+
+    It earns its keep by having already found things nothing else could. Three override
+    rows claimed a nationality the seasons made impossible, and the archive-resolved half
+    turned out to answer a subtly different question from the one the draft asks -- which
+    nation a player EVER represented, not the one he held that season. A player who
+    emigrated after his IPL career reads as overseas for seasons in which he was not.
+
+    Deliberately counts the KNOWN overseas only, exactly as the engine does (A49). An
+    unknown nationality cannot make this fail, which is right: unknown is a gap and this
+    check is for contradictions. The gaps are check 19's business and the CSV's.
+    """
+    title = "no real XI fielded more than four overseas players"
+    nationality = dict(_rows(
+        conn, "select person_id, nationality from people where nationality is not null"))
+    if not nationality:
+        return skipped(21, title, "no nationalities derived - run etl.derive_people")
+
+    xis = _rows(conn, """
+        select f.season_year, m.match_id, a.franchise_season_id, array_agg(a.person_id)
+        from appearances a
+        join franchise_seasons f on f.franchise_season_id = a.franchise_season_id
+        join matches m on m.match_id = a.match_id
+        where a.participated
+        group by 1, 2, 3
+    """)
+    names = dict(_rows(conn, "select person_id, primary_name from people"))
+
+    culprits: Counter = Counter()
+    illegal = 0
+    for year, match_id, _fs, people in xis:
+        overseas = [p for p in people
+                    if nationality.get(p) not in (None, HOME_NATION)]
+        if len(overseas) > OVERSEAS_PER_XI:
+            illegal += 1
+            for p in overseas:
+                culprits[p] += 1
+
+    # Named by player rather than by match. A single wrong nationality shows up in every
+    # XI that player appeared in, so a list of matches would report one error dozens of
+    # times and bury how few distinct facts are actually in dispute.
+    offenders = [
+        f"{names.get(p, p)} ({nationality[p]}) sits in {n} XI(s) that would hold "
+        f"{OVERSEAS_PER_XI + 1}+ overseas players"
+        for p, n in culprits.most_common(15)
+    ]
+    if len(culprits) > 15:
+        offenders.append(f"... {len(culprits) - 15} more player(s) implicated")
+    return verdict(
+        21, title,
+        f"{illegal} of {len(xis)} real XIs would be illegal under our nationality data; "
+        f"{len(culprits)} player(s) implicated",
+        offenders,
+    )
+
+
 def check_15_actual_delivery_is_reproducible(conn) -> Result:
     """A19. `legal_ball` regenerates the source's own scorecard reference.
 
@@ -937,4 +1002,5 @@ CHECKS = (
     check_18_batting_order_is_complete,
     check_19_every_squad_can_field_a_keeper,
     check_20_state_model_covers_every_state,
+    check_21_no_real_xi_fielded_five_overseas,
 )

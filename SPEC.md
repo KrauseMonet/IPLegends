@@ -1468,6 +1468,53 @@ and the ordering underneath survives in `rated_per_ball`.
 Top of the resulting list: Gayle 2011 and 2012 (100), de Villiers 2016 and 2015 (100),
 Marsh 2008 (99), Russell 2019 (99), Kohli 2016 (98), Warner 2016 (98), Bumrah 2024 (98).
 
+### 7.9 Versatility, and the top of the scale
+
+**Migration 012. A view replacement, as 010 and 011 were.**
+
+**[A59] An all-rounder is worth more than the sum of his two impacts, and the reason is the
+DRAFT rather than the cricket.** A55 made batting and bowling add, which was the missing
+half; it is still not the whole of what a dual contributor is worth. The template is what a
+drafter actually solves — 15 cards into `keeper 1 / opener 2 / top_order 2 /
+middle_or_finisher 3 / bowler 5 / open 2` — and a card filling a batting band *and* the
+bowler slot relieves two constraints with one pick. Narine 2024 can be slotted at `opener`,
+`bowler` or `open`; a pure opener of equal merit can only ever be one of those. None of that
+flexibility appears in a sum of per-ball impacts.
+
+Priced at **ALLROUNDER_RUNS = 5.0** runs per match at a full double share, scaled
+continuously:
+
+```
+share = least(bat_balls_per_match / 18, 1) * least(bowl_balls_per_match / 24, 1)
+```
+
+**Continuous, not a threshold, and that is the point.** A cut at "three overs bowled and
+batting enough" qualified **38 of the 123** player-seasons rated in both disciplines and put
+a cliff through a continuum — Watson 2015 missed by **0.6 balls a match** while Watson 2011
+cleared it. A33's floors and A43's cohort threshold are defensible because each sits in a
+wide empty gap in the evidence; this quantity has no gap, so a threshold would be an
+arbitrary line rather than a rule about evidence.
+
+The two references are the full shares: **18 balls faced** is three overs and is also the
+league's mean batting exposure (18.7), and **24 balls bowled** is four overs, the hard
+maximum. A player doing both jobs completely scores 1.0; a specialist scores 0. Like A57
+this is a declared game-design term and is written down as one.
+
+Effect: Narine 2024 goes 95 to **99** at a full share of 1.00, Watson 2008 to **98** at 0.90,
+Russell 2019 holds **99** at 0.58. Five of the top twenty are now dual contributors.
+
+**[A60] The scale tops out at 99, not 100.** 100 reads as a perfect card and nothing in
+nineteen seasons is perfect. Purely a display decision: the map stays linear on blended
+merit and only the upper anchor moves, so every gap survives in proportion exactly as A58
+requires. **Five seasons reach 99** — Gayle 2011 and 2012, Russell 2019, Narine 2024, de
+Villiers 2016.
+
+**A structural consequence of A54 worth recording rather than correcting.** A bowler may
+bowl at most **24 balls** in a match; a top-order batter faces up to **43.6**. Bowling
+exposure is therefore capped at about **55%** of batting's ceiling. That is true of the game
+itself, not an artefact, so it is not adjusted for — and A59 partly offsets it for players
+who do both.
+
 ## 8. Validation
 
 Runnable scripts in `/validation` with clear pass/fail output.

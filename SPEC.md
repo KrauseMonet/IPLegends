@@ -1553,7 +1553,14 @@ Runnable scripts in `/validation` with clear pass/fail output.
     Currently Kohli 9,336 runs, Chahal 233 wickets, 10 kinds all classified. Chahal's lead
     is 7 wickets and is **not** asserted, for the same robustness reason.
 9. No franchise-season rating uses data from any other season, any other competition, or
-   any career aggregate except as a shrinkage prior.
+   any career aggregate except as a shrinkage prior. **Written 2026-07-31.** The wording
+   predates there being TWO shrinkage stages — the band prior (A46) and A57's career blend
+   — so the check polices the exception rather than restating it. It recounts `balls` from
+   each rating's own franchise-season, and asserts A57's blend lies inside
+   `[merit, career_merit]`: a convex combination can pull a season toward a player's other
+   seasons and can never carry it past them, which is precisely what makes the career term
+   shrinkage rather than leakage. **Falsifiable:** balls from a career aggregate fails
+   **1,767 of 1,812** rows; a blend escaping its endpoints fails **1,016**.
 
 **[A2] Checks 10 and 11 replaced.** The originals were tautological: any within-cell or
 within-season standardisation forces those means flat *by construction*, so they could
@@ -1587,7 +1594,15 @@ never fail. These two bracket the shrinkage constant from opposite sides.
 13. **[A2] Cohort offset era-drift diagnostic.** Check whether the pooled cohort offsets
     drift across eras. Pooling assumes "finisher" means the same thing in 2010 and 2024,
     and the Impact Player rule may have broken that. **If drift is large for a specific
-    cohort, split that cohort's offset by era.**
+    cohort, split that cohort's offset by era.** **Written 2026-07-31 and PASSES.** Three
+    eras, split at 2015 and at 2023 for the Impact Player rule. Not a tautology:
+    `centred_per_ball` is centred within *season*, which forces the league flat across
+    seasons and does **not** force a cohort flat, so a cohort drifting while its league
+    does not is exactly the signal. Fails only when drift is both real (3 sampling SEs) and
+    material (0.05 runs/ball, roughly A41's entire cohort spread). Largest observed drift is
+    **0.055 runs/ball for batting/middle**, and every cohort sits under 3 SE — closest are
+    batting/opener at 0.89 of the bar and batting/middle at 0.78. **The material bar is
+    currently inert**, recorded in the code the same way check 6 records its inert clause.
 
 14. **[A15] Innings-skew diagnostic.** Compare mean rating for players whose deliveries
     skew to second innings against those who skew to first. **Systematic separation means

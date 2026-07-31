@@ -413,20 +413,37 @@ uv run python -m validation --match 598027   # one scorecard
 uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
 
-**16 checks: 16 pass, 0 fail, 0 skip.** The suite is fully green for the first time as of
+**18 checks: 18 pass, 0 fail, 0 skip.** The suite is fully green for the first time as of
 2026-07-31: check 19 came right when the last 26 keepers were filled (A52) and check 21
 when the last 13 nationalities were (A51). Nothing skips: check 6 came off SKIP when
 migration 007 gave it a derived table.
 
-**Checks 9-11, 13 and 14 are still unwritten and are now UNBLOCKED.** Every one of them
-reads a *normalised* rating (9 leakage, 10 under-shrinkage, 11 over-shrinkage, 13 cohort
-era-drift, 14 innings skew), and migration 010 supplies one. They were held back so they
-would not become the tautologies A2 had to delete twice — the original 10 and 11 went for
-being true by construction, and check 2 for being enforced by five foreign keys — so when
-they are written, **each must be shown to fail with the thing it guards broken**, exactly
-as `tests/test_impact.py` was. 13 is the sharpest of the five: it asks whether A42's
-centring actually removed the era drift, and the pre-centring numbers (+0.007 to +0.257)
-are large enough that a broken centring would be unmissable.
+**Checks 9 and 13 are written (2026-07-31); 10, 11 and 14 remain.** Each of the two was
+verified falsifiable, as A2's deleted tautologies require. **Check 9** recounts `balls` from
+each rating's own franchise-season and asserts A57's blend stays inside `[merit,
+career_merit]` — the bound is what makes the career term shrinkage rather than leakage. It
+fails on **1,767 of 1,812** rows if balls come from a career aggregate, and on **1,016** if
+the blend escapes its endpoints. **Check 13** tests A2's pooling assumption across three
+eras split on the Impact Player rule; largest drift is **0.055 runs/ball (batting/middle)**
+and every cohort sits under 3 SE. **Its material bar is currently inert** and the check
+records that in the same way check 6 records its inert clause — see the note above
+`DRIFT_SES`. **The three still missing are 10 (under-shrinkage), 11 (over-shrinkage) and 14
+(innings skew).** They were held back so they would not become the tautologies A2 had to
+delete twice — the original 10 and 11 went for being true by construction, and check 2 for
+being enforced by five foreign keys — so when they are written, **each must be shown to fail
+with the thing it guards broken**, exactly as 9 and 13 were.
+
+**10 and 11 are now harder than they were, and that is worth knowing before starting.** Both
+bracket the shrinkage constant, and there are now TWO shrinkage stages: the band prior at
+k = 100 inside `player_season_impact` (A46) and A57's career blend at 0.45 on top. A
+within-player variance test written against the shipped rating measures the pair, not `k`,
+so it cannot bracket either one alone. Write them against `shrunk_per_ball` — which the view
+still exposes for exactly this reason — or state which of the two is under test.
+
+A separate era check already exists in substance and is not check 13: **season means of
+`display_rating` run 78.0 to 78.9 across all nineteen seasons**, so A42's centring survives
+the per-match rebasing and the career blend. That was measured by hand on 2026-07-31 and
+has no standing check behind it — which is the shape of thing this file exists to flag.
 
 **Check 12 is written and is not one of those.** It reads the §7.3 gate, which exists, and
 it asks a question no count can answer — see A40. Its predecessor, "every franchise-season

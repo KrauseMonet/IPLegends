@@ -922,6 +922,170 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
     )
 
 
+def check_09_no_rating_leaks_across_seasons(conn) -> Result:
+    """SPEC 8.9. A season's rating is built from that season, and priors are the exception.
+
+    The original wording - no rating uses data from any other season "except as a shrinkage
+    prior" - was written before there were two shrinkage stages. There now are: the band
+    prior inside `player_season_impact` (A46) and the career blend on top of it (A57). So
+    the check has to police the exception rather than merely restate it, and it does that
+    in two ways that fail differently.
+
+    First, the EVIDENCE. `balls` and `matches` are recounted from `deliveries` restricted to
+    that franchise-season alone. If a career aggregate ever leaked into the impact totals
+    rather than into the prior, the denominators are where it would surface, because they
+    are the one part of the rating that a prior cannot legitimately touch.
+
+    Second, the BOUND. A57's blend is a convex combination of `merit` and `career_merit`, so
+    the blended value must lie between them. That is what makes the career term shrinkage
+    rather than leakage: it can pull a season toward the player's other seasons and can
+    never carry it past them, so no season can be rated on evidence it does not have. A
+    blend that escaped its own endpoints - a bonus applied to careers above some bar, say -
+    would pass every count-based check ever written and fail this one on the row it moved.
+    """
+    title = "no rating leaks across seasons except through a declared prior"
+    if not _table_exists(conn, "player_season_rating"):
+        return skipped(9, title, "player_season_rating absent - apply migration 012")
+
+    offenders: list[str] = []
+
+    # Recounted from deliveries, per franchise-season, never per person's career.
+    mismatches = _rows(conn, f"""
+        with counted as (
+            select d.batting_fs_id as fs, d.batter_id as pid, 'batting' as discipline,
+                   count(*) filter (where d.extra_wides = 0) as balls
+            from deliveries d where {SCORING_SET} group by 1, 2
+            union all
+            select d.bowling_fs_id, d.bowler_id, 'bowling',
+                   count(*) filter (where d.legal_ball)
+            from deliveries d where {SCORING_SET} group by 1, 2
+        )
+        select p.primary_name, r.season_year, r.discipline, r.balls, c.balls
+        from player_season_rating r
+        join people p on p.person_id = r.person_id
+        left join counted c
+          on c.fs = r.franchise_season_id and c.pid = r.person_id
+         and c.discipline = r.discipline
+        where c.balls is distinct from r.balls
+    """)
+    for name, year, discipline, stored, recounted in mismatches:
+        offenders.append(
+            f"{name} {year} {discipline}: rating holds {stored} balls, this "
+            f"franchise-season alone yields {recounted}")
+
+    # A57's blend must stay inside its own endpoints.
+    escaped = _rows(conn, """
+        select distinct p.primary_name, r.season_year,
+               r.merit, r.career_merit, r.blended_merit
+        from player_season_rating r
+        join people p on p.person_id = r.person_id
+        where r.blended_merit < least(r.merit, r.career_merit) - 1e-9
+           or r.blended_merit > greatest(r.merit, r.career_merit) + 1e-9
+    """)
+    for name, year, merit, career, blended in escaped:
+        offenders.append(
+            f"{name} {year}: blended {float(blended):.3f} is outside "
+            f"[{float(min(merit, career)):.3f}, {float(max(merit, career)):.3f}] - the "
+            f"career term is no longer shrinkage")
+
+    (rated,), = _rows(conn, "select count(*) from player_season_rating")
+    return verdict(
+        9, title,
+        f"{rated:,} rating rows recounted from their own franchise-season; every blend "
+        f"inside its own endpoints",
+        offenders,
+    )
+
+
+# Eras to test A2's pooling assumption against. The 2023 boundary is the Impact Player
+# rule, which SPEC 8.13 names as the specific thing that might have broken "finisher"
+# meaning the same in 2010 and 2024; the earlier split is there so a slow drift with no
+# rule change behind it is visible too.
+ERAS = (("2008-2014", 2008, 2014), ("2015-2022", 2015, 2022), ("2023-2026", 2023, 2026))
+
+# A cohort's era drift has to clear BOTH bars to fail. Real: three sampling standard
+# errors, so noise off a thin cell cannot trip it. Material: 0.05 runs/ball, which is
+# roughly the ENTIRE cohort spread A41 measured (0.049), so a drift smaller than that
+# cannot justify splitting an offset it is already the same size as.
+#
+# MEASURED 2026-07-31: the material bar is currently INERT and the significance bar is
+# what does the work. Every cohort sits below 3 SE - the closest are batting/opener at
+# 0.89 of the bar (0.048 against 0.054) and batting/middle at 0.78 (0.055 against 0.071) -
+# and lowering DRIFT_RUNS to 0.01 changes no verdict, while lowering DRIFT_SES to 0.5
+# fails the check. Kept anyway, and named here rather than deleted, for the same reason
+# check 6 keeps its inert `not is_super_over` clause: it states the second half of the
+# rule, and the day a thick cohort drifts by a hair it is what stops a split being made
+# on a difference too small to matter. Note batting/middle EXCEEDS the material bar
+# already, so the two are not far from swapping which one binds.
+DRIFT_SES = 3.0
+DRIFT_RUNS = 0.05
+
+
+def check_13_cohort_offsets_do_not_drift_by_era(conn) -> Result:
+    """SPEC 8.13 / A2. Does a cohort mean the same thing in 2010 as in 2024?
+
+    A43 pools each cohort offset across all nineteen seasons, which assumes `finisher` is
+    one job throughout. The Impact Player rule is the obvious reason that might be false.
+
+    Not a tautology, and worth saying why, because A2 deleted two checks for being one:
+    `centred_per_ball` is centred within SEASON, so it is forced flat across seasons taken
+    as a whole and is NOT forced flat within a cohort. A cohort drifting while the league
+    it sits in does not is exactly the signal, and it survives the centring that makes the
+    aggregate uninformative.
+
+    Fails only when drift is both real and material (see DRIFT_SES, DRIFT_RUNS). The
+    response to a failure is in the spec and is not to widen the bars: split that cohort's
+    offset by era.
+    """
+    title = "pooled cohort offsets do not drift across eras"
+    if not _table_exists(conn, "player_season_rating"):
+        return skipped(13, title, "player_season_rating absent - apply migration 012")
+
+    cells: dict[tuple, list[float]] = {}
+    for discipline, cohort, year, centred in _rows(conn, """
+        select discipline, cohort, season_year, centred_per_ball
+        from player_season_rating where cohort is not null
+    """):
+        for label, lo, hi in ERAS:
+            if lo <= year <= hi:
+                cells.setdefault((discipline, cohort, label), []).append(float(centred))
+
+    offenders: list[str] = []
+    worst = ("", 0.0)
+    by_cohort: dict[tuple, list] = {}
+    for (discipline, cohort, era), vals in cells.items():
+        by_cohort.setdefault((discipline, cohort), []).append((era, vals))
+
+    for (discipline, cohort), eras in sorted(by_cohort.items()):
+        # A43's own evidence bar: a cohort too thin to earn an offset is too thin to
+        # be tested for drift in it.
+        usable = [(era, v) for era, v in eras if len(v) >= 20]
+        if len(usable) < 2:
+            continue
+        means = {era: sum(v) / len(v) for era, v in usable}
+        spread = max(means.values()) - min(means.values())
+        pooled = [x for _, v in usable for x in v]
+        sd = (sum((x - sum(pooled) / len(pooled)) ** 2 for x in pooled)
+              / (len(pooled) - 1)) ** 0.5
+        se = max(
+            (sd * (1 / len(v)) ** 0.5 for _, v in usable), default=0.0)
+        if spread > worst[1]:
+            worst = (f"{discipline}/{cohort}", spread)
+        if spread > DRIFT_SES * se and spread > DRIFT_RUNS:
+            detail = ", ".join(f"{era} {m:+.3f}" for era, m in sorted(means.items()))
+            offenders.append(
+                f"{discipline}/{cohort}: era means drift {spread:.3f} runs/ball "
+                f"({detail}); {DRIFT_SES:.0f} SE = {DRIFT_SES * se:.3f}. Split this "
+                f"cohort's offset by era.")
+
+    return verdict(
+        13, title,
+        f"{len(by_cohort)} cohorts tested over {len(ERAS)} eras; largest drift "
+        f"{worst[1]:.3f} runs/ball ({worst[0]})",
+        offenders,
+    )
+
+
 def check_15_actual_delivery_is_reproducible(conn) -> Result:
     """A19. `legal_ball` regenerates the source's own scorecard reference.
 
@@ -1057,4 +1221,6 @@ CHECKS = (
     check_20_state_model_covers_every_state,
     check_21_no_real_xi_fielded_five_overseas,
     check_22_the_card_and_the_engine_agree,
+    check_09_no_rating_leaks_across_seasons,
+    check_13_cohort_offsets_do_not_drift_by_era,
 )

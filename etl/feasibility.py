@@ -196,9 +196,35 @@ VARIANTS: dict[str, tuple[dict[str, str], bool, dict[str, int]]] = {
 
 # --- the drafter ---------------------------------------------------------------------
 
-def eligible_pairs(cards, unfilled: dict[str, int], taken: set[str]):
+# [A61] The four-overseas rule applied at DEAL time rather than only at XI time.
+#
+# The IPL caps the playing XI at four overseas players, and §1.1's template said nothing
+# about nationality, so the deck could hand a drafter fifteen cards that cannot produce a
+# legal eleven. Measured over 400 drafted XIs: 87 of them, better than one in five.
+#
+# Capping the SQUAD at four is stricter than the rule it enforces - a real franchise
+# carries more overseas players than it fields - and it is chosen anyway because it makes
+# the guarantee unconditional: with four or fewer in a squad of fifteen, EVERY eleven drawn
+# from it is legal, so no XI-selection path has to be trusted to find the legal one. A
+# higher cap would need the selector to prove a legal eleven exists in every case, which is
+# the sequence-property mistake A40 already made once by counting slots.
+OVERSEAS_CAP = 4
+
+
+def eligible_pairs(cards, unfilled: dict[str, int], taken: set[str],
+                   overseas_taken: int = 0, cap: int | None = OVERSEAS_CAP):
+    """Cards that can still fill an unfilled slot, honouring the overseas cap.
+
+    `is_overseas` is NULL for nobody as of A51, so the cap counts a known quantity. Were
+    unknowns to return - a revised archive adds a player nobody has resolved - `is True`
+    keeps them draftable rather than silently spending an overseas place on a guess, which
+    is A23's rule and A49's, applied at the third and last place the count is taken.
+    """
+    full = cap is not None and overseas_taken >= cap
     for card in cards:
         if card.person_id in taken:
+            continue
+        if full and card.overseas is True:
             continue
         for slot in card.slots:
             if unfilled.get(slot, 0) > 0:
@@ -244,7 +270,8 @@ class Result:
 
 
 def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
-              template: dict[str, int] | None = None) -> Result:
+              template: dict[str, int] | None = None,
+              cap: int | None = OVERSEAS_CAP) -> Result:
     """With `guarantee` off, an unservable deal strands the drafter instead of re-drawing.
 
     That ablation is the point of the exercise: a template that only completes because the
@@ -253,14 +280,17 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
     """
     unfilled = {s: n for s, n in (template or TEMPLATE).items() if n > 0}
     taken: set[str] = set()
+    overseas_taken = 0
     result = Result(completed=False)
 
     for _ in range(sum(unfilled.values())):
         # Global scarcity, recomputed each pick: how many franchise-seasons could still
         # serve each unfilled slot given who is already drafted.
+        full = cap is not None and overseas_taken >= cap
         scarcity = {
             slot: sum(
-                any(slot in c.slots and c.person_id not in taken for c in cards)
+                any(slot in c.slots and c.person_id not in taken
+                    and not (full and c.overseas is True) for c in cards)
                 for cards in deck.cards_by_fs.values()
             )
             for slot, n in unfilled.items()
@@ -270,7 +300,8 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         served = None
         for attempt in range(REDRAW_CAP if guarantee else 1):
             fs_id = rng.choice(deck.fs_ids)
-            pairs = list(eligible_pairs(deck.cards_by_fs.get(fs_id, ()), unfilled, taken))
+            pairs = list(eligible_pairs(deck.cards_by_fs.get(fs_id, ()), unfilled, taken,
+                                        overseas_taken, cap))
             if pairs:
                 served = (fs_id, pairs, attempt)
                 break
@@ -281,6 +312,8 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         fs_id, pairs, attempt = served
         card, slot = policy(pairs, scarcity)
         taken.add(card.person_id)
+        if card.overseas is True:
+            overseas_taken += 1
         unfilled[slot] -= 1
         result.redraws.append(attempt)
         result.fs_served.append(fs_id)

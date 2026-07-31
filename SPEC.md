@@ -1770,10 +1770,29 @@ uncertain, 88 with no legal XI**, so the uncertainty branch is now unexercised i
 and the rule above is what keeps it that way rather than something to delete: the 13
 disputed rows are still open and any future archive revision reintroduces unknowns.
 
-The 88 (94 before the fill) are a real finding and not an engine bug: **§1.1's draft template carries no
-nationality constraint at all**, so the deck can hand a drafter a squad that cannot be
-fielded. This belongs with A40's retune and is recorded here rather than patched, because
-lowering it means changing the template, which is a §1.1 decision.
+**[A61] CLOSED 2026-07-31.** The 88 (94 before the nationality fill) were a real finding and
+not an engine bug: **§1.1's draft template carried no nationality constraint at all**, so the
+deck could deal a squad that could not be fielded. The draft now caps the **squad** at four
+known-overseas players.
+
+Capping the squad is stricter than the rule it enforces — a real franchise carries more
+overseas players than it fields — and it is chosen anyway **because it makes legality
+structural**: with four or fewer in a squad of fifteen, every eleven drawn from it is legal,
+so no XI-selection path has to be trusted to find the legal one. Caps of five and six also
+produce zero illegal XIs today, but only by relying on the selector, which is the
+sequence-property mistake A40 already made once by counting slots instead of running the
+draft.
+
+Measured by running the draft: **400 of 400 XIs legal, 0 uncertain, 0 impossible**, and cap
+4 had the highest rational guarantee-off completion of the three candidates — **99.0%**
+against 98.4% at five and 97.6% at six. The cost is that the deal-time guarantee is no
+longer inert: it fires on about **1.5% of rational drafts** against 0.0% before, worst
+single pick one to two re-draws. That is a cap binding occasionally, which is what a cap is
+for, and A40's firing table now records it as the one sanctioned increase.
+
+`enforce_overseas` in the engine stays as a second net rather than being deleted. A revised
+archive can reintroduce unknown nationalities, and A49's asymmetric repair rule is the only
+thing that would keep the count honest if it did.
 
 ### 10.5 `--validate`, and what it does not cover
 

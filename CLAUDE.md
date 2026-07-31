@@ -343,6 +343,8 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A59 | **An all-rounder is worth more than the sum of his two impacts, and the reason is the DRAFT not the cricket.** A55 made the disciplines add; that was the missing half, not the whole. The drafter is solving a template — 15 cards into keeper 1 / opener 2 / top_order 2 / middle_or_finisher 3 / bowler 5 / open 2 — and a card filling a batting band AND the bowler slot relieves two constraints with one pick. Narine 2024 slots at `opener`, `bowler` or `open`; a pure opener of equal merit fills one. Priced at **ALLROUNDER_RUNS = 5.0** runs/match at a full double share, scaled **continuously** by `least(bat_bpm/18,1) * least(bowl_bpm/24,1)`. **Continuous, not a threshold, deliberately**: a cut at "3 overs bowled and batting enough" qualified 38 of 123 dual-rated seasons and put a cliff through a continuum — **Watson 2015 missed by 0.6 balls a match** while Watson 2011 cleared it. A33's floors and A43's threshold sit in wide empty gaps in the evidence; this quantity has none, so a threshold would be an arbitrary line rather than a rule about evidence. References are the two full shares: 18 balls faced is 3 overs and also the league mean exposure (18.7), 24 bowled is the hard maximum. Declared game-design term, like A57. Narine 2024 95 -> **99**, Watson 2008 -> **98**, five of the top twenty are dual contributors. |
 | A60 | **The scale tops out at 99, not 100** — 100 reads as a perfect card and nothing in nineteen seasons is perfect. Purely a display decision: the map stays linear on blended merit and only the upper anchor moves, so every gap survives in proportion as A58 requires. Five seasons reach 99. **Also recorded here, a structural consequence of A54 that is NOT corrected**: a bowler may bowl at most **24 balls** a match against a top-order batter's **43.6**, so bowling exposure is capped near **55%** of batting's ceiling. That is true of cricket rather than an artefact of the denominator, so it stands; A59 partly offsets it for players who do both. |
 
+| A61 | **The four-overseas rule is enforced at DEAL time, capping the SQUAD at four.** §1.1's template said nothing about nationality, so the deck could hand a drafter fifteen cards that cannot produce a legal eleven — measured at **87 of 400 drafted XIs, better than one in five**. Capping the squad at four is stricter than the rule it enforces (a real franchise carries more overseas than it fields) and is chosen anyway **because it makes legality structural**: with four or fewer in a squad of fifteen, EVERY eleven drawn from it is legal and no XI-selection path has to be trusted to find the legal one. Caps of 5 and 6 also give 0 illegal XIs today, but only by relying on the selector — which is the sequence-property mistake A40 already made once by counting slots. Measured by running the draft, not by counting: **400 of 400 XIs legal, 0 uncertain, 0 impossible**, and cap 4 had the *highest* rational guarantee-off completion of the three candidates (99.0% against 98.4% at 5 and 97.6% at 6). **The cost is that the guarantee is no longer inert** — see the revised note under `etl.feasibility`. `is_overseas` is NULL for nobody (A51) so the cap counts a known quantity, and an unknown stays draftable rather than silently spending an overseas place, which is A23's rule at the third and last place the count is taken. `tests/test_draft.py` holds it; all six assertions verified falsifiable. |
+
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
 them for a player who looks miscategorised** — the shape to watch for is a pure batter
@@ -540,10 +542,17 @@ finisher slot is carrying all the risk" — and then, after the A40 merge, to 0 
 
 **Then read the firing table, which is an A40 condition and not a diagnostic.** The
 guarantee is allowed to exist only as a net, and the only way to notice it has become a
-beam again is to count how often it fires. Rational is currently 0.0% of drafts and 0.00%
-of picks. **If that starts climbing, the template has drifted out from under the deck** —
-most likely because a revised archive moved A33's floors — and it is the template that
-gets re-measured, not the guarantee that gets trusted harder.
+beam again is to count how often it fires.
+
+**A61 moved it off zero deliberately, and that is the one sanctioned increase.** Rational
+was 0.0% of drafts before the overseas cap and is **~1.5% of drafts, 0.12% of picks, worst
+single pick 1-2 re-draws** after it. That is the cap binding occasionally, which is what a
+cap is for, and it bought 87 of 400 unfieldable XIs down to 0. It is still a net: it fires
+on one draft in sixty and never needs more than two re-draws.
+
+**If it climbs beyond that, the template has drifted out from under the deck** — most
+likely because a revised archive moved A33's floors — and it is the template that gets
+re-measured, not the guarantee that gets trusted harder.
 
 `TEMPLATE` in `etl/feasibility.py` is the single definition of the slot template and check
 12 imports it, so retuning the template moves the check with it rather than leaving the

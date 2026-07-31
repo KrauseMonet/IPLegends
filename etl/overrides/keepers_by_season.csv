@@ -1,6 +1,6 @@
 franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,balls_bowled,keeper_elsewhere,cricinfo_id,kept
-17,2008 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,6,1,0,y,28081,
-17,2008 Chennai Super Kings,b5da6c24,PA Patel,13,0,6,2,0,y,32242,
+17,2008 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,6,1,0,y,28081,y
+17,2008 Chennai Super Kings,b5da6c24,PA Patel,13,0,6,2,0,y,32242,y
 17,2008 Chennai Super Kings,3576e47e,S Badrinath,12,0,5,3,0,,26806,
 34,2008 Deccan Chargers,2b6e6dec,AC Gilchrist,14,1,6,1,0,y,5390,y
 34,2008 Deccan Chargers,e1d1b294,HH Gibbs,9,0,5,2,0,,45224,
@@ -8,7 +8,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 39,2008 Delhi Daredevils,c03f1114,KD Karthik,10,2,6,2,0,y,30045,y
 39,2008 Delhi Daredevils,0a476045,S Dhawan,14,0,8,1,0,,28235,
 39,2008 Delhi Daredevils,c4487b84,AB de Villiers,7,0,3,3,0,y,44936,
-112,2008 Kings XI Punjab,6b71e6cf,KC Sangakkara,9,0,4,1,0,y,50710,
+112,2008 Kings XI Punjab,6b71e6cf,KC Sangakkara,9,0,4,1,0,y,50710,y
 112,2008 Kings XI Punjab,d18f9182,DPMD Jayawardene,13,0,3,2,0,,49289,
 112,2008 Kings XI Punjab,508a1ea7,SE Marsh,11,0,3,3,0,,6683,
 66,2008 Kolkata Knight Riders,fe11caa6,WP Saha,12,2,8,1,0,y,279810,y
@@ -39,10 +39,10 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 113,2009 Kings XI Punjab,6b71e6cf,KC Sangakkara,13,2,6,2,0,y,50710,y
 113,2009 Kings XI Punjab,d18f9182,DPMD Jayawardene,10,0,8,1,0,,49289,
 113,2009 Kings XI Punjab,3fca55af,S Sohal,8,0,2,3,0,,228943,
-67,2009 Kolkata Knight Riders,710dd98c,MN van Wyk,5,0,7,1,0,,47711,
+67,2009 Kolkata Knight Riders,710dd98c,MN van Wyk,5,0,7,1,0,,47711,y
 67,2009 Kolkata Knight Riders,b8a55852,BB McCullum,13,0,6,2,0,y,37737,
 67,2009 Kolkata Knight Riders,297b26da,Yashpal Singh,5,0,3,3,0,,36130,
-67,2009 Kolkata Knight Riders,fe11caa6,WP Saha,8,0,2,5,0,y,279810,
+67,2009 Kolkata Knight Riders,fe11caa6,WP Saha,8,0,2,5,0,y,279810,y
 91,2009 Mumbai Indians,0aadc906,PR Shah,8,2,6,1,0,y,34282,y
 91,2009 Mumbai Indians,4e04666c,YV Takawale,4,2,1,5,0,y,35357,y
 91,2009 Mumbai Indians,2bb09eb2,Mohammad Ashraful,1,0,2,2,0,,55988,
@@ -95,7 +95,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 37,2011 Deccan Chargers,d0513f63,CL White,6,0,2,2,0,,8291,
 37,2011 Deccan Chargers,dded65e7,IR Jaggi,2,0,1,3,0,,279554,
 42,2011 Delhi Daredevils,8ba8195d,V Sehwag,11,0,9,1,0,,35263,
-42,2011 Delhi Daredevils,890946a0,NV Ojha,14,0,8,2,0,y,32102,
+42,2011 Delhi Daredevils,890946a0,NV Ojha,14,0,8,2,0,y,32102,y
 42,2011 Delhi Daredevils,dcce6f09,DA Warner,13,0,4,3,0,,219889,
 42,2011 Delhi Daredevils,afa7e784,MS Wade,3,0,0,,0,y,230193,
 115,2011 Kings XI Punjab,2b6e6dec,AC Gilchrist,14,3,9,1,0,y,5390,y
@@ -244,7 +244,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 97,2015 Mumbai Indians,70d205c9,AT Rayudu,14,0,9,1,0,y,33141,
 97,2015 Mumbai Indians,89f64c19,LMP Simmons,13,0,6,3,0,,53116,
 97,2015 Mumbai Indians,855a210c,AP Tare,2,0,1,6,0,y,333904,
-138,2015 Rajasthan Royals,a4cc73aa,SV Samson,14,0,9,1,0,y,425943,
+138,2015 Rajasthan Royals,a4cc73aa,SV Samson,14,0,9,1,0,y,425943,y
 138,2015 Rajasthan Royals,30a45b23,SPD Smith,13,0,7,2,0,,267192,
 138,2015 Rajasthan Royals,29e95537,AM Rahane,14,0,3,3,0,,277916,
 157,2015 Royal Challengers Bangalore,c03f1114,KD Karthik,16,4,14,1,0,y,30045,y
@@ -282,7 +282,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 7,2016 Royal Challengers Bangalore,b17e2f24,KL Rahul,13,4,5,2,0,y,422108,y
 7,2016 Royal Challengers Bangalore,c4487b84,AB de Villiers,16,0,19,1,0,y,44936,
 7,2016 Royal Challengers Bangalore,99d63244,KM Jadhav,3,0,1,3,0,y,290716,
-8,2016 Sunrisers Hyderabad,890946a0,NV Ojha,15,0,18,1,0,y,32102,
+8,2016 Sunrisers Hyderabad,890946a0,NV Ojha,15,0,18,1,0,y,32102,y
 8,2016 Sunrisers Hyderabad,0a476045,S Dhawan,17,0,5,2,0,,28235,
 8,2016 Sunrisers Hyderabad,dcce6f09,DA Warner,17,0,4,3,0,,219889,
 8,2016 Sunrisers Hyderabad,855a210c,AP Tare,2,0,1,5,0,y,333904,
@@ -291,7 +291,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 48,2017 Delhi Daredevils,c16d4035,SW Billings,6,0,4,3,0,y,297628,
 48,2017 Delhi Daredevils,855a210c,AP Tare,3,0,0,,0,y,333904,
 59,2017 Gujarat Lions,b8a55852,BB McCullum,11,0,8,1,0,y,37737,
-59,2017 Gujarat Lions,c03f1114,KD Karthik,14,0,8,2,0,y,30045,
+59,2017 Gujarat Lions,c03f1114,KD Karthik,14,0,8,2,0,y,30045,y
 59,2017 Gujarat Lions,b8d490fd,AJ Finch,13,0,6,3,0,,5334,
 59,2017 Gujarat Lions,752f7486,Ishan Kishan,11,0,4,4,0,y,720471,
 121,2017 Kings XI Punjab,fe11caa6,WP Saha,14,2,10,1,0,y,279810,y
@@ -315,7 +315,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 159,2017 Royal Challengers Bangalore,c3a96caf,Mandeep Singh,11,0,6,3,0,,398506,
 173,2017 Sunrisers Hyderabad,dcce6f09,DA Warner,14,0,10,1,0,,219889,
 173,2017 Sunrisers Hyderabad,0a476045,S Dhawan,14,0,7,2,0,,28235,
-173,2017 Sunrisers Hyderabad,890946a0,NV Ojha,8,0,6,3,0,y,32102,
+173,2017 Sunrisers Hyderabad,890946a0,NV Ojha,8,0,6,3,0,y,32102,y
 25,2018 Chennai Super Kings,4a8a2e3b,MS Dhoni,16,3,11,1,0,y,28081,y
 25,2018 Chennai Super Kings,1dc12ab9,SK Raina,15,0,9,2,0,,33335,
 25,2018 Chennai Super Kings,c16d4035,SW Billings,8,0,5,3,0,y,297628,
@@ -359,11 +359,11 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 50,2019 Delhi Capitals,85ec8e33,SS Iyer,16,0,8,2,0,,642519,
 50,2019 Delhi Capitals,0a476045,S Dhawan,16,0,5,3,0,,28235,
 123,2019 Kings XI Punjab,d67d5f00,DA Miller,10,0,7,1,0,,321777,
-123,2019 Kings XI Punjab,b17e2f24,KL Rahul,14,0,7,2,0,y,422108,
+123,2019 Kings XI Punjab,b17e2f24,KL Rahul,14,0,7,2,0,y,422108,y
 123,2019 Kings XI Punjab,00ea847a,MA Agarwal,13,0,7,3,0,,398438,
 123,2019 Kings XI Punjab,3241e3fd,N Pooran,6,0,1,4,0,y,604302,
 123,2019 Kings XI Punjab,9418198b,P Simran Singh,1,0,1,5,0,y,1161024,
-77,2019 Kolkata Knight Riders,c03f1114,KD Karthik,13,0,7,1,0,y,30045,
+77,2019 Kolkata Knight Riders,c03f1114,KD Karthik,13,0,7,1,0,y,30045,y
 77,2019 Kolkata Knight Riders,b4b99816,Shubman Gill,13,0,7,2,0,,1070173,
 77,2019 Kolkata Knight Riders,1c17e270,RV Uthappa,11,0,4,3,0,y,35582,
 101,2019 Mumbai Indians,372455c4,Q de Kock,16,2,17,1,0,y,379143,y
@@ -386,14 +386,14 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 27,2020 Chennai Super Kings,45a43fe2,RD Gaikwad,6,0,4,3,0,,1060380,
 27,2020 Chennai Super Kings,70d205c9,AT Rayudu,12,0,3,4,0,y,33141,
 27,2020 Chennai Super Kings,99d63244,KM Jadhav,5,0,1,6,0,y,290716,
-51,2020 Delhi Capitals,919a3be2,RR Pant,14,0,13,1,0,y,931581,
+51,2020 Delhi Capitals,919a3be2,RR Pant,14,0,13,1,0,y,931581,y
 51,2020 Delhi Capitals,48a1d7b7,SO Hetmyer,12,0,7,2,0,,670025,
 51,2020 Delhi Capitals,85ec8e33,SS Iyer,17,0,6,3,0,,642519,
-124,2020 Kings XI Punjab,b17e2f24,KL Rahul,14,0,10,1,0,y,422108,
+124,2020 Kings XI Punjab,b17e2f24,KL Rahul,14,0,10,1,0,y,422108,y
 124,2020 Kings XI Punjab,3241e3fd,N Pooran,14,0,7,2,0,y,604302,
 124,2020 Kings XI Punjab,00ea847a,MA Agarwal,11,0,6,3,0,,398438,
 124,2020 Kings XI Punjab,9418198b,P Simran Singh,2,0,1,7,0,y,1161024,
-78,2020 Kolkata Knight Riders,c03f1114,KD Karthik,14,0,9,1,0,y,30045,
+78,2020 Kolkata Knight Riders,c03f1114,KD Karthik,14,0,9,1,0,y,30045,y
 78,2020 Kolkata Knight Riders,b4b99816,Shubman Gill,14,0,7,2,0,,1070173,
 78,2020 Kolkata Knight Riders,d2a6c0e6,EJG Morgan,14,0,3,3,0,,24598,
 102,2020 Mumbai Indians,372455c4,Q de Kock,16,4,18,1,0,y,379143,y
@@ -411,7 +411,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 176,2020 Sunrisers Hyderabad,93b4fc78,MK Pandey,15,0,7,2,0,,290630,
 176,2020 Sunrisers Hyderabad,bb965e9a,PK Garg,13,0,6,3,0,,1070180,
 176,2020 Sunrisers Hyderabad,541f85c9,SP Goswami,3,0,1,5,0,y,302579,
-28,2021 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,13,1,0,y,28081,
+28,2021 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,13,1,0,y,28081,y
 28,2021 Chennai Super Kings,3355b542,F du Plessis,16,0,12,2,0,,44828,
 28,2021 Chennai Super Kings,1dc12ab9,SK Raina,11,0,7,3,0,,33335,
 28,2021 Chennai Super Kings,70d205c9,AT Rayudu,14,0,2,5,0,y,33141,
@@ -428,7 +428,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 103,2021 Mumbai Indians,271f83cd,SA Yadav,14,0,5,1,0,,446507,
 103,2021 Mumbai Indians,dbe50b21,HH Pandya,11,0,4,2,0,,625371,
 103,2021 Mumbai Indians,752f7486,Ishan Kishan,10,0,3,4,0,y,720471,
-125,2021 Punjab Kings,b17e2f24,KL Rahul,13,0,11,1,0,y,422108,
+125,2021 Punjab Kings,b17e2f24,KL Rahul,13,0,11,1,0,y,422108,y
 125,2021 Punjab Kings,00ea847a,MA Agarwal,12,0,5,2,0,,398438,
 125,2021 Punjab Kings,7dcb9bc9,M Shahrukh Khan,10,0,4,3,0,,719719,
 125,2021 Punjab Kings,3241e3fd,N Pooran,12,0,3,5,0,y,604302,
@@ -446,7 +446,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 177,2021 Sunrisers Hyderabad,fe11caa6,WP Saha,9,0,6,2,0,y,279810,
 177,2021 Sunrisers Hyderabad,93b4fc78,MK Pandey,8,0,5,3,0,,290630,
 177,2021 Sunrisers Hyderabad,99d63244,KM Jadhav,6,0,2,7,0,y,290716,
-29,2022 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,9,1,0,y,28081,
+29,2022 Chennai Super Kings,4a8a2e3b,MS Dhoni,14,0,9,1,0,y,28081,y
 29,2022 Chennai Super Kings,1c17e270,RV Uthappa,11,0,5,2,0,y,35582,
 29,2022 Chennai Super Kings,70d205c9,AT Rayudu,12,0,4,3,0,y,33141,
 53,2022 Delhi Capitals,919a3be2,RR Pant,14,4,8,1,0,y,931581,y
@@ -463,7 +463,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 85,2022 Lucknow Super Giants,372455c4,Q de Kock,15,1,12,1,0,y,379143,y
 85,2022 Lucknow Super Giants,b17e2f24,KL Rahul,15,0,9,2,0,y,422108,
 85,2022 Lucknow Super Giants,0ebfb1ad,E Lewis,6,0,3,3,0,,431901,
-104,2022 Mumbai Indians,752f7486,Ishan Kishan,14,0,13,1,0,y,720471,
+104,2022 Mumbai Indians,752f7486,Ishan Kishan,14,0,13,1,0,y,720471,y
 104,2022 Mumbai Indians,740742ef,RG Sharma,14,0,7,2,0,,34102,
 104,2022 Mumbai Indians,f1f99156,TH David,8,0,6,3,0,,892749,
 104,2022 Mumbai Indians,85b3fab2,T Stubbs,2,0,0,,0,y,595978,
@@ -487,11 +487,11 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 30,2023 Chennai Super Kings,70d205c9,AT Rayudu,14,0,2,6,0,y,33141,
 54,2023 Delhi Capitals,378daa89,Aman Hakim Khan,10,0,9,1,0,,1254269,
 54,2023 Delhi Capitals,dcce6f09,DA Warner,14,0,7,2,0,,219889,
-54,2023 Delhi Capitals,3d284ca3,PD Salt,9,0,5,3,0,,669365,
+54,2023 Delhi Capitals,3d284ca3,PD Salt,9,0,5,3,0,,669365,y
 61,2023 Gujarat Titans,fe11caa6,WP Saha,17,2,9,2,0,y,279810,y
 61,2023 Gujarat Titans,d67d5f00,DA Miller,15,0,11,1,0,,321777,
 61,2023 Gujarat Titans,b4b99816,Shubman Gill,17,0,6,3,0,,1070173,
-81,2023 Kolkata Knight Riders,0bacade8,Rahmanullah Gurbaz,11,0,10,1,0,,974087,
+81,2023 Kolkata Knight Riders,0bacade8,Rahmanullah Gurbaz,11,0,10,1,0,,974087,y
 81,2023 Kolkata Knight Riders,0a509d6b,RK Singh,14,0,8,2,0,,723105,
 81,2023 Kolkata Knight Riders,a24be938,VR Iyer,14,0,3,3,0,,851403,
 86,2023 Lucknow Super Giants,3241e3fd,N Pooran,15,3,6,1,0,y,604302,y
@@ -520,7 +520,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 179,2023 Sunrisers Hyderabad,235c2bb6,H Klaasen,11,1,3,3,0,y,436757,y
 179,2023 Sunrisers Hyderabad,00ea847a,MA Agarwal,10,0,6,1,0,,398438,
 179,2023 Sunrisers Hyderabad,8e514b4c,Abdul Samad,8,0,4,2,0,,1175485,
-31,2024 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,10,1,0,y,28081,
+31,2024 Chennai Super Kings,4a8a2e3b,MS Dhoni,13,0,10,1,0,y,28081,y
 31,2024 Chennai Super Kings,45a43fe2,RD Gaikwad,14,0,5,2,0,,1060380,
 31,2024 Chennai Super Kings,29e95537,AM Rahane,12,0,1,3,0,,277916,
 55,2024 Delhi Capitals,919a3be2,RR Pant,13,5,11,1,0,y,931581,y
@@ -531,7 +531,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 62,2024 Gujarat Titans,39a2dfa8,R Tewatia,11,0,6,1,0,,423838,
 62,2024 Gujarat Titans,d67d5f00,DA Miller,9,0,5,2,0,,321777,
 62,2024 Gujarat Titans,afa7e784,MS Wade,1,0,1,8,0,y,230193,
-82,2024 Kolkata Knight Riders,3d284ca3,PD Salt,12,0,12,1,0,,669365,
+82,2024 Kolkata Knight Riders,3d284ca3,PD Salt,12,0,12,1,0,,669365,y
 82,2024 Kolkata Knight Riders,85ec8e33,SS Iyer,14,0,10,2,0,,642519,
 82,2024 Kolkata Knight Riders,0a509d6b,RK Singh,13,0,7,3,0,,723105,
 82,2024 Kolkata Knight Riders,d7017798,A Raghuvanshi,9,0,4,5,0,y,1292495,
@@ -539,10 +539,10 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 87,2024 Lucknow Super Giants,3241e3fd,N Pooran,14,0,7,2,0,y,604302,
 87,2024 Lucknow Super Giants,2c25d4f5,D Padikkal,8,0,3,3,0,,1119026,
 87,2024 Lucknow Super Giants,372455c4,Q de Kock,11,0,3,4,0,y,379143,
-106,2024 Mumbai Indians,752f7486,Ishan Kishan,14,0,9,1,0,y,720471,
+106,2024 Mumbai Indians,752f7486,Ishan Kishan,14,0,9,1,0,y,720471,y
 106,2024 Mumbai Indians,f1f99156,TH David,12,0,6,2,0,,892749,
 106,2024 Mumbai Indians,271f83cd,SA Yadav,11,0,4,3,0,,446507,
-128,2024 Punjab Kings,800d2d97,JM Sharma,14,0,13,1,0,y,721867,
+128,2024 Punjab Kings,800d2d97,JM Sharma,14,0,13,1,0,y,721867,y
 128,2024 Punjab Kings,abb83e27,JM Bairstow,11,0,8,2,0,y,297433,
 128,2024 Punjab Kings,cad00a4d,RR Rossouw,8,0,4,3,0,,318845,
 128,2024 Punjab Kings,9418198b,P Simran Singh,14,0,1,7,0,y,1161024,
@@ -571,7 +571,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 83,2025 Kolkata Knight Riders,0a509d6b,RK Singh,11,0,9,1,0,,723105,
 83,2025 Kolkata Knight Riders,29e95537,AM Rahane,12,0,5,2,0,,277916,
 83,2025 Kolkata Knight Riders,be24ead0,Ramandeep Singh,7,0,5,3,0,,1079470,
-83,2025 Kolkata Knight Riders,372455c4,Q de Kock,8,0,3,5,0,y,379143,
+83,2025 Kolkata Knight Riders,372455c4,Q de Kock,8,0,3,5,0,y,379143,y
 83,2025 Kolkata Knight Riders,d7017798,A Raghuvanshi,12,0,2,6,0,y,1292495,
 88,2025 Lucknow Super Giants,919a3be2,RR Pant,14,1,5,3,0,y,931581,y
 88,2025 Lucknow Super Giants,3241e3fd,N Pooran,14,0,8,1,0,y,604302,
@@ -592,9 +592,9 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 167,2025 Royal Challengers Bengaluru,3d284ca3,PD Salt,13,0,9,2,0,,669365,
 167,2025 Royal Challengers Bengaluru,f1f99156,TH David,10,0,7,3,0,,892749,
 181,2025 Sunrisers Hyderabad,0890552f,A Manohar,8,0,7,1,0,,778963,
-181,2025 Sunrisers Hyderabad,235c2bb6,H Klaasen,13,0,7,2,0,y,436757,
+181,2025 Sunrisers Hyderabad,235c2bb6,H Klaasen,13,0,7,2,0,y,436757,y
 181,2025 Sunrisers Hyderabad,a3b0600d,Aniket Verma,13,0,6,3,0,,1409976,
-181,2025 Sunrisers Hyderabad,752f7486,Ishan Kishan,14,0,8,,1,y,720471,
+181,2025 Sunrisers Hyderabad,752f7486,Ishan Kishan,14,0,8,,1,y,720471,y
 33,2026 Chennai Super Kings,a4cc73aa,SV Samson,14,2,4,5,0,y,425943,y
 33,2026 Chennai Super Kings,844e79d1,D Brevis,11,0,12,1,0,,1070665,
 33,2026 Chennai Super Kings,cf59b3f0,Urvil Patel,7,0,6,2,0,,1131570,
@@ -611,7 +611,7 @@ franchise_season_id,squad,person_id,name,matches,stumpings,catches,catch_rank,ba
 84,2026 Kolkata Knight Riders,0a509d6b,RK Singh,11,0,11,1,0,,723105,
 84,2026 Kolkata Knight Riders,29e95537,AM Rahane,14,0,8,2,0,,277916,
 84,2026 Kolkata Knight Riders,650d5e49,R Powell,9,0,6,3,0,,820351,
-89,2026 Lucknow Super Giants,919a3be2,RR Pant,13,0,10,1,0,y,931581,
+89,2026 Lucknow Super Giants,919a3be2,RR Pant,13,0,10,1,0,y,931581,y
 89,2026 Lucknow Super Giants,3241e3fd,N Pooran,14,0,5,2,0,y,604302,
 89,2026 Lucknow Super Giants,3d8feaf8,MR Marsh,13,0,4,3,0,,272450,
 89,2026 Lucknow Super Giants,989889ff,JP Inglis,5,0,1,6,0,y,662235,

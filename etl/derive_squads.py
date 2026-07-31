@@ -184,8 +184,29 @@ def build(conn) -> tuple[list[tuple], dict]:
 
 
 def write(conn, rows: list[tuple]) -> None:
+    """Rewrite `squad_members`, and say out loud what that costs downstream.
+
+    Migration 009 made `player_season_impact` reference this table, so a plain truncate
+    now fails outright -- which is the database being right. The rows depend on these:
+    every rating is keyed to a (franchise_season, person) pair that lives here, and a
+    squad rebuild can change a role or a band underneath one.
+
+    So the dependant is NAMED in the truncate rather than reached by CASCADE. Postgres
+    requires both in one statement either way, but spelling the table out means a future
+    dependant fails here loudly instead of being emptied silently by a CASCADE nobody
+    revisits -- and an empty ratings table looks exactly like a fresh one until something
+    reads it: `player_season_rating` would simply return nothing and every draft would come
+    up empty with no error anywhere. Naming it also puts the refresh order in the one place
+    a caller cannot miss it.
+    """
     with conn.cursor() as cur:
-        cur.execute("truncate squad_members")
+        cur.execute("select count(*) from player_season_impact")
+        (impact_rows,) = cur.fetchone()
+        if impact_rows:
+            print(f"  clearing {impact_rows:,} player_season_impact rows that depend on "
+                  f"squad_members.\n  RE-RUN `uv run python -m etl.impact --write` after "
+                  f"this, or there are no ratings.")
+        cur.execute("truncate player_season_impact, squad_members")
         with cur.copy(
             """
             copy squad_members (

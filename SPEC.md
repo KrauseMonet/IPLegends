@@ -719,6 +719,19 @@ all season. The per-squad answer lives in `etl/overrides/keepers_by_season.csv`,
 where it does not. **Blank is undecided, and undecided is not a yes** — an unproved squad
 gets no keeper rather than a guessed one.
 
+**[A52] The 26 were CLOSED on 2026-07-31, and the diagnosis is worth more than the fix: a
+stumping is PROOF of a keeper, not the DEFINITION of one.** Every one of the 26 had the
+same cause — **zero stumpings all season**. With 388 stumpings over 166 franchise-seasons,
+about 2.3 each, a season with none is ordinary luck rather than missing data, so the rule
+was working exactly as designed and simply had nothing to work with. The squads had keepers
+throughout: 2008 Chennai had Dhoni, 2022 Mumbai had Ishan Kishan, 2024 Kolkata had Phil
+Salt. They were resolved from the public record, which is **the only place the answer
+exists** — Cricsheet carries no keeper flag (A30 below) and no internal signal can close
+it. 29 rows across 26 squads, three of which genuinely shared the gloves (2008 Chennai
+Dhoni and Parthiv Patel, 2009 Kolkata van Wyk and Saha, 2025 Hyderabad Klaasen and Kishan),
+which A24 already permits. **Check 19 now passes at 166 of 166** — 139 squads with one
+keeper, 27 with two — and check 12's thinnest slot moves from 126 to 150 of 166.
+
 **[A30] Catches rank the candidates. They may not pick one.** The 26 unproved squads
 were the case for mining catches behind the stumps, filed earlier as the better keeper
 signal. It was tested before it was trusted, against the 140 squad-seasons a stumping
@@ -1487,8 +1500,10 @@ never fail. These two bracket the shrinkage constant from opposite sides.
     document exists to prevent.* This is a check on the deck rather than on the parse: the
     keeper slot in the XI has to be filled from somewhere, so a squad offering nobody to
     fill it is a card that breaks the game, not a statistic that is slightly off.
-    **Currently FAILS at 140 of 166** and correctly so — it is blocked on
-    `keepers_by_season.csv` being hand-filled, and the failure is the block being visible.
+    **PASSES at 166 of 166 as of 2026-07-31** (A52). It failed at 140 for as long as
+    `keepers_by_season.csv` was unfilled, and that failure was the block being visible
+    rather than a defect — the last 26 squads took no stumping all season, so nothing
+    inside the archive could ever have settled them.
 
 20. **[A31] The state model covers all 80 states and reconciles with a fresh recount.** Two
     claims. *Legibility:* a state the archive has never seen is stored with `faced = 0`, not

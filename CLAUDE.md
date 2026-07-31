@@ -321,6 +321,9 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 
 | A51 | **The IPL's own four-overseas cap is an EXTERNAL check on SPEC 6.1, and it is validation check 21.** Replaying our nationality data against **2,486 real team sheets** tests it against a rule the archive never states — an XI our data says fielded five overseas players is our data being wrong, because the match was played. It found things nothing internal could. (1) **Three of the hand-filled 314 were impossible**: `VS Malik` and `Shoaib Ahmed` entered as Pakistan but played 2009+, and no Pakistani has played the IPL since 2008; `AG Murtaza` entered as Afghanistan but played 2010-2013, and the first Afghan was 2017. A fourth, `WA Mota` (Australia), sits in **10 of his 12 XIs** as an illegal fifth. All four are now India. (2) **The archive-resolved half answers a different question from the one the draft asks** — which nation a player EVER represented, not the one he held that season. `S Sohal` opened for Punjab from 2008 and later played T20Is for the USA, so the vote marks him overseas for seasons in which he was domestic. **This is A23's shape running the other way**: A23 stopped an unknown defaulting to domestic, this marks a genuine Indian overseas. Safer direction, still wrong. **RATIFIED: nationality is the one held DURING the IPL career, not the career vote.** All 13 were web-verified and filled — eight India, three South Africa (capped by SA while they played), two genuine overseas slots. Two are worth keeping for the reasoning: **Tanmay Mishra was a capped KENYA international and still domestic**, signed by Deccan as a local player on his Indian passport, so the question is not 'has he a cap' but 'did he occupy an overseas slot'; and **Sachin Rana was never a Seychelles player at all** — a registry collision, not an emigration. **Check 21 had a bug of its own that inflated the alarm by a third**: it counted everyone who `participated`, including a fielding substitute who took a catch and was never in the XI. On the named-XI basis the same data read 63, not 99. The Impact Player is still counted deliberately — four overseas in the XI obliges an Indian Impact Player, so four across the named twelve is the right bound. **Check 21 now PASSES: 0 of 2,486**, with 816 people, 489 international, 327 override, 0 unknown, and the game's 400 XIs at **313 / 0 / 87**. Falsified rather than assumed: marking Kohli Australian implicates 82 players. |
 
+| A52 | **A stumping is PROOF of a keeper, not the DEFINITION of one, and treating the two as the same thing is what left 26 squads keeperless.** All 26 uncovered franchise-seasons had the same cause: **zero stumpings all season**. The archive holds 388 stumpings over 166 franchise-seasons, about 2.3 each, so a season with none is ordinary luck rather than missing data — and A24's "blank is undecided" then correctly refused to name anyone. The squads had keepers all along: 2008 Chennai had Dhoni, 2022 Mumbai had Ishan Kishan, 2024 Kolkata had Phil Salt. **Resolved from the public record, which is the only place the answer exists** — Cricsheet has no keeper flag (A30) and no internal signal can close it. **29 rows across the 26 squads**, three of them shared gloves (2008 Chennai Dhoni + Parthiv Patel, 2009 Kolkata van Wyk + Saha, 2025 Hyderabad Klaasen + Kishan), which A24 already permits. Check 19 goes 140 -> **166 of 166** (139 with one keeper, 27 with two) and check 12's thinnest slot goes 126 -> **150 of 166**. **The candidate ranking would have got several of these wrong**, which is A30 measured again rather than restated: 2008 Chennai has Dhoni and Parthiv Patel tied on catches at ranks 1 and 2 and both keepers elsewhere, and 2024 Kolkata puts Salt top with `keeper_elsewhere` reading *no* while Raghuvanshi at rank 5 reads *yes*. Reading `catch_rank` alone inverts that one. |
+| A53 | **`etl.derive_squads` had been unrunnable since migration 009 and nothing noticed, because nothing had needed to re-run it.** 009 made `player_season_impact` reference `squad_members`, so the loader's plain `truncate squad_members` fails outright — correctly, since every rating is keyed to a (franchise_season, person) pair that lives in the truncated table. **Fixed by NAMING the dependant in the truncate, not by CASCADE.** Postgres needs both in one statement either way, so the choice is purely about what happens to the *next* dependant: named, it fails loudly here; CASCADE, it is emptied silently. And an empty `player_season_impact` is indistinguishable from a fresh one until something reads it — `player_season_rating` returns nothing, every draft comes up empty, and no error is raised anywhere. The loader now prints the row count it is clearing and the command to restore it. **Refresh order is now `etl.load` -> `derive_people` -> `derive_squads` -> `state_model --write` -> `impact --write`**, and `derive_squads` moved into it rather than sitting beside it. |
+
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
 them for a player who looks miscategorised** — the shape to watch for is a pure batter
@@ -361,7 +364,7 @@ them has been measured. The merge makes this non-urgent — it does not answer i
 | 4d. Full archive loaded | done; 1,243 matches, 295,732 deliveries, 28,106 appearances, 816 people, 166 franchise-seasons, 70 MB, 33s |
 | 5. Validation 1-7 | done; check 5 now live off `squad_members`, check 6 now live off the state model |
 | 5b. Checks 15 and 16 | done 2026-07-30; both had been asserted in SPEC as measured fact with no standing check behind them. 15 regenerates all 295,732 scorecard references from `legal_ball`; 16 pins the unknown-length innings at exactly 6. |
-| 6. Squads, roles and bands | code done; **check 19 FAILS by design — 26 franchise-seasons have no keeper and cannot be drafted legally until `keepers_by_season.csv` is filled** |
+| 6. Squads, roles and bands | **done 2026-07-31.** Check 19 PASSES: **166 of 166** franchise-seasons offer a keeper (139 with one, 27 with two). The last 26 were resolved from the public record, not from the archive — see A52. |
 | **7.1 State model** | **done 2026-07-30**, migration 007 applied. 146,159 balls faced into 80 states (5 never observed, kept as zeroes) plus 161 exact-wicket runs-remaining states, 88 kB. Checks 6, 8 and 20 written; check 6 came off SKIP. **A31 corrected SPEC's wicket-cost rule — the old wording priced a wicket by differencing runs remaining, which is confounded and goes negative.** |
 | **7.2-7.3 Shrinkage + gates** | **done 2026-07-30**, migration 009 applied. State model refit striker-only (7,139 of 7,458 dismissals), **5,149 `player_season_impact` rows** written, `player_season_rating` view live. Ratified: two gates on the scoring-set denominator (A33), striker-only attribution (A36), one fallback rule (A37), long grain (A38). Provisional and paired: A34 residual + A35 `k`, both post-§7.4. `tests/test_impact.py` pins A37 and the gate arithmetic, 15 tests. |
 | **1.1 Draft feasibility** | **done 2026-07-30**, out of order and deliberately so. §7.4 normalises toward the slot template, so normalising before knowing the template is legal would be wasted work. `etl.feasibility` runs the draft; check 12 asserts it and was verified falsifiable. **Template retuned and SETTLED (A40 closed):** `middle` + `finisher` merged into `middle_or_finisher` x3, keeper resolved by the CSV. Rational guarantee-off failure 1.7% -> **0 of 2,000**, the guarantee is a net again, and `opener`/`top_order` are unmoved so the bottleneck did not shift upward. |
@@ -390,9 +393,10 @@ uv run python -m validation --match 598027   # one scorecard
 uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
 
-**15 checks: 14 pass, 1 fails.** Check 21 is new and passes at 0 of 2,486 (A51). The failure is check 19 and it is correct — 26
-franchise-seasons have no keeper until `keepers_by_season.csv` is hand-filled. Nothing
-skips any more: check 6 came off SKIP when migration 007 gave it a derived table.
+**15 checks: 15 pass, 0 fail, 0 skip.** The suite is fully green for the first time as of
+2026-07-31: check 19 came right when the last 26 keepers were filled (A52) and check 21
+when the last 13 nationalities were (A51). Nothing skips: check 6 came off SKIP when
+migration 007 gave it a derived table.
 
 **Checks 9-11, 13 and 14 are still unwritten and are now UNBLOCKED.** Every one of them
 reads a *normalised* rating (9 leakage, 10 under-shrinkage, 11 over-shrinkage, 13 cohort
@@ -554,6 +558,19 @@ Both are re-runnable and `derive_people` is idempotent to the byte. `derive_squa
 truncates and rewrites. Run `derive_people` before `derive_squads` — the keeper role
 reads `keepers_by_season.csv`, which the first command generates.
 
+**`derive_squads` also clears `player_season_impact`, so `etl.impact --write` MUST follow
+it** (A53). The full refresh order is one chain, not two:
+
+```
+etl.load -> etl.derive_people -> etl.derive_squads -> etl.state_model --write -> etl.impact --write
+```
+
+Migration 009 pointed `player_season_impact` at `squad_members`, which made the plain
+truncate fail — the database being right, because a squad rebuild can move a role or a band
+underneath a rating keyed to it. The dependant is **named** in the truncate rather than
+reached by CASCADE, so the next table to depend on `squad_members` fails loudly here
+instead of being emptied in silence.
+
 **One column per file is the decision; the rest is evidence** (A30). `merge_override`
 takes the decision column by name, carries it across untouched, and refreshes everything
 else, so adding a new signal reaches rows that already exist. **Nothing else in the repo
@@ -562,8 +579,8 @@ may write a decision column.**
 | CSV | Decision column | Rows awaiting a human | Blocks |
 |---|---|---|---|
 | `nationality.csv` | `nationality` | **0 of 327** — COMPLETE (A51) | the four-overseas rule |
-| `keepers.csv` | `is_keeper` | 440 of 489 | the keeper slot |
-| `keepers_by_season.csv` | `kept` | 467 of 633 | the keeper slot |
+| `keepers.csv` | `is_keeper` | 440 of 489 — **not blocking**, A24 superseded it | (nothing) |
+| `keepers_by_season.csv` | `kept` | 438 of 633 — **not blocking**, all 166 squads covered (A52) | the keeper slot |
 | `bowling_style.csv` | `bowling_style` | 479 of 479 | A8 pace/spin slots (not a legal draft) |
 
 Blank means undecided in all four. Nothing is guessed and nothing is defaulted, so an

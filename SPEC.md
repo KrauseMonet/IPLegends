@@ -1677,8 +1677,10 @@ cannot be judged: the only external test available is whether the numbers play a
 looks like cricket. They are specified in §10. Nothing in `etl` imports `game`, so the
 dependency runs one way and the pipeline is exactly as testable as it was.
 
-- Any web UI, Next.js app or API route
-- Authentication, leaderboards, daily challenge
+- Any web UI or Next.js app. **The API's session model is now specified — see §11** — but
+  nothing is built.
+- Authentication, leaderboards, daily challenge. **Deliberately deferred, not rejected**:
+  §11's design is chosen partly because all three are additive to it.
 - Any AI or LLM integration
 - Any franchise logo, crest, kit colour or player photograph. IPL and BCCI marks are
   aggressively enforced and player likeness rights are live litigation territory in India.
@@ -1820,3 +1822,57 @@ real repair is ratings on both sides, which is what the game supplies.
 because at league average the tilt is the identity: `tests/test_simulator.py` is the other
 half and covers what no aggregate can — that the tilt hits the mean it was asked for, that a
 better batter both scores more and is dismissed less, and that the XI rules hold.
+
+## 11. The session model
+
+**[A62] Sessions are STATELESS and seed-based. Nothing is stored, and no account is needed
+to play.** Ratified 2026-07-31, before any web code exists, because it determines the schema
+and the API shape and is far cheaper to decide than to retrofit.
+
+### 11.1 What forces the question
+
+`run_draft` is a closed loop today: fifteen picks start to finish, with the drafter supplied
+as a function (`rational`, `naive`, `random`). Nothing waits for anything. A website replaces
+that function with a person, so the loop has to be broken open across fifteen HTTP requests —
+and the partly-drafted squad has to exist somewhere between pick 3 and pick 4. That
+"somewhere" is the session model.
+
+### 11.2 The decision, and the property it rests on
+
+The client carries **the seed and the choice indices made so far**, signed so it cannot be
+forged. Each request replays the draft from scratch and serves the next deal.
+
+This rests on the draft being fully deterministic given a seed and a sequence of choices,
+which was **verified rather than assumed** before the design was ratified: **200 of 200
+drafts replayed exactly** — same squad, same slot assignment, and the same sequence of
+franchise-seasons dealt. The match is deterministic from the same seed too, so a whole
+session reproduces end to end.
+
+The RNG stream *does* depend on the choices, because a pick changes which cards remain
+eligible and therefore how many re-draws the guarantee performs. That is why the choices are
+part of the state and the seed alone is not enough.
+
+**The state is a seed and fifteen small integers.** It fits in a URL.
+
+### 11.3 Why this one
+
+- **No storage, no accounts, no migration.** The first playable version needs none of the
+  three, and nothing in this section adds a table.
+- **A URL is a reproducible game.** `/draft/8f3a2c` deals the same fifteen cards to everyone,
+  forever. That is a sharing mechanic for free, and it is the same determinism the test suite
+  already depends on.
+- **Replay is cheap.** A full fifteen-pick draft replays in **3.3 ms**; a whole fifteen-request
+  draft costs roughly **25 ms of CPU in total**. The deck is **1,689 cards over 166
+  franchise-seasons** and loads once at boot in **3.8 s**, so it is held in memory and never
+  re-queried per request.
+
+### 11.4 What is deferred, and why it stays cheap
+
+**Daily challenge** and **login** are explicitly later stages. Both are additive here rather
+than a rewrite: a daily challenge is one shared seed per date instead of a random one, and
+accounts only become necessary when a result has to outlive the request that produced it. A
+`results` table arrives with the leaderboard and not before.
+
+**The one thing to settle before the leaderboard, not after:** whether a deal is random per
+player or shared per day. Random-per-player is played once; shared-per-day is compared and
+returned to. It costs nothing now and is awkward to retrofit once URLs are in circulation.

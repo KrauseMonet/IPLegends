@@ -467,16 +467,30 @@ def check_06_super_overs_excluded(conn) -> Result:
 
     # `player_season_rating` has no delivery provenance of its own - it reads only
     # `player_season_impact`, so the exclusion above already covers it. What it CAN get
-    # wrong independently is the gate: the view exists so that consuming a rating and
-    # respecting A33 are the same act, and a widened WHERE clause would quietly hand out
-    # ratings for seasons that are not draftable. That is what is asserted here.
-    (rateable,), = _rows(
-        conn, "select count(*) from player_season_impact where not_rateable_reason is null")
+    # wrong independently is WHO it offers.
+    #
+    # [A65] The rule this asserts changed. Until 013 the view offered exactly the seasons
+    # passing A33's floors, and a widened WHERE clause would have handed out ratings for
+    # undraftable seasons. A65 reversed that deliberately: the gate no longer removes a
+    # card, only records that the estimate is thin, so the view must now offer every season
+    # that faced or bowled a ball. `balls > 0` is arithmetic rather than a floor - without a
+    # ball there is no per-ball figure to shrink and no balls-per-match to multiply by.
+    #
+    # The assertion is kept EXACT in both directions. Too few rows means the gate has crept
+    # back and half of every squad has silently lost its cards; too many means a season with
+    # no deliveries has acquired a rating out of nothing.
+    #
+    # `balls > 0` is INERT today - no `player_season_impact` row has zero balls, so the
+    # clause changes nothing and breaking it does not fail this check. Kept and named for
+    # the same reason check 6 keeps its inert super-over clause: it states the rule. What
+    # DOES fail here is reverting to A33's gate, which is the regression worth catching.
+    (playable,), = _rows(
+        conn, "select count(*) from player_season_impact where balls > 0")
     (offered,), = _rows(conn, "select count(*) from player_season_rating")
-    if offered != rateable:
+    if offered != playable:
         offenders.append(
-            f"player_season_rating offers {offered:,} rows but only {rateable:,} "
-            "player-seasons pass the A33 gates"
+            f"player_season_rating offers {offered:,} rows against {playable:,} "
+            "player-seasons that faced or bowled a ball (A65)"
         )
 
     (stored,), = _rows(conn, "select sum(faced) from state_ball_outcomes")
@@ -486,7 +500,7 @@ def check_06_super_overs_excluded(conn) -> Result:
         f"{len(derived)} derived table(s) examined; all {supers:,} super over deliveries "
         f"excluded from both the fitting and scoring sets by each clause independently; "
         f"state model holds {stored:,} balls; ratings hold {rated:,} rows of which "
-        f"{rateable:,} pass the A33 gates and the view offers exactly those",
+        f"{playable:,} faced or bowled a ball and the view offers exactly those",
         offenders,
     )
 
@@ -1041,10 +1055,18 @@ def check_13_cohort_offsets_do_not_drift_by_era(conn) -> Result:
     if not _table_exists(conn, "player_season_rating"):
         return skipped(13, title, "player_season_rating absent - apply migration 012")
 
+    # [A68] Measured on the seasons the offsets are ESTIMATED from, not on every rated
+    # row. Since A65 the view also carries thin seasons, whose band is derived from a
+    # handful of innings; including them showed 0.090 runs/ball of "era drift" in
+    # batting/finisher that vanished on the gate-passing seasons alone (worst ratio 1.65
+    # against 0.90). That was thin seasons being unevenly spread across eras - more players
+    # per season since the Impact Player rule - and splitting an offset by era on the
+    # strength of it would have been fitting noise, which A2 refused twice.
     cells: dict[tuple, list[float]] = {}
     for discipline, cohort, year, centred in _rows(conn, """
         select discipline, cohort, season_year, centred_per_ball
-        from player_season_rating where cohort is not null
+        from player_season_rating
+        where cohort is not null and not_rateable_reason is null
     """):
         for label, lo, hi in ERAS:
             if lo <= year <= hi:

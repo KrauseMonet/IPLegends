@@ -240,6 +240,16 @@ Re-verify the 2026 files against a fresh download before finalising ratings. If 
 baseline sits far off trend after within-season normalisation, flag it rather than
 absorbing it silently.
 
+**Reported verified by the user on 2026-07-31.** Recorded here with the claim named, per
+A22: what this discharges is the 2026 season data, and **the figure the record now rests on
+is V Suryavanshi's 776 runs off 327 balls (strike rate 237.3)**, which is the largest single
+outlier in nineteen seasons and carries a 95 rating. The archive hash is unchanged from A9
+(`841b9829...`, 5,180,977 bytes), so this is a verification of the same bytes A9 closed on,
+not of a re-download. **If that specific line was not what was checked, this is not
+discharged** — A22 is exactly the case where a neighbouring figure was checked and the
+claimed one was not. Independently, 2026's season mean sits at 78.4 against a 78.0-78.9
+range across all nineteen seasons, so the baseline is on trend rather than off it.
+
 ## Storage budget (Neon free tier)
 
 Free tier is **0.5 GB logical data per project**; instant-restore history is metered

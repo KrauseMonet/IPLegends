@@ -114,6 +114,16 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 .entry{display:grid;grid-template-columns:1fr auto 2.6em;align-items:baseline;column-gap:10px;
   padding:9px 0;border-bottom:1px solid var(--rule-soft)}
 .entry .nm{font-size:16.5px;min-width:0}
+/* Kind marks, drawn rather than lettered: a bat, a ball, both for an all-rounder, a
+   glove for the keeper. Inline SVG so they take the ink colour and need no asset. */
+.ic{display:inline-block;width:15px;height:15px;vertical-align:-2px;margin-right:7px;flex:none}
+.ic svg{width:100%;height:100%;display:block}
+.ic path,.ic circle,.ic line,.ic rect{stroke:var(--ink-2);stroke-width:1.6;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.ic.ball circle{fill:var(--ball);stroke:var(--ball)}
+.ic.ball path{stroke:var(--paper);stroke-width:1.2}
+.entry.off .ic path,.entry.off .ic circle{stroke:var(--rule)}
+.entry.off .ic.ball circle{fill:var(--rule);stroke:var(--rule)}
 .entry .nm .flag{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ball);
   margin-right:7px;vertical-align:middle}
 .entry .nm .flag.home{background:transparent;border:1px solid var(--rule)}
@@ -123,6 +133,17 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 .pk{font-family:var(--sans);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
   border:1px solid var(--rule);padding:3px 8px;color:var(--ink-2);background:var(--card)}
 .pk:hover{border-color:var(--ball);color:var(--ball);background:#fff}
+/* A blocked man stays on the sheet. Removing him hides the shape of the squad -- you
+   could not see that Chennai 2010 had Dhoni once your keeper was named. */
+.entry.off{display:block;color:var(--ink-3);padding:7px 0}
+.entry.off .nm{color:var(--ink-3)}
+.entry.off .fig{color:var(--rule)}
+.entry.off .nm{display:block}
+.entry.off .fig{display:none}
+.why{display:block;font-family:var(--sans);font-size:9.5px;letter-spacing:.06em;
+  color:var(--ink-3);font-style:italic;padding-left:22px;margin-top:1px}
+.roster-head{font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--ink-3);padding:16px 0 6px;border-bottom:1px solid var(--rule)}
 
 /* the squad sheet, ruled like a scorecard */
 .tally{display:flex;align-items:baseline;gap:12px;padding:16px 0 8px}
@@ -182,6 +203,23 @@ th.n,td.n{text-align:right;font-family:var(--fig);font-variant-numeric:tabular-n
 td{padding:5px 0;border-bottom:1px solid var(--rule-soft)}
 tr.tail td{color:var(--ink-3);font-style:italic}
 
+.season{display:grid;grid-template-columns:1.25fr .95fr;gap:0}
+.season > div{padding:0 26px}
+.season > div:first-child{padding-left:0;border-right:1px solid var(--rule)}
+.season > div:last-child{padding-right:0}
+.ladder-row td{padding:7px 0}
+tr.you td{font-weight:600}
+tr.you td:first-child{box-shadow:inset 3px 0 0 var(--ball);padding-left:9px}
+tr.cut td{border-bottom:1.5px solid var(--ink)}
+.fx{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;
+  padding:7px 0;border-bottom:1px solid var(--rule-soft);font-size:14.5px}
+.fx .wl{font-family:var(--sans);font-size:9.5px;letter-spacing:.1em;width:1.6em;
+  text-align:center;padding:2px 0;border:1px solid var(--rule);color:var(--ink-3)}
+.fx .wl.w{background:var(--willow);border-color:var(--willow);color:var(--paper)}
+.fx .wl.l{background:var(--ball);border-color:var(--ball);color:var(--paper)}
+.fx .sc{font-family:var(--fig);font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.tie-stage{font-family:var(--sans);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ball);padding-top:14px}
 .hide{display:none!important}
 .slip{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);
   color:var(--paper);padding:12px 22px;font-family:var(--sans);font-size:13px;z-index:60}
@@ -194,7 +232,8 @@ tr.tail td{color:var(--ink-3);font-style:italic}
   .headline{font-size:38px}
   .field{max-width:360px;margin:0 auto;width:100%}
   .method{grid-template-columns:1fr;gap:22px}
-  .folio,.cards2{grid-template-columns:1fr}
+  .folio,.cards2,.season{grid-template-columns:1fr}
+  .season > div{padding:0;border-right:0}
   .col,.cards2 > div{padding:0;border-right:0;border-bottom:1px solid var(--rule);
     padding-bottom:22px;margin-bottom:22px}
   .col:last-child,.cards2 > div:last-child{border-bottom:0}
@@ -283,7 +322,7 @@ tr.tail td{color:var(--ink-3);font-style:italic}
         <div id="slots"></div>
         <div class="foot-actions">
           <button class="act lead hide" id="simBtn"
-            style="border:1.5px solid var(--ink)" onclick="simulate()">Play the match</button>
+            style="border:1.5px solid var(--ink)" onclick="simulate()">Play the season</button>
           <button class="act" style="border:1.5px solid var(--rule)" onclick="go('home')">Abandon</button>
           <span class="stamp" id="seedPill"></span>
         </div>
@@ -298,14 +337,13 @@ tr.tail td{color:var(--ink-3);font-style:italic}
     </div>
   </section>
 
-  <!-- ============ REPORT ============ -->
+  <!-- ============ THE SEASON ============ -->
   <section id="result" class="hide">
     <div class="report">
       <div class="over-line" id="resSeed"></div>
       <div class="call" id="resVerdict"></div>
       <div class="figures" id="resScore"></div>
       <div class="margin" id="resMargin"></div>
-      <div class="ledger" id="resTiles"></div>
       <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
         <div class="actions">
           <button class="act lead" onclick="newDraft()">Draft again</button>
@@ -313,9 +351,20 @@ tr.tail td{color:var(--ink-3);font-style:italic}
         </div>
       </div>
     </div>
-    <div class="cards2">
-      <div><table id="inn1"></table></div>
-      <div><table id="inn2"></table></div>
+
+    <div class="season">
+      <div>
+        <div class="col-head" style="margin-top:26px"><span>League table</span>
+          <em id="tableNote"></em></div>
+        <table id="ladder"></table>
+      </div>
+      <div>
+        <div class="col-head" style="margin-top:26px"><span>Your fourteen</span>
+          <em id="formNote"></em></div>
+        <div id="yourForm"></div>
+        <div class="col-head" style="margin-top:26px"><span>Playoffs</span></div>
+        <div id="bracket"></div>
+      </div>
     </div>
   </section>
 
@@ -350,6 +399,22 @@ const ROLE = {keeper:'Wicketkeeper', opener:'Opener', top_order:'Top order',
 // alone was wide enough to wrap 'MS Dhoni' onto two lines.
 const CHIP = {keeper:'Kpr', opener:'Open', top_order:'Top', middle_or_finisher:'Mid',
               bowler:'Bowl', open:'Any'};
+
+// A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
+// baseline; the ball is the only filled mark, which is what makes a bowler scannable.
+const BAT  = '<path d="M10.6 2.2 13.4 5 7.2 11.2 4.4 8.4Z"/><path d="M4.4 8.4 2.4 12.6l4.2-1.4"/>';
+const BALL = '<circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/>';
+const GLOVE= '<path d="M4.4 13.4V6.8a1.4 1.4 0 0 1 2.8 0V4.2a1.4 1.4 0 0 1 2.8 0v1.2a1.4 1.4 0 0 1 2.4 1v6a2 2 0 0 1-2 2H6.4a2 2 0 0 1-2-2Z"/>';
+const ICON = {
+  batter:     `<span class="ic bat" title="Batter">${svg(BAT)}</span>`,
+  bowler:     `<span class="ic ball" title="Bowler">${svg(BALL)}</span>`,
+  allrounder: `<span class="ic all" title="All-rounder">${svg(
+      '<path d="M9.6 1.6 12 4 7 9 4.6 6.6Z"/><path d="M4.6 6.6 2.8 10.4l3.8-1.3"/>' +
+      '<circle cx="11.4" cy="11.4" r="3.2" fill="currentColor"/>')}</span>`,
+  keeper:     `<span class="ic glove" title="Wicketkeeper">${svg(GLOVE)}</span>`,
+  unrated:    `<span class="ic none" title="Not rated"></span>`,
+};
+function svg(inner){ return `<svg viewBox="0 0 16 16" aria-hidden="true">${inner}</svg>`; }
 
 async function boot(){
   META = await api('/api/meta');
@@ -408,7 +473,7 @@ function render(s){
       const got = idx >= 0 ? used.splice(idx,1)[0] : null;
       rows.push(`<div class="line ${got?'set':''}">
         <span class="role">${ROLE[slot]||slot}</span>
-        <span class="who">${got ? got.name : 'to be named'}</span>
+        <span class="who">${got ? (ICON[got.kind]||'') + got.name : 'to be named'}</span>
         <span class="club">${got ? got.franchise + ' ' + got.season_year : ''}</span>
         <span class="fig">${got ? got.rating : ''}</span></div>`);
     }
@@ -425,23 +490,34 @@ function render(s){
       if (!byPlayer.has(o.person_id)) byPlayer.set(o.person_id, {card:o, choices:[]});
       byPlayer.get(o.person_id).choices.push({slot:o.slot, index:i});
     });
-    $('#optCount').textContent = byPlayer.size;
-    $('#options').innerHTML = [...byPlayer.values()].map(({card,choices}) => `
+    const blocked = s.deal.blocked || [];
+    $('#optCount').textContent = `${byPlayer.size} of ${byPlayer.size + blocked.length}`;
+    const live = [...byPlayer.values()].map(({card,choices}) => `
       <div class="entry">
-        <span class="nm"><span class="flag ${card.overseas ? '' : 'home'}"
+        <span class="nm">${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
         <span class="picks">${choices.map(c =>
           `<button class="pk" title="${ROLE[c.slot]||c.slot}"
              onclick="pick(${c.index})">${CHIP[c.slot]||c.slot}</button>`).join('')}</span>
         <span class="fig">${card.rating ?? '—'}</span>
       </div>`).join('');
+    // The rest of the squad, greyed with the reason. Kept on the sheet rather than
+    // filtered away so the roster reads as a roster.
+    const dead = blocked.length ? `<div class="roster-head">Unavailable</div>` +
+      blocked.map(b => `
+      <div class="entry off">
+        <span class="nm">${ICON[b.kind] || ''}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}</span>
+        <span class="why">${b.blocked || ''}</span>
+        <span class="fig">${b.rating ?? '—'}</span>
+      </div>`).join('') : '';
+    $('#options').innerHTML = live + dead;
     $('#simBtn').classList.add('hide');
     $('#legalLine').classList.add('hide');
   } else {
     $('#dealYear').textContent = '';
     $('#dealTeam').textContent = 'Selection closed';
     $('#optCount').textContent = '';
-    $('#options').innerHTML = '<div class="note">Fifteen chosen. Play when ready.</div>';
+    $('#options').innerHTML = '<div class="note">Fifteen chosen. Fourteen matches await.</div>';
     $('#simBtn').classList.remove('hide');
     loadXI();
   }
@@ -452,7 +528,7 @@ async function loadXI(){
   $('#xiList').outerHTML = '<div id="xiList">' + x.xi.map((p,i) =>
     `<div class="line set" style="grid-template-columns:22px minmax(0,1fr) 3em 2.4em">
      <span class="role">${i+1}</span>
-     <span class="who">${p.name}</span><span class="club">${p.season_year}</span>
+     <span class="who">${(ICON[p.kind]||'') + p.name}</span><span class="club">${p.season_year}</span>
      <span class="fig">${p.rating ?? ''}</span></div>`).join('') + '</div>';
   const line = $('#legalLine');
   line.classList.remove('hide');
@@ -460,46 +536,59 @@ async function loadXI(){
   line.textContent = x.overseas.charAt(0).toUpperCase() + x.overseas.slice(1);
 }
 
-/* --- match --- */
+/* --- the season --- */
 async function simulate(){
   $('#simBtn').disabled = true;
-  try { showResult(await api('/api/match/' + S.state)); }
+  $('#simBtn').textContent = 'Playing the season…';
+  try { showSeason(await api('/api/season/' + S.state)); }
   catch(e){ slip(e.message); }
-  finally { $('#simBtn').disabled = false; }
+  finally { $('#simBtn').disabled = false; $('#simBtn').textContent = 'Play the season'; }
 }
 
-function showResult(m){
-  $('#resSeed').textContent = 'Seed ' + m.state.split('-')[0];
-  const you = m.first, them = m.second, won = m.result.startsWith('YOU');
-  $('#resVerdict').textContent = won ? 'Your eleven prevail'
-    : (m.result === 'tied' ? 'A tie' : 'Beaten');
+function showSeason(d){
+  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
+  const me = d.table.find(r => r.you);
+  const won = d.you_champion;
+  $('#resVerdict').textContent = won ? 'Champions'
+    : (me.pos <= 4 ? 'Into the playoffs' : 'The season ends here');
   $('#resVerdict').classList.toggle('won', won);
-  $('#resScore').textContent = `${you.runs}/${you.wickets} · ${them.runs}/${them.wickets}`;
-  $('#resMargin').textContent = m.result.replace('YOU', 'You').replace('OPPONENT', 'The house');
-  // `first.bowling` is who bowled AT you. Your own attack appears in the second innings.
-  const top = [...you.batting].sort((a,b)=>b.runs-a.runs)[0] || {name:'—',runs:0};
-  const best = [...them.bowling].sort((a,b)=>b.wickets-a.wickets || a.runs-b.runs)[0]
-               || {name:'—',wickets:0,runs:0};
-  $('#resTiles').innerHTML = `
-    <div><b>${you.runs}/${you.wickets}</b><span>your innings</span></div>
-    <div><b>${them.runs}/${them.wickets}</b><span>the house</span></div>
-    <div><b>${top.runs}</b><span>${top.name}</span></div>
-    <div><b>${best.wickets}–${best.runs}</b><span>${best.name}</span></div>`;
-  $('#inn1').innerHTML =
-    `<caption>Your eleven — ${you.runs}/${you.wickets} (${you.overs} ov)</caption>` + card(you);
-  $('#inn2').innerHTML =
-    `<caption>The house — ${them.runs}/${them.wickets} (${them.overs} ov)</caption>` + card(them);
+  $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
+  $('#resMargin').textContent = won
+    ? `Your eleven take the title, finishing ${ordinal(me.pos)} in the league.`
+    : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
+
+  $('#tableNote').textContent = `${d.matches_each} each`;
+  $('#ladder').innerHTML =
+    `<tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
+        <th class="n">Pts</th><th class="n">NRR</th></tr>` +
+    d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
+      <td class="n" style="text-align:left">${r.pos}</td><td>${r.short}</td>
+      <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
+      <td class="n">${r.points}</td>
+      <td class="n">${r.nrr > 0 ? '+' : ''}${r.nrr.toFixed(3)}</td></tr>`).join('');
+
+  const w = d.your_results.filter(r => r.winner === 'YOU').length;
+  $('#formNote').textContent = `${w} won`;
+  $('#yourForm').innerHTML = d.your_results.map(r => {
+    const them = r.home === 'YOU' ? r.away : r.home;
+    const mine = r.home === 'YOU' ? r.home_score : r.away_score;
+    const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
+    const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l');
+    return `<div class="fx"><span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
+      <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span></div>`;
+  }).join('');
+
+  $('#bracket').innerHTML = d.playoffs.map(r => `
+    <div class="tie-stage">${r.stage}</div>
+    <div class="fx"><span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
+      >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
+      <span>${r.home} v ${r.away}</span>
+      <span class="sc">${r.home_score} · ${r.away_score}</span></div>
+    <div class="fx" style="border:0;padding-top:2px"><span></span>
+      <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
   go('result');
 }
-const card = inn =>
-  `<tr><th>Batting</th><th class="n">R</th><th class="n">B</th></tr>` +
-  inn.batting.map(b => `<tr class="${b.rated?'':'tail'}"><td>${b.name}${b.out?'':' *'}</td>
-    <td class="n">${b.runs}</td><td class="n">${b.balls}</td></tr>`).join('') +
-  `<tr><td>Extras</td><td class="n">${inn.extras}</td><td class="n"></td></tr>` +
-  `<tr><th style="padding-top:18px">Bowling</th><th class="n" style="padding-top:18px">O</th>
-       <th class="n" style="padding-top:18px">R–W</th></tr>` +
-  inn.bowling.map(b => `<tr><td>${b.name}</td><td class="n">${b.overs}</td>
-    <td class="n">${b.runs}–${b.wickets}</td></tr>`).join('');
+const ordinal = n => n + (['th','st','nd','rd'][(n % 100 - 20) % 10] || ['th','st','nd','rd'][n] || 'th');
 
 function copyLink(){
   const url = location.origin + '/#' + S.state;

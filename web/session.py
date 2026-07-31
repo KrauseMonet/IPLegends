@@ -13,9 +13,12 @@ and the human is injected as a POLICY that replays recorded choices and then sto
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass
 
-from etl.feasibility import POLICIES, SQUAD_SIZE, Card, Deck, run_draft
+from etl.feasibility import (
+    OVERSEAS_CAP, POLICIES, SQUAD_SIZE, TEMPLATE, Card, Deck, run_draft,
+)
 
 
 class InvalidState(ValueError):
@@ -36,12 +39,20 @@ class _NeedChoice(Exception):
 
 @dataclass(frozen=True)
 class Deal:
-    """One franchise-season offered to the drafter, and what each card could fill."""
+    """One franchise-season offered to the drafter -- the WHOLE squad, not just the part
+    that can be taken.
+
+    A list showing only the pickable men hides the shape of the squad: you cannot see that
+    Chennai 2010 had Dhoni if your keeper is already named, so the deal looks thin rather
+    than spent. `blocked` carries everyone else with the reason, so the roster reads as a
+    roster and the constraint reads as a constraint.
+    """
 
     fs_id: int
     franchise: str | None
     season_year: int | None
     options: list[tuple[Card, str]]
+    blocked: list[tuple[Card, str]] = None
 
 
 @dataclass(frozen=True)
@@ -133,7 +144,8 @@ def replay(deck: Deck, seed: int, choices: tuple[int, ...]) -> Session:
         pairs = pause.pairs
         first = pairs[0][0]
         return Session(seed, choices,
-                       Deal(first.fs_id, first.franchise, first.season_year, pairs),
+                       Deal(first.fs_id, first.franchise, first.season_year, pairs,
+                            _blocked(deck, first.fs_id, squad, pairs)),
                        squad)
 
     if not result.completed:
@@ -143,6 +155,38 @@ def replay(deck: Deck, seed: int, choices: tuple[int, ...]) -> Session:
         raise InvalidState(
             f"this draft cannot be completed - stranded on {result.stranded_on}")
     return Session(seed, choices, None, result.picks)
+
+
+def _blocked(deck: Deck, fs_id: int, squad: list[tuple[Card, str]],
+             pairs: list[tuple[Card, str]]) -> list[tuple[Card, str]]:
+    """Everyone in the dealt squad who cannot be taken, and the reason.
+
+    Reasons are ordered by which the drafter can do something about. Being already drafted
+    is permanent; the overseas cap is permanent once spent; a filled place may still open
+    up in the sense that another card fills a different one. Reported in that order so the
+    most final reason wins rather than whichever is checked first.
+    """
+    takeable = {c.person_id for c, _ in pairs}
+    drafted = {c.person_id for c, _ in squad}
+    overseas_taken = sum(1 for c, _ in squad if c.overseas is True)
+    filled = Counter(slot for _, slot in squad)
+    unfilled = {s for s, n in TEMPLATE.items() if filled[s] < n}
+
+    out: list[tuple[Card, str]] = []
+    for card in deck.cards_by_fs.get(fs_id, ()):
+        if card.person_id in takeable:
+            continue
+        if card.person_id in drafted:
+            reason = "already drafted"
+        elif card.overseas is True and overseas_taken >= OVERSEAS_CAP:
+            reason = "overseas quota full"
+        elif not (card.slots & unfilled):
+            reason = "no place open"
+        else:
+            # Shouldn't happen: if a slot is open and he is not blocked, he is takeable.
+            reason = "unavailable"
+        out.append((card, reason))
+    return out
 
 
 def _picks_so_far(deck: Deck, seed: int, choices: tuple[int, ...]) -> list[tuple[Card, str]]:
@@ -176,6 +220,17 @@ def new_seed(rng: random.Random | None = None) -> int:
     """A fresh game. Six digits keeps a shareable URL short and is far more than the 166
     franchise-seasons could ever distinguish anyway."""
     return (rng or random.Random()).randrange(1_000_000)
+
+
+def replay_stream(deck: Deck, seed: int, choices: tuple[int, ...],
+                  rng: random.Random) -> None:
+    """Advance `rng` exactly as the player's own draft did, and nothing more.
+
+    The season needs the generator positioned where the draft left it, so that a state
+    reproduces the whole campaign. Kept separate from `after_draft` because the season
+    deals its own opposition rather than drafting one.
+    """
+    run_draft(deck, _policy(choices), rng)
 
 
 def after_draft(deck: Deck, seed: int, choices: tuple[int, ...]

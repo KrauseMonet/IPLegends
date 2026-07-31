@@ -27,7 +27,10 @@ from etl.feasibility import SQUAD_SIZE, Card
 from game.__main__ import (
     BAND_ORDER, attack, batting_order, choose_xi, overseas_status,
 )
-from game.simulator import Innings, load_model, play_innings
+from game.season import (
+    MATCHES_EACH, TEAMS, Season, Side, historical_sides, run_league, run_playoffs,
+)
+from game.simulator import load_model
 from web import session as sess
 
 # Populated at boot. The deck is 1,689 cards and takes ~3.8 s to build; the state model is
@@ -45,8 +48,57 @@ async def lifespan(_: FastAPI):
         from etl.feasibility import load_deck
         STATE["deck"] = load_deck(conn)
         STATE["model"] = load_model(conn)
+        STATE["unrated"] = _load_unrated(conn)
     yield
     STATE.clear()
+
+
+def _load_unrated(conn) -> dict[int, list]:
+    """Squad members with no rating, per franchise-season, for DISPLAY ONLY.
+
+    A squad is about twenty men and roughly half clear A33's floors, so a deal that showed
+    only the rated ones would misrepresent the squad -- Chennai 2010 would look like ten
+    players. These are returned as plain dicts and never as `Card`s, deliberately: a Card
+    is the draft's currency, and one of these entering `cards_by_fs` would make an unrated
+    player draftable through the `open` slot.
+    """
+    # The reason carries the NUMBERS, not just the word. McCullum made 158* in the first
+    # match ever played and is unrated for 2008 -- because he appeared four times and faced
+    # 92 balls, under A33's hundred-ball floor. "Not rated" alone reads as a bug to anyone
+    # who remembers the innings; "4 matches, 92 balls" reads as the rule it is.
+    rows = conn.execute(
+        """
+        select s.franchise_season_id, p.primary_name, s.role, s.batting_band,
+               p.is_overseas, s.matches_played,
+               max(i.balls) filter (where i.discipline = 'batting'),
+               max(i.balls) filter (where i.discipline = 'bowling')
+        from squad_members s
+        join people p on p.person_id = s.person_id
+        left join player_season_impact i
+               on i.franchise_season_id = s.franchise_season_id
+              and i.person_id = s.person_id
+        where not exists (
+            select 1 from player_season_rating r
+            where r.franchise_season_id = s.franchise_season_id
+              and r.person_id = s.person_id)
+        group by 1, 2, 3, 4, 5, 6
+        order by p.primary_name
+        """
+    ).fetchall()
+    out: dict[int, list] = {}
+    for fs_id, name, role, band, overseas, matches, faced, bowled in rows:
+        bits = [f"{matches} match{'' if matches == 1 else 'es'}"]
+        if faced:
+            bits.append(f"{faced} faced")
+        if bowled:
+            bits.append(f"{bowled} bowled")
+        out.setdefault(fs_id, []).append({
+            "person_id": "", "name": name, "franchise": None, "season_year": None,
+            "band": band, "role": role, "kind": "unrated", "rating": None,
+            "overseas": overseas, "slot": None,
+            "blocked": ", ".join(bits) + " · below the rating floor",
+        })
+    return out
 
 
 app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
@@ -71,9 +123,11 @@ class CardOut(BaseModel):
     season_year: int | None
     band: str | None
     role: str | None
+    kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
     rating: int | None = Field(description="A58/A60's integer 70-99 card rating")
     overseas: bool | None = Field(description="null means unknown, never domestic (A23)")
     slot: str | None = Field(default=None, description="the slot this option would fill")
+    blocked: str | None = Field(default=None, description="why he cannot be taken")
 
 
 class DealOut(BaseModel):
@@ -81,6 +135,7 @@ class DealOut(BaseModel):
     franchise: str | None
     season_year: int | None
     options: list[CardOut]
+    blocked: list[CardOut] = []
 
 
 class SessionOut(BaseModel):
@@ -98,30 +153,65 @@ class PickIn(BaseModel):
     index: int = Field(ge=0, description="an index into the deal's options")
 
 
-class InningsOut(BaseModel):
-    side: str
-    runs: int
-    wickets: int
-    overs: str
-    extras: int
-    batting: list[dict]
-    bowling: list[dict]
+class StandingOut(BaseModel):
+    pos: int
+    name: str
+    short: str
+    you: bool
+    played: int
+    won: int
+    lost: int
+    tied: int
+    points: int
+    nrr: float
 
 
-class MatchOut(BaseModel):
+class ResultOut(BaseModel):
+    stage: str
+    home: str
+    away: str
+    home_score: str
+    away_score: str
+    winner: str | None
+    margin: str
+    yours: bool
+
+
+class SeasonOut(BaseModel):
     state: str
-    first: InningsOut
-    second: InningsOut
-    result: str
+    your_side: str
+    table: list[StandingOut]
+    your_results: list[ResultOut]
+    playoffs: list[ResultOut]
+    champion: str
+    you_champion: bool
+    matches_each: int = MATCHES_EACH
+    teams: int = TEAMS
 
 
 # --- mapping ---------------------------------------------------------------------------
 
-def _card(card: Card, slot: str | None = None) -> CardOut:
+def _kind(card: Card) -> str:
+    """What the icon shows. Derived from the RATINGS rather than from `squad_members.role`,
+    because the card is what a drafter is buying: a man rated in both disciplines is an
+    all-rounder here even if A26's thresholds classified him as one or the other."""
+    if card.role == "keeper":
+        return "keeper"
+    if card.has_bat and card.has_bowl:
+        return "allrounder"
+    if card.has_bowl:
+        return "bowler"
+    if card.has_bat:
+        return "batter"
+    return "unrated"
+
+
+def _card(card: Card, slot: str | None = None, blocked: str | None = None) -> CardOut:
     return CardOut(
         person_id=card.person_id, name=card.name, franchise=card.franchise,
         season_year=card.season_year, band=card.band, role=card.role,
-        rating=card.display, overseas=card.overseas, slot=slot,
+        kind=_kind(card), rating=card.display, overseas=card.overseas,
+        slot=slot, blocked=blocked,
     )
 
 
@@ -137,6 +227,8 @@ def _session_out(s: sess.Session) -> SessionOut:
             fs_id=s.deal.fs_id, franchise=s.deal.franchise,
             season_year=s.deal.season_year,
             options=[_card(c, slot) for c, slot in s.deal.options],
+            blocked=[_card(c, None, why) for c, why in (s.deal.blocked or [])]
+                    + STATE["unrated"].get(s.deal.fs_id, []),
         ),
         complete=s.complete,
     )
@@ -222,42 +314,61 @@ def pick(state: str, body: PickIn) -> SessionOut:
     return _session_out(_load(sess.encode(seed, choices + (body.index,))))
 
 
-@app.get("/api/match/{state}", response_model=MatchOut)
-def match(state: str) -> MatchOut:
+def _score(runs: int, wickets: int) -> str:
+    return f"{runs}/{wickets}"
+
+
+def _result_out(r, you: Side) -> ResultOut:
+    return ResultOut(
+        stage=r.stage, home=r.home.short, away=r.away.short,
+        home_score=_score(r.home_runs, r.home_wickets),
+        away_score=_score(r.away_runs, r.away_wickets),
+        winner=None if r.winner is None else r.winner.short,
+        margin=r.margin, yours=(r.home is you or r.away is you),
+    )
+
+
+@app.get("/api/season/{state}", response_model=SeasonOut)
+def season(state: str) -> SeasonOut:
+    """A full campaign: fourteen league matches, a table, then the playoffs.
+
+    Around three seconds of simulation -- seventy league matches plus four playoff ties,
+    each two innings scored ball by ball. Done inside the request rather than queued,
+    because it is deterministic from the state and therefore cacheable by anything in
+    front of it; a job queue would add a store to a design whose whole point (SPEC 11)
+    is not having one.
+    """
     player = _load(state)
     if not player.complete:
-        raise HTTPException(
-            status_code=409,
-            detail=f"{len(player.squad)} of {SQUAD_SIZE} picks made")
+        raise HTTPException(status_code=409,
+                            detail=f"{len(player.squad)} of {SQUAD_SIZE} picks made")
 
     deck, model = STATE["deck"], STATE["model"]
     seed, choices = sess.decode(state)
-    try:
-        # Returns the LIVE rng, already advanced past both drafts, so the match continues
-        # one stream exactly as `python -m game --seed N` does.
-        house, rng = sess.after_draft(deck, seed, choices)
-    except sess.InvalidState as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    rng = random.Random(seed)
+    sess.replay_stream(deck, seed, choices, rng)      # advance exactly as the draft did
 
-    xi_you = choose_xi([c for c, _ in player.squad])
-    xi_them = choose_xi([c for c, _ in house])
+    yours = Side(name="Your eleven", short="YOU",
+                 xi=choose_xi([c for c, _ in player.squad]), you=True)
+    opposition = historical_sides(deck, rng, TEAMS - 1)
+    if len(opposition) < TEAMS - 1:
+        raise HTTPException(status_code=500, detail="could not field a full league")
 
-    first = play_innings(model, batting_order(xi_you, model), attack(xi_them, model), rng)
-    second = play_innings(model, batting_order(xi_them, model), attack(xi_you, model),
-                          rng, target=first.runs)
+    sides = [yours] + opposition
+    result = run_playoffs(model, run_league(model, sides, rng), rng)
 
-    if second.runs > first.runs:
-        result = f"OPPONENT win by {10 - second.wickets} wickets"
-    elif first.runs > second.runs:
-        result = f"YOU win by {first.runs - second.runs} runs"
-    else:
-        result = "tied"
-
-    return MatchOut(
+    return SeasonOut(
         state=state,
-        first=_innings_out(first, "YOU"),
-        second=_innings_out(second, "OPPONENT"),
-        result=result,
+        your_side=yours.name,
+        table=[StandingOut(pos=i, name=s.side.name, short=s.side.short, you=s.side.you,
+                           played=s.played, won=s.won, lost=s.lost, tied=s.tied,
+                           points=s.points, nrr=round(s.nrr, 3))
+               for i, s in enumerate(result.table, 1)],
+        your_results=[_result_out(r, yours) for r in result.results
+                      if r.home is yours or r.away is yours],
+        playoffs=[_result_out(r, yours) for r in result.playoffs],
+        champion=result.champion.name,
+        you_champion=result.champion is yours,
     )
 
 

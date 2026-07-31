@@ -1922,3 +1922,61 @@ accounts only become necessary when a result has to outlive the request that pro
 **The one thing to settle before the leaderboard, not after:** whether a deal is random per
 player or shared per day. Random-per-player is played once; shared-per-day is compared and
 returned to. It costs nothing now and is awkward to retrofit once URLs are in circulation.
+
+## 12. The season
+
+**[A63] The game is a SEASON, not a match.** One match was never the game: a drafted eleven
+that wins once and loses thirteen had a good night, not a good side, and only a league
+separates the two. Fourteen league matches, a table, then the playoffs.
+
+### 12.1 The opposition is historical
+
+Nine real franchise-seasons — Mumbai 2018, Kolkata 2024 — each fielding the best legal
+eleven that squad could actually put out, drawn uniformly over the 166 exactly as the deck
+is (A10). Better than nine synthetic drafts on its own terms, and it is also **the only
+opposition this archive can vouch for**: every one of those elevens really took the field.
+
+### 12.2 Fourteen matches on ten sides
+
+Ten teams at fourteen matches each is 70 fixtures, and it needs each side to play five
+opponents twice and four once. That makes the "plays twice" relation a **5-regular graph**,
+which circular distances 1, 2 and 5 give exactly: two neighbours either side, plus the team
+directly opposite. Distance 5 is the antipode and so names one opponent rather than two —
+5 = 2 + 2 + 1 — which is the arithmetic a test derives rather than assumes.
+
+It is also what a real fixture list does: near rivals twice, the rest once. Symmetric, so
+no side gets an easier draw.
+
+### 12.3 The table
+
+Two points a win, one a tie. **Net run rate charges a side bowled out the FULL twenty
+overs**, which is the competition's own rule and not a rounding detail: without it, 60 all
+out in 12 overs scores a better rate than 60 for 4 in 20, and a side could improve its net
+run rate by collapsing. Pinned by a test from both directions.
+
+### 12.4 The playoffs are the IPL's, not a bracket
+
+Top four. Qualifier 1 (1 v 2), Eliminator (3 v 4), then **Qualifier 1's loser drops into
+Qualifier 2 rather than out**, and the winner of that meets Qualifier 1's winner in the
+final.
+
+Reproducing that is most of what the league table is *for*. Under a straight semi-final
+bracket, finishing first and finishing third are nearly equivalent; under this one, the top
+two get a second life and the table is worth playing for.
+
+### 12.5 What the deal shows
+
+**The whole squad, not the takeable part of it.** A franchise-season is about twenty men and
+roughly half clear A33's floors, so a list of only the pickable ones misrepresents the squad
+— Chennai 2010 would read as ten players, and you could not see that it had Dhoni once your
+keeper was named. Everyone else is greyed with the reason: *already drafted*, *overseas
+quota full*, *no place open*, or, for an unrated man, **the numbers**.
+
+That last one earns its wording. McCullum made 158\* in the first match ever played and is
+unrated for 2008 — because he appeared four times and faced 92 balls, under A33's hundred-ball
+floor. "Not rated" alone reads as a bug to anyone who remembers the innings; "4 matches, 92
+faced · below the rating floor" reads as the rule it is.
+
+The unrated men are carried as plain records and **never as `Card`s**, deliberately: a Card is
+the draft's currency, and one of these reaching `cards_by_fs` would make an unrated player
+draftable through the `open` slot.

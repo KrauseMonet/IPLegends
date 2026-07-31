@@ -871,6 +871,57 @@ def check_21_no_real_xi_fielded_five_overseas(conn) -> Result:
     )
 
 
+def check_22_the_card_and_the_engine_agree(conn) -> Result:
+    """A57. What the drafter reads and what the engine plays are the same claim.
+
+    The reputation blend is the one term in the project that is not a measurement, and the
+    only thing that keeps it honest is that it reaches BOTH numbers. If it lifted the card
+    without lifting `rated_per_ball`, a drafter would pick a 97 and watch it bowl like a 78
+    -- and would be right to trust neither number afterwards.
+
+    So this recomputes the identity the view is built on: spread over a player-season's own
+    balls, `rated_per_ball` has to integrate back to exactly `blended_merit`. It is not a
+    restatement of the view's arithmetic, because it re-derives the left side from the
+    per-discipline columns a consumer actually reads, in the grain a consumer reads them.
+    A blend applied to the display alone fails here on every row that has one.
+
+    Also pins the scale to A58's 70-100. A rating outside it means the percentile anchors
+    stopped bracketing the data, which is what a revised archive would do quietly.
+    """
+    title = "the card's rating and the engine's per-ball value are the same claim"
+    if not _table_exists(conn, "player_season_rating"):
+        return skipped(22, title, "player_season_rating absent - apply migration 011")
+
+    offenders: list[str] = []
+    rows = _rows(conn, """
+        select p.primary_name, r.season_year,
+               sum(r.rated_per_ball * r.balls::numeric / r.matches) as integrated,
+               max(r.blended_merit)                                 as blended,
+               max(r.display_rating)                                as display,
+               count(*)                                             as disciplines
+        from player_season_rating r
+        join people p on p.person_id = r.person_id
+        group by r.franchise_season_id, r.person_id, p.primary_name, r.season_year
+    """)
+    both = 0
+    for name, year, integrated, blended, display, disciplines in rows:
+        if abs(float(integrated) - float(blended)) > 1e-6:
+            offenders.append(
+                f"{name} {year}: engine integrates to {float(integrated):.4f} but the "
+                f"card claims {float(blended):.4f}")
+        if not 70 <= display <= 100:
+            offenders.append(f"{name} {year}: display_rating {display} is outside 70-100")
+        if disciplines == 2:
+            both += 1
+
+    return verdict(
+        22, title,
+        f"{len(rows):,} player-seasons reconciled, {both:,} of them all-rounders scoring "
+        f"in both disciplines",
+        offenders,
+    )
+
+
 def check_15_actual_delivery_is_reproducible(conn) -> Result:
     """A19. `legal_ball` regenerates the source's own scorecard reference.
 
@@ -1005,4 +1056,5 @@ CHECKS = (
     check_19_every_squad_can_field_a_keeper,
     check_20_state_model_covers_every_state,
     check_21_no_real_xi_fielded_five_overseas,
+    check_22_the_card_and_the_engine_agree,
 )

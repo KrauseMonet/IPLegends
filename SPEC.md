@@ -1392,6 +1392,82 @@ lists stop moving; moving them to fill a slot would be fitting the evidence to t
 
 ---
 
+### 7.8 The card: runs per match, disciplines added, and a declared reputation term
+
+**Migration 011. A view replacement and nothing else** — no table, no column, no stored
+number, exactly as 010 was.
+
+**[A54] Per ball is right for the engine and wrong for a card.** The engine tilts one
+delivery at a time, so it needs a per-ball rate. A drafter is buying a player for a match.
+Four measurements said the difference was not cosmetic:
+
+- Kohli 2016 (973 runs, the aggregate record) rated **75.4** against Russell 2019's
+  **100.0**. Per match they are **+11.35** and **+12.13** runs above par — an 11% gap shown
+  as 25 points, because Kohli's value spreads over 36.9 balls a game and Russell's over 19.2.
+- Warner 2016 beat Tanvir 2008 on impact per match (**+12.61** to **+9.46**) and lost on the
+  card (81.5 to 84.7). The card had the better season second.
+- Players with four to six Player-of-the-Match awards in a season — Marsh 2008, Hussey 2013,
+  Tendulkar 2010, Rohit 2016 — sat in the **60s**.
+- Finishers held **4% of rated seasons and 20% of the top twenty**, because a death-overs
+  ball carries **3.93** runs of variance against a powerplay ball's **2.12** and they face
+  about half as many. Per-ball rating read that noise as merit.
+
+Multiplying by balls per match fixes all four and needs no new correction: finishers fall to
+**0% of the top 20 and 6% of the top 50**, because fewer balls now means less, not more.
+
+**[A55] Batting and bowling ADD.** 010 gave an all-rounder two independent rows and every
+consumer took the better one, so Narine 2024 — 488 runs at a strike rate of 181 *and* a 69.7
+bowling season — was carded at 69.7 with his batting discarded. Both impacts are already
+measured in runs above par, so they need addition, not weighting. **123 of 1,689 player-
+seasons score in both disciplines.** Narine 2024 is now **95**.
+
+**[A56] Player of the Match enters the rating.** Cricsheet carries it on **1,234 of 1,243**
+matches and migration 002 has stored it since the first load; the ratings ignored it. It is
+the one **human** judgement in the pipeline — somebody who watched the game naming who
+decided it. Priced at **12 runs per award per match played**, which is a conversion and
+therefore a choice, written once in the view. Deliberately too small to carry a season
+alone: Marsh's five-award 2008 gains 5.5 runs a match against a merit of 16.8.
+
+**[A57] A REPUTATION term, and it is a game-design decision rather than a measurement.**
+This is the only parameter in the project not derived from evidence about the thing it
+scores, and it is recorded plainly so nobody later mistakes it for one. The brief is a game
+people want to play, and a card rating Bumrah 37 for one poor season reads as broken to
+someone who knows he is Bumrah — however well earned that 37 is by 4 wickets in 49 overs at
+8.37.
+
+Mechanically it is **A7 reinstated as a second shrinkage stage**: each season is blended
+toward the player's other seasons, leave-one-out, at **REPUTATION = 0.45**. A46's removal of
+A7 from the *first* stage stands — `player_season_impact` still shrinks toward the band
+prior, which is still the right answer for estimating a season. This is a different claim
+applied after the estimate is complete: a card is *"Bumrah, as of 2026"*, not *"Bumrah in
+2026"*. Result: his range is **78 to 98** across eleven seasons rather than 37.6 to 92.9.
+
+Two guards, both load-bearing:
+
+- The career estimate is itself shrunk toward the league by **CAREER_N = 2** pseudo-seasons.
+  Without it a one-season player is blended toward himself, i.e. not blended at all, and
+  Tanvir 2008 — a fine season, but eleven matches with no career to appeal to — ranked
+  **third of 1,689**, ahead of every Kohli and Gayle season. He now sits at 92.
+- **The blend feeds `rated_per_ball` too, not only the display.** If reputation lifted the
+  card without lifting what the engine plays, the match would contradict the rating inside
+  one over. **Check 22** enforces this and was verified falsifiable: with the blend on the
+  card alone, **1,689 of 1,689** player-seasons fail it.
+
+**[A58] The display scale is 70–100, INTEGER, anchored on percentiles.** A44's 0–100 with a
+mean of 50 is a statistician's scale; a game scale puts the floor where a weak card is still
+a card. It costs nothing in honesty because the map is linear — every gap survives in
+proportion, which is the whole of A44's argument against percentile.
+
+Anchored at the **2nd and 99.8th percentiles** of blended merit, not at min and max: Gayle
+2011 and 2012 sit far clear of the field, and anchoring on them compressed **55%** of all
+seasons into a five-point band. On percentiles the spread is **19/40/26/11/3/1%** across the
+six bands and four seasons reach 100. Integer rounding was asked for and makes ties common —
+about **56 seasons per point** — which is accepted: a drafter sees fifteen cards at a time,
+and the ordering underneath survives in `rated_per_ball`.
+
+Top of the resulting list: Gayle 2011 and 2012 (100), de Villiers 2016 and 2015 (100),
+Marsh 2008 (99), Russell 2019 (99), Kohli 2016 (98), Warner 2016 (98), Bumrah 2024 (98).
+
 ## 8. Validation
 
 Runnable scripts in `/validation` with clear pass/fail output.

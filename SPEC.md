@@ -1511,7 +1511,9 @@ mean of 50 is a statistician's scale; a game scale puts the floor where a weak c
 a card. It costs nothing in honesty because the map is linear — every gap survives in
 proportion, which is the whole of A44's argument against percentile.
 
-Anchored at the **2nd and 99.8th percentiles** of blended merit, not at min and max: Gayle
+Anchored at the **2nd and 99.8th percentiles** [corrected 2026-08-02, A74 — the high anchor
+is now the **99th** percentile, not the 99.8th, after counting showed 82% of the deck reading
+70-79 under the old anchor; see CLAUDE.md's A74 for the measurement] of blended merit, not at min and max: Gayle
 2011 and 2012 sit far clear of the field, and anchoring on them compressed **55%** of all
 seasons into a five-point band. On percentiles the spread is **19/40/26/11/3/1%** across the
 six bands and four seasons reach 100. Integer rounding was asked for and makes ties common —

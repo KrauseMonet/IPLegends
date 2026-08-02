@@ -1,0 +1,14 @@
+.env
+.venv/
+.pytest_cache/
+__pycache__/
+.git/
+data/
+tests/
+validation/
+migrations/
+.claude/
+uv.lock
+CLAUDE.md
+SPEC.md
+CREDITS.md

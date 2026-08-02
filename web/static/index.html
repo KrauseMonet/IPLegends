@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Legends Almanack — an all-time IPL draft</title>
+<title>The Legends Almanack · an all-time IPL draft</title>
 <style>
 /* ---------------------------------------------------------------------------------------
    THE LEGENDS ALMANACK, under the lights.
@@ -141,7 +141,15 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 /* --- the draft: three panels --- */
 .folio{display:grid;grid-template-columns:1fr 1.2fr .8fr;gap:16px;padding-top:30px;
   position:relative;z-index:1}
-.col{padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;overflow:hidden}
+/* Each panel is capped to a viewport-relative height and scrolls its own list
+   internally, rather than growing to fit a squad of twenty-odd names (most of them
+   blocked and greyed, but still shown per A64) and pushing the whole page down past
+   several screens. The header above a list and the footer below it (Play the season,
+   Leave room) stay in view; only the list in between scrolls -- and on a small phone
+   screen this is what keeps the draft usable at all without constant scrolling. */
+.col{padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;
+  overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 200px)}
+.col-scroll{flex:1 1 auto;min-height:0;overflow-y:auto}
 .col-head{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
   color:var(--ink-3);padding:14px 18px;border-bottom:1px solid var(--line);margin-bottom:2px;
   display:flex;justify-content:space-between;align-items:baseline;background:var(--panel-2)}
@@ -294,7 +302,8 @@ tr.you td{font-weight:700;color:var(--ink)}
 tr.you td:first-child{box-shadow:inset 3px 0 0 var(--gold);padding-left:9px}
 tr.cut td{border-bottom:1.5px solid var(--gold)}
 .fx{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;
-  padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;transition:background .12s}
+.fx[onclick]:hover{background:var(--panel-2)}
 .fx .wl{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;width:1.8em;text-align:center;
   padding:3px 0;border-radius:4px;border:1px solid var(--line-strong);color:var(--ink-3)}
 .fx .wl.w{background:var(--green);border-color:var(--green);color:#04231a;font-weight:700}
@@ -316,6 +325,15 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   box-shadow:0 20px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line-strong)}
 .card-actions{display:flex;gap:12px}
 .card-actions a.act{text-decoration:none;display:inline-flex;align-items:center}
+
+/* the scorecard overlay: reuses .card-overlay's backdrop, a scrolling frame of its own
+   since two full elevens' worth of batting and bowling can run taller than the screen */
+.scorecard-frame{background:var(--bg-2);border:1px solid var(--line-strong);border-radius:14px;
+  max-width:960px;width:100%;max-height:88vh;overflow-y:auto;padding:6px 26px 26px}
+.scorecard-frame .report{padding:22px 0 4px}
+.scorecard-close{display:flex;justify-content:flex-end;padding-top:10px}
+.fow{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.8;
+  padding:12px 0 4px;white-space:pre-line}
 
 /* room setup: create/join */
 .room-label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
@@ -383,16 +401,17 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   <section id="home">
     <div class="spread">
       <div>
-        <div class="standfirst">Nineteen seasons · one eleven</div>
-        <h2 class="headline">Every season is a hand.<br>Play the <i>best eleven</i> ever dealt.</h2>
-        <p class="deck"><span class="drop">You</span> are dealt one franchise-season at a time —
-          Chennai 2010, Kolkata 2008, Rajasthan 2022 — and you may take one player from it,
-          straight into a batting position he's actually played. Twelve picks — eleven who
-          bat, one Impact Player — no more than four overseas. Then your eleven takes the
-          field for twenty overs against the house.</p>
+        <div class="standfirst">Nineteen seasons · one XI · fourteen matches</div>
+        <h2 class="headline">Build the XI<br>the IPL <i>never picked</i>.</h2>
+        <p class="deck"><span class="drop">Nineteen seasons</span> of the IPL, opened one
+          squad at a time. Chennai 2010, Kolkata 2008, Rajasthan 2022. Take one man from
+          each, into a batting position he actually filled. Twelve selections: eleven who
+          bat, one Impact Player, no more than four overseas. Then your XI plays a full
+          season. Fourteen matches against real franchise-sides, a points table, then the
+          playoffs.</p>
         <div class="actions">
           <button class="act lead" onclick="newDraft()">Begin a draft</button>
-          <button class="act" onclick="promptSeed()">Open by seed</button>
+          <button class="act" onclick="promptSeed()">Draft number</button>
           <button class="act" onclick="go('roomSetup')">Play with friends</button>
         </div>
         <div class="colophon" id="homeStats"></div>
@@ -406,21 +425,21 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
     <div class="method">
       <section>
         <h3><span class="mico bat"><svg viewBox="0 0 16 16"><path d="M8 1.1c-1 0-1.8.9-1.8 2.2v4.9c0 .8.5 1.4 1.2 1.7l-.4 4.4c0 .35.3.6.65.6h.7c.35 0 .65-.25.65-.6l-.4-4.4c.7-.3 1.2-.9 1.2-1.7V3.3c0-1.3-.8-2.2-1.8-2.2Z"/></svg></span>
-          <span>I.</span> The deal</h3>
+          <span>I.</span> The squads</h3>
         <p>A franchise-season drawn evenly from all one hundred and sixty-six. Mumbai answers
            nineteen times; Kochi Tuskers Kerala, once only.</p>
       </section>
       <section>
         <h3><span class="mico"><svg viewBox="0 0 16 16"><path d="M8 8.4a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M2.4 13.6c.6-2.7 2.6-4.2 5.6-4.2s5 1.5 5.6 4.2"/></svg></span>
           <span>II.</span> The selection</h3>
-        <p>One man from that squad, for a place still open. He must have played that season —
-           there are no imaginary teams here.</p>
+        <p>One man from that squad, for a place still open. He must have played that season.
+           There are no imaginary teams here.</p>
       </section>
       <section>
         <h3><span class="mico ball"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/></svg></span>
-          <span>III.</span> The match</h3>
-        <p>Twenty overs a side, delivery by delivery, priced from every ball bowled in the
-           competition since 2008.</p>
+          <span>III.</span> The season</h3>
+        <p>Fourteen league matches and the playoffs, every delivery priced from every ball
+           bowled in the competition since 2008.</p>
       </section>
     </div>
   </section>
@@ -441,7 +460,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         </div>
         <div class="col-head" style="margin-bottom:0">
           <span>Available</span><em id="optCount"></em></div>
-        <div id="options"></div>
+        <div id="options" class="col-scroll"></div>
       </div>
 
       <div class="col">
@@ -451,12 +470,12 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
         </div>
         <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="orderSheet"></div>
+        <div id="orderSheet" class="col-scroll"></div>
       </div>
 
       <div class="col">
         <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note">Take players straight into a batting
+        <div id="legality" class="legality note col-scroll">Take players straight into a batting
           position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
           options, and eleven batting positions.</div>
         <div class="foot-actions">
@@ -541,7 +560,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             <div class="club" id="roomDealTeam">—</div>
           </div>
           <div class="col-head" style="margin-bottom:0"><span>Available</span></div>
-          <div id="roomOptions"></div>
+          <div id="roomOptions" class="col-scroll"></div>
         </div>
 
         <div class="col">
@@ -550,12 +569,12 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             <div class="n" id="roomTimer">–</div>
             <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
           </div>
-          <div id="roomOrderSheet"></div>
+          <div id="roomOrderSheet" class="col-scroll"></div>
         </div>
 
         <div class="col">
           <div class="col-head"><span>Other players</span></div>
-          <div id="roomOthers"></div>
+          <div id="roomOthers" class="col-scroll"></div>
           <div class="foot-actions">
             <button class="act" onclick="leaveRoom()">Leave</button>
             <span class="stamp" id="roomCodeStamp"></span>
@@ -580,8 +599,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         <div class="call">Draft stranded</div>
         <p style="max-width:520px;margin:14px auto 0;color:var(--ink-3);font-size:14px;line-height:1.5">
           One seat's earlier picks left no legal candidate for a slot that still needed filling.
-          This is a rare, genuine dead end in the archive rather than a bug in your play — the room
-          can't recover from here.
+          This is a rare, genuine dead end in the archive rather than a bug in your play. The
+          room cannot recover from here.
         </p>
         <p style="max-width:520px;margin:10px auto 0;font-family:var(--mono);font-size:12px;color:var(--ink-4)"
            id="roomFailedReason"></p>
@@ -634,8 +653,22 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
     </div>
   </div>
 
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-frame">
+      <div class="report">
+        <div class="over-line" id="scStage"></div>
+        <div class="call" id="scHeadline"></div>
+        <div class="margin" id="scMargin"></div>
+      </div>
+      <div class="cards2" id="scInnings"></div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div class="imprint">
-    <div>The Legends Almanack · deal · select · play</div>
+    <div>The Legends Almanack · squads · selection · season</div>
     <div id="footStats"></div>
   </div>
 </div>
@@ -713,7 +746,8 @@ function drawField(){
 /* --- draft --- */
 async function newDraft(){ render(await api('/api/draft', {method:'POST'})); go('draft'); }
 function promptSeed(){
-  const v = prompt('Seed — the same number deals the same cards to everyone.');
+  const v = prompt('Enter a draft number. The same number always deals the same squads in '
+    + 'the same order, so share it and a friend faces exactly your draft.');
   if (v !== null && v.trim() !== '') openSeed(v.trim());
 }
 async function openSeed(v){
@@ -775,7 +809,7 @@ async function rerollDeal(kind){
 function render(s){
   S = s;
   history.replaceState(null, '', '#' + s.state);
-  $('#seedPill').textContent = 'seed ' + s.state.split('-')[0];
+  $('#seedPill').textContent = 'draft no. ' + s.state.split('-')[0];
   $('#pickCount').textContent = `${s.picks_made}/${s.picks_total}`;
   $('#pickBig').textContent = s.picks_made;
   $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;
@@ -835,7 +869,7 @@ function renderPanels(){
   if (s.errors.length){
     $('#legality').innerHTML = s.errors.map(e => `<div class="bad">${e}</div>`).join('');
   } else if (s.squad_complete) {
-    $('#legality').innerHTML = '<div class="ok">Legal — ready to play</div>';
+    $('#legality').innerHTML = '<div class="ok">Legal, ready to play</div>';
   } else {
     $('#legality').innerHTML = '<div class="note" style="padding:0">Take players straight ' +
       'into a batting position (or Impact) until all twelve are filled.</div>';
@@ -870,7 +904,10 @@ async function simulate(){
   finally { $('#simBtn').disabled = false; $('#simBtn').textContent = 'Play the season'; }
 }
 
+let SEASON_DATA = null, ROOM_MATCH_DATA = null;
+
 function showSeason(d){
+  SEASON_DATA = d;
   $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
   const me = d.table.find(r => r.you);
   const won = d.you_champion;
@@ -894,18 +931,20 @@ function showSeason(d){
 
   const w = d.your_results.filter(r => r.winner === 'YOU').length;
   $('#formNote').textContent = `${w} won`;
-  $('#yourForm').innerHTML = d.your_results.map(r => {
+  $('#yourForm').innerHTML = d.your_results.map((r, i) => {
     const them = r.home === 'YOU' ? r.away : r.home;
     const mine = r.home === 'YOU' ? r.home_score : r.away_score;
     const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
     const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l');
-    return `<div class="fx"><span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
+    return `<div class="fx" onclick="showScorecard('league', ${i})">
+      <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span></div>`;
   }).join('');
 
-  $('#bracket').innerHTML = d.playoffs.map(r => `
+  $('#bracket').innerHTML = d.playoffs.map((r, i) => `
     <div class="tie-stage">${r.stage}</div>
-    <div class="fx"><span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
+    <div class="fx" onclick="showScorecard('playoffs', ${i})">
+      <span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
       >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
       <span>${r.home} v ${r.away}</span>
       <span class="sc">${r.home_score} · ${r.away_score}</span></div>
@@ -913,12 +952,67 @@ function showSeason(d){
       <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
   go('result');
 }
+
+function showScorecard(list, i){
+  renderScorecard(SEASON_DATA[list === 'league' ? 'your_results' : 'playoffs'][i]);
+}
+
+function showRoomScorecard(kind, i){
+  const m = ROOM_MATCH_DATA;
+  const r = kind === 'result' ? m.result
+    : kind === 'final' ? m.final
+    : kind === 'semis' ? m.semis[i]
+    : m.playoffs[i];
+  renderScorecard(r);
+}
+
+function renderScorecard(r){
+  if (!r || !r.home_innings || !r.away_innings) return;
+  $('#scStage').textContent = r.stage;
+  $('#scHeadline').textContent = r.winner ? `${r.winner} win` : 'Match tied';
+  $('#scHeadline').classList.toggle('won', !!r.winner);
+  $('#scMargin').textContent = r.margin;
+  $('#scInnings').innerHTML =
+    scorecardInnings(r.home, r.home_score, r.home_innings) +
+    scorecardInnings(r.away, r.away_score, r.away_innings);
+  $('#scorecardOverlay').classList.remove('hide');
+}
+
+function hideScorecard(e){
+  if (e && e.target !== e.currentTarget) return;   // a click inside the frame stays open
+  $('#scorecardOverlay').classList.add('hide');
+}
+
+function scorecardInnings(short, score, inn){
+  const batting = inn.batting.map(b => b.faced_any
+    ? `<tr><td>${b.name}${b.out ? '' : ' *'}</td><td class="n">${b.runs}</td>
+        <td class="n">${b.balls}</td><td class="n">${b.strike_rate}</td></tr>`
+    : `<tr class="tail"><td>${b.name}</td>
+        <td class="n" colspan="3" style="font-style:italic">did not bat</td></tr>`
+  ).join('');
+  const bowling = inn.bowling.map(bo => `<tr><td>${bo.name}</td>
+    <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
+    <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');
+  const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';
+  return `<div>
+    <table>
+      <caption>${short} · ${score} (${inn.overs} ov, ${inn.extras} extras)</caption>
+      <tr><th>Batting</th><th class="n">R</th><th class="n">B</th><th class="n">SR</th></tr>
+      ${batting}
+    </table>
+    <table>
+      <tr><th>Bowling</th><th class="n">O</th><th class="n">R</th><th class="n">W</th><th class="n">Econ</th></tr>
+      ${bowling}
+    </table>
+    ${fow}
+  </div>`;
+}
 const ordinal = n => n + (['th','st','nd','rd'][(n % 100 - 20) % 10] || ['th','st','nd','rd'][n] || 'th');
 
 function copyLink(){
   const url = location.origin + '/#' + S.state;
   navigator.clipboard.writeText(url)
-    .then(() => slip('Copied — this link replays the same game.'))
+    .then(() => slip('Copied. This link replays the same game.'))
     .catch(() => slip(url));
 }
 
@@ -1231,20 +1325,26 @@ async function renderRoomResult(r){
 }
 
 function showRoomMatch(m){
+  ROOM_MATCH_DATA = m;
   const el = $('#roomMatchBody');
+  const stageRow = (r, onclick) => `<div class="fx" onclick="${onclick}">
+    <span class="wl ${r.winner ? 'w' : ''}">${r.winner ? 'W' : 'T'}</span>
+    <span>${r.stage}: ${r.home} v ${r.away}</span>
+    <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
   if (m.format === 'final'){
     const res = m.result;
     el.innerHTML = `<div class="report" style="padding:0 0 20px">
       <div class="call ${res.winner ? 'won' : ''}">${res.winner ? res.winner + ' win' : 'Tied'}</div>
       <div class="figures">${res.home_score} · ${res.away_score}</div>
-      <div class="margin">${res.margin}</div></div>`;
+      <div class="margin">${res.margin}</div>
+      <div style="margin-top:14px">
+        <button class="act" onclick="showRoomScorecard('result')">Scorecard</button>
+      </div></div>`;
   } else if (m.format === 'cup'){
-    const stage = r => `<div class="fx"><span class="wl ${r.winner ? 'w' : ''}">${r.winner ? 'W' : 'T'}</span>
-      <span>${r.stage}: ${r.home} v ${r.away}</span>
-      <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
     el.innerHTML = `<div style="padding:0 0 20px">
       <div class="call won" style="text-align:center;margin-bottom:16px">${m.champion} win the cup</div>
-      ${m.semis.map(stage).join('')}${stage(m.final)}</div>`;
+      ${m.semis.map((r, i) => stageRow(r, `showRoomScorecard('semis',${i})`)).join('')}
+      ${stageRow(m.final, `showRoomScorecard('final')`)}</div>`;
   } else {
     el.innerHTML = `<div class="cards2" style="grid-template-columns:1fr">
       <div><table>
@@ -1255,6 +1355,9 @@ function showRoomMatch(m){
           <td class="n">${row.won}</td><td class="n">${row.lost}</td>
           <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
       </table></div></div>
+      <div style="margin-top:16px">
+        ${m.playoffs.map((r, i) => stageRow(r, `showRoomScorecard('playoffs',${i})`)).join('')}
+      </div>
       <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>`;
   }
 }

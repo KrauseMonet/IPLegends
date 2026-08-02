@@ -16,7 +16,7 @@ import random
 from dataclasses import dataclass, field
 
 from etl.feasibility import Card, Deck
-from game.simulator import BALLS_PER_OVER, OVERS, Model, play_innings
+from game.simulator import BALLS_PER_OVER, Innings, OVERS, Model, play_innings
 
 TEAMS = 10                 # you and nine historical sides
 MATCHES_EACH = 14          # the IPL's own league length
@@ -83,6 +83,12 @@ class Result:
     winner: Side | None = None
     margin: str = ""
     stage: str = "league"
+    # The full ball-by-ball detail `play()` already computed for this match -- kept
+    # rather than discarded once folded into the summary ints above, so a scorecard can
+    # be shown without a second simulation. `None` only for a `Result` built by hand
+    # (tests construct one directly to exercise table/points arithmetic in isolation).
+    home_innings: Innings | None = None
+    away_innings: Innings | None = None
 
 
 @dataclass
@@ -224,7 +230,8 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
 
     r = Result(home=home, away=away, stage=stage,
                home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
-               away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls)
+               away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls,
+               home_innings=first, away_innings=second)
     if second.runs > first.runs:
         r.winner, r.margin = away, f"{away.short} by {10 - second.wickets} wickets"
     elif first.runs > second.runs:

@@ -171,6 +171,35 @@ class RerollIn(BaseModel):
                                    f"of the same franchise just dealt")
 
 
+class BatterOut(BaseModel):
+    name: str
+    runs: int
+    balls: int
+    out: bool
+    faced_any: bool = Field(description="false means he never came in to bat at all")
+    strike_rate: float | None = Field(
+        default=None, description="null only when faced_any is false")
+
+
+class BowlerOut(BaseModel):
+    name: str
+    overs: str
+    runs: int
+    wickets: int
+    economy: float
+
+
+class InningsOut(BaseModel):
+    runs: int
+    wickets: int
+    overs: str
+    extras: int
+    batting: list[BatterOut] = Field(description="in batting order, all eleven")
+    bowling: list[BowlerOut] = Field(description="the five who bowled at least one ball")
+    commentary: list[str] = Field(
+        default_factory=list, description="fall-of-wicket lines, in order")
+
+
 class StandingOut(BaseModel):
     pos: int
     name: str
@@ -193,6 +222,9 @@ class ResultOut(BaseModel):
     winner: str | None
     margin: str
     yours: bool
+    home_innings: InningsOut | None = Field(
+        default=None, description="the scorecard -- null only for a hand-built Result")
+    away_innings: InningsOut | None = None
 
 
 class SeasonOut(BaseModel):
@@ -443,6 +475,33 @@ def _score(runs: int, wickets: int) -> str:
     return f"{runs}/{wickets}"
 
 
+def _batter_out(b) -> BatterOut:
+    return BatterOut(
+        name=b.player.name, runs=b.runs, balls=b.balls, out=b.out, faced_any=b.faced_any,
+        strike_rate=round(b.runs * 100 / b.balls, 1) if b.faced_any else None,
+    )
+
+
+def _bowler_out(bo) -> BowlerOut:
+    return BowlerOut(
+        name=bo.player.name, overs=bo.overs, runs=bo.runs, wickets=bo.wickets,
+        economy=round(bo.runs * 6 / bo.balls, 2),
+    )
+
+
+def _innings_out(innings) -> InningsOut:
+    return InningsOut(
+        runs=innings.runs, wickets=innings.wickets, overs=innings.overs,
+        extras=innings.extras,
+        batting=[_batter_out(b) for b in innings.batting],
+        # A bowler in the attack who never got an over (the innings ended first) has
+        # nothing to show -- BOWLERS_IN_TWELVE (A50) means the pool is exactly five, not
+        # every one of them is guaranteed a turn.
+        bowling=[_bowler_out(bo) for bo in innings.bowling if bo.balls > 0],
+        commentary=list(innings.commentary),
+    )
+
+
 def _result_out(r, you: Side) -> ResultOut:
     return ResultOut(
         stage=r.stage, home=r.home.short, away=r.away.short,
@@ -450,6 +509,8 @@ def _result_out(r, you: Side) -> ResultOut:
         away_score=_score(r.away_runs, r.away_wickets),
         winner=None if r.winner is None else r.winner.short,
         margin=r.margin, yours=(r.home is you or r.away is you),
+        home_innings=_innings_out(r.home_innings) if r.home_innings else None,
+        away_innings=_innings_out(r.away_innings) if r.away_innings else None,
     )
 
 

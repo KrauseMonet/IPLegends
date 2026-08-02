@@ -1,10 +1,18 @@
 """Live multiplayer rooms: friends draft together, live, turn by turn.
 
-[In-memory, v1 -- ratified with the user over a Neon table.] Rooms live in a plain
-process-lifetime dict, not a database table. SPEC 11's "no storage, no accounts, no
-migration" bias is extended here rather than broken: a room is a short-lived social
-thing, and the cost of that choice (a server restart loses every open room) is one the
-user chose to accept for the simplicity it buys.
+[Neon-backed, v2.] Rooms live in two tables (migration 019), not a process-lifetime dict
+-- the earlier in-memory version could not survive a serverless cold start or answer
+correctly when two requests for the same room landed on two different instances, which is
+the normal case on Vercel. `_load_room`/`_save_room` are the only functions that know SQL
+exists; every function below them (`_resolve`, `_auto_pick`, the dataclasses themselves)
+is untouched from the in-memory version and is still tested with zero database, exactly as
+`tests/test_rooms.py`'s own docstring already describes.
+
+Every public function here takes `conn` and holds the room row `SELECT ... FOR UPDATE`
+for the life of that connection's transaction (opened by the caller, one per request) --
+load, mutate with the same pure logic as before, save, all inside one lock. That is the
+only concurrency primitive this needs: two requests for the same room now simply
+serialise through Postgres's own row lock rather than a Python dict.
 
 A room does not reimplement the draft. Each seat's own twelve picks replay through the
 EXACT SAME `etl.feasibility.run_draft` / `web.session.replay` machinery the solo draft
@@ -95,14 +103,10 @@ class Room:
         return len(self.players) >= self.seats
 
 
-ROOMS: dict[str, Room] = {}
-
-
-def _new_code() -> str:
-    while True:
-        code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
-        if code not in ROOMS:
-            return code
+# A room is a short-lived social thing (the original in-memory docstring's own framing,
+# still true); nothing here schedules a sweep, it just happens to run whenever someone
+# next starts a new one (A62's "resolve on read" stance, extended to retention).
+ROOM_TTL_HOURS = 24
 
 
 def _player_seed(room_seed: int, player_id: str) -> int:
@@ -113,30 +117,105 @@ def _player_seed(room_seed: int, player_id: str) -> int:
     return int(digest, 16) % 1_000_000_000
 
 
-def _get(code: str) -> Room:
-    room = ROOMS.get(code)
-    if room is None:
+def _sweep_stale_rooms(conn) -> None:
+    conn.execute(
+        "delete from rooms where created_at < now() - make_interval(hours => %s)",
+        (ROOM_TTL_HOURS,),
+    )
+
+
+def _new_code(conn) -> str:
+    while True:
+        code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
+        if conn.execute("select 1 from rooms where code = %s", (code,)).fetchone() is None:
+            return code
+
+
+def _load_room(conn, code: str, deck: Deck) -> Room:
+    """Locks the room row for the rest of the caller's transaction -- every public
+    function below pairs this with a `_save_room` before the connection commits, so two
+    requests touching the same room serialise through this lock rather than racing."""
+    row = conn.execute(
+        """
+        select code, format, timer_seconds, seed, host_id, status, round,
+               round_started_at, failure_reason
+          from rooms where code = %s for update
+        """,
+        (code,),
+    ).fetchone()
+    if row is None:
         raise RoomError(f"no room {code!r}")
+    (code, fmt, timer_seconds, seed, host_id, status, round_no,
+     round_started_at, failure_reason) = row
+    room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
+                host_id=host_id, status=status, round=round_no,
+                round_started_at=round_started_at or 0.0, failure_reason=failure_reason)
+    for player_id, name, is_cpu, state in conn.execute(
+        "select player_id, name, is_cpu, state from room_players "
+        "where room_code = %s order by seat_order",
+        (code,),
+    ):
+        seed_p, moves = sess.decode(state)
+        if is_cpu:
+            # Never stored (A19): a CPU's final twelve is exactly reproducible from
+            # (deck, seed), the same rational policy `start_room` used to build it the
+            # first time. `result.completed` was already checked there; a deck that
+            # completes once completes identically every time, being a pure function
+            # of (deck, seed, policy).
+            result = run_draft(deck, POLICIES["rational"], random.Random(seed_p))
+            room.players[player_id] = RoomPlayer(
+                player_id, name, is_cpu=True, seed=seed_p,
+                order=result.order, impact=result.impact)
+        else:
+            room.players[player_id] = RoomPlayer(
+                player_id, name, is_cpu=False, seed=seed_p, moves=moves)
     return room
 
 
-def create_room(fmt: str, timer_seconds: int, host_name: str) -> tuple[Room, str]:
+def _save_room(conn, room: Room) -> None:
+    conn.execute(
+        """
+        insert into rooms (code, format, timer_seconds, seed, host_id, status, round,
+                            round_started_at, failure_reason)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        on conflict (code) do update set
+            status = excluded.status, round = excluded.round,
+            round_started_at = excluded.round_started_at,
+            failure_reason = excluded.failure_reason
+        """,
+        (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
+         room.status, room.round, room.round_started_at, room.failure_reason),
+    )
+    for seat_order, (player_id, p) in enumerate(room.players.items()):
+        state = sess.encode(p.seed, () if p.is_cpu else p.moves)
+        conn.execute(
+            """
+            insert into room_players (room_code, player_id, seat_order, name, is_cpu, state)
+            values (%s, %s, %s, %s, %s, %s)
+            on conflict (room_code, player_id) do update set state = excluded.state
+            """,
+            (room.code, player_id, seat_order, p.name, p.is_cpu, state),
+        )
+
+
+def create_room(conn, fmt: str, timer_seconds: int, host_name: str) -> tuple[Room, str]:
     if fmt not in ROOM_FORMATS:
         raise RoomError(f"unknown format {fmt!r}: choose one of {sorted(ROOM_FORMATS)}")
     if timer_seconds not in TIMER_CHOICES:
         raise RoomError(f"timer must be one of {TIMER_CHOICES}")
+    _sweep_stale_rooms(conn)
     room_seed = sess.new_seed()
     host_id = secrets.token_urlsafe(8)
-    room = Room(code=_new_code(), format=fmt, timer_seconds=timer_seconds,
+    room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
                 seed=room_seed, host_id=host_id)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False,
                                         seed=_player_seed(room_seed, host_id))
-    ROOMS[room.code] = room
+    _save_room(conn, room)
     return room, host_id
 
 
-def join_room(code: str, name: str) -> tuple[Room, str]:
-    room = _get(code)
+def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
+    room = _load_room(conn, code, deck)
     if room.status != "lobby":
         raise RoomError("this room has already started")
     if room.full:
@@ -144,11 +223,12 @@ def join_room(code: str, name: str) -> tuple[Room, str]:
     player_id = secrets.token_urlsafe(8)
     room.players[player_id] = RoomPlayer(player_id, name, is_cpu=False,
                                           seed=_player_seed(room.seed, player_id))
+    _save_room(conn, room)
     return room, player_id
 
 
-def start_room(code: str, player_id: str, deck: Deck) -> Room:
-    room = _get(code)
+def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
+    room = _load_room(conn, code, deck)
     if player_id != room.host_id:
         raise RoomError("only the host can start the draft")
     if room.status != "lobby":
@@ -169,7 +249,8 @@ def start_room(code: str, player_id: str, deck: Deck) -> Room:
 
     room.status = "drafting"
     room.round = 0
-    room.round_started_at = time.monotonic()
+    room.round_started_at = time.time()
+    _save_room(conn, room)
     return room
 
 
@@ -216,7 +297,7 @@ def _resolve(room: Room, deck: Deck) -> None:
     while room.status == "drafting":
         pending = [p for p in room.players.values() if not p.done and not p.is_cpu
                    and len(p.moves) <= room.round]
-        if pending and time.monotonic() - room.round_started_at <= room.timer_seconds:
+        if pending and time.time() - room.round_started_at <= room.timer_seconds:
             return  # still within the window; nothing to resolve yet
         for p in pending:
             try:
@@ -226,14 +307,14 @@ def _resolve(room: Room, deck: Deck) -> None:
                 room.failure_reason = str(exc)
                 return
         room.round += 1
-        room.round_started_at = time.monotonic()
+        room.round_started_at = time.time()
         if room.round >= TWELVE_SIZE:
             room.status = "complete"
             return
 
 
-def submit_pick(code: str, player_id: str, index: int, slot: int, deck: Deck) -> Room:
-    room = _get(code)
+def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: Deck) -> Room:
+    room = _load_room(conn, code, deck)
     _resolve(room, deck)
     if room.status != "drafting":
         raise RoomError(f"this room is not drafting (status: {room.status})")
@@ -251,14 +332,16 @@ def submit_pick(code: str, player_id: str, index: int, slot: int, deck: Deck) ->
         raise RoomError(str(exc)) from exc
     player.moves = new_moves
     _resolve(room, deck)   # this pick may have been the last one the round was waiting on
+    _save_room(conn, room)
     return room
 
 
-def room_state(code: str, deck: Deck) -> Room:
+def room_state(conn, code: str, deck: Deck) -> Room:
     """Read-only poll: resolve any expired round first, so a client that polls slowly
     still sees an up-to-date room rather than one waiting on a clock nobody is checking."""
-    room = _get(code)
+    room = _load_room(conn, code, deck)
     _resolve(room, deck)
+    _save_room(conn, room)
     return room
 
 

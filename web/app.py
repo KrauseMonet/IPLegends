@@ -16,7 +16,7 @@ import os
 import pathlib
 import random
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 import psycopg
 from dotenv import load_dotenv
@@ -647,11 +647,22 @@ def twelve(state: str) -> dict:
 
 # --- rooms ---------------------------------------------------------------------------
 #
-# Friends draft together, live, turn by turn (in-memory, v1 -- see `web.rooms`'s own
-# docstring for why, and for the round-by-round mechanic itself). Nothing here decides
-# anything about cricket either: `web.rooms` reuses `web.session.replay` per seat, which
-# reuses `etl.feasibility.run_draft`, so a room's picks are validated exactly the way a
-# solo draft's are.
+# Friends draft together, live, turn by turn -- Neon-backed (migration 019), see
+# `web.rooms`'s own docstring for why and for the round-by-round mechanic itself. Nothing
+# here decides anything about cricket either: `web.rooms` reuses `web.session.replay` per
+# seat, which reuses `etl.feasibility.run_draft`, so a room's picks are validated exactly
+# the way a solo draft's are.
+
+@contextmanager
+def _room_db():
+    """A short-lived connection per room request, against the POOLED endpoint. Unlike the
+    boot-time DIRECT_URL load (one connection, once, for the process's whole life), a room
+    request is exactly the many-short-transactions pattern PgBouncer transaction-mode
+    pooling exists for -- this is the first thing in the app that actually uses
+    DATABASE_URL rather than DIRECT_URL."""
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        yield conn
+
 
 def _room_player_out(player: rooms.RoomPlayer, deck) -> RoomPlayerOut:
     s = rooms.player_session(player, deck)
@@ -676,7 +687,7 @@ def _room_player_out(player: rooms.RoomPlayer, deck) -> RoomPlayerOut:
 def _room_state_out(room: rooms.Room, deck) -> RoomStateOut:
     remaining = 0
     if room.status == "drafting":
-        remaining = max(0, round(room.timer_seconds - (time.monotonic() - room.round_started_at)))
+        remaining = max(0, round(room.timer_seconds - (time.time() - room.round_started_at)))
     return RoomStateOut(
         code=room.code, format=room.format, seats=room.seats,
         timer_seconds=room.timer_seconds, host_id=room.host_id,
@@ -688,51 +699,58 @@ def _room_state_out(room: rooms.Room, deck) -> RoomStateOut:
 
 @app.post("/api/rooms", response_model=CreatedRoomOut)
 def create_room(body: CreateRoomIn) -> CreatedRoomOut:
-    try:
-        room, player_id = rooms.create_room(body.format, body.timer_seconds, body.host_name)
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
+    with _room_db() as conn:
+        try:
+            room, player_id = rooms.create_room(
+                conn, body.format, body.timer_seconds, body.host_name)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
 
 
 @app.post("/api/rooms/{code}/join", response_model=CreatedRoomOut)
 def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
-    try:
-        room, player_id = rooms.join_room(code, body.name)
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
+    with _room_db() as conn:
+        try:
+            room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"])
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
 
 
 @app.post("/api/rooms/{code}/start", response_model=RoomStateOut)
 def start_room(code: str, body: HostActionIn) -> RoomStateOut:
     """Host-only. Fills every seat still empty with a CPU-drafted twelve (instantly, in
     full) and starts round 0's clock."""
-    try:
-        room = rooms.start_room(code, body.player_id, STATE["deck"])
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _room_state_out(room, STATE["deck"])
+    with _room_db() as conn:
+        try:
+            room = rooms.start_room(conn, code, body.player_id, STATE["deck"])
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"])
 
 
 @app.get("/api/rooms/{code}", response_model=RoomStateOut)
 def get_room(code: str) -> RoomStateOut:
     """Poll target. Resolves any expired round (auto-picking whoever is still waiting)
     before returning, so a slow-polling client still sees an up-to-date room."""
-    try:
-        room = rooms.room_state(code, STATE["deck"])
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _room_state_out(room, STATE["deck"])
+    with _room_db() as conn:
+        try:
+            room = rooms.room_state(conn, code, STATE["deck"])
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"])
 
 
 @app.post("/api/rooms/{code}/pick", response_model=RoomStateOut)
 def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
-    try:
-        room = rooms.submit_pick(code, body.player_id, body.index, body.slot, STATE["deck"])
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _room_state_out(room, STATE["deck"])
+    with _room_db() as conn:
+        try:
+            room = rooms.submit_pick(
+                conn, code, body.player_id, body.index, body.slot, STATE["deck"])
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"])
 
 
 @app.get("/api/rooms/{code}/match", response_model=RoomMatchOut)
@@ -742,10 +760,13 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
     `run_cup`/`run_league`+`run_playoffs` the solo season already uses, just fed the
     room's own drafted sides instead of nine historical ones."""
     deck, model = STATE["deck"], STATE["model"]
-    try:
-        room = rooms.room_state(code, deck)
-    except rooms.RoomError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Only the room lookup needs the connection -- released before the (up to ~3s)
+    # match simulation below, which touches no database.
+    with _room_db() as conn:
+        try:
+            room = rooms.room_state(conn, code, deck)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     if room.status != "complete":
         raise HTTPException(status_code=409,
                             detail=f"room is not complete yet (status: {room.status})")

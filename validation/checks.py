@@ -66,6 +66,13 @@ STATE_TABLES = {
     "person_batting_positions",
 }
 
+# [Migration 019] Live multiplayer room state -- not a category check 6 can even ask
+# about. "Super over deliveries excluded from derived stat tables" presumes a table built
+# FROM `deliveries`; a room holds seat assignments and move lists, nothing aggregated from
+# a ball bowled. Excluded from `derived` entirely (same treatment as BASE_TABLES) rather
+# than added to STATE_TABLES, which would misstate that check 6 examines them.
+OPERATIONAL_TABLES = {"rooms", "room_players"}
+
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
 # for every kind in the archive, so a kind added later cannot fall silently between them.
 # `retired hurt` is not a dismissal at all - the batter may return - but it carries a
@@ -418,7 +425,7 @@ def check_06_super_overs_excluded(conn) -> Result:
     carrying no weight, so nobody mistakes it for the thing doing the work.
     """
     title = "super over deliveries are excluded from derived stat tables"
-    derived = sorted(_tables(conn) - BASE_TABLES)
+    derived = sorted(_tables(conn) - BASE_TABLES - OPERATIONAL_TABLES)
     if not derived:
         (n,), = _rows(conn, "select count(*) from deliveries where is_super_over")
         return skipped(

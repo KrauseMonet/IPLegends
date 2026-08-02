@@ -934,8 +934,9 @@ function renderPanels(){
     $('#legality').innerHTML = '<div class="ok">Legal, ready to play</div>';
   } else {
     $('#legality').innerHTML = '<div class="note" style="padding:0">Take players straight ' +
-      'into a batting position (or Impact) until all twelve are filled. Click two already-' +
-      'placed picks to swap where they bat, any time before the twelve is complete.</div>';
+      'into a batting position (or Impact) until all twelve are filled. Click an already-' +
+      'placed pick, then a second slot, to swap them or move him into an open one -- any ' +
+      'time before the twelve is complete.</div>';
   }
 
   $('#simBtn').classList.toggle('hide', !s.squad_complete);
@@ -953,9 +954,14 @@ function renderPanels(){
     } else if (REPOSITION_PENDING !== null){
       if (slot === REPOSITION_PENDING){
         classes.push('reposition-selected');
-      } else if (got){
+      } else {
+        // an empty target is a plain move (frees REPOSITION_PENDING's slot) and only
+        // needs the SELECTED player's own eligibility; a filled target is a swap and
+        // needs both directions.
         const selected = REPOSITION_PENDING === 12 ? s.impact : s.order[REPOSITION_PENDING - 1];
-        const ok = eligibleForSlot(got, REPOSITION_PENDING) && eligibleForSlot(selected, slot);
+        const ok = got
+          ? eligibleForSlot(got, REPOSITION_PENDING) && eligibleForSlot(selected, slot)
+          : eligibleForSlot(selected, slot);
         classes.push(ok ? 'eligible' : 'ineligible');
       }
     }

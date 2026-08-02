@@ -10,11 +10,13 @@ that slot is final the moment it lands -- there is no bench, no unplace. A compl
 draft is therefore already arranged; what these tests exercise is that the atomic
 pick+place is validated and replayed correctly.
 
-Repositioning, added later, is NOT a reopening of A73 -- it is strictly narrower than the
-bench/rearrange model A73 deliberately removed. A `Reposition` may only ever swap two
-slots that ALREADY hold a player; it can never target an open one, which is exactly what
-keeps it from being able to desync `run_draft`'s own open-slots bookkeeping (see
-`Reposition`'s own docstring in web/session.py).
+Repositioning, added later, is NOT a reopening of A73 in spirit -- there is still no
+bench, nothing sits unplaced. `from_slot` must always be occupied, but `to_slot` may be
+open (freeing `from_slot` for a later pick) or occupied (a swap). Unlike the first cut of
+this feature, a `Reposition` is now consumed by `run_draft` ITSELF, exactly like a
+`Reroll` -- it costs an attempt, mutates `open_slots` directly, and so can only ever be
+issued while the draft is still in progress (see `Reposition`'s and
+`RepositionRequested`'s own docstrings in web/session.py and etl/feasibility.py).
 
 The fixture deck is synthetic on purpose. A test that needed Neon to prove the state string
 round-trips would be testing the network.
@@ -350,7 +352,27 @@ def test_reroll_state_round_trips():
     assert sess.decode(state) == (2, moves)
 
 
-# --- repositioning: swapping two already-placed players' slots ----------------------------
+# --- repositioning: moving or swapping already-placed players' slots ----------------------
+#
+# A reposition is now consumed by `run_draft` itself (`RepositionRequested`,
+# etl/feasibility.py), the same way a `Reroll` is -- it costs an attempt, so it can only
+# ever be issued while the draft is still in progress (there is no pick_no iteration left
+# for a completed twelve to consume it in). Every fixture below uses `partial_walk`, never
+# `walk`, for exactly that reason.
+
+def partial_walk(seed: int, n: int, chooser=_spread) -> sess.Session:
+    """Like `walk`, but stops after exactly `n` real picks, leaving the draft still in
+    progress -- what every reposition test needs, since a completed twelve has no
+    pick_no iteration left for `run_draft` to consume a `Reposition` move within."""
+    s = sess.replay(DECK, seed, ())
+    for _ in range(n):
+        assert s.deal is not None, "ran out of picks before reaching n"
+        i = chooser(s.deal.options, len(s.picks))
+        chosen = s.deal.options[i]
+        slot = min(chosen.slots & _open_slots(s))
+        s = sess.replay(DECK, seed, s.moves + (sess.Pick(i, slot),))
+    return s
+
 
 def _find_pair(s: sess.Session, *, mutually_eligible: bool):
     """Two filled slots whose occupants either can or cannot legally trade places --
@@ -369,8 +391,22 @@ def _find_pair(s: sess.Session, *, mutually_eligible: bool):
     return None
 
 
+def _find_movable(s: sess.Session):
+    """A filled slot and a DIFFERENT, currently-open slot its occupant is legally
+    eligible for -- the "move" shape of a reposition, as opposed to `_find_pair`'s
+    "swap" shape."""
+    open_now = {i + 1 for i, c in enumerate(s.order) if c is None}
+    for i, card in enumerate(s.order):
+        if card is None:
+            continue
+        for target in card.positions:
+            if target in open_now and target != i + 1:
+                return i + 1, target
+    return None
+
+
 def test_reposition_swaps_two_already_placed_players():
-    s = walk(9)
+    s = partial_walk(9, 8)
     pair = _find_pair(s, mutually_eligible=True)
     assert pair is not None, "fixture did not produce a swappable pair for this seed"
     slot_a, slot_b = pair
@@ -390,31 +426,79 @@ def test_reposition_swaps_two_already_placed_players():
         assert (before.person_id if before else None) == (after.person_id if after else None)
 
 
-def test_reposition_refuses_a_slot_still_open_mid_draft():
+def test_reposition_moves_into_an_open_slot_and_frees_the_original():
+    """The new capability: `to_slot` need not be occupied. Moving into an open slot
+    frees `from_slot` -- proven precisely (a later pick can then target it) at the
+    run_draft level in tests/test_draft.py; this checks the same shape survives session
+    replay end to end (encode/decode, `_NeedChoice`, the deal actually offered next)."""
+    s = partial_walk(9, 6)
+    pair = _find_movable(s)
+    assert pair is not None, "fixture did not produce a movable slot for this seed"
+    from_slot, to_slot = pair
+    moved = s.order[from_slot - 1]
+
+    s2 = sess.replay(DECK, 9, s.moves + (sess.Reposition(from_slot, to_slot),))
+    assert s2.order[to_slot - 1].person_id == moved.person_id
+    assert s2.order[from_slot - 1] is None, "the original slot must now be open"
+    assert s2.deal is not None
+
+    open_after = _open_slots(s2)
+    assert from_slot in open_after, "the freed slot must be genuinely open, not cosmetic"
+    eligible_here = [i for i, c in enumerate(s2.deal.options) if from_slot in c.slots]
+    if eligible_here:   # only guaranteed by construction at the run_draft level above
+        i = eligible_here[0]
+        s3 = sess.replay(DECK, 9, s2.moves + (sess.Pick(i, from_slot),))
+        assert s3.order[from_slot - 1].person_id == s2.deal.options[i].person_id
+
+
+def test_reposition_refuses_when_the_from_slot_is_empty():
+    """Only `to_slot` may be empty (the move case) -- `from_slot` must always hold
+    someone, or there is nothing to reposition."""
     s = sess.replay(DECK, 4, ())
     chosen = s.deal.options[0]
     slot = min(chosen.positions)
     s2 = sess.replay(DECK, 4, (sess.Pick(0, slot),))
-    open_slot = next(sl for sl in range(1, XI_SIZE + 1) if sl != slot)
+    empty_slot = next(sl for sl in range(1, XI_SIZE + 1) if sl != slot)
     with pytest.raises(sess.InvalidState):
-        sess.replay(DECK, 4, s2.moves + (sess.Reposition(slot, open_slot),))
+        sess.replay(DECK, 4, s2.moves + (sess.Reposition(empty_slot, slot),))
+
+
+def test_reposition_refuses_a_move_into_an_ineligible_open_slot():
+    s = sess.replay(DECK, 4, ())
+    chosen = s.deal.options[0]
+    slot = min(chosen.positions)
+    s2 = sess.replay(DECK, 4, (sess.Pick(0, slot),))
+    bad_target = next(sl for sl in range(1, XI_SIZE + 1)
+                       if sl != slot and sl not in chosen.positions)
+    with pytest.raises(sess.InvalidState):
+        sess.replay(DECK, 4, s2.moves + (sess.Reposition(slot, bad_target),))
 
 
 def test_reposition_refuses_a_pair_that_is_not_mutually_eligible():
-    s = walk(9)
+    s = partial_walk(9, 8)
     pair = _find_pair(s, mutually_eligible=False)
     assert pair is not None, "fixture did not produce an ineligible pair for this seed"
     with pytest.raises(sess.InvalidState):
         sess.replay(DECK, 9, s.moves + (sess.Reposition(*pair),))
 
 
+def test_reposition_refuses_a_slot_swapping_with_itself():
+    s = sess.replay(DECK, 4, ())
+    chosen = s.deal.options[0]
+    slot = min(chosen.positions)
+    s2 = sess.replay(DECK, 4, (sess.Pick(0, slot),))
+    with pytest.raises(sess.InvalidState):
+        sess.replay(DECK, 4, s2.moves + (sess.Reposition(slot, slot),))
+
+
 def test_reposition_can_swap_a_player_into_and_out_of_impact():
     """Slot 12 names Impact, same as a Pick -- swapping a batting slot with it must work
     exactly like swapping two XI slots, not need a separate code path."""
-    s = walk(9)
+    s = partial_walk(9, 8)
     pair = None
     for slot in range(1, XI_SIZE + 1):
-        if IMPACT_SLOT in s.order[slot - 1].slots and slot in s.impact.slots:
+        if s.order[slot - 1] is not None and s.impact is not None \
+                and IMPACT_SLOT in s.order[slot - 1].slots and slot in s.impact.slots:
             pair = (slot, IMPACT_SLOT)
             break
     assert pair is not None, "fixture did not produce an eligible impact swap for this seed"
@@ -425,21 +509,14 @@ def test_reposition_can_swap_a_player_into_and_out_of_impact():
     assert s2.impact.person_id == xi_card.person_id
 
 
-def test_reposition_interleaved_with_picks_matches_a_single_pass_at_the_end():
-    """The whole point of applying repositions as one pass after the picks are resolved
-    (`_apply_repositions`) is that WHEN in the move list a valid reposition is issued
-    cannot change the outcome -- pin that directly by issuing the same swap at two
-    different points in an otherwise-identical draft and checking both land the same."""
-    s = walk(9)
+def test_a_reposition_costs_an_attempt_not_a_pick():
+    """Mirrors `test_a_reroll_never_spends_a_pick`: a reposition must never advance the
+    pick count, only occupy an attempt inside the SAME pick_no."""
+    s = partial_walk(9, 8)
     pair = _find_pair(s, mutually_eligible=True)
     assert pair is not None
-
-    early = sess.replay(DECK, 9, (sess.Reposition(*pair),) + s.moves)
-    late = sess.replay(DECK, 9, s.moves + (sess.Reposition(*pair),))
-    assert [c.person_id if c else None for c in early.order] == \
-        [c.person_id if c else None for c in late.order]
-    assert (early.impact.person_id if early.impact else None) == \
-        (late.impact.person_id if late.impact else None)
+    s2 = sess.replay(DECK, 9, s.moves + (sess.Reposition(*pair),))
+    assert len(s2.picks) == len(s.picks)
 
 
 @pytest.mark.parametrize("bad", ["7-m3", "7-m3:", "7-mx:1", "7-m1:x", "7-m0:1"])

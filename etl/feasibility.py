@@ -80,7 +80,8 @@ REDRAW_CAP = 2_000
 # not per pick (original SPEC 1.1), and enforcing the count is the session layer's job
 # (whichever policy raises `RerollRequested` knows how many it has already spent) --
 # `run_draft` only needs to know a reroll CAN happen and how to retry when it does.
-REROLLS_ALLOWED = 3
+# Cut from 3 to 1: a game-design call, not a re-measurement of anything a reroll protects.
+REROLLS_ALLOWED = 1
 
 # A reroll asks for a different deal, but "different" has two meanings a drafter cares
 # about separately: an unrelated team entirely, or the same team a different year. Both
@@ -107,6 +108,30 @@ class RerollRequested(Exception):
     def __init__(self, kind: str = "team"):
         super().__init__(kind)
         self.kind = kind
+
+
+class RepositionRequested(Exception):
+    """Raised by a policy to swap, or move, whoever sits at two slots -- without spending
+    a pick. Caught inside `run_draft`'s own attempt loop exactly like `RerollRequested`:
+    it costs one attempt (and the RNG draw that comes with it) but never advances
+    `pick_no`, so the slot-filling budget A73 relies on (one pick fills exactly one open
+    slot, forever) is completely unaffected -- a reposition changes WHICH slot is open,
+    never how MANY are. That is also why it is safe for a LATER pick in the same draft to
+    target a slot only a reposition freed: `open_slots` is mutated directly, so the very
+    next `eligible()` call sees it.
+
+    `to_slot` may already be occupied (a swap) or empty (a plain move, freeing
+    `from_slot`) -- `run_draft` applies whichever it turns out to be. Legality (`from_slot`
+    actually occupied, and each player eligible for the OTHER's slot when it is a swap, or
+    the moving player eligible for `to_slot` when it is a move) is the CALLER's job to have
+    already checked against the exact `DraftState` this is raised against -- `run_draft`
+    only asserts it, deliberately not re-deriving a check the policy just made.
+    """
+
+    def __init__(self, from_slot: int, to_slot: int):
+        super().__init__(from_slot, to_slot)
+        self.from_slot = from_slot
+        self.to_slot = to_slot
 
 
 @dataclass(frozen=True)
@@ -491,6 +516,7 @@ class Result:
     order: list[Card | None] = field(default_factory=lambda: [None] * XI_SIZE)
     impact: Card | None = None
     player_rerolls: int = 0        # total RerollRequested catches across the whole draft
+    player_repositions: int = 0    # total RepositionRequested catches across the draft
 
 
 def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
@@ -521,6 +547,13 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
     pool is empty (a franchise with only one season on the archive, or a one-fs deck),
     it silently widens back to the full deck rather than raising -- a rare edge case, not
     a promise this module can always keep.
+
+    `RepositionRequested` is a second, unrelated way a policy can decline to use an
+    attempt on a pick: swap or move whoever already sits at two slots instead. It shares
+    the reroll's cost (one attempt, one RNG draw, `pick_no` unmoved) but touches
+    `order`/`impact`/`open_slots` directly rather than asking for a different deal --
+    see its own docstring for why that can never desync the slot-filling budget A73
+    relies on, or the guarantee re-drawing around it.
     """
     taken: set[str] = set()
     overseas_taken = 0
@@ -573,6 +606,29 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
                     narrowed = [f for f in deck.fs_ids if f != fs_id]
                 if narrowed:
                     pool = narrowed
+                continue
+            except RepositionRequested as reposition:
+                result.player_repositions += 1
+                from_slot, to_slot = reposition.from_slot, reposition.to_slot
+                from_card = impact if from_slot == IMPACT_SLOT else order[from_slot - 1]
+                to_card = impact if to_slot == IMPACT_SLOT else order[to_slot - 1]
+                assert from_card is not None, (
+                    f"reposition from empty slot {from_slot} -- the caller must validate "
+                    f"this against the same DraftState before raising"
+                )
+                if from_slot == IMPACT_SLOT:
+                    impact = to_card
+                else:
+                    order[from_slot - 1] = to_card
+                if to_slot == IMPACT_SLOT:
+                    impact = from_card
+                else:
+                    order[to_slot - 1] = from_card
+                if to_card is None:
+                    # a move, not a swap: from_slot opens up, to_slot fills -- the ONLY
+                    # way a reposition ever changes open_slots (a swap leaves both filled)
+                    open_slots.discard(to_slot)
+                    open_slots.add(from_slot)
                 continue
             served = (fs_id, card, slot)
             break

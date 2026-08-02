@@ -183,3 +183,87 @@ def test_a_policy_can_reroll_a_servable_deal_without_it_counting_as_a_pick():
     assert result.completed
     assert result.player_rerolls == 2
     assert len(result.picks) == TWELVE_SIZE, "a reroll must never be counted as a pick"
+
+
+# --- repositioning ----------------------------------------------------------------------
+
+def test_a_reposition_frees_a_slot_for_a_pick_that_had_nowhere_else_to_go():
+    """The scenario this exists for: a card eligible at exactly ONE position, already
+    occupied by a teammate with somewhere else to go. A custom policy takes the flexible
+    player into slot 2 first, then -- before its second pick -- repositions him out to
+    slot 5 (also eligible), and only THEN takes the locked player into the now-open slot
+    2. This is the one behaviour a client-side post-pass could never give: the reposition
+    has to change what `run_draft`'s OWN `eligible()` call offers on the very next
+    attempt, not just what the final arrangement looks like."""
+    from etl.feasibility import RepositionRequested, pick_rational
+
+    def card(i, positions, *, bowl=None, role="batter"):
+        return Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.5, bowl=bowl,
+                    role=role, career_positions=positions)
+
+    flex = card(0, frozenset({2, 5}))
+    locked = card(1, frozenset({2}))
+    keeper = card(2, frozenset({1}), role="keeper")
+    bowlers = [card(10 + i, frozenset({pos}), bowl=0.2)
+               for i, pos in enumerate((3, 4, 6, 7, 8))]
+    extras = [card(20 + i, frozenset({9, 10, 11})) for i in range(6)]
+    deck = Deck({1: [flex, locked, keeper] + bowlers + extras}, [1])
+
+    done = {"repositioned": False}
+
+    def policy(candidates, state, rng):
+        by_id = {c.person_id: c for c in candidates}
+        if state.remaining == TWELVE_SIZE:
+            return by_id["p0"], 2
+        if not done["repositioned"] and state.remaining == TWELVE_SIZE - 1:
+            done["repositioned"] = True
+            raise RepositionRequested(2, 5)
+        if "p1" in by_id and 2 in state.open_slots:
+            return by_id["p1"], 2
+        return pick_rational(candidates, state, rng)
+
+    result = run_draft(deck, policy, random.Random(1))
+    assert result.completed
+    assert result.order[1].person_id == "p1", "the locked player must land at slot 2"
+    assert result.order[4].person_id == "p0", "the flexible player must have moved to slot 5"
+    assert result.player_repositions == 1
+    assert len(result.picks) == TWELVE_SIZE, "a reposition must never be counted as a pick"
+
+
+def test_a_reposition_swap_never_changes_open_slots():
+    """The other shape: both slots already occupied. Neither becomes open, so this must
+    cost an attempt but never touch which slot a later pick can target."""
+    from etl.feasibility import RepositionRequested, pick_rational
+
+    def card(i, positions, *, bowl=None, role="batter"):
+        return Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.5, bowl=bowl,
+                    role=role, career_positions=positions)
+
+    a = card(0, frozenset({2, 5}))
+    b = card(1, frozenset({2, 5}))
+    keeper = card(2, frozenset({1}), role="keeper")
+    bowlers = [card(10 + i, frozenset({pos}), bowl=0.2)
+               for i, pos in enumerate((3, 4, 6, 7, 8))]
+    extras = [card(20 + i, frozenset({9, 10, 11})) for i in range(6)]
+    deck = Deck({1: [a, b, keeper] + bowlers + extras}, [1])
+
+    done = {"swapped": False}
+
+    def policy(candidates, state, rng):
+        by_id = {c.person_id: c for c in candidates}
+        if state.remaining == TWELVE_SIZE:
+            return by_id["p0"], 2
+        if state.remaining == TWELVE_SIZE - 1:
+            return by_id["p1"], 5
+        if not done["swapped"] and state.remaining == TWELVE_SIZE - 2:
+            done["swapped"] = True
+            raise RepositionRequested(2, 5)
+        return pick_rational(candidates, state, rng)
+
+    result = run_draft(deck, policy, random.Random(1))
+    assert result.completed
+    assert result.order[1].person_id == "p1" and result.order[4].person_id == "p0", (
+        "a swap trades occupants, it does not touch which slots count as open"
+    )
+    assert result.player_repositions == 1
+    assert len(result.picks) == TWELVE_SIZE

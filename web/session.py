@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 from etl.feasibility import (
     BOWLERS_IN_TWELVE, IMPACT_SLOT, OVERSEAS_CAP, POLICIES, REROLL_KINDS, REROLLS_ALLOWED,
-    TWELVE_SIZE, XI_SIZE, Card, DraftState, Deck, RerollRequested, could_still_complete,
-    order_errors, run_draft,
+    TWELVE_SIZE, XI_SIZE, Card, DraftState, Deck, RepositionRequested, RerollRequested,
+    could_still_complete, order_errors, run_draft,
 )
 
 
@@ -87,12 +87,18 @@ class Reroll:
 
 @dataclass(frozen=True)
 class Reposition:
-    """Swap whoever is AT two already-filled slots -- never an empty one. Restricting it
-    to two occupied slots is what lets this be a plain move type at all: `run_draft`'s own
-    loop (etl/feasibility.py) only ever reads `open_slots` as a SET, never caring which
-    specific card sits where, and a same-occupied-set swap can never change that set --
-    so it cannot desync the deal sequence, whatever point in the move list it lands at.
-    `12` names the Impact slot, same as everywhere else (`IMPACT_SLOT`).
+    """Move whoever is at `from_slot` to `to_slot` -- swapping with whoever is already
+    there, or simply relocating if `to_slot` is empty (which then frees `from_slot` for a
+    LATER pick, e.g. dropping an opener down to make room for a position-locked new
+    arrival). `12` names the Impact slot, same as everywhere else (`IMPACT_SLOT`).
+
+    Consumed by `run_draft`'s own loop as `RepositionRequested` (etl/feasibility.py) --
+    NOT a client-side rearrangement applied after the fact. That is the only way a move
+    into an empty slot can work at all: `open_slots` has to change in the SAME state the
+    deal-time guarantee and the forward check read, or a pick recorded right after this
+    one would be validated against the pre-move slots and wrongly refused. See
+    `RepositionRequested`'s own docstring for why this costs an attempt (an RNG draw) but
+    never a pick, and cannot desync the slot-filling budget A73 relies on.
 
     Only valid while the draft is still in progress -- enforced by the API route that
     accepts a NEW one, not here: replay has no notion of "now", only of what a state
@@ -222,6 +228,35 @@ def decode(state: str) -> tuple[int, tuple[Move, ...]]:
 
 # --- replay ---------------------------------------------------------------------------
 
+def _slot_card(order, impact: Card | None, slot: int) -> Card | None:
+    if slot == IMPACT_SLOT:
+        return impact
+    if not 1 <= slot <= XI_SIZE:
+        raise InvalidState(f"slot {slot} does not exist")
+    return order[slot - 1]
+
+
+def _validate_reposition(move: Reposition, state: DraftState) -> None:
+    """Checked here, against the exact `DraftState` `run_draft` is about to act on --
+    `RepositionRequested` itself only asserts (see its docstring), it does not re-derive
+    this. Replay is the only place a hand-crafted state string is ever verified (SPEC
+    11.2, unsigned state), so this is where an illegal reposition has to be caught."""
+    if move.from_slot == move.to_slot:
+        raise InvalidState(f"slot {move.from_slot} cannot swap with itself")
+    from_card = _slot_card(state.order, state.impact, move.from_slot)
+    to_card = _slot_card(state.order, state.impact, move.to_slot)
+    if from_card is None:
+        raise InvalidState(f"slot {move.from_slot} is empty -- nothing to move")
+    if to_card is not None:
+        if move.to_slot not in from_card.slots or move.from_slot not in to_card.slots:
+            raise InvalidState(
+                f"{from_card.name} and {to_card.name} cannot swap slots "
+                f"{move.from_slot}/{move.to_slot}: not eligible for each other's position")
+    elif move.to_slot not in from_card.slots:
+        raise InvalidState(
+            f"{from_card.name} cannot move to slot {move.to_slot}: not eligible there")
+
+
 def _policy(moves: tuple[Move, ...]):
     remaining_moves = iter(moves)
     rerolls_used = 0
@@ -241,6 +276,9 @@ def _policy(moves: tuple[Move, ...]):
                     f"no rerolls remaining ({REROLLS_ALLOWED} allowed per draft)")
             rerolls_used += 1
             raise RerollRequested(move.kind)
+        if isinstance(move, Reposition):
+            _validate_reposition(move, state)
+            raise RepositionRequested(move.from_slot, move.to_slot)
         if not 0 <= move.index < len(candidates):
             raise InvalidState(
                 f"choice {move.index} is not among the {len(candidates)} options dealt")
@@ -258,82 +296,35 @@ def _policy(moves: tuple[Move, ...]):
 def replay(deck: Deck, seed: int, moves: tuple[Move, ...]) -> Session:
     """Rebuild a session from scratch on every request (SPEC 11.3).
 
-    `Reposition` moves never reach `run_draft`/`_policy` -- they touch no RNG and no
-    `open_slots`, so `run_draft`'s own twelve-pick loop runs on the Pick/Reroll moves
-    alone, exactly as it always has, and every recorded `Reposition` is applied as one
-    pass over the resulting order afterward (`_apply_repositions`). That pass is safe to
-    do only once at the end rather than interleaved with the picks precisely because a
-    reposition can never touch a slot a Pick still needs (see `Reposition`'s own
-    docstring) -- so the picks and the rearranging cannot interact, in either order.
+    `Reposition` moves reach `run_draft` exactly like `Reroll` does -- as an exception
+    `_policy` raises instead of returning a pick, caught inside `run_draft`'s own attempt
+    loop and applied directly to its live `order`/`open_slots` (`RepositionRequested`,
+    etl/feasibility.py). That is what lets a LATER pick in the same move list target a
+    slot only a reposition freed: the very next `eligible()` call inside `run_draft` sees
+    the update, because it IS the same state, not a snapshot rebuilt afterward.
     """
-    sim_moves = tuple(m for m in moves if not isinstance(m, Reposition))
-    reposition_moves = tuple(m for m in moves if isinstance(m, Reposition))
-
     rng = random.Random(seed)
     try:
-        result = run_draft(deck, _policy(sim_moves), rng)
+        result = run_draft(deck, _policy(moves), rng)
     except _NeedChoice as pause:
         state = pause.state
         candidates = pause.candidates
         first = candidates[0]
         deal = Deal(first.fs_id, first.franchise, first.season_year, candidates,
                     _blocked(deck, first.fs_id, state))
-        order, impact, picks = list(state.order), state.impact, list(state.picks)
-    else:
-        if not result.completed:
-            # The guarantee re-drew to its cap and still found nothing. Check 12 asserts
-            # this does not happen to a rational drafter; a human can strand where a
-            # rational one would not, so it is reported rather than treated as impossible.
-            raise InvalidState(
-                f"this draft cannot be completed - stranded on {result.stranded_on}")
-        deal, order, impact, picks = None, list(result.order), result.impact, result.picks
+        order = list(state.order)
+        picks = list(state.picks)
+        return Session(seed, moves, deal, picks, tuple(order), state.impact,
+                       tuple(order_errors(order, state.impact, picks)))
 
-    order, impact = _apply_repositions(order, impact, reposition_moves)
-    return Session(seed, moves, deal, picks, tuple(order), impact,
-                   tuple(order_errors(order, impact, picks)))
-
-
-def _slot_card(order: list[Card | None], impact: Card | None, slot: int) -> Card | None:
-    if slot == IMPACT_SLOT:
-        return impact
-    if not 1 <= slot <= XI_SIZE:
-        raise InvalidState(f"slot {slot} does not exist")
-    return order[slot - 1]
-
-
-def _set_slot(order: list[Card | None], impact: Card | None, slot: int,
-              card: Card) -> tuple[list[Card | None], Card | None]:
-    if slot == IMPACT_SLOT:
-        return order, card
-    order = list(order)
-    order[slot - 1] = card
-    return order, impact
-
-
-def _apply_repositions(order: list[Card | None], impact: Card | None,
-                        moves: tuple[Reposition, ...]
-                        ) -> tuple[list[Card | None], Card | None]:
-    """Every recorded swap, in order. Both slots a valid `Reposition` names are always
-    already filled by the time it happens (checked here, since replay is the only place a
-    hand-crafted state string is ever verified -- SPEC 11.2, unsigned state) -- and a swap
-    between two filled slots never changes which slots `run_draft`'s own bookkeeping
-    considers open, so applying every recorded reposition as one pass AFTER the picks are
-    fully resolved reproduces exactly what applying each one live, interleaved with the
-    picks as they happened, would have done."""
-    for m in moves:
-        a = _slot_card(order, impact, m.from_slot)
-        b = _slot_card(order, impact, m.to_slot)
-        if a is None or b is None:
-            raise InvalidState(
-                f"cannot swap slots {m.from_slot} and {m.to_slot}: "
-                f"both must already hold a player")
-        if m.to_slot not in a.slots or m.from_slot not in b.slots:
-            raise InvalidState(
-                f"{a.name} and {b.name} cannot swap slots {m.from_slot}/{m.to_slot}: "
-                f"not eligible for each other's position")
-        order, impact = _set_slot(order, impact, m.from_slot, b)
-        order, impact = _set_slot(order, impact, m.to_slot, a)
-    return order, impact
+    if not result.completed:
+        # The guarantee re-drew to its cap and still found nothing. Check 12 asserts this
+        # does not happen to a rational drafter; a human can strand where a rational one
+        # would not, so it is reported rather than treated as impossible.
+        raise InvalidState(
+            f"this draft cannot be completed - stranded on {result.stranded_on}")
+    return Session(seed, moves, None, result.picks, tuple(result.order), result.impact,
+                   tuple(order_errors(result.order, result.impact, result.picks)))
 
 
 def _blocked(deck: Deck, fs_id: int, state: DraftState) -> list[tuple[Card, str]]:

@@ -493,11 +493,14 @@ def reroll(state: str, body: RerollIn) -> SessionOut:
 
 @app.post("/api/draft/{state}/reposition", response_model=SessionOut)
 def reposition(state: str, body: RepositionIn) -> SessionOut:
-    """Swap whoever is currently placed at `from_slot` and `to_slot` -- both must already
-    hold a player, and each must be legally eligible for the other's slot; this is not a
-    bench, it moves nobody in or out of the twelve, only where two already-drafted picks
-    bat (or which one holds Impact). Only while the draft is still in progress: once the
-    squad is complete a drafted arrangement is final, the same way a pick is."""
+    """Move whoever is at `from_slot` to `to_slot`. `from_slot` must already hold a
+    player; `to_slot` may be another occupied slot (a swap, both must be eligible for
+    the other's position) or an open one (a plain move, freeing `from_slot` for a later
+    pick -- e.g. dropping a flexible player out of an opener's slot to make room for one
+    who can bat nowhere else). This moves nobody in or out of the twelve, only where
+    already-drafted picks bat (or which one holds Impact). Only while the draft is still
+    in progress: once the squad is complete an arrangement is final, the same way a pick
+    is."""
     current = _load(state)
     if current.squad_complete:
         raise HTTPException(status_code=409, detail="this squad is already full")

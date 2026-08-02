@@ -133,6 +133,13 @@ class CardOut(BaseModel):
         description="batting numbers this player is eligible for (A72); "
                     "empty only for the defensive-net 'unrated' case")
     blocked: str | None = Field(default=None, description="why he cannot be taken")
+    bat_runs: int | None = Field(default=None, description="null means he never batted this season")
+    bat_balls: int | None = None
+    bat_strike_rate: float | None = None
+    bowl_wickets: int | None = Field(default=None, description="null means he never bowled this season")
+    bowl_runs: int | None = None
+    bowl_balls: int | None = None
+    bowl_economy: float | None = None
 
 
 class DealOut(BaseModel):
@@ -341,6 +348,9 @@ def _card(card: Card, blocked: str | None = None) -> CardOut:
         season_year=card.season_year, band=card.band, role=card.role,
         kind=_kind(card), rating=card.display, overseas=card.overseas,
         positions=sorted(card.positions), blocked=blocked,
+        bat_runs=card.bat_runs, bat_balls=card.bat_balls, bat_strike_rate=card.strike_rate,
+        bowl_wickets=card.bowl_wickets, bowl_runs=card.bowl_runs, bowl_balls=card.bowl_balls,
+        bowl_economy=card.economy,
     )
 
 

@@ -142,6 +142,25 @@ class Card:
     # those two cases are deliberately not distinguished past this point.
     career_positions: frozenset[int] = frozenset()
 
+    # The actual box-score, not derivable from `bat`/`bowl` (those are per-ball ratings
+    # against a state model, not counting stats). Read directly off `deliveries` rather
+    # than stored anywhere (A19) -- there is no rule here to protect, just a display
+    # figure, so a stored column would be a second copy with nothing checking it.
+    # NULL, not zero, when the player never had that discipline this season at all.
+    bat_runs: int | None = None
+    bat_balls: int | None = None
+    bowl_wickets: int | None = None
+    bowl_runs: int | None = None
+    bowl_balls: int | None = None
+
+    @property
+    def strike_rate(self) -> float | None:
+        return round(self.bat_runs * 100 / self.bat_balls, 1) if self.bat_balls else None
+
+    @property
+    def economy(self) -> float | None:
+        return round(self.bowl_runs * 6 / self.bowl_balls, 2) if self.bowl_balls else None
+
     @property
     def has_bat(self) -> bool:
         return self.bat is not None
@@ -203,19 +222,44 @@ def load_deck(conn) -> Deck:
     """
     rows = conn.execute(
         """
+        with batting as (
+            -- A22: balls faced is extra_wides = 0, not legal_ball -- a no-ball is a ball
+            -- faced, a wide is not. Super overs excluded, matching how a season total is
+            -- read off the public record (a separate mini-innings, not folded into it).
+            select batter_id as person_id, batting_fs_id as fs_id,
+                   sum(runs_batter) as runs,
+                   count(*) filter (where extra_wides = 0) as balls
+              from deliveries
+             where not is_super_over
+             group by 1, 2
+        ), bowling as (
+            -- A1: byes/legbyes are not charged to the bowler's runs; wides/no-balls are.
+            select bowler_id as person_id, bowling_fs_id as fs_id,
+                   count(*) filter (where credited_to_bowler) as wickets,
+                   sum(runs_batter + extra_wides + extra_noballs) as runs,
+                   count(*) filter (where legal_ball) as balls
+              from deliveries
+             where not is_super_over
+             group by 1, 2
+        )
         select s.franchise_season_id, s.person_id, p.primary_name,
                s.role, s.batting_band, coalesce(p.is_keeper, false),
                f.season_year, f.display_name, p.is_overseas,
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,
                max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl,
-               max(r.display_rating) as display
+               max(r.display_rating) as display,
+               bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
           from squad_members s
           join people p on p.person_id = s.person_id
           join franchise_seasons f on f.franchise_season_id = s.franchise_season_id
           join player_season_rating r
             on r.franchise_season_id = s.franchise_season_id
            and r.person_id = s.person_id
-         group by 1, 2, 3, 4, 5, 6, 7, 8, 9
+          left join batting bt
+            on bt.person_id = s.person_id and bt.fs_id = s.franchise_season_id
+          left join bowling bw
+            on bw.person_id = s.person_id and bw.fs_id = s.franchise_season_id
+         group by 1, 2, 3, 4, 5, 6, 7, 8, 9, bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
         """
     ).fetchall()
 
@@ -228,11 +272,14 @@ def load_deck(conn) -> Deck:
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for (fs_id, person_id, name, role, band, career_keeper,
-         season_year, franchise, overseas, bat, bowl, display) in rows:
+         season_year, franchise, overseas, bat, bowl, display,
+         bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls) in rows:
         cards_by_fs[fs_id].append(
             Card(fs_id, person_id, name, bat, bowl, band, role, career_keeper,
                  season_year, franchise, overseas, display,
-                 frozenset(positions_by_person.get(person_id, ())))
+                 frozenset(positions_by_person.get(person_id, ())),
+                 bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
+                 bowl_runs=bowl_runs, bowl_balls=bowl_balls)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]

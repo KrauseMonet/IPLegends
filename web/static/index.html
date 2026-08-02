@@ -6,259 +6,375 @@
 <title>The Legends Almanack — an all-time IPL draft</title>
 <style>
 /* ---------------------------------------------------------------------------------------
-   THE ALMANACK.
+   THE LEGENDS ALMANACK, under the lights.
 
-   Cricket's own visual culture is print: the almanack, the ruled scorecard, the agate
-   column of tabular figures. So this is paper and ink rather than a lit board -- serif
-   headlines, hairline rules instead of boxes, right-aligned figures, and one accent taken
-   from a cricket ball. Deliberately the opposite of a dark neon draft screen.
+   IPL's own brand language: a deep floodlit blue, a trophy gold, a flame-orange-red for
+   emphasis. Heavy condensed uppercase for headlines, a circular crest, a rig of floodlights
+   in the corner, and a stat/step footer read in mono figures -- broadcast graphics rather
+   than a printed page.
 --------------------------------------------------------------------------------------- */
 :root{
-  --paper:#f3efe4; --paper-2:#eae4d4; --card:#fbf9f3;
-  --ink:#191714; --ink-2:#4a453c; --ink-3:#8b8375;
-  --rule:#cdc4ae; --rule-soft:#e0d8c5;
-  --ball:#8c2f22;        /* leather red - the only loud colour */
-  --ball-soft:#b8543f;
-  --willow:#4e6242;      /* bat willow green, for confirmations */
-  --serif:"Iowan Old Style","Hoefler Text",Georgia,"Times New Roman",serif;
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-  --fig:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --bg:#050b1a; --bg-2:#0a1730;
+  --panel:#0d1c3a; --panel-2:#12274a; --panel-3:#17305a;
+  --line:rgba(255,255,255,.11); --line-strong:rgba(255,255,255,.24);
+  --ink:#f3f6fb; --ink-2:#aebedb; --ink-3:#6c7fa3;
+  --gold:#f5b83d; --gold-2:#ffd873;
+  --red:#e2472e; --red-2:#ff6a4d;
+  --green:#33d19a;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  background:var(--paper); color:var(--ink);
-  font-family:var(--serif); font-size:17px; line-height:1.55;
+  background-color:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.55;
   -webkit-font-smoothing:antialiased;
+  /* Floodlit stadium photo, scrimmed dark so the same white/gold text stays readable
+     over it wherever it isn't sitting on an opaque panel. */
   background-image:
-    repeating-linear-gradient(0deg, rgba(25,23,20,.014) 0 1px, transparent 1px 3px),
-    radial-gradient(900px 500px at 85% -10%, rgba(140,47,34,.05), transparent 65%);
+    linear-gradient(180deg, rgba(3,7,17,.90) 0%, rgba(3,7,17,.74) 32%, rgba(3,7,17,.82) 68%, rgba(3,7,17,.94) 100%),
+    radial-gradient(1100px 560px at 82% -8%, rgba(245,184,61,.14), transparent 58%),
+    radial-gradient(900px 480px at 4% 8%, rgba(51,160,209,.09), transparent 60%),
+    radial-gradient(1400px 700px at 50% 118%, rgba(226,71,46,.06), transparent 60%),
+    url('/static/stadium-bg.jpg');
+  background-size:auto,auto,auto,auto,cover;
+  background-position:0 0,0 0,0 0,0 0,center top;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+  position:relative;
 }
-.sheet{max-width:1080px;margin:0 auto;padding:0 26px 90px}
+.sheet{max-width:1180px;margin:0 auto;padding:0 26px 100px;position:relative}
 
-/* --- masthead: a wordmark with a rule, not a logo lockup --- */
-.masthead{display:flex;align-items:flex-end;gap:16px;padding:28px 0 10px;
-  border-bottom:2px solid var(--ink);flex-wrap:wrap}
-.wordmark{cursor:pointer}
-.wordmark .the{font-family:var(--sans);font-size:10px;letter-spacing:.34em;text-transform:uppercase;
+/* --- floodlight rig, purely decorative --- */
+.rig{position:absolute;top:0;right:0;width:min(46vw,560px);height:420px;pointer-events:none;
+  opacity:.55;z-index:0}
+.rig svg{width:100%;height:100%}
+
+/* --- masthead --- */
+.masthead{display:flex;align-items:center;gap:16px;padding:26px 0 22px;
+  border-bottom:1px solid var(--line);flex-wrap:wrap;position:relative;z-index:1}
+.wordmark{display:flex;align-items:center;gap:13px;cursor:pointer}
+.crest{width:46px;height:46px;flex:none;border-radius:50%;background:var(--panel-2);
+  border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 4px rgba(245,184,61,.10), 0 6px 18px -8px rgba(245,184,61,.5)}
+.crest svg{width:24px;height:24px}
+.crest path{fill:var(--gold);stroke:none}
+.wordmark .the{font-family:var(--mono);font-size:10px;letter-spacing:.36em;text-transform:uppercase;
   color:var(--ink-3);display:block;margin-bottom:1px}
-.wordmark h1{font-size:34px;margin:0;font-weight:600;letter-spacing:-.4px;line-height:1}
-.masthead .edition{margin-left:auto;font-family:var(--sans);font-size:10.5px;letter-spacing:.2em;
-  text-transform:uppercase;color:var(--ink-3);text-align:right;line-height:1.7}
-.rule-thin{height:1px;background:var(--ink);opacity:.35;margin-top:3px}
+.wordmark h1{font-size:24px;margin:0;font-weight:800;letter-spacing:.5px;line-height:1;
+  text-transform:uppercase;color:var(--ink)}
+.wordmark h1 .leg{color:var(--gold)}
+.masthead .edition{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3);text-align:right;line-height:1.8}
+.masthead .edition b{color:var(--gold);font-weight:600}
 
 /* --- opening spread --- */
-.spread{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;padding:46px 0 30px;align-items:start}
-.standfirst{font-family:var(--sans);font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;
-  color:var(--ball);margin-bottom:18px}
-.headline{font-size:52px;line-height:1.06;margin:0 0 22px;font-weight:600;letter-spacing:-1px}
-.headline i{font-style:italic;color:var(--ball)}
-.deck{font-size:19px;line-height:1.6;color:var(--ink-2);margin:0 0 28px;max-width:46ch}
-.deck .drop{float:left;font-size:58px;line-height:.82;padding:5px 9px 0 0;font-weight:600;color:var(--ball)}
+.spread{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;padding:52px 0 34px;
+  align-items:center;position:relative;z-index:1}
+.standfirst{font-family:var(--mono);font-size:11px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:18px;font-weight:600}
+.headline{font-size:clamp(34px,4.6vw,54px);line-height:1.05;margin:0 0 22px;font-weight:800;
+  letter-spacing:-.5px;text-transform:uppercase}
+.headline i{font-style:normal;color:var(--gold)}
+.deck{font-size:17px;line-height:1.65;color:var(--ink-2);margin:0 0 30px;max-width:48ch}
+.deck .drop{color:var(--gold);font-weight:700}
 
-.actions{display:flex;gap:0;align-items:stretch;border:1.5px solid var(--ink);width:fit-content;max-width:100%;flex-wrap:wrap}
+.actions{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}
 button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
-.act{font-family:var(--sans);font-size:13px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;
-  padding:15px 26px;background:transparent}
-.act:hover{background:var(--paper-2)}
-.act.lead{background:var(--ball);color:var(--paper);border-right:1.5px solid var(--ink)}
-.act.lead:hover{background:var(--ball-soft)}
+.act{font-family:var(--sans);font-size:13.5px;font-weight:750;letter-spacing:.05em;
+  text-transform:uppercase;padding:15px 26px;border-radius:8px;background:var(--panel-2);
+  border:1px solid var(--line-strong);color:var(--ink);transition:border-color .15s,background .15s}
+.act:hover{border-color:var(--gold);background:var(--panel-3)}
+.act.lead{background:linear-gradient(180deg,var(--gold-2),var(--gold));color:#1a1204;
+  border:1px solid var(--gold);box-shadow:0 10px 26px -12px rgba(245,184,61,.55)}
+.act.lead:hover{filter:brightness(1.06)}
 .act:disabled{opacity:.4;cursor:not-allowed}
 
-.colophon{font-family:var(--fig);font-size:11.5px;color:var(--ink-3);margin-top:20px;letter-spacing:.02em}
-.colophon b{color:var(--ink);font-weight:600}
+.colophon{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px}
+.stat{display:flex;align-items:center;gap:9px}
+.stat .ico{width:20px;height:20px;flex:none;color:var(--gold)}
+.stat .ico svg{width:100%;height:100%}
+.stat .ico path,.stat .ico circle,.stat .ico rect{stroke:currentColor;stroke-width:1.6;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.stat b{font-family:var(--mono);font-size:18px;color:var(--ink);font-weight:700;display:block;line-height:1}
+.stat span{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3)}
 
-/* the field: a fine engraved oval, drawn not glowing */
-.field{position:relative;aspect-ratio:1/1.06;border:1.5px solid var(--ink);border-radius:50%;
-  background:var(--card);display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 0 7px var(--paper), 0 0 0 8px var(--rule-soft)}
-.field::before{content:"";position:absolute;inset:12%;border:1px solid var(--rule);border-radius:50%}
-.wicket{width:8%;height:26%;border-left:1px solid var(--ink-3);border-right:1px solid var(--ink-3);
-  position:relative;background:repeating-linear-gradient(90deg,transparent 0 3px,rgba(25,23,20,.05) 3px 4px)}
-.wicket::before,.wicket::after{content:"";position:absolute;left:-3px;right:-3px;height:1.5px;background:var(--ink)}
-.wicket::before{top:8%} .wicket::after{bottom:8%}
-.pos{position:absolute;transform:translate(-50%,-50%);font-family:var(--sans);font-size:9px;
-  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
-.pos::before{content:"";display:block;width:3px;height:3px;background:var(--ball);border-radius:50%;
-  margin:0 auto 4px}
-.field-cap{font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+/* the field: a floodlit ground, glowing rather than engraved */
+.field{position:relative;aspect-ratio:1/1;border-radius:50%;
+  background:radial-gradient(circle at 50% 42%, rgba(51,160,209,.14), rgba(5,11,26,.4) 72%);
+  border:1px solid var(--line-strong);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 8px rgba(245,184,61,.05), inset 0 0 60px rgba(245,184,61,.05)}
+.field::before{content:"";position:absolute;inset:9%;border:1px dashed var(--line-strong);border-radius:50%}
+.wicket{width:9%;height:30%;border-radius:2px;position:relative;
+  background:linear-gradient(180deg,rgba(245,184,61,.30),rgba(245,184,61,.12));
+  border:1px solid rgba(245,184,61,.4)}
+.wicket::before,.wicket::after{content:"";position:absolute;left:20%;right:20%;height:2px;
+  background:rgba(243,246,251,.55)}
+.wicket::before{top:10%} .wicket::after{bottom:10%}
+.pos{position:absolute;transform:translate(-50%,-50%);font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+.pos::before{content:"";display:block;width:5px;height:5px;background:var(--gold);border-radius:50%;
+  margin:0 auto 5px;box-shadow:0 0 8px rgba(245,184,61,.7)}
+.field-cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
   color:var(--ink-3);text-align:center;margin-top:16px}
 
-/* --- how it works: an editorial run-in list, not three boxes --- */
-.method{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:24px 0;margin:22px 0 0;
-  display:grid;grid-template-columns:repeat(3,1fr);gap:38px}
-.method section{padding-right:10px}
-.method h3{font-family:var(--sans);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;
-  margin:0 0 8px;color:var(--ball)}
-.method h3 span{color:var(--ink-3);margin-right:8px}
-.method p{margin:0;font-size:15.5px;line-height:1.55;color:var(--ink-2)}
+/* --- how it works: numbered, iconed steps --- */
+.method{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:8px 0 0;
+  position:relative;z-index:1}
+.method section{border:1px solid var(--line);background:var(--panel);border-radius:10px;
+  padding:20px 20px 22px;display:flex;flex-direction:column;gap:10px}
+.method h3{font-family:var(--sans);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+  margin:0;color:var(--ink);display:flex;align-items:center;gap:10px;font-weight:750}
+.method h3 span{font-family:var(--mono);color:var(--gold);font-size:14px}
+.method .mico{width:22px;height:22px;flex:none;color:var(--gold)}
+.method .mico svg{width:100%;height:100%}
+.method .mico path,.method .mico circle{stroke:currentColor;stroke-width:1.5;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.method .mico.ball circle{fill:currentColor}
+.method .mico.ball path{stroke:var(--panel)}
+.method .mico.bat path{fill:currentColor;stroke:none}
+.method p{margin:0;font-size:14px;line-height:1.6;color:var(--ink-2)}
 
-/* --- the draft: three ruled columns --- */
-.folio{display:grid;grid-template-columns:1fr 1.25fr .8fr;gap:0;padding-top:26px;
-  border-top:2px solid var(--ink)}
-.col{padding:0 26px;border-right:1px solid var(--rule)}
-.col:first-child{padding-left:0}
-.col:last-child{border-right:0;padding-right:0}
-.col-head{font-family:var(--sans);font-size:10px;letter-spacing:.26em;text-transform:uppercase;
-  color:var(--ink-3);padding-bottom:9px;border-bottom:1px solid var(--ink);margin-bottom:2px;
-  display:flex;justify-content:space-between;align-items:baseline}
-.col-head em{font-style:normal;color:var(--ball);font-family:var(--fig);letter-spacing:0}
+/* --- the draft: three panels --- */
+.folio{display:grid;grid-template-columns:1fr 1.2fr .8fr;gap:16px;padding-top:30px;
+  position:relative;z-index:1}
+.col{padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;overflow:hidden}
+.col-head{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);padding:14px 18px;border-bottom:1px solid var(--line);margin-bottom:2px;
+  display:flex;justify-content:space-between;align-items:baseline;background:var(--panel-2)}
+.col-head em{font-style:normal;color:var(--gold);font-family:var(--mono);letter-spacing:0;font-weight:600}
 
-.fixture{padding:16px 0 14px;border-bottom:1px solid var(--rule)}
-.fixture .yr{font-family:var(--fig);font-size:12px;color:var(--ball);letter-spacing:.1em}
-.fixture .club{font-size:27px;line-height:1.12;font-weight:600;letter-spacing:-.4px;margin-top:2px}
+.fixture{padding:18px 18px 16px}
+.fixture .yr{font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.12em;font-weight:600}
+.fixture .club{font-size:24px;line-height:1.15;font-weight:800;letter-spacing:-.3px;margin-top:3px}
+.reroll-row{margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.act.reroll{font-size:11px;padding:8px 14px;display:inline-flex;align-items:center;gap:6px}
+#rerollCount{font-family:var(--mono);color:var(--ink-3);font-weight:600;font-size:11px}
 
-/* an entry line, set like an index of names */
-/* Grid, not flex: the figure must hold its column even when a man can fill three places
-   and the chips wrap. In flex the chips pushed the rating onto a line of its own. */
 .entry{display:grid;grid-template-columns:1fr auto 2.6em;align-items:baseline;column-gap:10px;
-  padding:9px 0;border-bottom:1px solid var(--rule-soft)}
-.entry .nm{font-size:16.5px;min-width:0}
-/* Kind marks, drawn rather than lettered: a bat, a ball, both for an all-rounder, a
-   glove for the keeper. Inline SVG so they take the ink colour and need no asset. */
-.ic{display:inline-block;width:15px;height:15px;vertical-align:-2px;margin-right:7px;flex:none}
+  padding:11px 18px;border-bottom:1px solid var(--line);transition:background .12s}
+.entry:hover{background:var(--panel-2)}
+.entry .nm{font-size:15px;min-width:0;display:flex;align-items:center}
+.ic{display:inline-flex;width:16px;height:16px;vertical-align:-3px;margin-right:8px;flex:none}
 .ic svg{width:100%;height:100%;display:block}
 .ic path,.ic circle,.ic line,.ic rect{stroke:var(--ink-2);stroke-width:1.6;fill:none;
   stroke-linecap:round;stroke-linejoin:round}
-.ic.ball circle{fill:var(--ball);stroke:var(--ball)}
-.ic.ball path{stroke:var(--paper);stroke-width:1.2}
-.entry.off .ic path,.entry.off .ic circle{stroke:var(--rule)}
-.entry.off .ic.ball circle{fill:var(--rule);stroke:var(--rule)}
-.entry .nm .flag{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ball);
-  margin-right:7px;vertical-align:middle}
-.entry .nm .flag.home{background:transparent;border:1px solid var(--rule)}
-.entry .fig{font-family:var(--fig);font-size:16px;font-variant-numeric:tabular-nums;color:var(--ink);
-  min-width:2.4em;text-align:right}
+.ic.ball circle{fill:var(--red);stroke:var(--red)}
+.ic.ball path{stroke:var(--panel);stroke-width:1.2}
+.ic.all circle{fill:var(--gold)}
+.ic.glove path{stroke:var(--gold-2)}
+.entry.off .ic path,.entry.off .ic circle{stroke:var(--ink-3)}
+.entry.off .ic.ball circle{fill:var(--ink-3);stroke:var(--ink-3)}
+.entry .nm .flag{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);
+  margin-right:8px;vertical-align:middle;box-shadow:0 0 6px rgba(245,184,61,.7)}
+.entry .nm .flag.home{background:transparent;border:1px solid var(--ink-3);box-shadow:none}
+.entry .fig{font-family:var(--mono);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--green);min-width:2.4em;text-align:right}
 .picks{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-.pk{font-family:var(--sans);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
-  border:1px solid var(--rule);padding:3px 8px;color:var(--ink-2);background:var(--card)}
-.pk:hover{border-color:var(--ball);color:var(--ball);background:#fff}
-/* A blocked man stays on the sheet. Removing him hides the shape of the squad -- you
-   could not see that Chennai 2010 had Dhoni once your keeper was named. */
-.entry.off{display:block;color:var(--ink-3);padding:7px 0}
+.pk{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--line-strong);border-radius:5px;padding:4px 9px;color:var(--ink-2);
+  background:var(--panel-3)}
+.pk:hover{border-color:var(--gold);color:var(--gold);background:rgba(245,184,61,.1)}
+/* [A73] one "take" button per entry -- taking him already IS placing him, straight into
+   a batting position (or Impact). If he is only eligible for one open slot right now the
+   pick settles immediately; otherwise the order sheet below asks which one. */
+.take{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  border:1px solid var(--gold);border-radius:5px;padding:5px 11px;color:var(--gold);
+  background:rgba(245,184,61,.08)}
+.take:hover{background:var(--gold);color:#1a1204}
+/* a candidate with more than one open eligible slot: waiting on a row click above */
+.entry.pending{background:rgba(245,184,61,.09);box-shadow:inset 3px 0 0 var(--gold)}
+.entry.pending .take{background:var(--gold);color:#1a1204}
+.entry.off{display:block;color:var(--ink-3);padding:9px 18px}
 .entry.off .nm{color:var(--ink-3)}
-.entry.off .fig{color:var(--rule)}
-.entry.off .nm{display:block}
 .entry.off .fig{display:none}
-.why{display:block;font-family:var(--sans);font-size:9.5px;letter-spacing:.06em;
-  color:var(--ink-3);font-style:italic;padding-left:22px;margin-top:1px}
-.roster-head{font-family:var(--sans);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--ink-3);padding:16px 0 6px;border-bottom:1px solid var(--rule)}
+.entry.off .nm{display:block}
+.why{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;
+  color:var(--ink-3);font-style:italic;padding-left:24px;margin-top:2px}
+.roster-head{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);padding:14px 18px 6px;border-bottom:1px solid var(--line)}
 
-/* the squad sheet, ruled like a scorecard */
-.tally{display:flex;align-items:baseline;gap:12px;padding:16px 0 8px}
-.tally .n{font-family:var(--fig);font-size:38px;font-variant-numeric:tabular-nums;line-height:1;color:var(--ball)}
-.tally .of{font-family:var(--sans);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);line-height:1.6}
-.gauge{height:2px;background:var(--rule-soft);margin-bottom:6px}
-.gauge i{display:block;height:100%;background:var(--ball);transition:width .35s}
-/* Grid so the CLUB gives way first. Under flex the player's name was the thing that got
-   truncated, which is the one column a reader is actually scanning. */
-.line{display:grid;grid-template-columns:92px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
-  align-items:baseline;column-gap:12px;padding:7px 0;
-  border-bottom:1px solid var(--rule-soft);font-size:15px}
-.line .role{font-family:var(--sans);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;
+/* the squad sheet */
+.tally{display:flex;align-items:baseline;gap:12px;padding:18px 18px 10px}
+.tally .n{font-family:var(--mono);font-size:36px;font-variant-numeric:tabular-nums;line-height:1;
+  color:var(--gold);font-weight:700}
+.tally .of{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);line-height:1.7}
+.gauge{height:3px;background:var(--panel-3);margin:0 18px 14px;border-radius:2px}
+.gauge i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2));
+  transition:width .35s;border-radius:2px}
+.line{display:grid;grid-template-columns:96px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
+  align-items:baseline;column-gap:12px;padding:9px 18px;
+  border-bottom:1px solid var(--line);font-size:14.5px}
+.line .role{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--ink-3)}
 .line .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   color:var(--ink-3);font-style:italic}
-.line.set .who{color:var(--ink);font-style:normal}
-.line .fig{font-family:var(--fig);font-size:14px;font-variant-numeric:tabular-nums;
-  color:var(--ink-2);text-align:right}
-.line .club{font-family:var(--sans);font-size:10px;color:var(--ink-3);letter-spacing:.04em;
+.line.set .who{color:var(--ink);font-style:normal;font-weight:600}
+.line .fig{font-family:var(--mono);font-size:13.5px;font-variant-numeric:tabular-nums;
+  color:var(--green);text-align:right;font-weight:600}
+.line .club{font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:.02em;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 
-.verdict-note{font-family:var(--sans);font-size:11px;letter-spacing:.04em;padding:12px 0;
-  border-top:1px solid var(--ink);color:var(--willow)}
-.verdict-note.no{color:var(--ball)}
-.note{font-size:15px;color:var(--ink-3);font-style:italic;padding:14px 0}
+.verdict-note{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;padding:14px 18px;
+  border-top:1px solid var(--line);color:var(--green);font-weight:600}
+.verdict-note.no{color:var(--red-2)}
+.note{font-size:14px;color:var(--ink-3);font-style:italic;padding:16px 18px}
 
-.foot-actions{display:flex;gap:14px;align-items:center;padding-top:20px;flex-wrap:wrap}
-.stamp{margin-left:auto;font-family:var(--fig);font-size:11px;color:var(--ink-3);
-  border:1px solid var(--rule);padding:6px 12px}
+/* [A72] the order sheet: eleven numbered batting positions plus one Impact row. Filled
+   rows show who bats there; an empty row is a target while a squad member is selected. */
+.orderline{display:grid;grid-template-columns:28px minmax(0,1fr) 2.4em;align-items:center;
+  column-gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);font-size:14px;
+  cursor:pointer;transition:background .12s,opacity .12s}
+.orderline:hover{background:var(--panel-2)}
+.orderline .num{font-family:var(--mono);font-size:11px;color:var(--ink-3);text-align:center}
+.orderline.impactrow .num{color:var(--gold);font-size:9px;letter-spacing:.05em}
+.orderline .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-3);font-style:italic}
+.orderline.filled .who{color:var(--ink);font-style:normal;font-weight:600}
+.orderline .fig{font-family:var(--mono);font-size:13px;color:var(--green);text-align:right;
+  font-weight:600}
+/* while a squad member is selected: his eligible rows glow gold and invite a click;
+   everything else dims, so the choice reads as a choice rather than a guess */
+.orderline.eligible{border-color:var(--gold);box-shadow:inset 0 0 0 1px rgba(245,184,61,.35)}
+.orderline.ineligible{opacity:.35;cursor:not-allowed}
+.orderline.ineligible:hover{background:none}
+
+/* the legality checklist -- one line per rule, a plain sentence from the server rather
+   than a client-side re-derivation of what "legal" means */
+.legality{padding:6px 18px 16px}
+.legality .ok{font-family:var(--mono);font-size:12px;color:var(--green);padding:10px 0;
+  font-weight:600}
+.legality .bad{font-family:var(--mono);font-size:11.5px;color:var(--red-2);padding:5px 0;
+  line-height:1.5}
+.legality .bad::before{content:"· "}
+
+.foot-actions{display:flex;gap:12px;align-items:center;padding:18px;flex-wrap:wrap}
+.stamp{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+  border:1px solid var(--line-strong);padding:7px 12px;border-radius:6px}
 
 /* --- the report --- */
-.report{padding:44px 0 10px;text-align:center;border-bottom:2px solid var(--ink)}
-.report .over-line{font-family:var(--sans);font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink-3)}
-.report .call{font-size:15px;letter-spacing:.3em;text-transform:uppercase;font-family:var(--sans);
-  font-weight:650;margin:16px 0 8px;color:var(--ball)}
-.report .call.won{color:var(--willow)}
-.report .figures{font-family:var(--fig);font-variant-numeric:tabular-nums;font-weight:500;
-  font-size:clamp(30px,6.4vw,58px);letter-spacing:-1px;line-height:1.1;white-space:nowrap}
-.report .margin{font-size:19px;font-style:italic;color:var(--ink-2);margin-top:10px}
-.ledger{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--rule);margin-top:30px}
-.ledger div{padding:16px 8px;border-right:1px solid var(--rule-soft)}
-.ledger div:last-child{border-right:0}
-.ledger b{display:block;font-family:var(--fig);font-size:21px;font-variant-numeric:tabular-nums;color:var(--ink)}
-.ledger span{font-family:var(--sans);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.report{padding:50px 0 14px;text-align:center;position:relative;z-index:1}
+.report .over-line{font-family:var(--mono);font-size:10px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-3)}
+.report .call{font-size:16px;letter-spacing:.24em;text-transform:uppercase;font-family:var(--sans);
+  font-weight:800;margin:16px 0 8px;color:var(--red-2)}
+.report .call.won{color:var(--gold)}
+.report .figures{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:800;
+  font-size:clamp(32px,6.8vw,64px);letter-spacing:-1px;line-height:1.1;white-space:nowrap;
+  color:var(--ink)}
+.report .margin{font-size:16.5px;font-style:italic;color:var(--ink-2);margin-top:10px}
+.ledger{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:32px}
+.ledger div{padding:18px 10px;border:1px solid var(--line);background:var(--panel);border-radius:10px}
+.ledger b{display:block;font-family:var(--mono);font-size:22px;font-variant-numeric:tabular-nums;
+  color:var(--gold);font-weight:700}
+.ledger span{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3)}
 
-.cards2{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:34px}
-.cards2 > div{padding:0 26px;border-right:1px solid var(--rule)}
-.cards2 > div:first-child{padding-left:0}
-.cards2 > div:last-child{border-right:0;padding-right:0}
-table{width:100%;border-collapse:collapse;font-size:15px}
-caption{font-family:var(--fig);font-size:12.5px;letter-spacing:.04em;text-align:left;
-  padding-bottom:8px;border-bottom:1px solid var(--ink);color:var(--ink)}
-th{font-family:var(--sans);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
-  text-align:left;padding:9px 0 6px;font-weight:600}
-th.n,td.n{text-align:right;font-family:var(--fig);font-variant-numeric:tabular-nums}
-td{padding:5px 0;border-bottom:1px solid var(--rule-soft)}
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:32px}
+.cards2 > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
+  border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+caption{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-align:left;
+  padding:16px 0 8px;color:var(--ink)}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;padding:9px 0 6px;font-weight:600;border-bottom:1px solid var(--line)}
+th.n,td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td{padding:6px 0;border-bottom:1px solid var(--line)}
 tr.tail td{color:var(--ink-3);font-style:italic}
 
-.season{display:grid;grid-template-columns:1.25fr .95fr;gap:0}
-.season > div{padding:0 26px}
-.season > div:first-child{padding-left:0;border-right:1px solid var(--rule)}
-.season > div:last-child{padding-right:0}
+.season{display:grid;grid-template-columns:1.25fr .95fr;gap:16px}
+.season > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
+  border-radius:10px}
 .ladder-row td{padding:7px 0}
-tr.you td{font-weight:600}
-tr.you td:first-child{box-shadow:inset 3px 0 0 var(--ball);padding-left:9px}
-tr.cut td{border-bottom:1.5px solid var(--ink)}
+tr.you td{font-weight:700;color:var(--ink)}
+tr.you td:first-child{box-shadow:inset 3px 0 0 var(--gold);padding-left:9px}
+tr.cut td{border-bottom:1.5px solid var(--gold)}
 .fx{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;
-  padding:7px 0;border-bottom:1px solid var(--rule-soft);font-size:14.5px}
-.fx .wl{font-family:var(--sans);font-size:9.5px;letter-spacing:.1em;width:1.6em;
-  text-align:center;padding:2px 0;border:1px solid var(--rule);color:var(--ink-3)}
-.fx .wl.w{background:var(--willow);border-color:var(--willow);color:var(--paper)}
-.fx .wl.l{background:var(--ball);border-color:var(--ball);color:var(--paper)}
-.fx .sc{font-family:var(--fig);font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
-.tie-stage{font-family:var(--sans);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--ball);padding-top:14px}
+  padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.fx .wl{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;width:1.8em;text-align:center;
+  padding:3px 0;border-radius:4px;border:1px solid var(--line-strong);color:var(--ink-3)}
+.fx .wl.w{background:var(--green);border-color:var(--green);color:#04231a;font-weight:700}
+.fx .wl.l{background:var(--red);border-color:var(--red);color:#2b0705;font-weight:700}
+.fx .sc{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.tie-stage{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold);padding-top:16px;font-weight:600}
 .hide{display:none!important}
-.slip{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);
-  color:var(--paper);padding:12px 22px;font-family:var(--sans);font-size:13px;z-index:60}
-.imprint{margin-top:54px;padding-top:18px;border-top:1px solid var(--rule);
-  font-family:var(--sans);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-3);text-align:center;line-height:2.1}
+.slip{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel-3);
+  color:var(--ink);padding:13px 22px;font-family:var(--sans);font-size:13px;z-index:60;
+  border:1px solid var(--gold);border-radius:8px}
+
+/* the shareable journey card: a hand-drawn canvas, previewed full height and downloadable
+   as a real PNG -- no server-side image generation, no new dependency */
+.card-overlay{position:fixed;inset:0;background:rgba(3,7,17,.92);z-index:70;
+  display:flex;align-items:center;justify-content:center;padding:24px}
+.card-frame{display:flex;flex-direction:column;align-items:center;gap:16px;max-height:100%}
+.card-frame canvas{max-height:80vh;width:auto;border-radius:14px;
+  box-shadow:0 20px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line-strong)}
+.card-actions{display:flex;gap:12px}
+.card-actions a.act{text-decoration:none;display:inline-flex;align-items:center}
+
+/* room setup: create/join */
+.room-label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.room-input{width:100%;font:inherit;font-family:var(--sans);font-size:16px;color:var(--ink);
+  background:var(--panel-2);border:1px solid var(--line-strong);border-radius:8px;
+  padding:12px 14px}
+.room-input:focus{outline:none;border-color:var(--gold)}
+.room-choices{display:flex;gap:10px;flex-wrap:wrap}
+.room-choice{font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;padding:10px 16px;
+  border-radius:7px;border:1px solid var(--line-strong);background:var(--panel-2);
+  color:var(--ink-2)}
+.room-choice.sel{border-color:var(--gold);color:var(--gold);background:rgba(245,184,61,.08)}
+.imprint{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;line-height:2.2;position:relative;z-index:1}
 
 @media (max-width:900px){
   .spread{grid-template-columns:1fr;gap:34px}
-  .headline{font-size:38px}
   .field{max-width:360px;margin:0 auto;width:100%}
-  .method{grid-template-columns:1fr;gap:22px}
+  .method{grid-template-columns:1fr;gap:12px}
   .folio,.cards2,.season{grid-template-columns:1fr}
-  .season > div{padding:0;border-right:0}
-  .col,.cards2 > div{padding:0;border-right:0;border-bottom:1px solid var(--rule);
-    padding-bottom:22px;margin-bottom:22px}
-  .col:last-child,.cards2 > div:last-child{border-bottom:0}
-  .ledger{grid-template-columns:1fr 1fr}
-  .ledger div:nth-child(2){border-right:0}
   .line .club{display:none}
-  /* The two-up button bar wraps into an L shape at this width; stack it instead so the
-     lead action keeps its full-width emphasis. */
   .actions{width:100%;flex-direction:column;flex-wrap:nowrap}
-  .act{text-align:center;padding:16px 20px}
-  .act.lead{border-right:0;border-bottom:1.5px solid var(--ink)}
+  .act{text-align:center}
+  .ledger{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
 <body>
 <div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
 
   <div class="masthead">
     <div class="wordmark" onclick="go('home')">
-      <span class="the">The</span>
-      <h1>Legends Almanack</h1>
-      <div class="rule-thin"></div>
+      <div class="crest"><svg viewBox="0 0 16 16">
+        <path d="M8 1.1c-1 0-1.8.9-1.8 2.2v4.9c0 .8.5 1.4 1.2 1.7l-.4 4.4c0 .35.3.6.65.6h.7c.35 0 .65-.25.65-.6l-.4-4.4c.7-.3 1.2-.9 1.2-1.7V3.3c0-1.3-.8-2.2-1.8-2.2Z"/>
+      </svg></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
     </div>
     <div class="edition">
-      Indian Premier League<br>
+      <b>Indian Premier League</b><br>
       <span id="deckPill">…</span>
     </div>
   </div>
@@ -269,13 +385,15 @@ tr.cut td{border-bottom:1.5px solid var(--ink)}
       <div>
         <div class="standfirst">Nineteen seasons · one eleven</div>
         <h2 class="headline">Every season is a hand.<br>Play the <i>best eleven</i> ever dealt.</h2>
-        <p class="deck"><span class="drop">Y</span>ou are dealt one franchise-season at a time —
+        <p class="deck"><span class="drop">You</span> are dealt one franchise-season at a time —
           Chennai 2010, Kolkata 2008, Rajasthan 2022 — and you may take one player from it,
-          for a place you still need. Fifteen selections, no more than four overseas. Then your
-          eleven takes the field for twenty overs against the house.</p>
+          straight into a batting position he's actually played. Twelve picks — eleven who
+          bat, one Impact Player — no more than four overseas. Then your eleven takes the
+          field for twenty overs against the house.</p>
         <div class="actions">
           <button class="act lead" onclick="newDraft()">Begin a draft</button>
           <button class="act" onclick="promptSeed()">Open by seed</button>
+          <button class="act" onclick="go('roomSetup')">Play with friends</button>
         </div>
         <div class="colophon" id="homeStats"></div>
       </div>
@@ -286,15 +404,24 @@ tr.cut td{border-bottom:1.5px solid var(--ink)}
     </div>
 
     <div class="method">
-      <section><h3><span>I.</span> The deal</h3>
+      <section>
+        <h3><span class="mico bat"><svg viewBox="0 0 16 16"><path d="M8 1.1c-1 0-1.8.9-1.8 2.2v4.9c0 .8.5 1.4 1.2 1.7l-.4 4.4c0 .35.3.6.65.6h.7c.35 0 .65-.25.65-.6l-.4-4.4c.7-.3 1.2-.9 1.2-1.7V3.3c0-1.3-.8-2.2-1.8-2.2Z"/></svg></span>
+          <span>I.</span> The deal</h3>
         <p>A franchise-season drawn evenly from all one hundred and sixty-six. Mumbai answers
-           nineteen times; Kochi Tuskers Kerala, once only.</p></section>
-      <section><h3><span>II.</span> The selection</h3>
+           nineteen times; Kochi Tuskers Kerala, once only.</p>
+      </section>
+      <section>
+        <h3><span class="mico"><svg viewBox="0 0 16 16"><path d="M8 8.4a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M2.4 13.6c.6-2.7 2.6-4.2 5.6-4.2s5 1.5 5.6 4.2"/></svg></span>
+          <span>II.</span> The selection</h3>
         <p>One man from that squad, for a place still open. He must have played that season —
-           there are no imaginary teams here.</p></section>
-      <section><h3><span>III.</span> The match</h3>
+           there are no imaginary teams here.</p>
+      </section>
+      <section>
+        <h3><span class="mico ball"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/></svg></span>
+          <span>III.</span> The match</h3>
         <p>Twenty overs a side, delivery by delivery, priced from every ball bowled in the
-           competition since 2008.</p></section>
+           competition since 2008.</p>
+      </section>
     </div>
   </section>
 
@@ -306,33 +433,161 @@ tr.cut td{border-bottom:1.5px solid var(--ink)}
         <div class="fixture">
           <div class="yr" id="dealYear"></div>
           <div class="club" id="dealTeam">—</div>
+          <div class="reroll-row hide" id="rerollRow">
+            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team')">Another team</button>
+            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season')">Another season</button>
+            <span id="rerollCount"></span>
+          </div>
         </div>
-        <div class="col-head" style="border-bottom:0;padding-top:14px">
+        <div class="col-head" style="margin-bottom:0">
           <span>Available</span><em id="optCount"></em></div>
         <div id="options"></div>
       </div>
 
       <div class="col">
-        <div class="col-head"><span>Your selection</span><em id="pickCount">0/15</em></div>
+        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
         <div class="tally">
           <div class="n" id="pickBig">0</div>
           <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
         </div>
         <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="slots"></div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn"
-            style="border:1.5px solid var(--ink)" onclick="simulate()">Play the season</button>
-          <button class="act" style="border:1.5px solid var(--rule)" onclick="go('home')">Abandon</button>
-          <span class="stamp" id="seedPill"></span>
-        </div>
+        <div id="orderSheet"></div>
       </div>
 
       <div class="col">
-        <div class="col-head"><span>The eleven</span></div>
-        <div id="xiList" class="note">Named once fifteen are chosen: a wicketkeeper, five
-          bowlers, and the best of the bats.</div>
-        <div class="verdict-note hide" id="legalLine"></div>
+        <div class="col-head"><span>Legality</span></div>
+        <div id="legality" class="legality note">Take players straight into a batting
+          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
+          options, and eleven batting positions.</div>
+        <div class="foot-actions">
+          <button class="act lead hide" id="simBtn" onclick="simulate()">Play the season</button>
+          <button class="act" onclick="go('home')">Abandon</button>
+          <span class="stamp" id="seedPill"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROOMS: create/join ============ -->
+  <section id="roomSetup" class="hide">
+    <div class="folio" style="grid-template-columns:1fr">
+      <div class="col" style="max-width:560px;margin:40px auto;width:100%">
+        <div class="col-head"><span>Play with friends</span></div>
+        <div style="padding:22px">
+          <label class="room-label">Your name</label>
+          <input id="roomName" class="room-input" placeholder="Your name" maxlength="40">
+
+          <div class="room-label" style="margin-top:20px">Format</div>
+          <div class="room-choices" id="formatChoices">
+            <button class="room-choice sel" data-format="final" onclick="pickFormat('final')">Final · 2</button>
+            <button class="room-choice" data-format="cup" onclick="pickFormat('cup')">Cup · 4</button>
+            <button class="room-choice" data-format="league" onclick="pickFormat('league')">League · 10</button>
+          </div>
+
+          <div class="room-label" style="margin-top:20px">Seconds per pick</div>
+          <div class="room-choices" id="timerChoices">
+            <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
+            <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
+            <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
+          </div>
+
+          <div class="actions" style="margin-top:24px">
+            <button class="act lead" onclick="createRoom()">Create a room</button>
+          </div>
+
+          <div style="margin:28px 0;border-top:1px solid var(--line)"></div>
+
+          <label class="room-label">Room code</label>
+          <input id="joinCode" class="room-input" placeholder="ABC123" maxlength="6"
+            style="text-transform:uppercase">
+          <div class="actions" style="margin-top:16px">
+            <button class="act" onclick="joinRoom()">Join a room</button>
+            <button class="act" onclick="go('home')">Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROOMS: lobby / live draft / result ============ -->
+  <section id="room" class="hide">
+    <div id="roomLobby" class="hide">
+      <div class="folio" style="grid-template-columns:1fr">
+        <div class="col" style="max-width:560px;margin:40px auto;width:100%">
+          <div class="col-head"><span>Lobby</span><em id="lobbySeats"></em></div>
+          <div class="fixture">
+            <div class="yr">ROOM CODE</div>
+            <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
+            <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px">
+              <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span>
+            </div>
+          </div>
+          <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
+          <div id="lobbyPlayers"></div>
+          <div class="foot-actions">
+            <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft()">Start draft</button>
+            <button class="act" onclick="leaveRoom()">Leave</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomDraft" class="hide">
+      <div class="folio">
+        <div class="col">
+          <div class="col-head"><span>Dealt to you</span></div>
+          <div class="fixture">
+            <div class="yr" id="roomDealYear"></div>
+            <div class="club" id="roomDealTeam">—</div>
+          </div>
+          <div class="col-head" style="margin-bottom:0"><span>Available</span></div>
+          <div id="roomOptions"></div>
+        </div>
+
+        <div class="col">
+          <div class="col-head"><span>Batting order</span></div>
+          <div class="tally">
+            <div class="n" id="roomTimer">–</div>
+            <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
+          </div>
+          <div id="roomOrderSheet"></div>
+        </div>
+
+        <div class="col">
+          <div class="col-head"><span>Other players</span></div>
+          <div id="roomOthers"></div>
+          <div class="foot-actions">
+            <button class="act" onclick="leaveRoom()">Leave</button>
+            <span class="stamp" id="roomCodeStamp"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomResult" class="hide">
+      <div class="report">
+        <div class="over-line">ROOM <span id="roomResultCode"></span></div>
+      </div>
+      <div id="roomMatchBody"></div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <button class="act lead" onclick="go('home')">Done</button>
+      </div>
+    </div>
+
+    <div id="roomFailed" class="hide">
+      <div class="report">
+        <div class="over-line">ROOM <span id="roomFailedCode"></span></div>
+        <div class="call">Draft stranded</div>
+        <p style="max-width:520px;margin:14px auto 0;color:var(--ink-3);font-size:14px;line-height:1.5">
+          One seat's earlier picks left no legal candidate for a slot that still needed filling.
+          This is a rare, genuine dead end in the archive rather than a bug in your play — the room
+          can't recover from here.
+        </p>
+        <p style="max-width:520px;margin:10px auto 0;font-family:var(--mono);font-size:12px;color:var(--ink-4)"
+           id="roomFailedReason"></p>
+      </div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <button class="act lead" onclick="go('home')">Done</button>
       </div>
     </div>
   </section>
@@ -348,25 +603,36 @@ tr.cut td{border-bottom:1.5px solid var(--ink)}
         <div class="actions">
           <button class="act lead" onclick="newDraft()">Draft again</button>
           <button class="act" onclick="copyLink()">Copy this game</button>
+          <button class="act" onclick="showJourneyCard()">Journey card</button>
         </div>
       </div>
     </div>
 
     <div class="season">
       <div>
-        <div class="col-head" style="margin-top:26px"><span>League table</span>
+        <div class="col-head" style="margin:26px -18px 0"><span>League table</span>
           <em id="tableNote"></em></div>
         <table id="ladder"></table>
       </div>
       <div>
-        <div class="col-head" style="margin-top:26px"><span>Your fourteen</span>
+        <div class="col-head" style="margin:26px -18px 0"><span>Your fourteen</span>
           <em id="formNote"></em></div>
         <div id="yourForm"></div>
-        <div class="col-head" style="margin-top:26px"><span>Playoffs</span></div>
+        <div class="col-head" style="margin:26px -18px 0"><span>Playoffs</span></div>
         <div id="bracket"></div>
       </div>
     </div>
   </section>
+
+  <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
+    <div class="card-frame">
+      <canvas id="journeyCanvas" width="1080" height="1920"></canvas>
+      <div class="card-actions">
+        <a id="cardDownload" class="act lead" download="legends-almanack-card.png">Download</a>
+        <button class="act" onclick="hideJourneyCard()">Close</button>
+      </div>
+    </div>
+  </div>
 
   <div class="imprint">
     <div>The Legends Almanack · deal · select · play</div>
@@ -390,16 +656,9 @@ function slip(msg){
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
 }
 function go(id){
-  for (const s of ['home','draft','result']) $('#'+s).classList.toggle('hide', s !== id);
+  for (const s of ['home','draft','result','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
   window.scrollTo(0,0);
 }
-const ROLE = {keeper:'Wicketkeeper', opener:'Opener', top_order:'Top order',
-              middle_or_finisher:'Middle', bowler:'Bowler', open:'Any'};
-// Chips sit in a narrow column beside the name, so they get the short form. 'Wicketkeeper'
-// alone was wide enough to wrap 'MS Dhoni' onto two lines.
-const CHIP = {keeper:'Kpr', opener:'Open', top_order:'Top', middle_or_finisher:'Mid',
-              bowler:'Bowl', open:'Any'};
-
 // A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
 // baseline; the ball is the only filled mark, which is what makes a bowler scannable.
 const BAT  = '<path d="M10.6 2.2 13.4 5 7.2 11.2 4.4 8.4Z"/><path d="M4.4 8.4 2.4 12.6l4.2-1.4"/>';
@@ -420,11 +679,23 @@ async function boot(){
   META = await api('/api/meta');
   const s = META.seasons;
   $('#deckPill').textContent = `${s[0]}–${s[s.length-1]} · ${META.franchise_seasons} squads`;
-  $('#homeStats').innerHTML =
-    `<b>${META.cards.toLocaleString()}</b> rated player-seasons · <b>${META.franchise_seasons}</b> franchise-seasons · <b>${s.length}</b> seasons`;
+  $('#homeStats').innerHTML = statRow();
   $('#footStats').textContent =
     `${META.cards.toLocaleString()} player-seasons · ${META.franchise_seasons} squads · ${s.length} seasons`;
   drawField();
+}
+
+const PEOPLE = '<path d="M8 8.4a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M2.4 13.6c.6-2.7 2.6-4.2 5.6-4.2s5 1.5 5.6 4.2"/>';
+const SHIRT  = '<path d="M5.4 2.4 2.2 5l1.8 2 1.6-1.2v7.8h5v-7.8L12.2 7l1.8-2-3.2-2.6c-.6.9-1.6 1.4-2.8 1.4s-2.2-.5-2.8-1.4Z"/>';
+const TROPHY = '<path d="M5 2.4h6v3.6a3 3 0 0 1-6 0Z"/><path d="M5 3.4H2.6v1a2.4 2.4 0 0 0 2.4 2.4M11 3.4h2.4v1a2.4 2.4 0 0 1-2.4 2.4"/><path d="M8 8.4v3.2M5.6 13.6h4.8M6.2 13.6l.5-2h2.6l.5 2"/>';
+
+function statRow(){
+  const s = META.seasons;
+  const items = [[PEOPLE, META.cards.toLocaleString(), 'Rated player-seasons'],
+    [SHIRT, META.franchise_seasons, 'Franchise-seasons'], [TROPHY, s.length, 'Seasons']];
+  return items.map(([icon,n,label]) =>
+    `<div class="stat"><span class="ico">${svg(icon)}</span><div><b>${n}</b><span>${label}</span></div></div>`
+  ).join('');
 }
 
 function drawField(){
@@ -449,10 +720,54 @@ async function openSeed(v){
   try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
   catch(e){ slip(e.message); }
 }
-async function pick(i){
+// [A73] A pick names both the candidate AND the slot he bats at, in one request --
+// placement is final the instant it lands, so there is no bench and nothing to move
+// again afterward. If a candidate has exactly one open slot he's eligible for right now,
+// taking him settles it immediately; with more than one, PENDING holds him while the
+// order sheet asks which slot, and clicking an eligible row finishes the pick.
+let PENDING = null;   // {index, card} for a deal option awaiting a slot choice, or null
+
+function openSlots(s){
+  const open = new Set(Array.from({length:11}, (_, i) => i + 1));
+  open.add(12);   // the Impact pseudo-slot, open until s.impact is chosen
+  s.order.forEach((c, i) => { if (c) open.delete(i + 1); });
+  if (s.impact) open.delete(12);
+  return open;
+}
+
+async function submitPick(i, slot){
   try {
     S = await api(`/api/draft/${S.state}/pick`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:i})});
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({index: i, slot})});
+    PENDING = null;
+    render(S);
+  } catch(e){ slip(e.message); }
+}
+
+function take(i){
+  const card = S.deal.options[i];
+  const open = openSlots(S);
+  const eligibleOpen = card.positions.filter(p => open.has(p));
+  if (open.has(12)) eligibleOpen.push(12);
+  if (eligibleOpen.length === 1){
+    submitPick(i, eligibleOpen[0]);
+    return;
+  }
+  PENDING = (PENDING && PENDING.index === i) ? null : {index: i, card};
+  render(S);   // the deal list's "pending" highlight lives here too, not just the order sheet
+}
+
+function rowClick(slot){
+  if (!PENDING) return;   // filled rows are inert -- nothing to move once placed (A73)
+  submitPick(PENDING.index, slot);
+}
+
+async function rerollDeal(kind){
+  try {
+    S = await api(`/api/draft/${S.state}/reroll`, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
+    PENDING = null;
     render(S);
   } catch(e){ slip(e.message); }
 }
@@ -466,41 +781,25 @@ function render(s){
   $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;
   $('#progBar').style.width = (100 * s.picks_made / s.picks_total) + '%';
 
-  const used = [...s.squad], rows = [];
-  for (const [slot, n] of Object.entries(META.template)){
-    for (let k = 0; k < n; k++){
-      const idx = used.findIndex(c => c.slot === slot);
-      const got = idx >= 0 ? used.splice(idx,1)[0] : null;
-      rows.push(`<div class="line ${got?'set':''}">
-        <span class="role">${ROLE[slot]||slot}</span>
-        <span class="who">${got ? (ICON[got.kind]||'') + got.name : 'to be named'}</span>
-        <span class="club">${got ? got.franchise + ' ' + got.season_year : ''}</span>
-        <span class="fig">${got ? got.rating : ''}</span></div>`);
-    }
-  }
-  $('#slots').innerHTML = rows.join('');
-
   if (s.deal){
     $('#dealYear').textContent = s.deal.season_year;
     $('#dealTeam').textContent = s.deal.franchise;
-    // Grouped by player: the API returns one entry per (player, place) because that is what
-    // the draft consumes, but a list repeating a name three times reads as a fault.
-    const byPlayer = new Map();
-    s.deal.options.forEach((o,i) => {
-      if (!byPlayer.has(o.person_id)) byPlayer.set(o.person_id, {card:o, choices:[]});
-      byPlayer.get(o.person_id).choices.push({slot:o.slot, index:i});
-    });
+    $('#rerollRow').classList.remove('hide');
+    const rerollsLeft = s.rerolls_allowed - s.rerolls_used;
+    $('#rerollTeamBtn').disabled = rerollsLeft <= 0;
+    $('#rerollSeasonBtn').disabled = rerollsLeft <= 0;
+    $('#rerollCount').textContent = `(${rerollsLeft} left)`;
     const blocked = s.deal.blocked || [];
-    $('#optCount').textContent = `${byPlayer.size} of ${byPlayer.size + blocked.length}`;
-    const live = [...byPlayer.values()].map(({card,choices}) => `
-      <div class="entry">
+    $('#optCount').textContent = `${s.deal.options.length} of ${s.deal.options.length + blocked.length}`;
+    const live = s.deal.options.map((card, i) => {
+      const pending = PENDING && PENDING.index === i ? ' pending' : '';
+      return `
+      <div class="entry${pending}">
         <span class="nm">${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
-        <span class="picks">${choices.map(c =>
-          `<button class="pk" title="${ROLE[c.slot]||c.slot}"
-             onclick="pick(${c.index})">${CHIP[c.slot]||c.slot}</button>`).join('')}</span>
-        <span class="fig">${card.rating ?? '—'}</span>
-      </div>`).join('');
+        <span class="picks"><button class="take" onclick="take(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
+      </div>`;
+    }).join('');
     // The rest of the squad, greyed with the reason. Kept on the sheet rather than
     // filtered away so the roster reads as a roster.
     const dead = blocked.length ? `<div class="roster-head">Unavailable</div>` +
@@ -508,32 +807,58 @@ function render(s){
       <div class="entry off">
         <span class="nm">${ICON[b.kind] || ''}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}</span>
         <span class="why">${b.blocked || ''}</span>
-        <span class="fig">${b.rating ?? '—'}</span>
       </div>`).join('') : '';
     $('#options').innerHTML = live + dead;
-    $('#simBtn').classList.add('hide');
-    $('#legalLine').classList.add('hide');
   } else {
     $('#dealYear').textContent = '';
     $('#dealTeam').textContent = 'Selection closed';
+    $('#rerollRow').classList.add('hide');
     $('#optCount').textContent = '';
-    $('#options').innerHTML = '<div class="note">Fifteen chosen. Fourteen matches await.</div>';
-    $('#simBtn').classList.remove('hide');
-    loadXI();
+    $('#options').innerHTML = '<div class="note">Twelve chosen. Ready to play.</div>';
   }
+
+  renderPanels();
 }
 
-async function loadXI(){
-  const x = await api('/api/xi/' + S.state);
-  $('#xiList').outerHTML = '<div id="xiList">' + x.xi.map((p,i) =>
-    `<div class="line set" style="grid-template-columns:22px minmax(0,1fr) 3em 2.4em">
-     <span class="role">${i+1}</span>
-     <span class="who">${(ICON[p.kind]||'') + p.name}</span><span class="club">${p.season_year}</span>
-     <span class="fig">${p.rating ?? ''}</span></div>`).join('') + '</div>';
-  const line = $('#legalLine');
-  line.classList.remove('hide');
-  line.classList.toggle('no', x.overseas.includes('NO LEGAL'));
-  line.textContent = x.overseas.charAt(0).toUpperCase() + x.overseas.slice(1);
+function renderPanels(){
+  const s = S;
+
+  // the order sheet: eleven numbered rows, then Impact. A row is only ever clickable
+  // while PENDING holds a candidate awaiting a slot -- once filled, a row is inert (A73:
+  // final the moment a pick is made, nothing to move again).
+  const open = openSlots(s);
+  const rows = s.order.map((got, i) => orderRow(i + 1, got, `${i + 1}`));
+  rows.push(orderRow(12, s.impact, 'IMP', true));
+  $('#orderSheet').innerHTML = rows.join('');
+
+  // legality: the server's own sentences, not a client-side re-derivation of the rules
+  if (s.errors.length){
+    $('#legality').innerHTML = s.errors.map(e => `<div class="bad">${e}</div>`).join('');
+  } else if (s.squad_complete) {
+    $('#legality').innerHTML = '<div class="ok">Legal — ready to play</div>';
+  } else {
+    $('#legality').innerHTML = '<div class="note" style="padding:0">Take players straight ' +
+      'into a batting position (or Impact) until all twelve are filled.</div>';
+  }
+
+  $('#simBtn').classList.toggle('hide', !s.squad_complete);
+  $('#simBtn').disabled = !s.playable;
+  $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
+
+  function orderRow(slot, got, label, isImpact){
+    const classes = ['orderline'];
+    if (got) classes.push('filled');
+    if (isImpact) classes.push('impactrow');
+    if (PENDING){
+      const eligible = !got && open.has(slot)
+        && (slot === 12 || PENDING.card.positions.includes(slot));
+      classes.push(eligible ? 'eligible' : 'ineligible');
+    }
+    return `<div class="${classes.join(' ')}" onclick="rowClick(${slot})">
+      <span class="num">${label}</span>
+      <span class="who">${got ? (ICON[got.kind] || '') + got.name : (isImpact ? 'no impact player' : 'to be named')}</span>
+    </div>`;
+  }
 }
 
 /* --- the season --- */
@@ -595,6 +920,343 @@ function copyLink(){
   navigator.clipboard.writeText(url)
     .then(() => slip('Copied — this link replays the same game.'))
     .catch(() => slip(url));
+}
+
+/* --- the journey card: a hand-drawn canvas, no server-side image generation --------- */
+
+const CARD_MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+const CARD_SANS = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+
+function themeColor(name){
+  return getComputedStyle(document.documentElement).getPropertyValue('--' + name).trim();
+}
+
+async function showJourneyCard(){
+  try {
+    const d = await api('/api/card/' + S.state);
+    drawJourneyCard(d);
+    $('#cardOverlay').classList.remove('hide');
+  } catch(e){ slip(e.message); }
+}
+
+function hideJourneyCard(e){
+  if (e && e.target !== e.currentTarget) return;   // a click inside the frame stays open
+  $('#cardOverlay').classList.add('hide');
+}
+
+function drawJourneyCard(d){
+  const canvas = $('#journeyCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, cx = W / 2;
+  const gold = themeColor('gold'), ink = themeColor('ink'), ink3 = themeColor('ink-3'),
+        green = themeColor('green'), red2 = themeColor('red-2'),
+        lineStrong = themeColor('line-strong'), bg = themeColor('bg'), bg2 = themeColor('bg-2');
+
+  ctx.clearRect(0, 0, W, H);
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, bg2);
+  grad.addColorStop(1, bg);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = gold;
+  ctx.lineWidth = 5;
+  ctx.strokeRect(30, 30, W - 60, H - 60);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = ink3;
+  ctx.font = `600 24px ${CARD_MONO}`;
+  ctx.fillText('SEED ' + d.state.split('-')[0], cx, 110);
+
+  ctx.fillStyle = d.champion ? gold : red2;
+  ctx.font = `800 56px ${CARD_SANS}`;
+  ctx.fillText(d.champion ? 'CHAMPION' : 'THE SEASON ENDS HERE', cx, 190);
+
+  ctx.fillStyle = ink;
+  ctx.font = `800 140px ${CARD_MONO}`;
+  ctx.fillText(`${d.won}-${d.lost}${d.tied ? '-' + d.tied : ''}`, cx, 350);
+
+  // four stat tiles
+  const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES']];
+  const gap = 24, tileW = (W - 120 - gap * (tiles.length - 1)) / tiles.length;
+  const tileY = 420, tileH = 150;
+  tiles.forEach(([val, label], i) => {
+    const x = 60 + i * (tileW + gap);
+    ctx.strokeStyle = lineStrong;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, tileY, tileW, tileH);
+    ctx.fillStyle = green;
+    ctx.font = `700 52px ${CARD_MONO}`;
+    ctx.fillText(String(val), x + tileW / 2, tileY + 78);
+    ctx.fillStyle = ink3;
+    ctx.font = `600 18px ${CARD_MONO}`;
+    ctx.fillText(label, x + tileW / 2, tileY + 118);
+  });
+
+  // top performers, dashed box like the "golden boot" callout
+  const boxY = 610, boxH = 200;
+  ctx.setLineDash([10, 8]);
+  ctx.strokeStyle = gold;
+  ctx.strokeRect(60, boxY, W - 120, boxH);
+  ctx.setLineDash([]);
+  ctx.fillStyle = gold;
+  ctx.font = `600 22px ${CARD_MONO}`;
+  ctx.fillText('TOP PERFORMERS', cx, boxY + 46);
+  ctx.fillStyle = ink;
+  ctx.font = `700 36px ${CARD_SANS}`;
+  ctx.fillText(`${d.top_scorer} · ${d.top_scorer_runs} runs`, cx, boxY + 100);
+  ctx.fillText(`${d.top_wicket_taker} · ${d.top_wicket_taker_wickets} wkts`, cx, boxY + 150);
+
+  // the twelve, in the order the drafter arranged them
+  ctx.textAlign = 'left';
+  ctx.fillStyle = ink3;
+  ctx.font = `600 20px ${CARD_MONO}`;
+  ctx.fillText('YOUR TWELVE', 60, boxY + boxH + 60);
+
+  const listTop = boxY + boxH + 110, listBottom = H - 140;
+  const rowH = (listBottom - listTop) / d.squad.length;
+  d.squad.forEach((c, i) => {
+    const y = listTop + i * rowH + rowH * 0.7;
+    ctx.fillStyle = ink3;
+    ctx.font = `600 22px ${CARD_MONO}`;
+    ctx.fillText(i === 11 ? 'IMP' : String(i + 1), 60, y);
+    ctx.fillStyle = ink;
+    ctx.font = `700 32px ${CARD_SANS}`;
+    ctx.fillText(c.name, 130, y);
+  });
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = ink3;
+  ctx.font = `600 20px ${CARD_MONO}`;
+  ctx.fillText('THE LEGENDS ALMANACK', cx, H - 60);
+
+  $('#cardDownload').href = canvas.toDataURL('image/png');
+}
+
+/* --- rooms: friends draft together, live, turn by turn ------------------------------- */
+
+let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
+let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30;
+
+function pickFormat(f){
+  CHOSEN_FORMAT = f;
+  document.querySelectorAll('#formatChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
+}
+function pickTimer(t){
+  CHOSEN_TIMER = t;
+  document.querySelectorAll('#timerChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', +b.dataset.timer === t));
+}
+
+async function createRoom(){
+  const name = $('#roomName').value.trim() || 'Player';
+  try {
+    const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER, host_name: name})});
+    enterRoom(r.room.code, r.player_id);
+  } catch(e){ slip(e.message); }
+}
+
+async function joinRoom(){
+  const code = $('#joinCode').value.trim().toUpperCase();
+  const name = $('#roomName').value.trim() || 'Player';
+  if (!code){ slip('Enter a room code.'); return; }
+  try {
+    const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name})});
+    enterRoom(code, r.player_id);
+  } catch(e){ slip(e.message); }
+}
+
+function enterRoom(code, playerId){
+  ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
+  go('room');
+  pollRoom();
+  if (ROOM_POLL) clearInterval(ROOM_POLL);
+  ROOM_POLL = setInterval(pollRoom, 2000);
+}
+
+function leaveRoom(){
+  if (ROOM_POLL) clearInterval(ROOM_POLL);
+  ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
+  go('home');
+}
+
+async function pollRoom(){
+  if (!ROOM_CODE) return;
+  try {
+    ROOM = await api('/api/rooms/' + ROOM_CODE);
+    renderRoom();
+  } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
+}
+
+async function startRoomDraft(){
+  try {
+    ROOM = await api(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
+    renderRoom();
+  } catch(e){ slip(e.message); }
+}
+
+function roomOpenSlots(me){
+  const open = new Set(Array.from({length:11}, (_, i) => i + 1));
+  open.add(12);
+  me.order.forEach((c, i) => { if (c) open.delete(i + 1); });
+  if (me.impact) open.delete(12);
+  return open;
+}
+
+function roomTake(i){
+  const me = ROOM.players.find(p => p.player_id === MY_PID);
+  const card = me.deal.options[i];
+  const open = roomOpenSlots(me);
+  const eligibleOpen = card.positions.filter(p => open.has(p));
+  if (open.has(12)) eligibleOpen.push(12);
+  if (eligibleOpen.length === 1){
+    roomSubmitPick(i, eligibleOpen[0]);
+    return;
+  }
+  ROOM_PENDING = (ROOM_PENDING && ROOM_PENDING.index === i) ? null : {index: i, card};
+  renderRoom();
+}
+
+function roomRowClick(slot){
+  if (!ROOM_PENDING) return;
+  roomSubmitPick(ROOM_PENDING.index, slot);
+}
+
+async function roomSubmitPick(index, slot){
+  try {
+    ROOM = await api(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({player_id: MY_PID, index, slot})});
+    ROOM_PENDING = null;
+    renderRoom();
+  } catch(e){ slip(e.message); }
+}
+
+function renderRoom(){
+  const r = ROOM;
+  if (!r) return;
+  $('#roomLobby').classList.toggle('hide', r.status !== 'lobby');
+  $('#roomDraft').classList.toggle('hide', r.status !== 'drafting');
+  $('#roomResult').classList.toggle('hide', r.status !== 'complete');
+  $('#roomFailed').classList.toggle('hide', r.status !== 'failed');
+
+  if (r.status === 'lobby') renderRoomLobby(r);
+  else if (r.status === 'drafting') renderRoomDraft(r);
+  else if (r.status === 'failed') renderRoomFailed(r);
+  else renderRoomResult(r);
+}
+
+function renderRoomFailed(r){
+  if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+  $('#roomFailedCode').textContent = r.code;
+  $('#roomFailedReason').textContent = r.failure_reason || '';
+}
+
+function renderRoomLobby(r){
+  $('#lobbyCode').textContent = r.code;
+  $('#lobbySeats').textContent = `${r.players.length} of ${r.seats}`;
+  $('#lobbyFormat').textContent = r.format.toUpperCase();
+  $('#lobbyTimer').textContent = r.timer_seconds + 's per pick';
+  $('#lobbyPlayers').innerHTML = r.players.map(p => `
+    <div class="entry"><span class="nm">${p.name}${p.player_id === r.host_id
+      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}</span></div>`
+  ).join('');
+  $('#lobbyStartBtn').classList.toggle('hide', MY_PID !== r.host_id);
+}
+
+function renderRoomDraft(r){
+  const me = r.players.find(p => p.player_id === MY_PID);
+  $('#roomRoundNow').textContent = `round ${r.round + 1}/${r.rounds_total}`;
+  $('#roomTimer').textContent = r.seconds_remaining;
+  $('#roomCodeStamp').textContent = 'room ' + r.code;
+
+  if (!me || me.done || !me.deal){
+    $('#roomDealYear').textContent = '';
+    $('#roomDealTeam').textContent = me && me.done ? 'Your twelve is set' : '—';
+    $('#roomOptions').innerHTML = '<div class="note">Waiting on the rest of the room…</div>';
+  } else {
+    $('#roomDealYear').textContent = me.deal.season_year;
+    $('#roomDealTeam').textContent = me.deal.franchise;
+    $('#roomOptions').innerHTML = me.deal.options.map((card, i) => {
+      const pending = ROOM_PENDING && ROOM_PENDING.index === i ? ' pending' : '';
+      return `<div class="entry${pending}">
+        <span class="nm">${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
+          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
+        <span class="picks"><button class="take" onclick="roomTake(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
+      </div>`;
+    }).join('');
+  }
+
+  const open = me && me.deal ? roomOpenSlots(me) : new Set();
+  const order = me ? me.order : Array(11).fill(null);
+  const impact = me ? me.impact : null;
+  const rows = order.map((got, i) => roomOrderRow(i + 1, got, `${i + 1}`, open));
+  rows.push(roomOrderRow(12, impact, 'IMP', open, true));
+  $('#roomOrderSheet').innerHTML = rows.join('');
+
+  $('#roomOthers').innerHTML = r.players.filter(p => p.player_id !== MY_PID).map(p => `
+    <div class="line ${p.done ? 'set' : ''}">
+      <span class="role">${p.is_cpu ? 'CPU' : (p.done ? 'DONE' : 'PICKING')}</span>
+      <span class="who">${p.name}</span>
+      <span class="club">${!p.done && p.deal ? (p.deal.franchise + ' ' + p.deal.season_year) : ''}</span>
+      <span class="fig">${p.picks_made}/12</span>
+    </div>`).join('');
+}
+
+function roomOrderRow(slot, got, label, open, isImpact){
+  const classes = ['orderline'];
+  if (got) classes.push('filled');
+  if (isImpact) classes.push('impactrow');
+  if (ROOM_PENDING){
+    const eligible = !got && open.has(slot)
+      && (slot === 12 || ROOM_PENDING.card.positions.includes(slot));
+    classes.push(eligible ? 'eligible' : 'ineligible');
+  }
+  return `<div class="${classes.join(' ')}" onclick="roomRowClick(${slot})">
+    <span class="num">${label}</span>
+    <span class="who">${got ? (ICON[got.kind] || '') + got.name : (isImpact ? 'no impact player' : 'to be named')}</span>
+  </div>`;
+}
+
+async function renderRoomResult(r){
+  if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+  $('#roomResultCode').textContent = r.code;
+  try {
+    const match = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${MY_PID}`);
+    showRoomMatch(match);
+  } catch(e){ slip(e.message); }
+}
+
+function showRoomMatch(m){
+  const el = $('#roomMatchBody');
+  if (m.format === 'final'){
+    const res = m.result;
+    el.innerHTML = `<div class="report" style="padding:0 0 20px">
+      <div class="call ${res.winner ? 'won' : ''}">${res.winner ? res.winner + ' win' : 'Tied'}</div>
+      <div class="figures">${res.home_score} · ${res.away_score}</div>
+      <div class="margin">${res.margin}</div></div>`;
+  } else if (m.format === 'cup'){
+    const stage = r => `<div class="fx"><span class="wl ${r.winner ? 'w' : ''}">${r.winner ? 'W' : 'T'}</span>
+      <span>${r.stage}: ${r.home} v ${r.away}</span>
+      <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
+    el.innerHTML = `<div style="padding:0 0 20px">
+      <div class="call won" style="text-align:center;margin-bottom:16px">${m.champion} win the cup</div>
+      ${m.semis.map(stage).join('')}${stage(m.final)}</div>`;
+  } else {
+    el.innerHTML = `<div class="cards2" style="grid-template-columns:1fr">
+      <div><table>
+        <tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
+            <th class="n">Pts</th><th class="n">NRR</th></tr>
+        ${m.table.map(row => `<tr class="${row.you ? 'you' : ''}">
+          <td>${row.pos}</td><td>${row.name}</td><td class="n">${row.played}</td>
+          <td class="n">${row.won}</td><td class="n">${row.lost}</td>
+          <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
+      </table></div></div>
+      <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>`;
+  }
 }
 
 boot().then(() => {

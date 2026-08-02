@@ -35,7 +35,8 @@ DOUBLE_AT = (1, 2, 5)
 class Side:
     name: str
     short: str
-    xi: list[Card]
+    xi: list[Card]                    # already in batting order -- position i bats i+1
+    impact: Card | None = None        # [A72] the Impact Player, bowling pool only
     you: bool = False
 
 
@@ -85,6 +86,86 @@ class Result:
 
 
 @dataclass
+class JourneyAccumulator:
+    """Runs and wickets for ONE tracked side's own twelve, folded in match by match as
+    the season is played -- not a second pass over stored scorecards, since none are
+    stored (SPEC 11: nothing here touches a database). `play()` feeds this from the two
+    `Innings` it already computes; nothing re-simulates anything to get it.
+    """
+
+    runs: dict[str, int] = field(default_factory=dict)
+    wickets: dict[str, int] = field(default_factory=dict)
+    total_runs: int = 0
+    total_wickets: int = 0
+
+    def add_batting(self, innings) -> None:
+        for b in innings.batting:
+            if not b.faced_any:
+                continue
+            self.runs[b.player.name] = self.runs.get(b.player.name, 0) + b.runs
+            self.total_runs += b.runs
+
+    def add_bowling(self, innings) -> None:
+        for bo in innings.bowling:
+            if not bo.balls:
+                continue
+            self.wickets[bo.player.name] = self.wickets.get(bo.player.name, 0) + bo.wickets
+            self.total_wickets += bo.wickets
+
+
+def _leader(totals: dict[str, int]) -> tuple[str, int]:
+    """The name with the highest total, ties broken alphabetically (lowest name) for a
+    deterministic answer -- the same shape of tie-break `positions.py`'s `modal_position`
+    already uses, rather than an arbitrary dict-iteration-order pick."""
+    if not totals:
+        return "", 0
+    best = max(totals.values())
+    name = min(n for n, v in totals.items() if v == best)
+    return name, best
+
+
+@dataclass
+class JourneyStats:
+    """One tracked side's whole tournament, for the shareable card -- not stored, built
+    fresh from a `Season` and its `JourneyAccumulator` right after the match is played."""
+
+    runs: int
+    wickets: int
+    played: int
+    won: int
+    lost: int
+    tied: int
+    champion: bool
+    top_scorer: tuple[str, int]
+    top_wicket_taker: tuple[str, int]
+
+
+def journey_stats(season: Season, track: Side, acc: JourneyAccumulator) -> JourneyStats:
+    """The tracked side's whole tournament -- league record plus however far the playoffs
+    took them, not just the fourteen league games `season.table` itself counts.
+    """
+    standing = next(s for s in season.table if s.side is track)
+    played, won, lost, tied = standing.played, standing.won, standing.lost, standing.tied
+    for r in season.playoffs:
+        if r.home is not track and r.away is not track:
+            continue
+        played += 1
+        if r.winner is None:
+            tied += 1
+        elif r.winner is track:
+            won += 1
+        else:
+            lost += 1
+
+    return JourneyStats(
+        runs=acc.total_runs, wickets=acc.total_wickets,
+        played=played, won=won, lost=lost, tied=tied,
+        champion=season.champion is track,
+        top_scorer=_leader(acc.runs), top_wicket_taker=_leader(acc.wickets),
+    )
+
+
+@dataclass
 class Season:
     sides: list[Side]
     results: list[Result] = field(default_factory=list)
@@ -106,18 +187,40 @@ def fixtures(n: int = TEAMS) -> list[tuple[int, int]]:
 
 
 def play(model: Model, home: Side, away: Side, rng: random.Random,
-         stage: str = "league") -> Result:
+         stage: str = "league", track: Side | None = None,
+         stats: JourneyAccumulator | None = None) -> Result:
     """One match. The side batting first is the home side, which is all `home` means here.
 
     A tie is left as a tie rather than taken to a super over: the archive has sixteen of
     them in nineteen years and the league awards a point each, so the rarer path is the
     one that would need the evidence.
-    """
-    from game.__main__ import attack, batting_order
 
-    first = play_innings(model, batting_order(home.xi, model), attack(away.xi, model), rng)
-    second = play_innings(model, batting_order(away.xi, model), attack(home.xi, model),
+    [A72] `home.xi`/`away.xi` are already in batting order -- the human drafter's own
+    arrangement, or `opposition_order`'s algorithmic one for a historical side -- so
+    `lineup` only converts, it does not sort. The Impact Player never bats (only eleven
+    can); he widens the bowling pool `attack` draws from.
+
+    `track`/`stats` are optional and additive: when `track` is one of the two sides in
+    THIS match, its own batting and bowling innings are folded into `stats` right here,
+    from the exact `Innings` objects the match already computed -- not a second
+    simulation, and not something every caller has to know or care about.
+    """
+    from game.__main__ import attack, lineup
+
+    home_twelve = home.xi + ([home.impact] if home.impact is not None else [])
+    away_twelve = away.xi + ([away.impact] if away.impact is not None else [])
+
+    first = play_innings(model, lineup(home.xi, model), attack(away_twelve, model), rng)
+    second = play_innings(model, lineup(away.xi, model), attack(home_twelve, model),
                           rng, target=first.runs)
+
+    if stats is not None and track is not None:
+        if track is home:
+            stats.add_batting(first)
+            stats.add_bowling(second)
+        elif track is away:
+            stats.add_batting(second)
+            stats.add_bowling(first)
 
     r = Result(home=home, away=away, stage=stage,
                home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
@@ -141,12 +244,14 @@ def _credit(standing: Standing, runs: int, balls: int, wickets: int,
     standing.balls_against += full if against_wickets >= 10 else against_balls
 
 
-def run_league(model: Model, sides: list[Side], rng: random.Random) -> Season:
+def run_league(model: Model, sides: list[Side], rng: random.Random,
+               track: Side | None = None, stats: JourneyAccumulator | None = None
+               ) -> Season:
     season = Season(sides=sides)
     standings = {s.name: Standing(side=s) for s in sides}
 
     for i, j in fixtures(len(sides)):
-        r = play(model, sides[i], sides[j], rng)
+        r = play(model, sides[i], sides[j], rng, track=track, stats=stats)
         season.results.append(r)
         h, a = standings[r.home.name], standings[r.away.name]
         h.played += 1
@@ -169,7 +274,9 @@ def run_league(model: Model, sides: list[Side], rng: random.Random) -> Season:
     return season
 
 
-def run_playoffs(model: Model, season: Season, rng: random.Random) -> Season:
+def run_playoffs(model: Model, season: Season, rng: random.Random,
+                  track: Side | None = None, stats: JourneyAccumulator | None = None
+                  ) -> Season:
     """The IPL's own four-team finish, which is not a straight semi-final bracket.
 
     Finishing first or second is worth a second life: Qualifier 1's loser drops into
@@ -178,19 +285,35 @@ def run_playoffs(model: Model, season: Season, rng: random.Random) -> Season:
     """
     first, second, third, fourth = (s.side for s in season.table[:4])
 
-    q1 = play(model, first, second, rng, stage="Qualifier 1")
-    elim = play(model, third, fourth, rng, stage="Eliminator")
+    q1 = play(model, first, second, rng, stage="Qualifier 1", track=track, stats=stats)
+    elim = play(model, third, fourth, rng, stage="Eliminator", track=track, stats=stats)
     q1_loser = second if q1.winner is first else first
     elim_winner = elim.winner or third            # a tied eliminator falls to the higher seed
 
-    q2 = play(model, q1_loser, elim_winner, rng, stage="Qualifier 2")
+    q2 = play(model, q1_loser, elim_winner, rng, stage="Qualifier 2", track=track, stats=stats)
     finalist = q1.winner or first
     other = q2.winner or q1_loser
-    final = play(model, finalist, other, rng, stage="Final")
+    final = play(model, finalist, other, rng, stage="Final", track=track, stats=stats)
 
     season.playoffs = [q1, elim, q2, final]
     season.champion = final.winner or finalist
     return season
+
+
+def run_cup(model: Model, sides: list[Side], rng: random.Random) -> list[Result]:
+    """A four-side knockout for a room's "cup" format: two semi-finals (1v4, 2v3 by
+    JOIN order -- a room has no league table to seed from, unlike `run_playoffs`) then a
+    final between the winners. `play()` is reused verbatim; only the bracket shape here
+    is new -- three matches total, no table, no net run rate.
+    """
+    if len(sides) != 4:
+        raise ValueError(f"a cup needs exactly four sides, got {len(sides)}")
+    semi1 = play(model, sides[0], sides[3], rng, stage="Semi-final 1")
+    semi2 = play(model, sides[1], sides[2], rng, stage="Semi-final 2")
+    finalist1 = semi1.winner or sides[0]   # a tied semi falls to the higher seed
+    finalist2 = semi2.winner or sides[1]
+    final = play(model, finalist1, finalist2, rng, stage="Final")
+    return [semi1, semi2, final]
 
 
 def historical_sides(deck: Deck, rng: random.Random, n: int) -> list[Side]:
@@ -200,7 +323,7 @@ def historical_sides(deck: Deck, rng: random.Random, n: int) -> list[Side]:
     nineteen times more often than Kochi -- and skipping any squad that cannot field a
     legal eleven, which is a property of the squad rather than a failure here.
     """
-    from game.__main__ import choose_xi, viable
+    from game.__main__ import opposition_twelve, viable
 
     sides: list[Side] = []
     seen: set[int] = set()
@@ -213,12 +336,13 @@ def historical_sides(deck: Deck, rng: random.Random, n: int) -> list[Side]:
         squad = list(deck.cards_by_fs.get(fs_id, ()))
         if len(squad) < 11 or not viable(squad):
             continue
-        xi = choose_xi(squad)
+        xi, impact = opposition_twelve(squad)
         if len(xi) != 11:
             continue
         card = squad[0]
         sides.append(Side(name=f"{card.franchise} {card.season_year}",
-                          short=_abbrev(card.franchise, card.season_year), xi=xi))
+                          short=_abbrev(card.franchise, card.season_year),
+                          xi=xi, impact=impact))
     return sides
 
 

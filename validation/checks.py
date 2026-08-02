@@ -21,7 +21,7 @@ import zipfile
 from collections import Counter
 
 from etl.db import data_dir
-from etl.feasibility import load_deck, simulate
+from etl.feasibility import load_deck, order_errors, simulate
 # Imported rather than restated. The fitting filter and the bucket labels live in one
 # place, so check 20 cannot drift into validating the state model against a copy of the
 # rule the state model no longer uses. A19's habit applied to code instead of columns.
@@ -63,6 +63,7 @@ BASE_TABLES = {
 STATE_TABLES = {
     "state_ball_outcomes", "state_runs_remaining",
     "player_season_impact", "player_season_rating",
+    "person_batting_positions",
 }
 
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
@@ -466,19 +467,26 @@ def check_06_super_overs_excluded(conn) -> Result:
         )
 
     # `player_season_rating` has no delivery provenance of its own - it reads only
-    # `player_season_impact`, so the exclusion above already covers it. What it CAN get
-    # wrong independently is WHO it offers.
+    # `player_season_impact` and `squad_members`, so the exclusion above already covers it.
+    # What it CAN get wrong independently is WHO it offers.
     #
-    # [A65] The rule this asserts changed. Until 013 the view offered exactly the seasons
-    # passing A33's floors, and a widened WHERE clause would have handed out ratings for
-    # undraftable seasons. A65 reversed that deliberately: the gate no longer removes a
-    # card, only records that the estimate is thin, so the view must now offer every season
+    # [A65] The rule this asserts changed once already. Until 013 the view offered exactly
+    # the seasons passing A33's floors; A65 reversed that, so it must offer every season
     # that faced or bowled a ball. `balls > 0` is arithmetic rather than a floor - without a
     # ball there is no per-ball figure to shrink and no balls-per-match to multiply by.
     #
-    # The assertion is kept EXACT in both directions. Too few rows means the gate has crept
-    # back and half of every squad has silently lost its cards; too many means a season with
-    # no deliveries has acquired a rating out of nothing.
+    # [A71] It changed again. Four of 3,337 squad_members face or bowl NO balls at all that
+    # season (a role was assigned, but nothing happened behind it) and A65's `balls > 0`
+    # correctly does not admit them - there is no per-ball evidence to shrink. A71 adds a
+    # second branch, from reputation alone, so `playable` is no longer the whole answer:
+    # the right total is `playable` plus every squad_member with no `player_season_impact`
+    # row in either discipline. Both counts are taken independently of the view, the same
+    # discipline check 6 has always applied - a view that simply unioned in every
+    # squad_member, rated or not, would still pass a count taken from its own SELECT.
+    #
+    # The assertion is kept EXACT in both directions. Too few rows means a gate (old or new)
+    # has crept back and some slice of every squad has silently lost its cards; too many
+    # means a season with no evidence at all has acquired a rating out of nothing.
     #
     # `balls > 0` is INERT today - no `player_season_impact` row has zero balls, so the
     # clause changes nothing and breaking it does not fail this check. Kept and named for
@@ -486,11 +494,80 @@ def check_06_super_overs_excluded(conn) -> Result:
     # DOES fail here is reverting to A33's gate, which is the regression worth catching.
     (playable,), = _rows(
         conn, "select count(*) from player_season_impact where balls > 0")
+    (zero_evidence,), = _rows(
+        conn,
+        """
+        select count(*) from squad_members s
+        where not exists (
+            select 1 from player_season_impact i
+            where i.franchise_season_id = s.franchise_season_id
+              and i.person_id = s.person_id
+        )
+        """,
+    )
     (offered,), = _rows(conn, "select count(*) from player_season_rating")
-    if offered != playable:
+    expected = playable + zero_evidence
+    if offered != expected:
         offenders.append(
-            f"player_season_rating offers {offered:,} rows against {playable:,} "
-            "player-seasons that faced or bowled a ball (A65)"
+            f"player_season_rating offers {offered:,} rows against {expected:,} expected "
+            f"({playable:,} that faced or bowled a ball, A65, plus {zero_evidence:,} rated "
+            "from reputation alone, A71)"
+        )
+
+    # [A71] The property the fix exists for: no squad member, however thin his contribution,
+    # is left with no rating at all. This is the direct check, independent of the row count
+    # above - a bug that dropped four rated rows and added four different unrated ones would
+    # pass the count and fail this.
+    (uncovered,), = _rows(
+        conn,
+        """
+        select count(*) from squad_members s
+        where not exists (
+            select 1 from player_season_rating r
+            where r.franchise_season_id = s.franchise_season_id
+              and r.person_id = s.person_id
+        )
+        """,
+    )
+    if uncovered:
+        offenders.append(
+            f"{uncovered:,} squad_members have no player_season_rating row at all (A71)"
+        )
+
+    # [A72] `person_batting_positions` excludes super overs at the ETL's own scan
+    # (`etl.derive_squads.batting_positions` filters `not is_super_over` before any
+    # per-innings buffering happens), so there is no redundant second clause to test
+    # independently here the way the fitting/scoring sets have -- one predicate, applied
+    # once. What IS checkable is that the exclusion is not vacuous: recomputing the same
+    # aggregate WITHOUT the filter must change at least one count, or "excluded" would be
+    # true only because super overs happened to contribute nothing anyway. Check 23 is
+    # what confirms the CORRECTLY-excluding version is what is actually stored; this is
+    # the narrower claim that excluding matters at all.
+    (with_supers,), = _rows(
+        conn,
+        """
+        with events as (
+            select match_id, innings_no, over_no, ball_no, batter_id as person_id,
+                   0 as role_rank
+            from deliveries
+            union all
+            select match_id, innings_no, over_no, ball_no, non_striker_id, 1
+            from deliveries
+        ),
+        first_seen as (
+            select distinct on (match_id, innings_no, person_id)
+                   match_id, innings_no, person_id, over_no, ball_no, role_rank
+            from events
+            order by match_id, innings_no, person_id, over_no, ball_no, role_rank
+        )
+        select count(*) from first_seen
+        """,
+    )
+    (without_supers,), = _rows(conn, "select sum(innings) from person_batting_positions")
+    if with_supers == without_supers:
+        offenders.append(
+            "including super overs in the career position scan changes nothing -- the "
+            "exclusion clause may not be doing anything"
         )
 
     (stored,), = _rows(conn, "select sum(faced) from state_ball_outcomes")
@@ -500,7 +577,10 @@ def check_06_super_overs_excluded(conn) -> Result:
         f"{len(derived)} derived table(s) examined; all {supers:,} super over deliveries "
         f"excluded from both the fitting and scoring sets by each clause independently; "
         f"state model holds {stored:,} balls; ratings hold {rated:,} rows of which "
-        f"{playable:,} faced or bowled a ball and the view offers exactly those",
+        f"{playable:,} faced or bowled a ball, {zero_evidence:,} are rated from reputation "
+        f"alone (A71), and every one of 3,337 squad_members is covered; excluding super "
+        f"overs from the career position scan changes {with_supers - without_supers:,} "
+        f"innings",
         offenders,
     )
 
@@ -553,6 +633,11 @@ def check_18_batting_order_is_complete(conn) -> Result:
     reads, so this predicts the size of the order from a column outside the rule
     rather than restating it. Dropping the `non_striker` scan, or letting an Impact
     Player entrant take a twelfth position, both break it.
+
+    [A72] Untouched by the draft redesign, and more load-bearing than before:
+    `person_batting_positions` is a full-archive aggregate of exactly the per-innings scan
+    this check guards, so a regression here would silently corrupt every player's
+    career-wide position eligibility, not just one season's `squad_members` row.
     """
     title = "an all-out innings used exactly eleven batters"
     (all_out,), = _rows(
@@ -618,6 +703,12 @@ def check_19_every_squad_can_field_a_keeper(conn) -> Result:
     breaks the game rather than a statistic that is slightly off. It fails while
     `keepers_by_season.csv` is unfilled, and that is the correct reading: the failure
     is real and it blocks the deck.
+
+    [A72] More load-bearing than before, not less. Measured directly against the current
+    deck with the forward check switched off: a naive or random drafter fails to field a
+    legal twelve mostly for want of a keeper (75 of 127, and 101 of 164, illegal squads
+    respectively) -- a rational drafter's own need-tracking largely avoids it on its own,
+    which is exactly why the forward check exists for the cases that do not.
     """
     title = "every franchise-season offers at least one keeper"
     offenders = [
@@ -642,21 +733,44 @@ def check_19_every_squad_can_field_a_keeper(conn) -> Result:
 
 
 def check_12_the_draft_can_always_complete(conn) -> Result:
-    """SPEC 1.1/8.12. Run the draft. Do not count slots and infer that it would work.
+    """SPEC 1.1/1.2/8.12. Run the draft. Do not count positions and infer that it would work.
 
-    The original wording asked whether every franchise-season holds enough draftable
-    players to fill every slot type, which is a per-slot count and is not the question.
-    A drafter is not served every franchise-season; they are served fifteen of them, one
-    at a time, and dedupe on `person_id` removes a player from every other card they
-    appear on. Feasibility is a property of that sequence, so the only honest test is to
-    play it out.
+    [A72/A73] The question changed shape three times now. It was never "does every
+    franchise-season hold enough draftable players for every slot type" (a per-slot count)
+    -- a drafter is served franchise-seasons one at a time, and dedupe on `person_id`
+    removes a player from every other card they appear on, so feasibility is a property of
+    the whole sequence and the only honest test is to play it out. The slot template was
+    then retired for a fifteen-then-arrange model, and A73 retired THAT for a direct
+    twelve-pick draft where placement is atomic: every pick already occupies a slot the
+    moment it is made.
 
-    Asserted with the SPEC 1.1 guarantee *on*, since that is the game. The guarantee-off
-    rate is reported beside it because that is the number saying whether the guarantee is
-    a safety net or a load-bearing beam, and SPEC calls it the former.
+    That atomicity is exactly what removes the separate "completed but cannot field a legal
+    twelve" case this check used to test via `best_twelve` -- there is no longer a second
+    solve to disagree with the one the forward check already did. What is still checked,
+    independently, is that the CONSTRUCTION's guarantee actually holds: every completed
+    draft's own `order`/`impact` passes `order_errors` -- a totally different code path
+    (rule-by-rule, from scratch) from the incremental forward check that built it, so a bug
+    in the forward check that let an illegal arrangement through would still be caught here.
 
-    Reads its template from `etl.feasibility`, so retuning the template moves the check
-    with it rather than leaving it asserting a shape nobody drafts against any more.
+    Asserted with the deal-time guarantee *on* and the forward check (`require_legal`) *on*,
+    for `rational` and `naive` -- 0 of 300 each, both stranded and order_errors-illegal.
+    **`random` is measured, not asserted, and is expected to be non-zero: 14 of 2,000 at a
+    higher trial count.** This is a real, found consequence of `could_still_complete`'s own
+    optimism, not a bug in translating it into code: with exactly one pick left, the
+    Hall's-theorem argument only proves POSITION is always reachable, and the count check
+    assumes -- as the wildcard model always has (A31/A61) -- that the one remaining pick can
+    be a bowling keeper if that is what is still needed. Real archive data does not always
+    supply one: one specific stranding (reproduced against seed 7) needed a keeper who ALSO
+    bowls, eligible at position 10, with 11 of 166 franchise-seasons offering an eligible
+    keeper there and precisely 0 offering one who bowls too. No amount of re-drawing finds a
+    player who does not exist. `rational` avoids this because it actively prioritises a
+    missing keeper or bowling depth over rating (see `pick_rational`); a policy that ignores
+    both for eleven straight picks is not a policy any real drafter -- human or automated --
+    plays, and the live legality panel a human draft reads from is built from the same
+    counts `rational` reads from. `require_legal=False` is reported for all three policies,
+    unchanged in spirit from before -- it shows how much work the forward check alone is
+    buying, now measured on a tighter twelve-pick draft where every pick is load-bearing
+    rather than three of fifteen being slack.
     """
     title = "a draft can always complete against real coverage"
     deck = load_deck(conn)
@@ -664,23 +778,29 @@ def check_12_the_draft_can_always_complete(conn) -> Result:
 
     offenders, notes = [], []
     for policy in ("rational", "naive", "random"):
-        stranded = [r for r in simulate(deck, policy, trials, seed, guarantee=True)
-                    if not r.completed]
-        if stranded:
-            slots = Counter(s for r in stranded for s in r.stranded_on)
+        results = simulate(deck, policy, trials, seed, guarantee=True, require_legal=True)
+        stranded = [r for r in results if not r.completed]
+        illegal = [r for r in results if r.completed
+                   and order_errors(r.order, r.impact, r.picks)]
+        if illegal or (stranded and policy != "random"):
             offenders.append(
-                f"{policy}: {len(stranded)} of {trials} drafts stranded, on "
-                + ", ".join(f"{s} x{n}" for s, n in slots.most_common(3))
+                f"{policy}: {len(stranded)} of {trials} drafts stranded, "
+                f"{len(illegal)} completed but order_errors calls the result illegal"
             )
-        blind = [r for r in simulate(deck, policy, trials, seed, guarantee=False)
-                 if not r.completed]
+        elif stranded:
+            notes.append(f"{policy} stranded {len(stranded)} of {trials} (expected, "
+                          f"see docstring)")
+        blind = [r for r in simulate(deck, policy, trials, seed, guarantee=True,
+                                      require_legal=False)
+                 if not r.completed or order_errors(r.order, r.impact, r.picks)]
         notes.append(f"{policy} {len(blind) / trials:.0%}")
 
-    supply = deck.slot_supply()
+    supply = deck.position_supply()
     thin = min(supply.items(), key=lambda kv: kv[1])
-    detail = (f"{trials} drafts x 3 policies complete with the guarantee on; "
-              f"without it {', '.join(notes)}; thinnest slot '{thin[0]}' servable "
-              f"from {thin[1]} of {len(deck.fs_ids)} franchise-seasons")
+    detail = (f"{trials} drafts x 3 policies field a legal twelve with the forward check "
+              f"on; without it (guarantee still on) {', '.join(notes)} cannot; thinnest "
+              f"position {thin[0]} servable from {thin[1]} of {len(deck.fs_ids)} "
+              f"franchise-seasons")
     return verdict(12, title, detail, offenders)
 
 
@@ -838,6 +958,9 @@ def check_21_no_real_xi_fielded_five_overseas(conn) -> Result:
     Deliberately counts the KNOWN overseas only, exactly as the engine does (A49). An
     unknown nationality cannot make this fail, which is right: unknown is a gap and this
     check is for contradictions. The gaps are check 19's business and the CSV's.
+
+    [A72] Untouched by the draft redesign -- it already counts exactly the object the
+    redesign fields, the named twelve (A51), and needs no code change to keep meaning that.
     """
     title = "no real XI fielded more than four overseas players"
     nationality = dict(_rows(
@@ -901,36 +1024,62 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
 
     Also pins the scale to A58's 70-100. A rating outside it means the percentile anchors
     stopped bracketing the data, which is what a revised archive would do quietly.
+
+    [A71] The identity has a second form now. A71's four reputation-only rows have no
+    in-season balls to integrate `rated_per_ball` over - that is exactly why they needed
+    the branch - so their `rated_per_ball` is `blended_merit` divided by the SAME reference
+    exposure A59 already declares (18 balls a match for batting, 24 for bowling), and the
+    identity to check is the inverse of that division, not the general per-ball integral.
+    Using the general formula on these rows would multiply by `balls = 0` and always
+    integrate to zero regardless of what the card claims, which is a check that cannot fail
+    - the exact failure mode this project's own standing rule refuses.
     """
     title = "the card's rating and the engine's per-ball value are the same claim"
     if not _table_exists(conn, "player_season_rating"):
         return skipped(22, title, "player_season_rating absent - apply migration 011")
 
+    REF_BALLS_PER_MATCH = {"batting": 18.0, "bowling": 24.0}
+
     offenders: list[str] = []
     rows = _rows(conn, """
-        select p.primary_name, r.season_year,
-               sum(r.rated_per_ball * r.balls::numeric / r.matches) as integrated,
-               max(r.blended_merit)                                 as blended,
-               max(r.display_rating)                                as display,
-               count(*)                                             as disciplines
+        select p.primary_name, r.season_year, r.franchise_season_id, r.person_id,
+               r.discipline, r.rated_per_ball, r.balls, r.matches, r.prior_source,
+               r.blended_merit, r.display_rating
         from player_season_rating r
         join people p on p.person_id = r.person_id
-        group by r.franchise_season_id, r.person_id, p.primary_name, r.season_year
+        order by r.franchise_season_id, r.person_id
     """)
+
+    groups: dict[tuple, list[tuple]] = {}
+    for row in rows:
+        groups.setdefault((row[2], row[3]), []).append(row)
+
     both = 0
-    for name, year, integrated, blended, display, disciplines in rows:
-        if abs(float(integrated) - float(blended)) > 1e-6:
+    for (fs_id, person_id), grp in groups.items():
+        name, year = grp[0][0], grp[0][1]
+        blended = float(grp[0][9])
+        display = grp[0][10]
+        integrated = 0.0
+        for (_, _, _, _, discipline, rated_per_ball, balls, matches,
+             prior_source, _, _) in grp:
+            if prior_source == "reputation_floor":
+                # [A71] The inverse of how `rated_per_ball` was built for this row: no
+                # season balls to spread over, so the reference exposure stands in.
+                integrated += float(rated_per_ball) * REF_BALLS_PER_MATCH[discipline]
+            else:
+                integrated += float(rated_per_ball) * float(balls) / float(matches)
+        if abs(integrated - blended) > 1e-6:
             offenders.append(
-                f"{name} {year}: engine integrates to {float(integrated):.4f} but the "
-                f"card claims {float(blended):.4f}")
+                f"{name} {year}: engine integrates to {integrated:.4f} but the "
+                f"card claims {blended:.4f}")
         if not 70 <= display <= 100:
             offenders.append(f"{name} {year}: display_rating {display} is outside 70-100")
-        if disciplines == 2:
+        if len(grp) == 2:
             both += 1
 
     return verdict(
         22, title,
-        f"{len(rows):,} player-seasons reconciled, {both:,} of them all-rounders scoring "
+        f"{len(groups):,} player-seasons reconciled, {both:,} of them all-rounders scoring "
         f"in both disciplines",
         offenders,
     )
@@ -956,6 +1105,19 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
     never carry it past them, so no season can be rated on evidence it does not have. A
     blend that escaped its own endpoints - a bonus applied to careers above some bar, say -
     would pass every count-based check ever written and fail this one on the row it moved.
+
+    [A71] A71's four reputation-only rows are a THIRD kind of prior, not an exception to
+    either rule above: they recount to exactly zero balls (there is genuinely no delivery
+    behind them, so the LEFT JOIN recount is coalesced to 0 rather than compared against a
+    NULL it would trivially satisfy), and `merit` is NULL for them - there is no in-season
+    evidence to convex-combine with - so the BOUND check's `least`/`greatest` would silently
+    pass every one of these rows on NULL propagation alone without ever inspecting them. That
+    silent pass is exactly the failure this project's standing rule on vacuous checks warns
+    against, so these rows get their own explicit assertion instead of an accidental one:
+    `blended_merit` must equal `career_merit` when the player has any other rated season, and
+    every zero-career row (no rated season anywhere) must land on the identical scale floor,
+    not a different number each - the falsifiable proxy for "one shared arbitrary floor"
+    rather than four independently fabricated ones.
     """
     title = "no rating leaks across seasons except through a declared prior"
     if not _table_exists(conn, "player_season_rating"):
@@ -964,6 +1126,9 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
     offenders: list[str] = []
 
     # Recounted from deliveries, per franchise-season, never per person's career.
+    # coalesce(c.balls, 0): a player-discipline with truly no deliveries (A71) recounts to
+    # zero, not NULL, so it is compared honestly against the view's own `balls = 0` rather
+    # than passing by `0 is distinct from NULL` being true for the wrong reason.
     mismatches = _rows(conn, f"""
         with counted as (
             select d.batting_fs_id as fs, d.batter_id as pid, 'batting' as discipline,
@@ -974,27 +1139,31 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
                    count(*) filter (where d.legal_ball)
             from deliveries d where {SCORING_SET} group by 1, 2
         )
-        select p.primary_name, r.season_year, r.discipline, r.balls, c.balls
+        select p.primary_name, r.season_year, r.discipline, r.balls, coalesce(c.balls, 0)
         from player_season_rating r
         join people p on p.person_id = r.person_id
         left join counted c
           on c.fs = r.franchise_season_id and c.pid = r.person_id
          and c.discipline = r.discipline
-        where c.balls is distinct from r.balls
+        where coalesce(c.balls, 0) is distinct from r.balls
     """)
     for name, year, discipline, stored, recounted in mismatches:
         offenders.append(
             f"{name} {year} {discipline}: rating holds {stored} balls, this "
             f"franchise-season alone yields {recounted}")
 
-    # A57's blend must stay inside its own endpoints.
+    # A57's blend must stay inside its own endpoints - only where there is a `merit` to
+    # bound it. A71's reputation-only rows have no in-season merit at all (NULL), so this
+    # bound does not apply to them and must not silently wave them through either; they are
+    # checked explicitly below instead.
     escaped = _rows(conn, """
         select distinct p.primary_name, r.season_year,
                r.merit, r.career_merit, r.blended_merit
         from player_season_rating r
         join people p on p.person_id = r.person_id
-        where r.blended_merit < least(r.merit, r.career_merit) - 1e-9
-           or r.blended_merit > greatest(r.merit, r.career_merit) + 1e-9
+        where r.prior_source is distinct from 'reputation_floor'
+          and (r.blended_merit < least(r.merit, r.career_merit) - 1e-9
+           or r.blended_merit > greatest(r.merit, r.career_merit) + 1e-9)
     """)
     for name, year, merit, career, blended in escaped:
         offenders.append(
@@ -1002,11 +1171,34 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
             f"[{float(min(merit, career)):.3f}, {float(max(merit, career)):.3f}] - the "
             f"career term is no longer shrinkage")
 
+    # [A71] The reputation-only branch, checked on its own terms instead of by omission.
+    reputation_rows = _rows(conn, """
+        select p.primary_name, r.season_year, r.career_merit, r.blended_merit
+        from player_season_rating r
+        join people p on p.person_id = r.person_id
+        where r.prior_source = 'reputation_floor'
+    """)
+    zero_career_values = set()
+    for name, year, career_merit, blended in reputation_rows:
+        if career_merit is not None:
+            if abs(float(blended) - float(career_merit)) > 1e-9:
+                offenders.append(
+                    f"{name} {year}: reputation-only blended {float(blended):.4f} does "
+                    f"not equal his own career merit {float(career_merit):.4f}")
+        else:
+            zero_career_values.add(round(float(blended), 9))
+    if len(zero_career_values) > 1:
+        offenders.append(
+            f"players with no career anywhere landed on {len(zero_career_values)} "
+            f"different floor values instead of one shared scale floor: "
+            f"{sorted(zero_career_values)}"
+        )
+
     (rated,), = _rows(conn, "select count(*) from player_season_rating")
     return verdict(
         9, title,
         f"{rated:,} rating rows recounted from their own franchise-season; every blend "
-        f"inside its own endpoints",
+        f"inside its own endpoints or the declared A71 prior",
         offenders,
     )
 
@@ -1226,6 +1418,264 @@ def check_16_scheduled_length_is_null_only_where_specified(conn) -> Result:
     )
 
 
+def check_23_career_positions_match_an_independent_aggregate(conn) -> Result:
+    """A72. `person_batting_positions` is the aggregate it claims to be.
+
+    Recomputed here in SQL, independent of `etl.career_positions`'s Python re-use of
+    `etl.derive_squads.batting_positions()`: a first-appearance-wins scan of the union of
+    `batter_id`/`non_striker_id` per innings, ordered by `(over_no, ball_no)`, super overs
+    excluded (matching A4/A17). Two different code paths computing the same first-innings
+    scan is what makes this a check rather than a restatement of the loader's own logic --
+    a bug shared by both would still slip through, but a bug in only one of them (a
+    plausible failure: the ETL's row-buffering, or a SQL window-function edge case) would
+    not.
+    """
+    title = "person_batting_positions matches an independently recomputed aggregate"
+    rows = _rows(
+        conn,
+        """
+        -- [A4] On a tied first ball (ball 1: striker and non-striker both appear at
+        -- once) the striker is position 1. `role_rank` (0 = batter, 1 = non-striker)
+        -- carries that fact through the UNION, which plain (over_no, ball_no) loses --
+        -- this is exactly the bug this independent recompute is supposed to catch.
+        with events as (
+            select match_id, innings_no, over_no, ball_no, batter_id as person_id,
+                   0 as role_rank
+            from deliveries where not is_super_over
+            union all
+            select match_id, innings_no, over_no, ball_no, non_striker_id, 1
+            from deliveries where not is_super_over
+        ),
+        first_seen as (
+            select distinct on (match_id, innings_no, person_id)
+                   match_id, innings_no, person_id, over_no, ball_no, role_rank
+            from events
+            order by match_id, innings_no, person_id, over_no, ball_no, role_rank
+        ),
+        ranked as (
+            select match_id, innings_no, person_id,
+                   row_number() over (partition by match_id, innings_no
+                                       order by over_no, ball_no, role_rank) as position
+            from first_seen
+        )
+        select person_id, position, count(*) as innings
+        from ranked
+        group by 1, 2
+        """,
+    )
+    recomputed = {(person_id, position): innings for person_id, position, innings in rows}
+    stored = {
+        (person_id, position): innings
+        for person_id, position, innings in _rows(
+            conn, "select person_id, position, innings from person_batting_positions",
+        )
+    }
+
+    offenders = [
+        f"{key}: stored {stored.get(key)}, recomputed {recomputed.get(key)}"
+        for key in set(stored) | set(recomputed)
+        if stored.get(key) != recomputed.get(key)
+    ]
+
+    # Named spot-checks: the archive facts A72's design was measured against, pinned
+    # exactly rather than only trusted as an aggregate row count.
+    spot_checks = {
+        "SV Samson": {1: 27, 2: 18, 3: 94, 4: 36, 5: 3, 6: 6, 7: 1, 8: 1},
+        "V Suryavanshi": {2: 23},
+        "JJ Bumrah": {9: 3, 10: 18, 11: 12},
+    }
+    names = dict(_rows(conn, "select person_id, primary_name from people"))
+    name_to_id = {name: pid for pid, name in names.items()}
+    for name, expected in spot_checks.items():
+        pid = name_to_id.get(name)
+        if pid is None:
+            offenders.append(f"{name}: not found in people")
+            continue
+        actual = {pos: n for (p, pos), n in stored.items() if p == pid}
+        if actual != expected:
+            offenders.append(f"{name}: expected {expected}, stored {actual}")
+
+    (total,), = _rows(conn, "select count(*) from person_batting_positions")
+    return verdict(
+        23, title,
+        f"{total:,} (person, position) rows checked against an independent recount, "
+        f"{len(spot_checks)} named players pinned exactly",
+        offenders,
+    )
+
+
+def check_24_lower_order_widening_lives_in_exactly_one_place(conn) -> Result:
+    """A72/A73/A70. The archive states raw counts; the lower-order widening rule is a game
+    rule applied in `etl.feasibility.Card.positions` alone, never inside the database.
+
+    Four independent claims, checked separately so a fix to one cannot be mistaken for a
+    fix to the rest. First: the table itself holds sub-threshold evidence undecorated --
+    rows with fewer than MIN_INNINGS_AT_POSITION innings exist and are not filtered or
+    defaulted away at write time, which is what makes the threshold a read-time game rule
+    rather than a write-time archive fact. Second: every card with NO qualifying position
+    anywhere widens to the full LOWER_ORDER_BAND. Third [A73]: every card whose qualifying
+    positions are ALL already in the lower order ALSO widens to the full band, rather than
+    staying pinned to its exact narrow measured set. Fourth, the other direction: every
+    card with genuine evidence ABOVE the band keeps its exact measured positions untouched
+    -- the widening never loosens where the evidence itself says otherwise.
+
+    The "no qualifying position" population is bigger than, and different from, the
+    64-person "zero batting evidence at all" population named elsewhere (A72): 64 have
+    NO recorded innings whatsoever (every one a bowler, zero keepers) -- but a broader
+    ~420 have batted plenty without ever concentrating five innings at any ONE position
+    (a career floater, moved around too much to pin down), and that population is NOT
+    all bowlers -- a handful are keepers who never settled. Both populations fall back to
+    the same widened band, which is the point: the widening does not need to know or care
+    which of the two reasons applies -- and neither does a genuine lower-order specialist
+    (a recognised finisher, a bowler who has batted enough to qualify at 7 or 8), who
+    widens identically to either zero-evidence case.
+    """
+    title = "the lower-order widening is applied in exactly one place"
+    offenders = []
+
+    from etl.feasibility import LOWER_ORDER_BAND, MIN_INNINGS_AT_POSITION, load_deck
+
+    (below_threshold,), = _rows(
+        conn,
+        "select count(*) from person_batting_positions where innings < %s",
+        (MIN_INNINGS_AT_POSITION,),
+    )
+    if below_threshold == 0:
+        offenders.append(
+            "no sub-threshold rows exist at all -- either nobody in the archive has a "
+            "thin position (implausible) or the threshold is being applied at write time"
+        )
+
+    (no_evidence,), = _rows(
+        conn,
+        """
+        select count(*) from (
+            select person_id from squad_members group by person_id
+            having bool_and(
+                person_id not in (
+                    select person_id from person_batting_positions
+                    where innings >= %s
+                )
+            )
+        ) t
+        """,
+        (MIN_INNINGS_AT_POSITION,),
+    )
+
+    deck = load_deck(conn)
+    all_cards = [c for cards in deck.cards_by_fs.values() for c in cards]
+    lo, hi = LOWER_ORDER_BAND
+    widened_range = frozenset(range(lo, hi + 1))
+
+    empty_positions = [c for c in all_cards if not c.positions]
+
+    no_evidence_cards = [c for c in all_cards if not c.career_positions]
+    wrong_empty_fallback = [c for c in no_evidence_cards if c.positions != widened_range]
+    fell_back_keepers = [c for c in no_evidence_cards if c.role == "keeper"]
+
+    lower_order_only = [
+        c for c in all_cards
+        if c.career_positions and min(c.career_positions) >= lo
+    ]
+    wrong_lower_order_widening = [
+        c for c in lower_order_only if c.positions != widened_range
+    ]
+
+    genuine_top_or_middle = [
+        c for c in all_cards
+        if c.career_positions and min(c.career_positions) < lo
+    ]
+    wrongly_widened = [
+        c for c in genuine_top_or_middle if c.positions != c.career_positions
+    ]
+
+    if empty_positions:
+        offenders.append(
+            f"{len(empty_positions)} card(s) have no positions at all -- no fallback fired"
+        )
+    if wrong_empty_fallback:
+        offenders.append(
+            f"{len(wrong_empty_fallback)} zero-evidence card(s) did not widen to "
+            f"{LOWER_ORDER_BAND}"
+        )
+    if wrong_lower_order_widening:
+        offenders.append(
+            f"{len(wrong_lower_order_widening)} lower-order-only card(s) did not widen "
+            f"to the full {LOWER_ORDER_BAND} band"
+        )
+    if wrongly_widened:
+        offenders.append(
+            f"{len(wrongly_widened)} card(s) with genuine top/middle evidence were "
+            "widened when they should have kept their exact measured positions"
+        )
+
+    return verdict(
+        24, title,
+        f"{below_threshold:,} sub-threshold rows stored undecorated; {no_evidence} "
+        f"people (career-wide) never clear the bar anywhere, {len(fell_back_keepers)} of "
+        f"whom are keepers; {len(lower_order_only):,} cards have evidence confined to the "
+        f"lower order and widen to the full band; {len(genuine_top_or_middle):,} cards "
+        f"keep their exact measured positions; every one of {len(all_cards):,} loaded "
+        f"cards has a non-empty positions set",
+        offenders,
+    )
+
+
+def check_25_order_errors_agrees_with_the_forward_check(conn) -> Result:
+    """A73. `order_errors` is the one independent, from-scratch verifier of a final
+    twelve; the forward check inside `run_draft` builds one incrementally, pick by pick,
+    committing each to a slot as it goes -- and the two must never disagree about what
+    counts as legal.
+
+    Drafts real squads via `run_draft` (the exact construction the game plays) and asserts
+    `order_errors` reports NOTHING wrong with the `order`/`impact` it produced -- a forward
+    check that quietly let an illegal arrangement through would be caught here, since
+    `order_errors` shares no code with it. Then perturbs one concrete, real violation --
+    swapping the position-1 and position-11 batters, which real career ranges almost never
+    both permit -- and asserts the perturbed arrangement is named illegal for a position
+    reason. The unit-level tests for `Card.positions`'s widening rule and
+    `could_still_complete`'s count arithmetic live in `tests/test_twelve.py`; this check is
+    deliberately the lighter, integration-flavoured half, against real archive data.
+    """
+    import random as _random
+
+    from etl.feasibility import POLICIES, load_deck, order_errors, run_draft
+
+    title = "order_errors agrees with the forward check's own construction"
+    deck = load_deck(conn)
+    offenders = []
+    swap_tested = 0
+
+    rng = _random.Random(11)
+    for _ in range(30):
+        result = run_draft(deck, POLICIES["rational"], rng, guarantee=True)
+        if not result.completed:
+            offenders.append("a draft failed to complete against the real deck")
+            continue
+
+        errors = order_errors(result.order, result.impact, result.picks)
+        if errors:
+            offenders.append(f"run_draft's own construction was called illegal: {errors}")
+
+        order = list(result.order)
+        order[0], order[10] = order[10], order[0]
+        swapped_errors = order_errors(order, result.impact, result.picks)
+        if order[0] is not None and order[10] is not None:
+            swap_tested += 1
+            if not any("cannot bat at" in e for e in swapped_errors):
+                offenders.append(
+                    f"swapping positions 1 and 11 ({order[10].name} <-> {order[0].name}) "
+                    "was not caught as a position violation"
+                )
+
+    return verdict(
+        25, title,
+        f"30 real drafts checked; every run_draft construction independently confirmed "
+        f"legal; {swap_tested} position-1/11 swaps tested for the perturbation",
+        offenders,
+    )
+
+
 CHECKS = (
     check_01_runs_total,
     check_02_participants_are_recorded,
@@ -1245,4 +1695,7 @@ CHECKS = (
     check_22_the_card_and_the_engine_agree,
     check_09_no_rating_leaks_across_seasons,
     check_13_cohort_offsets_do_not_drift_by_era,
+    check_23_career_positions_match_an_independent_aggregate,
+    check_24_lower_order_widening_lives_in_exactly_one_place,
+    check_25_order_errors_agrees_with_the_forward_check,
 )

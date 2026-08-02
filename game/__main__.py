@@ -5,9 +5,16 @@
     uv run python -m game --validate      # the engine against the archive it was fitted on
 
 The draft is not reimplemented here. It is `etl.feasibility`'s -- the same deck, the same
-uniform sampling over 166 franchise-seasons, the same dedupe, the same deal-time guarantee,
-and above all the same TEMPLATE, so a template retune moves the game and the feasibility
-check together instead of leaving them describing two different games.
+uniform sampling over 166 franchise-seasons, the same dedupe, the same deal-time
+guarantee, and above all the same legality algebra, so a rule change there moves the game
+and the feasibility check together instead of leaving them describing two different games.
+
+[A72] There is no more one XI-selection rule for both sides. The human drafter arranges
+his own final twelve (`lineup` just converts whatever order he chose); the nine historical
+OPPOSITION sides have no drafter, so they keep the old algorithmic rule -- best keeper,
+five bowlers, the best bats, then made legal -- renamed `opposition_xi` rather than
+replaced, plus a new `opposition_twelve` giving them an Impact Player too, so the game does
+not quietly field eleven against the player's twelve.
 """
 
 from __future__ import annotations
@@ -19,26 +26,31 @@ import random
 import psycopg
 from dotenv import load_dotenv
 
-from etl.feasibility import Card, POLICIES, SQUAD_SIZE, load_deck, run_draft
+from etl.feasibility import (
+    BOWLERS_IN_TWELVE, Card, POLICIES, TWELVE_SIZE, load_deck, run_draft,
+)
 from etl.state_model import FITTING_SET, NOT_A_WICKET
 from game.simulator import (
-    BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, OVERS, Innings, Model, Player,
-    load_model, play_innings,
+    BALLS_PER_OVER, OVERS, Innings, Model, Player, load_model, play_innings,
 )
 
-# Where each band bats. `tail` last, and a player with no band at all beside them -- see
-# `bat_delta` for why those two are not the same case.
+# Where each band bats, for the OPPOSITION's algorithmic order only -- the human drafter
+# has no band, he has his own arrangement. `tail` last, and a player with no band at all
+# beside them -- see `bat_delta` for why those two are not the same case.
 BAND_ORDER = {"opener": 0, "top_order": 1, "middle": 2, "finisher": 3, "tail": 4}
-
-BOWLERS_NEEDED = OVERS // MAX_OVERS_PER_BOWLER
 
 
 def bat_delta(card: Card, model: Model) -> tuple[float, bool]:
     """The batting delta for a drafted card, and whether it is a real rating.
 
-    A34's floor means most of a squad has no batting rating at all -- five bowlers and a
-    couple of the middle order -- and every one of them still has to bat. Three ways to
-    handle that, two of them wrong:
+    A `Card` has no batting rating at all -- `bat is None` -- whenever that player never had
+    a batting band this season, mainly specialist bowlers: measured at 379 of 3,333 cards
+    (11%), not most of a squad. **[Corrected 2026-08-01 -- this originally said "A34's
+    floor" and "most of a squad"; the floor being described is A33's, and A65/A71 have since
+    made A33's floor irrelevant to whether a card is rated at all, only to how -- so the
+    only cards left with no batting rating are the ones with no batting discipline to rate,
+    a smaller and different population than "most."]** Every one of them still has to bat.
+    Three ways to handle that, two of them wrong:
 
     - Give them zero. Zero is league average after centring, so a number 10 would bat like a
       rated middle-order player. This is the A23 failure exactly: defaulting an unobserved
@@ -73,11 +85,14 @@ OVERSEAS_LIMIT = 4
 def viable(xi: list[Card]) -> bool:
     """An XI has to keep wicket and get through twenty overs."""
     return (any(c.role == "keeper" for c in xi)
-            and sum(c.has_bowl for c in xi) >= BOWLERS_NEEDED)
+            and sum(c.has_bowl for c in xi) >= BOWLERS_IN_TWELVE)
 
 
-def choose_xi(squad: list[Card]) -> list[Card]:
-    """Eleven from fifteen: a keeper, five bowlers, the best bats left, then made legal.
+def opposition_xi(squad: list[Card]) -> list[Card]:
+    """Eleven from a real squad: a keeper, five bowlers, the best bats left, then made
+    legal. [A72] Renamed from `choose_xi`, not replaced -- the human drafter now arranges
+    his own final twelve by hand, but the nine historical OPPOSITION sides have no
+    drafter, so they keep exactly this algorithmic rule.
 
     Five bowlers because twenty overs at four each is exactly five, so the count is the
     rule rather than a preference. The keeper is taken first and only then are the bowlers
@@ -93,12 +108,32 @@ def choose_xi(squad: list[Card]) -> list[Card]:
     keeper = max((c for c in squad if c.role == "keeper"), key=lambda c: c.rating)
     rest = [c for c in squad if c is not keeper]
 
-    bowlers = sorted((c for c in rest if c.has_bowl), key=lambda c: -c.bowl)[:BOWLERS_NEEDED]
+    bowlers = sorted((c for c in rest if c.has_bowl),
+                      key=lambda c: -c.bowl)[:BOWLERS_IN_TWELVE]
     remaining = [c for c in rest if c not in bowlers]
     batters = sorted(remaining, key=lambda c: -(c.bat if c.has_bat else -9.9))
 
     xi = [keeper] + bowlers + batters[:11 - 1 - len(bowlers)]
     return enforce_overseas(xi, squad)
+
+
+def opposition_twelve(squad: list[Card]) -> tuple[list[Card], Card | None]:
+    """`opposition_xi` plus an Impact Player: the best remaining bowl-rated card.
+
+    Without this the nine historical opposition sides would field eleven against the
+    human drafter's twelve, a systematic and silent asymmetry. [A51] A real XI already at
+    the four-overseas limit obliges an Indian Impact Player -- four across the NAMED
+    TWELVE is the bound the archive itself enforces -- so the bench is restricted to
+    known-non-overseas candidates once the XI is already at the limit, the same
+    known-domestic-only repair `enforce_overseas` already applies to swaps.
+    """
+    xi = opposition_xi(squad)
+    xi_overseas = sum(c.overseas is True for c in xi)
+    bench = [c for c in squad if c not in xi and c.has_bowl]
+    if xi_overseas >= OVERSEAS_LIMIT:
+        bench = [c for c in bench if c.overseas is not True]
+    impact = max(bench, key=lambda c: c.bowl) if bench else None
+    return opposition_order(xi), impact
 
 
 def enforce_overseas(xi: list[Card], squad: list[Card]) -> list[Card]:
@@ -134,27 +169,36 @@ def enforce_overseas(xi: list[Card], squad: list[Card]) -> list[Card]:
     return xi
 
 
-def batting_order(xi: list[Card], model: Model) -> list[Player]:
-    """Bands first, rating within a band, unbanded last. Not a captain's order, a band's."""
-    ordered = sorted(
+def opposition_order(xi: list[Card]) -> list[Card]:
+    """Bands first, rating within a band, unbanded last -- the algorithmic order for a
+    historical opposition side, which has no human drafter to arrange it by hand."""
+    return sorted(
         xi,
         key=lambda c: (BAND_ORDER.get(c.band, len(BAND_ORDER)),
                        -(c.bat if c.has_bat else -9.9)),
     )
-    return [to_player(c, model) for c in ordered]
 
 
-def attack(xi: list[Card], model: Model) -> list[Player]:
-    """The five who bowl, best first -- not everyone in the XI who can.
+def lineup(order: list[Card], model: Model) -> list[Player]:
+    """Convert an already-arranged batting order into Players. No sorting here -- `order`
+    is either the human drafter's own arrangement or `opposition_order`'s algorithmic one;
+    this function's only job is the A34/A48 batting-delta conversion, per player, in place.
+    """
+    return [to_player(c, model) for c in order]
+
+
+def attack(twelve: list[Card], model: Model) -> list[Player]:
+    """The five who bowl, best first, drawn from up to twelve candidates -- the eleven who
+    bat plus the Impact Player -- not everyone among them who can.
 
     Capped at five deliberately. `choose_bowler` hands the next over to whoever has bowled
-    least, so an XI containing seven bowlers would give all seven three overs each: the two
-    worst get a full share and the best gets a quarter of their four. That is not how a T20
-    attack works, and it quietly flattens exactly the rating differences the draft is about.
+    least, so a pool of seven or twelve bowl-rated candidates would spread overs thinner
+    still: the extra depth is meant to widen the POOL a captain chooses from, never the
+    attack itself, which is still five bowlers across twenty overs (A50).
     """
     return [to_player(c, model)
-            for c in sorted((c for c in xi if c.has_bowl),
-                            key=lambda c: -c.bowl)[:BOWLERS_NEEDED]]
+            for c in sorted((c for c in twelve if c.has_bowl),
+                            key=lambda c: -c.bowl)[:BOWLERS_IN_TWELVE]]
 
 
 def overseas_status(xi: list[Card]) -> str:
@@ -177,11 +221,24 @@ def overseas_status(xi: list[Card]) -> str:
             f"{known + unknown}. Needs nationality.csv, which is 314 rows unfilled.")
 
 
-def print_draft(picks: list[tuple[Card, str]]) -> None:
-    print(f"    {'#':>2}  {'dealt':38} {'pick':24} {'slot':18} rating")
-    for i, (card, slot) in enumerate(picks, 1):
+def print_draft(picks: list[Card]) -> None:
+    """[A73] No more slot column -- a pick already names both the player and where he
+    bats, so the order below is exactly `run_draft`'s own `order`/`impact`, not a
+    separately-arranged twelve."""
+    print(f"    {'#':>2}  {'dealt':38} {'pick':24} {'positions':16} rating")
+    for i, card in enumerate(picks, 1):
         dealt = f"{card.franchise} {card.season_year}"
-        print(f"    {i:>2}  {dealt:38} {card.name:24} {slot:18} {card.rating:+.3f}")
+        positions = ",".join(str(p) for p in sorted(card.positions))
+        print(f"    {i:>2}  {dealt:38} {card.name:24} {positions:16} {card.rating:+.3f}")
+
+
+def print_twelve(order: list[Card | None], impact: Card) -> None:
+    print(f"    {'#':>3}  {'batting order':24} rating")
+    for i, card in enumerate(order, 1):
+        name = card.name if card is not None else "-"
+        rating = f"{card.rating:+.3f}" if card is not None else ""
+        print(f"    {i:>3}  {name:24} {rating}")
+    print(f"    IMP  {impact.name:24} {impact.rating:+.3f}")
 
 
 def print_scorecard(innings: Innings, side: str, chasing: bool) -> None:
@@ -248,7 +305,7 @@ def validate(conn, model: Model, trials: int, seed: int) -> None:
     """
     average = [Player(f"batter {i}", 0.0, 0.0) for i in range(11)]
     rng = random.Random(seed)
-    innings = [play_innings(model, average, average[:BOWLERS_NEEDED], rng)
+    innings = [play_innings(model, average, average[:BOWLERS_IN_TWELVE], rng)
                for _ in range(trials)]
     archive = archive_innings(conn)
 
@@ -297,33 +354,34 @@ def main() -> None:
         result = run_draft(deck, POLICIES[args.policy], rng)
         if not result.completed:
             raise SystemExit(f"{side} stranded on {result.stranded_on} -- check 12 lies")
-        squads.append((side, result.picks))
+        squads.append((side, result))
 
-    for side, picks in squads:
-        print(f"\n=== {side}: {SQUAD_SIZE} picks, uniform deck, "
-              f"{args.policy} drafter, seed {args.seed} ===\n")
-        print_draft(picks)
+    for side, result in squads:
+        print(f"\n=== {side}: {TWELVE_SIZE} picks straight into the final twelve, "
+              f"uniform deck, {args.policy} drafter, seed {args.seed} ===\n")
+        print_draft(result.picks)
 
-    elevens = []
-    for side, picks in squads:
-        xi = choose_xi([c for c, _ in picks])
-        print(f"\n=== {side}: playing XI ===\n")
-        for c in sorted(xi, key=lambda c: (BAND_ORDER.get(c.band, 9),
-                                           -(c.bat if c.has_bat else -9.9))):
-            bat = f"{c.bat:+.3f}" if c.has_bat else "  --  "
-            bowl = f"{c.bowl:+.3f}" if c.has_bowl else "  --  "
-            print(f"    {c.name:24} {c.franchise} {c.season_year}   "
-                  f"{str(c.band or '-'):12} bat {bat}  bowl {bowl}")
-        print(f"\n    four-overseas rule: {overseas_status(xi)}")
-        elevens.append((side, xi))
+    # [A73] `run_draft` already produced a fully-arranged order/impact for every policy --
+    # human or automated -- since placement is atomic at pick time. The CLI (no
+    # interactive drafter) just prints what came out, with no separate arranging step.
+    for side, result in squads:
+        print(f"\n=== {side}: final twelve ===\n")
+        print_twelve(result.order, result.impact)
+        all_twelve = [c for c in result.order if c is not None] + [result.impact]
+        print(f"\n    four-overseas rule: {overseas_status(all_twelve)}")
 
-    (side_a, xi_a), (side_b, xi_b) = elevens
+    (side_a, result_a), (side_b, result_b) = squads
     print(f"\n\n=== the match: {side_a} bat first ===")
 
-    first = play_innings(model, batting_order(xi_a, model), attack(xi_b, model), rng)
+    all_a = [c for c in result_a.order if c is not None] + [result_a.impact]
+    all_b = [c for c in result_b.order if c is not None] + [result_b.impact]
+
+    first = play_innings(model, lineup(list(result_a.order), model),
+                          attack(all_b, model), rng)
     print_scorecard(first, f"{side_a} innings", chasing=False)
 
-    second = play_innings(model, batting_order(xi_b, model), attack(xi_a, model), rng,
+    second = play_innings(model, lineup(list(result_b.order), model),
+                          attack(all_a, model), rng,
                           target=first.runs)
     print_scorecard(second, f"{side_b} innings, chasing {first.runs + 1}", chasing=True)
 

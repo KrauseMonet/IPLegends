@@ -58,10 +58,12 @@ MAX_OVERS_PER_BOWLER = 4
 class Player:
     """A drafted player-season as the engine sees it: a name and two per-ball deltas.
 
-    `bat` is never None. A number 10 still has to bat, and A33 refuses to rate a batting
-    season under 100 balls -- so the delta for one comes from the pooled below-floor
-    population of their band, which is estimable precisely because it is pooled (A43's
-    shape). `bowl` is None for anyone who cannot bowl, and the engine never asks them to.
+    `bat` is never None. A number 10 still has to bat, and a card with no batting band at
+    all this season has no individual batting rating to give him -- so the delta for one
+    comes from the pooled below-floor population of their band instead, which is estimable
+    precisely because it is pooled (A43's shape), even though A33's floor means no single
+    one of those seasons could be rated alone. `bowl` is None for anyone who cannot bowl,
+    and the engine never asks them to.
     """
 
     name: str
@@ -171,12 +173,21 @@ def load_model(conn) -> Model:
     # Read back out of the view rather than recomputed from it: the centring constant is
     # `shrunk - centred` for any row of that season, so this is the view's own answer to
     # its own arithmetic and cannot drift from it (A35's rule about k, applied to A42's mean).
+    #
+    # [A71] `where shrunk_per_ball is not null` excludes the reputation-only branch, whose
+    # rows carry no per-ball evidence and so no `shrunk`/`centred` values at all (NULL, not
+    # zero - there is nothing to compute them from). Without this filter, `distinct` mints
+    # a second (discipline, season_year, NULL) row for any season holding one of those four
+    # players, and dict-comprehension iteration order decides whether the real mean or the
+    # NULL one survives - caught by running the app rather than by any check, because no
+    # validation check reads this query.
     season_mean = {
         (discipline, year): float(mean)
         for discipline, year, mean in conn.execute(
             """
             select distinct discipline, season_year, shrunk_per_ball - centred_per_ball
             from player_season_rating
+            where shrunk_per_ball is not null
             """
         )
     }

@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from etl.feasibility import Card
-from game.__main__ import (
-    BOWLERS_NEEDED, OVERSEAS_LIMIT, attack, enforce_overseas, viable,
-)
+from etl.feasibility import BOWLERS_IN_TWELVE, Card
+from game.__main__ import OVERSEAS_LIMIT, attack, enforce_overseas, viable
 from game.simulator import (
     BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, OVERS, BowlerCard, Player,
     choose_bowler, tilt,
@@ -98,7 +96,7 @@ def bowlers(n: int) -> list[BowlerCard]:
 
 
 def test_an_attack_of_five_bowls_four_overs_each_and_never_twice_running():
-    attack_of_five = bowlers(BOWLERS_NEEDED)
+    attack_of_five = bowlers(BOWLERS_IN_TWELVE)
     previous = None
     for _ in range(OVERS):
         picked = choose_bowler(attack_of_five, previous)
@@ -121,16 +119,27 @@ def test_a_bowler_is_not_recalled_immediately_even_when_he_is_the_obvious_choice
 def test_the_attack_is_capped_at_five_however_many_can_bowl():
     """An XI with seven bowlers would otherwise give all seven three overs each, and the
     best bowler in the side would bowl a quarter of their allocation."""
-    xi = [Card(1, f"p{i}", f"p{i}", frozenset(), bat=0.0, bowl=0.1 * i) for i in range(7)]
+    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(7)]
     picked = attack(xi, model=None)
-    assert len(picked) == BOWLERS_NEEDED
+    assert len(picked) == BOWLERS_IN_TWELVE
     assert [p.name for p in picked] == ["p6", "p5", "p4", "p3", "p2"]
+
+
+def test_the_attack_may_be_drawn_from_a_twelve_including_the_impact_player():
+    """[A72] The Impact Player widens the bowling POOL, not the cap: passing eleven plus
+    an Impact still returns exactly five, and the Impact may be among them if he is the
+    best-rated bowler on offer."""
+    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(11)]
+    impact = Card(1, "impact", "impact", bat=0.0, bowl=99.0)
+    picked = attack(xi + [impact], model=None)
+    assert len(picked) == BOWLERS_IN_TWELVE
+    assert picked[0].name == "impact", "the Impact Player is eligible to be the best bowler"
 
 
 # --- the four-overseas rule, enforced on what is KNOWN --------------------------------
 
 def squad_card(i: int, overseas, *, keeper=False, bat=0.30, bowl=None) -> Card:
-    return Card(1, f"p{i}", f"p{i}", frozenset(), bat=bat, bowl=bowl,
+    return Card(1, f"p{i}", f"p{i}", bat=bat, bowl=bowl,
                 role="keeper" if keeper else None, overseas=overseas)
 
 

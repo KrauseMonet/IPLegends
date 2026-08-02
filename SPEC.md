@@ -83,7 +83,11 @@ a reroll as a safety net.
 2016 and Kohli RCB 2022 are distinct entries. A drafted squad may contain any person only
 once. Dedupe on `person_id`, not on the franchise-season entry.
 
-**Slot template. [A6 — supersedes the original template]**
+**Slot template. [A6 — supersedes the original template. SUPERSEDED IN TURN by A72/A73,
+2026-08-02 — see §1.1a below. Kept here, not deleted, because the measurement history
+below (A40, A61) is real and the reasoning it establishes — read the guarantee-off number,
+not the guarantee-on one; a net that fires constantly is a beam — is still exactly how
+§1.1a's own draft-feasibility numbers are read.]**
 
 | Slot | Count |
 |---|---|
@@ -175,6 +179,44 @@ identical squads, divergence after a reroll is legitimate, and any completed run
 reproducible from the seed alone for leaderboard disputes.
 
 **Phase 1 builds none of that.** This phase is the data pipeline only.
+
+### 1.1a Position eligibility and the final twelve, as actually built [A72/A73]
+
+The slot template above (A6/A40) was built, played, and replaced with something
+skill-driven: no slot categories at all. **Eligibility for each numbered batting position
+(1–11) is a career fact about the player**, not a category his card belongs to, and the
+drafter picks a playing **twelve directly** — eleven who bat, one Impact Player — one slot
+at a time, rather than fifteen candidates followed by a separate arranging phase.
+
+**Eligibility.** A position is real evidence about a player only if he has batted there in
+at least `MIN_INNINGS_AT_POSITION = 5` separate career innings, counted career-wide across
+all nineteen seasons in `person_batting_positions` (migration 017, derived by
+`etl.career_positions`). The naive alternative — a career `MIN`/`MAX` envelope, already
+stored on `squad_members` — was tried first and measured wrong: one outlier innings widens
+an envelope forever (SV Samson came out 1–8, Rinku Singh 3–8). Counted instead: Samson
+eligible at **1, 2, 3, 4, 6**; Rinku at **5, 6, 7**; Suryavanshi at **2 alone**.
+
+**The widening rule.** A player with no qualifying position anywhere, OR whose qualifying
+positions are *all* already in the lower order (a recognised finisher, a part-time bowler
+who has batted enough to qualify at 7 or 8), widens to the full **`LOWER_ORDER_BAND` =
+(7, 11)** — "any position below 6," excluding 6 itself. A player with any qualifying
+position above that band keeps his exact measured set untouched. Both are the same kind of
+fungible lower-order resource in practice; the widening only ever loosens where the
+evidence is silent or already agrees, never where it says otherwise.
+
+**The final twelve is drafted directly, not arranged afterward.** Every pick names both a
+candidate and the slot he occupies (a batting position, or Impact) in one move, **final the
+instant it lands** — no bench, no unplace, no rearranging. Squad size and slot count are
+therefore the same number, twelve, and the deal-time guarantee's forward check
+(`could_still_complete`) reduces to two integer inequalities rather than a bipartite-
+matching search: with exactly as many future picks as future open slots, a maximally-
+flexible hypothetical future pick can always be matched to *some* remaining slot (Hall's
+theorem), so only the keeper and bowling-depth counts can still be unreachable.
+
+**Requirements on the final twelve**, unchanged in spirit from the old template: at least
+one wicketkeeper, at least five with a bowling rating, at most four known-overseas (A61).
+There is no keeper "slot," no pace/spin split, no "open" band — a keeper bats wherever his
+own career says he bats, exactly like anyone else.
 
 ---
 
@@ -1084,12 +1126,17 @@ sweep grid, not a reason to trust them less or to round the next one. The sweep 
 evidence; if it is ever re-run on a revised archive and the stabilisation point moves, the
 constants move with it.
 
-Below a floor a player-season is **not rated at all** — not shrunk, not floored, simply not
-draftable from that franchise-season. This is the honest form: below the floor there is not
-enough signal to rate the season, so we do not pretend to. Since the deck is franchise-season
-grain, the consequence is a player you cannot draft from that specific team-year, which is
-the correct outcome rather than a loss. Excluded players stay in `squad_members` for
-completeness, they just do not appear as a pick.
+**[Superseded 2026-08-01 by A65/A71 — this section originally said a player below a floor
+was "not rated at all" and "not draftable from that franchise-season." That was true through
+migration 012 and is no longer true.]** Below a floor a player-season is not *precisely*
+estimable — there is not enough signal for its own per-ball figure to mean much — but A65
+removed the consequence rather than the measurement: the gate still records
+`not_rateable_reason` (this section's arithmetic is exactly how that column is filled), but a
+thin season is now rated from its prior/reputation instead of being dropped from the view. Of
+3,337 squad members, only 4 have literally zero balls in either discipline; A71 rates even
+those, from the player's own career or (with no career anywhere) a shared scale floor. Every
+squad member is draftable today. See CLAUDE.md's decisions log, A65–A71, for the full
+correction — it is not repeated section by section here.
 
 **The floors are measured, not assumed, and they are not the same number.** Reading the top
 5 of the raw list at each candidate cut, batting settles at 100 and bowling does not:
@@ -1369,13 +1416,19 @@ batting floor, and the largest tail batting season in nineteen years is **95 bal
 is the floor being *right* — a number 9 genuinely has no measurable batting season — but
 three things follow.
 
-1. **A cohort with zero rateable seasons has no offset and no display mapping, and any
-   player whose only rateable discipline falls in it is simply not rated as a batter.**
-   `tail` has nothing to estimate from, so §7.4 must not estimate it; `death`, at 8
-   seasons and 3 of them DJ Bravo, must be pooled rather than fitted. This is exactly the
-   condition A2 gave for refusing per-cell z-scoring, arriving a section earlier than
-   expected. Not rating a number 9's batting is the honest outcome — a tail batter is
-   drafted for their bowling, and that rating is real.
+1. **A cohort with zero gate-passing seasons has no offset to estimate, and gets zero
+   rather than a fitted one.** `tail` has nothing to estimate an offset FROM, so §7.4 must
+   not estimate it; `death`, at 8 seasons and 3 of them DJ Bravo, must be pooled rather than
+   fitted. This is exactly the condition A2 gave for refusing per-cell z-scoring, arriving a
+   section earlier than expected. **[Corrected 2026-08-01 — this originally continued "...
+   and any player whose only rateable discipline falls in it is simply not rated as a
+   batter." A65 made that false: a `tail` batter with any balls at all, however few, gets a
+   real batting rating today, just with an uncorrected (zero) cohort offset. Only a `tail`
+   batter with LITERALLY ZERO batting balls that season — 4 of 3,337 squad members,
+   archive-wide, across both disciplines — has no per-ball figure to rate at all, and A71
+   covers those from reputation instead.]** A tail batter is still drafted mainly for their
+   bowling, and that rating is real, but "not rated as a batter" is no longer the honest
+   description of the common case.
 2. **Check 12 must be written to FAIL on slot coverage rather than tolerate it.** A deck
    that cannot field a rated finisher from 123 of 166 franchise-seasons is a draft-legality
    problem, not a presentation one.
@@ -1841,7 +1894,10 @@ and the partly-drafted squad has to exist somewhere between pick 3 and pick 4. T
 
 The client carries **the seed and the choice indices made so far**. Each request replays the
 draft from scratch and serves the next deal. The state string is `7-0.3.14` — seed, then
-choices, in the open.
+choices, in the open. **[A73, 2026-08-02] Each choice now carries a slot too**
+(`7-3:4.0:12`, index then slot per move), since a pick is final the instant it lands rather
+than arranged afterward — the "why unsigned" argument below is unchanged, it is exactly as
+true of `index:slot` pairs as it was of bare indices.
 
 **[Corrected 2026-07-31 while building it] The state is NOT signed.** This section first
 called for an HMAC. Writing the replay showed there is nothing for a signature to protect:
@@ -1867,7 +1923,8 @@ The RNG stream *does* depend on the choices, because a pick changes which cards 
 eligible and therefore how many re-draws the guarantee performs. That is why the choices are
 part of the state and the seed alone is not enough.
 
-**The state is a seed and fifteen small integers.** It fits in a URL.
+**The state is a seed and twelve small `index:slot` pairs** (A73 — was fifteen bare
+integers). It fits in a URL.
 
 ### 11.3 Why this one
 
@@ -1891,10 +1948,10 @@ all reached by calling `etl.feasibility` and `game`, never by restating them.
 |---|---|
 | `GET /api/health` | deck size, for a load balancer |
 | `POST /api/draft?seed=` | start a game; omit the seed for a fresh one |
-| `GET /api/draft/{state}` | the current deal, or the finished squad |
-| `POST /api/draft/{state}/pick` | `{"index": n}` into the deal's options |
-| `GET /api/xi/{state}` | the eleven the engine would field, and its overseas status |
-| `GET /api/match/{state}` | the scorecard |
+| `GET /api/draft/{state}` | the current deal, or the finished twelve |
+| `POST /api/draft/{state}/pick` | `{"index": n, "slot": s}` — **[A73] index into the deal's options, slot 1-11 or 12 (Impact); one move, final the instant it lands, no separate place route** |
+| `GET /api/twelve/{state}` | the arranged twelve, and its overseas status |
+| `GET /api/season/{state}` | fourteen league matches, the table, the playoffs |
 
 `web/session.py` does the work, and it **reuses `run_draft` verbatim** rather than
 reimplementing the loop: the human is injected as a policy that replays recorded choices and
@@ -1966,17 +2023,22 @@ two get a second life and the table is worth playing for.
 
 ### 12.5 What the deal shows
 
-**The whole squad, not the takeable part of it.** A franchise-season is about twenty men and
-roughly half clear A33's floors, so a list of only the pickable ones misrepresents the squad
-— Chennai 2010 would read as ten players, and you could not see that it had Dhoni once your
-keeper was named. Everyone else is greyed with the reason: *already drafted*, *overseas
-quota full*, *no place open*, or, for an unrated man, **the numbers**.
+**The whole squad, not the takeable part of it.** A franchise-season is about twenty men, so
+a list of only the pickable ones misrepresents the squad — Chennai 2010 would read as ten
+players, and you could not see that it had Dhoni once your keeper was named. Everyone else is
+greyed with the reason: *already drafted*, *overseas quota full*, or *no place open*.
 
-That last one earns its wording. McCullum made 158\* in the first match ever played and is
-unrated for 2008 — because he appeared four times and faced 92 balls, under A33's hundred-ball
-floor. "Not rated" alone reads as a bug to anyone who remembers the innings; "4 matches, 92
-faced · below the rating floor" reads as the rule it is.
+**[Corrected 2026-08-01 — this section originally described a fourth reason, "the numbers,"**
+**for an "unrated man," using McCullum's 92-ball 2008 as the example: "unrated... under A33's**
+**hundred-ball floor."** A65 made that false — McCullum's 2008 is rated 83 and is a real Card
+today, not a greyed-out plain record. A33's floor still exists, but only as an input to
+*how* a season is estimated (its own evidence vs. a prior), never to *whether* it gets a
+rating at all. **A71 finished the job**: the 4 of 3,337 squad members with literally zero
+balls in either discipline — not "below a floor," but no evidence whatsoever — are rated too,
+from their own career elsewhere or, lacking one, a shared arbitrary floor. There is no
+"unrated man" case left in the archive as it stands today; the fourth greyed-out reason is
+dormant rather than deleted, kept for the day a revised archive reintroduces a squad member
+with no assignable discipline at all (A27's shape, not A33's).
 
-The unrated men are carried as plain records and **never as `Card`s**, deliberately: a Card is
-the draft's currency, and one of these reaching `cards_by_fs` would make an unrated player
-draftable through the `open` slot.
+Every squad member reaching a franchise-season's deal is therefore now a real `Card` — see
+CLAUDE.md's decisions log, A65–A71, for the mechanism.

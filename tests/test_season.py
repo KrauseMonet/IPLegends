@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections import Counter
 
 from game.season import (
-    DOUBLE_AT, MATCHES_EACH, POINTS_TIE, POINTS_WIN, TEAMS, Side, Standing, _abbrev,
-    _credit, fixtures,
+    DOUBLE_AT, MATCHES_EACH, POINTS_TIE, POINTS_WIN, TEAMS, JourneyAccumulator, Result,
+    Season, Side, Standing, _abbrev, _credit, _leader, fixtures, journey_stats,
 )
-from game.simulator import BALLS_PER_OVER, OVERS
+from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
 FULL = OVERS * BALLS_PER_OVER
 
@@ -112,3 +112,86 @@ def test_a_side_is_named_like_a_fixture_list():
 
 def test_a_missing_franchise_does_not_produce_a_blank_side():
     assert _abbrev(None, 2011) == "2011"
+
+
+# --- the journey card's stats accumulator ------------------------------------------------
+
+def _batter(name, runs, balls, faced_any=True):
+    return BatterCard(Player(name, 0.0), runs=runs, balls=balls, faced_any=faced_any)
+
+
+def _bowler(name, wickets, balls=24):
+    return BowlerCard(Player(name, 0.0), balls=balls, wickets=wickets)
+
+
+def test_add_batting_accumulates_runs_across_matches():
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("A", 30, 20), _batter("B", 10, 8)], bowling=[]))
+    acc.add_batting(Innings(batting=[_batter("A", 15, 10)], bowling=[]))
+    assert acc.runs == {"A": 45, "B": 10}
+    assert acc.total_runs == 55
+
+
+def test_a_batter_who_never_faced_a_ball_is_not_counted():
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("A", 0, 0, faced_any=False)], bowling=[]))
+    assert acc.runs == {}
+    assert acc.total_runs == 0
+
+
+def test_add_bowling_accumulates_wickets_across_matches():
+    acc = JourneyAccumulator()
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 2), _bowler("Y", 0)]))
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 1)]))
+    assert acc.wickets == {"X": 3, "Y": 0}
+    assert acc.total_wickets == 3
+
+
+def test_a_bowler_who_never_bowled_a_ball_is_not_counted():
+    acc = JourneyAccumulator()
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 0, balls=0)]))
+    assert acc.wickets == {}
+
+
+def test_leader_breaks_ties_alphabetically():
+    """A dict's own iteration order is insertion order, not a real tie-break -- the leader
+    must not depend on which of two equal totals happened to be added first."""
+    assert _leader({"Zed": 50, "Amy": 50, "Mid": 10}) == ("Amy", 50)
+
+
+def test_leader_on_no_evidence_at_all():
+    assert _leader({}) == ("", 0)
+
+
+def test_journey_stats_combines_the_league_record_with_however_far_the_playoffs_went():
+    you, them = side("YOU"), side("THEM")
+    standing = Standing(side=you, played=14, won=9, lost=5, tied=0)
+    season = Season(sides=[you, them], table=[standing])
+    season.playoffs = [
+        Result(home=you, away=them, winner=you, stage="Qualifier 1"),
+        Result(home=them, away=you, winner=them, stage="Final"),
+    ]
+    season.champion = them  # lost the final
+
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("A", 50, 30)], bowling=[]))
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("B", 2)]))
+
+    stats = journey_stats(season, you, acc)
+    assert stats.played == 16 and stats.won == 10 and stats.lost == 6
+    assert stats.champion is False
+    assert stats.runs == 50 and stats.wickets == 2
+    assert stats.top_scorer == ("A", 50)
+    assert stats.top_wicket_taker == ("B", 2)
+
+
+def test_journey_stats_for_a_side_that_never_reached_the_playoffs():
+    you, them = side("YOU"), side("THEM")
+    standing = Standing(side=you, played=14, won=4, lost=10, tied=0)
+    season = Season(sides=[you, them], table=[standing])
+    season.playoffs = [Result(home=them, away=them, winner=them, stage="Final")]
+    season.champion = them
+
+    stats = journey_stats(season, you, JourneyAccumulator())
+    assert stats.played == 14, "no playoff match involved this side, so none is added"
+    assert stats.won == 4 and stats.lost == 10

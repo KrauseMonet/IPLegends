@@ -356,6 +356,9 @@ count, from parsing the whole archive, is **295,732 deliveries across 1,243 matc
 | A68 | **Estimate parameters where the evidence is adequate; rate everyone.** A65 removed the gate everywhere at once and check 13 failed within minutes: batting `finisher` drifted **0.090 runs/ball** across eras against a 3-SE bar of 0.054. SPEC 8.13's own instruction for that failure is to split the offset by era. **It was checked before it was obeyed, and the instruction would have been wrong.** The same drift on gate-passing seasons alone clears nothing — worst ratio falls **1.65 -> 0.90** — so it is not an era effect but thin seasons, whose band comes from a handful of innings and which are unevenly spread across eras now the Impact Player rule has teams using more players. Splitting would have fitted noise, which A2 refused twice. Season means and cohort offsets are now measured on gate-passing seasons and applied to all. |
 | A69 | **The reputation floor must be CONVEX or it stops being shrinkage.** 013 wrote it as `0.85 * career`, which is sign-blind: a below-average player's career merit is negative, so 85% of it is LARGER, and the floor silently lifted every poor player toward the league. **Check 9 caught it on the row it moved** — A Mithun 2009 blended to -0.591 from a merit of -0.695 and a career of -0.721, outside both. Now `0.85*career + 0.15*merit`: still lift-only against the evidence blend, but a genuine convex combination, so a rating can never leave the interval its own two inputs span. |
 | A70 | **Migration 010 SAID the cohort offset was coalesced to zero and the SQL never did it.** The comment claimed a LEFT join with a coalesce so an unclassified cohort "arrives uncorrected rather than vanishing"; the code was `centred - cl.cohort_offset`, which yields NULL. It never fired because every cohort had rows, so **for four migrations the guard was decorative and nobody could tell** — each one copied the block forward verbatim. A68 broke it within minutes: offsets estimated on gate-passing seasons leave `tail` with none (A39), so every tail card came back NULL and the draft crashed on `max()` of an empty sequence. **The loud symptom was luck** — a NULL reaching the display would have shown a blank rating and nothing else. **A comment asserting behaviour the code does not have is worse than no comment**: it is a claim a reader will trust. |
+| A72 | **The draft's slot template (A6/A40) is retired for something skill-driven: eligibility for each numbered batting position is a career fact about the PLAYER, not a category his card belongs to.** The obvious mechanism was tried first because it needed no new ETL: career `MIN(batting_position_min)`/`MAX(batting_position_max)`, already on `squad_members` since migration 004. It does not hold up — measured against the archive, SV Samson comes out **1-8** and RK Singh (Rinku) comes out **3-8**, both far looser than reputation, because a single outlier innings widens a MIN/MAX envelope forever and can never narrow it back. **Counting replaces enveloping**: a position is real evidence about a player only if he has batted there in at least **`MIN_INNINGS_AT_POSITION` = 5** separate career innings — declared directly by the user, a game-design constant like A57's `REPUTATION`, not a threshold swept against a list. Migration 017 adds `person_batting_positions` (`person_id, position, innings`), derived **career-wide across all nineteen seasons** by `etl.career_positions` in one pass over the same per-innings `batting_order()` scan A4 already established, re-run after any `etl.load`. Measured named examples, matching the user's own ("you cannot play Vaibhav Suryavanshi anywhere but opening," "Rinku Singh only below 4"): **Samson eligible at 1, 2, 3, 4, 6** (not 1-8); **Rinku at 5, 6, 7** (not 3-8); **Suryavanshi at 2 alone** (his one recorded position, 23 innings); **KL Rahul at 1, 2, 3, 4** (not 1-11, which the old envelope gave him). **Check 23** confirms `person_batting_positions` against an independently recomputed aggregate: 2,484 (person, position) rows, 3 named players pinned exactly. |
+| A73 | **The draft itself simplifies from "pick fifteen, then arrange twelve" to picking the playing TWELVE directly, one slot at a time — and this is a game-design simplification with a real, load-bearing mathematical consequence, not just a UI change.** The fifteen-then-arrange shape was built, played, and found to be too much work: evaluating fifteen candidates and then solving a twelve-slot arrangement puzzle is roughly twice the cognitive load a direct twelve needs. So a pick now names both a candidate and the slot he bats at (or Impact) in one move, **final the moment it lands** — no bench, no unplace, no rearranging, confirmed directly with the user in preference to keeping that flexibility. Squad size and slot count become the same number, `TWELVE_SIZE = 12`, and `SQUAD_SIZE` is retired. **This collapses the forward check from a bipartite-matching problem into two integer inequalities.** With exactly as many future picks as future open slots — an invariant "final at pick time" guarantees, since every pick fills exactly one open slot and none is ever freed again — a maximally-flexible hypothetical future pick can always be matched to *some* remaining slot (Hall's theorem on a fully-connected bipartite graph), so position eligibility can never be the thing a forward check needs to verify. Only the keeper and bowling-depth COUNTS can still be unreachable, which is what `could_still_complete` checks. **Deleted entirely, no longer needed**: `Twelve`, `_match_positions`, `best_twelve`, `can_field_twelve`, `_wildcard`, `could_still_field_twelve` — all existed to solve "does some arrangement of this fifteen-card squad work," a problem that stops existing once every pick is placed atomically. `order_errors` is kept unchanged as the one independent, from-scratch verifier, precisely because it shares no code with the new incremental check. **The widening rule, in the same pass**: `TAIL_DEFAULT = (9, 11)` becomes `LOWER_ORDER_BAND = (7, 11)` — "any position below 6," confirmed with the user to exclude 6 itself — and now covers TWO cases, not one: a player with no qualifying position anywhere, AND (new) a player whose qualifying positions are ALL already in the lower order (a recognised finisher, a bowler who has batted enough to qualify at 7 or 8) — both widen to the full band rather than staying pinned to a narrow exact set, because both are the same kind of fungible lower-order resource in practice. A player with *any* qualifying position below 7 keeps his exact measured set untouched — the widening only ever loosens where the evidence is silent or already agrees, never where it says otherwise. **Check 24** verifies all three branches independently: 1,540 sub-threshold rows stored undecorated, 940 lower-order-only cards widen to the full band, 1,608 cards with genuine top/middle evidence keep their exact set, every one of 3,337 loaded cards has a non-empty `positions`. **A real bug was found and fixed in the same pass, not a shortcut newly introduced**: `pick_random` had always drawn from the global `random` module instead of the `rng: random.Random` `run_draft` was actually seeded with — invisible under the old fifteen-pick model's slack, but it made `check_12`'s "random" policy stranding rate look non-reproducible until traced down to it. Fixed to draw from `rng`, matching A62's seed-determinism guarantee. **With that fixed, `check_12` still measures a small, genuine, expected stranding rate for the adversarial "random" policy alone** (14 of 2,000, reproduced against seed 7: an actual pick sequence needing a keeper who ALSO bowls at position 10, with 11 of 166 franchise-seasons offering an eligible keeper there and precisely 0 offering one who bowls too — no redraw finds a player who does not exist) — `rational` and `naive` both show **0 of 2,000**, because a policy that manages either requirement at all essentially never reaches the corner a policy actively ignoring both can. This is the wildcard-optimism gap (A31/A61's own framing) recurring in the tighter model exactly as expected, reported rather than engineered away. |
+| A71 | **A65 rated every player-season with `balls > 0`. It left one population out: squad members with ZERO balls in both disciplines all season.** Measured at exactly **4 of 3,337** — JP Faulkner 2011, SS Mundhe 2011, VY Mahesh 2009, MS Bhandage 2025. Not A27's excluded 47 (those never get a `squad_members` row at all); these four have a role and a band or usage — the squad was picked to include them — but that season they were run out without facing, or never got an over that survived, or sat out every match they were part of. There is no per-ball evidence to shrink, so a fifth evidence tier is not the fix — that would be A33/A48's mistake in a new place, an individual number manufactured from nothing. What two of the four DO have is a career: Faulkner (six other rated seasons) and Mahesh (three) are rated from `reputation_merit`, the same CAREER_N = 2 shrunk-toward-league average A57 computes for everyone else, evaluated with no current season to leave out. **Mundhe and Bhandage have no rated season anywhere in nineteen years**, so they fall to `scale.lo` — the same 2nd-percentile anchor A58 already uses to fix the bottom of the 70-99 scale — a deliberate arbitrary floor, never a fabricated merit number (A23/A48's rule against defaulting an unobserved value to something plausible). `rated_per_ball` — what the ENGINE plays, not only the card (A45) — converts `blended_merit` through the same two reference exposures A59 already declares, 18 balls/match batting and 24 bowling, since a runs-per-match reputation figure has no per-ball equivalent of its own to borrow instead. Migration 016, a view replacement only. **Checks 6, 9 and 22 all needed real rewrites, not tolerance** — 6 now asserts the exact row count (`playable` + zero-evidence) AND that zero squad_members are uncovered; 9 gained an explicit assertion that reputation-only rows equal their own career merit (or the single shared floor value) rather than silently passing the existing bound check on NULL propagation, which check 9's own bound query would otherwise have done — a silent pass on NULL is the vacuous-check failure this project's standing rule refuses; 22 special-cases the reputation-only branch's integration formula, because the general `rated_per_ball * balls/matches` formula multiplies by `balls = 0` and integrates to zero regardless of what the card claims. All three rewrites verified falsifiable — reverting to the pre-A71 view fails 6 on both counts, and targeted breaks of the reputation and reference-exposure arithmetic fail 9 and 22 respectively. |
 
 **A26 is not settled.** The thresholds classify twelve undisputed players correctly, and
 twelve is a small anchor set. **When §7 lands and the top-20-per-cohort lists print, read
@@ -400,12 +403,14 @@ them has been measured. The merge makes this non-urgent — it does not answer i
 | 6. Squads, roles and bands | **done 2026-07-31.** Check 19 PASSES: **166 of 166** franchise-seasons offer a keeper (139 with one, 27 with two). The last 26 were resolved from the public record, not from the archive — see A52. |
 | **7.1 State model** | **done 2026-07-30**, migration 007 applied. 146,159 balls faced into 80 states (5 never observed, kept as zeroes) plus 161 exact-wicket runs-remaining states, 88 kB. Checks 6, 8 and 20 written; check 6 came off SKIP. **A31 corrected SPEC's wicket-cost rule — the old wording priced a wicket by differencing runs remaining, which is confounded and goes negative.** |
 | **7.2-7.3 Shrinkage + gates** | **done 2026-07-30**, migration 009 applied. State model refit striker-only (7,139 of 7,458 dismissals), **5,149 `player_season_impact` rows** written, `player_season_rating` view live. Ratified: two gates on the scoring-set denominator (A33), striker-only attribution (A36), one fallback rule (A37), long grain (A38). Provisional and paired: A34 residual + A35 `k`, both post-§7.4. `tests/test_impact.py` pins A37 and the gate arithmetic, 15 tests. |
-| **1.1 Draft feasibility** | **done 2026-07-30**, out of order and deliberately so. §7.4 normalises toward the slot template, so normalising before knowing the template is legal would be wasted work. `etl.feasibility` runs the draft; check 12 asserts it and was verified falsifiable. **Template retuned and SETTLED (A40 closed):** `middle` + `finisher` merged into `middle_or_finisher` x3, keeper resolved by the CSV. Rational guarantee-off failure 1.7% -> **0 of 2,000**, the guarantee is a net again, and `opener`/`top_order` are unmoved so the bottleneck did not shift upward. |
+| **1.1 Draft feasibility** | **done 2026-07-30**, out of order and deliberately so. §7.4 normalises toward the slot template, so normalising before knowing the template is legal would be wasted work. `etl.feasibility` runs the draft; check 12 asserts it and was verified falsifiable. **Template retuned and SETTLED (A40 closed):** `middle` + `finisher` merged into `middle_or_finisher` x3, keeper resolved by the CSV. Rational guarantee-off failure 1.7% -> **0 of 2,000**, the guarantee is a net again, and `opener`/`top_order` are unmoved so the bottleneck did not shift upward. **[The slot template this row describes is retired — A72/A73, see the row below.]** |
 | **7.4-7.6 Normalisation + rating scale** | **done 2026-07-30**, migration 010 applied. **A view replacement and nothing else — no table, no column, no stored number.** Within-season centring (unweighted, no SD division), pooled cohort offsets zeroed below 20 observations, one global SD, linear 0-100 clipped at S = 3.5. **1,812 rateable rows; scale min 6.7, max 100.0, mean 50.0, SD 14.3.** A34/A35 resolved in the same pass (A46): band prior, k = 100, `etl.impact --write` re-run, all 5,149 rows `prior_source = 'band'`, Kohli 19 of 19 still reconcile. `etl.feasibility` now ranks on `normalised_per_ball`. A9 closed. |
-| **10. The game** | **done 2026-07-30**, and it was out of scope until it was — SPEC §9 records the move rather than deleting the line. Draft, XI selection and a twenty-over-a-side match off the stored grids; no writes, no migration, nothing in `etl` imports it. Ratified: the tilt (A47), the band below-floor batting delta (A48), the known-count overseas bound on both sides of a repair (A49), the five-bowler cap (A50). `--validate` matches the archive on total, extras and wickets and **misses on SD, 27.1 vs 33.2, recorded not tuned.** `tests/test_simulator.py`, 19 tests, all verified falsifiable — three had to be rewritten because they were not. |
+| **7.8-7.12 Card, reputation floor, rate everyone** | **done 2026-08-01**, migrations 011-016, view replacements throughout. Per-match rebasing (A54), disciplines added (A55), Player of the Match priced in (A56), a continuous all-rounder term (A59), a 70-99 integer scale (A58/A60). **A33's gate stopped removing a card and started only recording why a season is thin** (A65): a thin season is rated from its prior instead of dropped, shrunk on MATCHES for the per-match quantity (A66), with the career acting as a convex FLOOR rather than a blend (A67/A69). Season means and cohort offsets are estimated on gate-passing seasons and applied to everyone (A68). **A71 closed the last gap**: the 4 of 3,337 squad members with zero balls in EITHER discipline all season are rated from their own career (2 of the 4) or a shared scale floor (the other 2) — every squad member is a real, draftable `Card` today, verified against `load_deck`. Checks 6, 9, 22 all carry A71-specific assertions, each verified falsifiable. SPEC.md's §7.3/§12.5 prose and several code comments (`etl/feasibility.py`, `game/__main__.py`, `game/simulator.py`, `web/app.py`) still described the pre-A65 gate as of 2026-08-01 and were corrected in place, with the old text named rather than silently replaced. |
+| **1.1/10/11 redesigned: position eligibility + a direct twelve-pick draft** | **done 2026-08-02**, migration 017, no view/table changes beyond it. **A72**: the slot template (A6/A40) is retired for career position-eligibility (`MIN_INNINGS_AT_POSITION = 5`, `person_batting_positions`, check 23). **A73**: the draft itself becomes twelve picks straight into the final twelve (`TWELVE_SIZE` replaces `SQUAD_SIZE`), placement final at pick time, no bench. `TAIL_DEFAULT` becomes `LOWER_ORDER_BAND = (7, 11)` with a second widening case for lower-order-only evidence (check 24). The forward check collapses from bipartite matching to two count checks (`could_still_complete`); `best_twelve`/`Twelve`/`_match_positions`/`_wildcard`/`can_field_twelve`/`could_still_field_twelve` deleted. `web/session.py`'s `Pick`/`Place` collapse into one `Pick(index, slot)` move; `/api/draft/{state}/place` is gone, `/pick` takes both; `/api/xi` is `/api/twelve`. A real pre-existing bug (`pick_random` reading the global `random` module instead of the seeded `rng`) was found and fixed in the same pass. Checks 12/24/25 rewritten; `tests/test_twelve.py`, `test_draft.py`, `test_web.py` updated; all 179 tests and 21 validation checks pass. |
+| **10. The game** | **done 2026-07-30**, and it was out of scope until it was — SPEC §9 records the move rather than deleting the line. Draft, XI selection and a twenty-over-a-side match off the stored grids; no writes, no migration, nothing in `etl` imports it. Ratified: the tilt (A47), the band below-floor batting delta (A48), the known-count overseas bound on both sides of a repair (A49), the five-bowler cap (A50). `--validate` matches the archive on total, extras and wickets and **misses on SD, 27.1 vs 33.2, recorded not tuned.** `tests/test_simulator.py`, 19 tests, all verified falsifiable — three had to be rewritten because they were not. **[XI selection here means the OPPOSITION's algorithmic side only, as of A72/A73 — the human drafter's own selection is the redesigned draft below.]** |
 | **7.8-7.9 The card** | **done 2026-07-31**, migrations 011 and 012 applied. Runs per MATCH (A54), disciplines added (A55), Player of the Match priced in (A56), a declared reputation blend (A57), integer 70-100 percentile-anchored scale (A58). **A view replacement only.** `etl.feasibility` now reads `rated_per_ball`; check 22 pins the card against the engine. Then 012: a continuous all-rounder term (A59) and a 70-**99** scale (A60). Kohli 2016 75.4 -> **96**, Bumrah's range 37.6-92.9 -> **77-96**, Narine 2024 69.7 -> **99**, finishers 20% -> **0%** of the top 20. |
 | **12. The season** | **done 2026-07-31.** Ten sides, fourteen matches each, a table on points and NRR, then Qualifier 1 / Eliminator / Qualifier 2 / Final. Opposition is nine real franchise-seasons (A63). The deal shows the whole squad greyed with reasons (A64), and cards carry a kind so the UI can mark bat / ball / both / gloves. `tests/test_season.py`, 12 tests, all falsifiable. |
-| **11. The API** | **done 2026-07-31.** Stateless, seed-based (A62), five routes in `web/app.py` over `web/session.py`. No storage, no accounts, no migration. `run_draft` reused verbatim rather than reimplemented. Verified end to end against the real deck: 1,689 cards, a 15-pick draft, a legal XI and a scorecard; the same state returns an identical match on repeat requests. **The HMAC in SPEC 11 was dropped while building** — replay makes the state self-validating, so a signature protected nothing. `tests/test_web.py`, 19 tests, all verified falsifiable (one had to be rewritten). |
+| **11. The API** | **done 2026-07-31.** Stateless, seed-based (A62), five routes in `web/app.py` over `web/session.py`. No storage, no accounts, no migration. `run_draft` reused verbatim rather than reimplemented. Verified end to end against the real deck: 1,689 cards, a 15-pick draft, a legal XI and a scorecard; the same state returns an identical match on repeat requests. **The HMAC in SPEC 11 was dropped while building** — replay makes the state self-validating, so a signature protected nothing. `tests/test_web.py`, 19 tests, all verified falsifiable (one had to be rewritten). **[Superseded by A72/A73: the deck is 3,337 cards today (A65/A71 rate everyone), the draft is twelve picks not fifteen, `/api/draft/{state}/place` is gone (pick and place are one move), and `/api/xi` is `/api/twelve`.]** |
 | 7.7 Ratings read + checks | **not started.** The top-20-per-cohort print against normalised numbers, and **checks 9-11, 13 and 14, which §7.4 has now unblocked** — write them against the real normalised rating, not before. A26's thresholds get re-read against those lists at the same time (watch for a pure batter tagged all-rounder), together with A40's filed question about all-rounders dominating the 5-8 band. |
 
 2016 was checked against the public record before being called done: Kohli 973 runs off
@@ -429,10 +434,29 @@ uv run python -m validation --match 598027   # one scorecard
 uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
 
-**18 checks: 18 pass, 0 fail, 0 skip.** Checks 6 and 13 were rewritten for A65/A68 — 6 now asserts the view offers every season that faced or bowled a ball (reverting it to A33's gate fails it), and 13 measures drift on the seasons the offsets are estimated from. The suite is fully green for the first time as of
+**21 checks: 21 pass, 0 fail, 0 skip.** Checks 6 and 13 were rewritten for A65/A68 — 6 now asserts the view offers every season that faced or bowled a ball (reverting it to A33's gate fails it), and 13 measures drift on the seasons the offsets are estimated from. The suite went fully green for the first time on
 2026-07-31: check 19 came right when the last 26 keepers were filled (A52) and check 21
 when the last 13 nationalities were (A51). Nothing skips: check 6 came off SKIP when
-migration 007 gave it a derived table.
+migration 007 gave it a derived table. **Checks 12, 24 and 25 were rewritten again on
+2026-08-02 for A72/A73**: 12 checks `order_errors` against the new atomic construction
+rather than a separate `best_twelve` solve, and reports (not asserts) the `random` policy's
+small genuine stranding rate rather than treating it as a failure; 24 (renamed from "the
+tail-only default") verifies all three branches of the `LOWER_ORDER_BAND` widening, not
+just the zero-evidence case; 25 checks `order_errors` against `run_draft`'s own
+construction directly, since `best_twelve` — the second solver it used to be checked
+against — no longer exists.
+
+**Checks 6, 9 and 22 were rewritten again on 2026-08-01 for A71 (migration 016).** 6's exact
+row count now expects `playable + zero_evidence` rather than `playable` alone, and gained a
+direct completeness assertion — zero squad_members left uncovered — so a bug that dropped
+four rated rows while adding four different unrated ones would still be caught. 9 gained an
+explicit check on the reputation-only branch (equals the player's own career merit, or the
+single shared scale floor if he has none) rather than relying on its existing bound query to
+skip those rows on NULL propagation, which it otherwise would have done — silently, and
+without saying so. 22 special-cases the reputation-only branch's engine-integration formula,
+because the general one multiplies by `balls = 0` and always integrates to zero regardless of
+the card's claim. All three verified falsifiable the same way check 6 always has been: revert
+to the pre-A71 view and watch the assertion that is supposed to catch it actually fail.
 
 **Checks 9 and 13 are written (2026-07-31); 10, 11 and 14 remain.** Each of the two was
 verified falsifiable, as A2's deleted tautologies require. **Check 9** recounts `balls` from
@@ -537,48 +561,52 @@ refresh rules, and mixing them up leaves a stale `prior_per_ball` under a fresh 
 ## Section 1.1: draft feasibility
 
 ```bash
-uv run python -m etl.feasibility                    # slot supply, policies, variants
+uv run python -m etl.feasibility                    # position supply, policies, redraw rates
 uv run python -m etl.feasibility --trials 5000 --seed 11
 uv run python -m validation --check 12              # the same thing, as a check
 ```
 
-Read-only, no writes, no arguments needed. It plays 15-pick drafts against the real deck —
-uniform over the 166 franchise-seasons, dedupe on `person_id`, the §1.1 deal-time
-guarantee — under three drafter policies, and reports completion, where a stranded drafter
-strands, how the superseded pre-merge template compares, and **how often the guarantee
-fires**.
+Read-only, no writes, no arguments needed. **[A72/A73 — this section describes the current
+mechanic; the slot-template narrative below it is history, kept rather than deleted per
+this file's own rule.]** It plays **twelve**-pick drafts against the real deck — uniform
+over the 166 franchise-seasons, dedupe on `person_id`, the §1.1 deal-time guarantee, every
+pick final the moment it lands — under three drafter policies, and reports completion,
+where a stranded drafter strands, and **how often the guarantee fires**.
 
-**Read the guarantee-off column, not the guarantee-on one.** Guarantee-on is 100% and will
-stay 100% until coverage collapses, because the guarantee re-draws until it finds a
-servable squad; it tells you the game works, not whether the template does. Guarantee-off
-is the template judged on its own, and it is the number that moved from "fine" to "the
-finisher slot is carrying all the risk" — and then, after the A40 merge, to 0 of 2,000.
+**Read the guarantee-off column, not the guarantee-on one.** Guarantee-on is close to 100%
+and will stay there until coverage collapses, because the guarantee re-draws until it finds
+a servable pick; it tells you the game works, not whether the deck's coverage does.
 
-**Then read the firing table, which is an A40 condition and not a diagnostic.** The
-guarantee is allowed to exist only as a net, and the only way to notice it has become a
-beam again is to count how often it fires.
+**A73 changed what "reads as fine" means here.** With squad size and slot count now the
+same number, every pick is load-bearing rather than three of fifteen being slack, so a
+small, genuine stranding rate for the **adversarial `random` policy alone** is now expected
+and reported rather than treated as a defect: **14 of 2,000** (seed 7), always on the very
+last pick, always because the twelve needed a keeper who ALSO bowls at whatever position
+was left, and none exists in the archive for that position (measured directly: 11 of 166
+franchise-seasons offer an eligible keeper there, 0 offer one who bowls too). `rational` and
+`naive` are **0 of 2,000** each — a policy that manages either requirement at all does not
+reach the corner a policy ignoring both can.
 
-**A61 moved it off zero deliberately, and that is the one sanctioned increase.** Rational
-was 0.0% of drafts before the overseas cap and is **~1.5% of drafts, 0.12% of picks, worst
-single pick 1-2 re-draws** after it. That is the cap binding occasionally, which is what a
-cap is for, and it bought 87 of 400 unfieldable XIs down to 0. It is still a net: it fires
-on one draft in sixty and never needs more than two re-draws.
-
-**If it climbs beyond that, the template has drifted out from under the deck** — most
-likely because a revised archive moved A33's floors — and it is the template that gets
-re-measured, not the guarantee that gets trusted harder.
-
-`TEMPLATE` in `etl/feasibility.py` is the single definition of the slot template and check
-12 imports it, so retuning the template moves the check with it rather than leaving the
-check asserting a shape nobody drafts against.
+**The historical A40/A61 template narrative, for context on how this section used to
+read:** the old slot template's guarantee-off rate moved from "fine" to "the finisher slot
+is carrying all the risk," then to 0 of 2,000 after the A40 merge, then A61 deliberately
+moved it back off zero (**~1.5% of drafts**) by adding the overseas cap, accepted because
+that is a cap binding occasionally, which is what a cap is for. None of that machinery
+(`TEMPLATE`, `BAND_SLOT`, slot supply) exists any more — position eligibility (A72) and the
+count-based forward check (A73) replaced it outright.
 
 ## Section 10: the game
 
 ```bash
-uv run python -m game                            # draft two squads, pick two XIs, play a match
+uv run python -m game                            # draft two twelves, play a match
 uv run python -m game --seed 7 --policy rational
 uv run python -m game --validate --trials 3000   # league-average innings vs the archive
 ```
+
+**[A73]** Each side is twelve picks straight into a fully arranged final twelve — `run_draft`
+produces `order`/`impact` directly for every policy, human or automated, so there is no
+separate "pick an XI" step here any more; `print_twelve` just prints what `run_draft`
+already built.
 
 Read-only. It reads the stored §7.1 grids and the `player_season_rating` view and fits
 nothing, so re-run it after any `etl.impact --write` to see new numbers — but a stale grid
@@ -621,15 +649,15 @@ table.
 |---|---|
 | `GET /api/health` | deck size |
 | `POST /api/draft?seed=` | start; omit the seed for a fresh one |
-| `GET /api/draft/{state}` | current deal, or the finished squad |
-| `POST /api/draft/{state}/pick` | `{"index": n}` |
-| `GET /api/xi/{state}` | the eleven, and its overseas status |
+| `GET /api/draft/{state}` | current deal, or the finished twelve |
+| `POST /api/draft/{state}/pick` | `{"index": n, "slot": s}` — **[A73] one move, not two: `slot` is 1-11 or 12 (Impact), final the instant it lands** |
+| `GET /api/twelve/{state}` | the arranged twelve, and its overseas status — **[A73] replaces `/api/xi`; no alias, no bench field any more** |
 | `GET /api/season/{state}` | fourteen league matches, the table, the playoffs (~3s) |
 
-State is `7-0.3.14` — seed then choices, **unsigned**, and SPEC 11.2 records why that
-corrects the original design: replay refuses an index the server never dealt, so there is
-nothing a signature would protect. **It goes back the day a leaderboard lands**, because a
-result that outlives its request can be submitted without being played.
+State is `7-3:4.0:12` — seed then `index:slot` moves, **unsigned**, and SPEC 11.2 records
+why that corrects the original design: replay refuses an index the server never dealt, so
+there is nothing a signature would protect. **It goes back the day a leaderboard lands**,
+because a result that outlives its request can be submitted without being played.
 
 **`web/session.py` reuses `run_draft` verbatim** — the human is injected as a policy that
 replays recorded choices and raises to pause. Do not reimplement the loop here: A61's cap and
@@ -655,8 +683,14 @@ reads `keepers_by_season.csv`, which the first command generates.
 it** (A53). The full refresh order is one chain, not two:
 
 ```
-etl.load -> etl.derive_people -> etl.derive_squads -> etl.state_model --write -> etl.impact --write
+etl.load -> etl.derive_people -> etl.derive_squads -> etl.state_model --write -> etl.impact --write -> etl.career_positions --write
 ```
+
+**[A72]** `etl.career_positions --write` refreshes `person_batting_positions` from `deliveries`
+directly (career-wide across all seasons, not from `squad_members`), so it has no ordering
+dependency on `derive_squads`/`impact` beyond needing a fresh `etl.load` behind it — it is
+placed last in the chain here only because it is the newest step, not because anything
+upstream of it produces its input.
 
 Migration 009 pointed `player_season_impact` at `squad_members`, which made the plain
 truncate fail — the database being right, because a squad rebuild can move a role or a band

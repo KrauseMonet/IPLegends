@@ -5,11 +5,16 @@ these tests are for the part that has to be right or the whole design collapses 
 session is reconstructible from a seed and a list of moves, and that a state the server did
 not produce is refused rather than half-honoured.
 
-[A73] A session now holds ONE kind of move: a pick names both a candidate and the slot he
-bats at, in the same request, and that slot is final the moment it lands -- there is no
-bench, no unplace, no later rearranging. A completed draft is therefore already arranged;
-what these tests exercise is that the atomic pick+place is validated and replayed
-correctly, not a separate placement phase (which no longer exists).
+[A73] A pick names both a candidate and the slot he bats at, in the same request, and
+that slot is final the moment it lands -- there is no bench, no unplace. A completed
+draft is therefore already arranged; what these tests exercise is that the atomic
+pick+place is validated and replayed correctly.
+
+Repositioning, added later, is NOT a reopening of A73 -- it is strictly narrower than the
+bench/rearrange model A73 deliberately removed. A `Reposition` may only ever swap two
+slots that ALREADY hold a player; it can never target an open one, which is exactly what
+keeps it from being able to desync `run_draft`'s own open-slots bookkeeping (see
+`Reposition`'s own docstring in web/session.py).
 
 The fixture deck is synthetic on purpose. A test that needed Neon to prove the state string
 round-trips would be testing the network.
@@ -341,5 +346,109 @@ def test_a_reroll_can_be_interleaved_with_picks():
 
 def test_reroll_state_round_trips():
     moves = (sess.Reroll("team"), sess.Pick(0, 7), sess.Reroll("season"))
+    state = sess.encode(2, moves)
+    assert sess.decode(state) == (2, moves)
+
+
+# --- repositioning: swapping two already-placed players' slots ----------------------------
+
+def _find_pair(s: sess.Session, *, mutually_eligible: bool):
+    """Two filled slots whose occupants either can or cannot legally trade places --
+    searched for rather than assumed, since the fixture's four-wide windows make either
+    outcome common but not guaranteed for any one specific pair."""
+    filled = {i + 1: c for i, c in enumerate(s.order) if c is not None}
+    if s.impact is not None:
+        filled[IMPACT_SLOT] = s.impact
+    for slot_a, card_a in filled.items():
+        for slot_b, card_b in filled.items():
+            if slot_a >= slot_b:
+                continue
+            ok = slot_b in card_a.slots and slot_a in card_b.slots
+            if ok == mutually_eligible:
+                return slot_a, slot_b
+    return None
+
+
+def test_reposition_swaps_two_already_placed_players():
+    s = walk(9)
+    pair = _find_pair(s, mutually_eligible=True)
+    assert pair is not None, "fixture did not produce a swappable pair for this seed"
+    slot_a, slot_b = pair
+
+    def at(session, slot):
+        return session.impact if slot == IMPACT_SLOT else session.order[slot - 1]
+
+    card_a, card_b = at(s, slot_a), at(s, slot_b)
+    s2 = sess.replay(DECK, 9, s.moves + (sess.Reposition(slot_a, slot_b),))
+    assert at(s2, slot_a).person_id == card_b.person_id
+    assert at(s2, slot_b).person_id == card_a.person_id
+    # every other slot is untouched
+    for slot in range(1, XI_SIZE + 1):
+        if slot in (slot_a, slot_b):
+            continue
+        before, after = s.order[slot - 1], s2.order[slot - 1]
+        assert (before.person_id if before else None) == (after.person_id if after else None)
+
+
+def test_reposition_refuses_a_slot_still_open_mid_draft():
+    s = sess.replay(DECK, 4, ())
+    chosen = s.deal.options[0]
+    slot = min(chosen.positions)
+    s2 = sess.replay(DECK, 4, (sess.Pick(0, slot),))
+    open_slot = next(sl for sl in range(1, XI_SIZE + 1) if sl != slot)
+    with pytest.raises(sess.InvalidState):
+        sess.replay(DECK, 4, s2.moves + (sess.Reposition(slot, open_slot),))
+
+
+def test_reposition_refuses_a_pair_that_is_not_mutually_eligible():
+    s = walk(9)
+    pair = _find_pair(s, mutually_eligible=False)
+    assert pair is not None, "fixture did not produce an ineligible pair for this seed"
+    with pytest.raises(sess.InvalidState):
+        sess.replay(DECK, 9, s.moves + (sess.Reposition(*pair),))
+
+
+def test_reposition_can_swap_a_player_into_and_out_of_impact():
+    """Slot 12 names Impact, same as a Pick -- swapping a batting slot with it must work
+    exactly like swapping two XI slots, not need a separate code path."""
+    s = walk(9)
+    pair = None
+    for slot in range(1, XI_SIZE + 1):
+        if IMPACT_SLOT in s.order[slot - 1].slots and slot in s.impact.slots:
+            pair = (slot, IMPACT_SLOT)
+            break
+    assert pair is not None, "fixture did not produce an eligible impact swap for this seed"
+    xi_slot, _ = pair
+    xi_card, impact_card = s.order[xi_slot - 1], s.impact
+    s2 = sess.replay(DECK, 9, s.moves + (sess.Reposition(xi_slot, IMPACT_SLOT),))
+    assert s2.order[xi_slot - 1].person_id == impact_card.person_id
+    assert s2.impact.person_id == xi_card.person_id
+
+
+def test_reposition_interleaved_with_picks_matches_a_single_pass_at_the_end():
+    """The whole point of applying repositions as one pass after the picks are resolved
+    (`_apply_repositions`) is that WHEN in the move list a valid reposition is issued
+    cannot change the outcome -- pin that directly by issuing the same swap at two
+    different points in an otherwise-identical draft and checking both land the same."""
+    s = walk(9)
+    pair = _find_pair(s, mutually_eligible=True)
+    assert pair is not None
+
+    early = sess.replay(DECK, 9, (sess.Reposition(*pair),) + s.moves)
+    late = sess.replay(DECK, 9, s.moves + (sess.Reposition(*pair),))
+    assert [c.person_id if c else None for c in early.order] == \
+        [c.person_id if c else None for c in late.order]
+    assert (early.impact.person_id if early.impact else None) == \
+        (late.impact.person_id if late.impact else None)
+
+
+@pytest.mark.parametrize("bad", ["7-m3", "7-m3:", "7-mx:1", "7-m1:x", "7-m0:1"])
+def test_a_malformed_reposition_is_rejected_not_guessed(bad):
+    with pytest.raises(sess.InvalidState):
+        sess.decode(bad)
+
+
+def test_reposition_state_round_trips():
+    moves = (sess.Pick(0, 3), sess.Reposition(3, 12), sess.Reposition(1, 2))
     state = sess.encode(2, moves)
     assert sess.decode(state) == (2, moves)

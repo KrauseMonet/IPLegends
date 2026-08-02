@@ -178,6 +178,11 @@ class RerollIn(BaseModel):
                                    f"of the same franchise just dealt")
 
 
+class RepositionIn(BaseModel):
+    from_slot: int = Field(ge=1, description="1-11 a batting position, or 12 for Impact")
+    to_slot: int = Field(ge=1, description="1-11 a batting position, or 12 for Impact")
+
+
 class BatterOut(BaseModel):
     name: str
     runs: int
@@ -447,7 +452,8 @@ def get_draft(state: str) -> SessionOut:
 def pick(state: str, body: PickIn) -> SessionOut:
     """Take option `index` from the current deal, straight into `slot` (1-11 a batting
     position, or 12 for Impact). [A73] Pick and placement are one move -- there is no
-    bench and nothing to rearrange afterward, so a single request settles both."""
+    bench, so a single request settles both. `/reposition` (below) lets an already-placed
+    pick trade slots with another one later in the same draft; it does not reopen a bench."""
     current = _load(state)
     if current.squad_complete:
         raise HTTPException(status_code=409, detail="this squad is already full")
@@ -479,6 +485,24 @@ def reroll(state: str, body: RerollIn) -> SessionOut:
         raise HTTPException(status_code=409, detail="this squad is already full")
     seed, moves = sess.decode(state)
     new_moves = moves + (sess.Reroll(body.kind),)
+    try:
+        return _session_out(sess.replay(STATE["deck"], seed, new_moves))
+    except sess.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/draft/{state}/reposition", response_model=SessionOut)
+def reposition(state: str, body: RepositionIn) -> SessionOut:
+    """Swap whoever is currently placed at `from_slot` and `to_slot` -- both must already
+    hold a player, and each must be legally eligible for the other's slot; this is not a
+    bench, it moves nobody in or out of the twelve, only where two already-drafted picks
+    bat (or which one holds Impact). Only while the draft is still in progress: once the
+    squad is complete a drafted arrangement is final, the same way a pick is."""
+    current = _load(state)
+    if current.squad_complete:
+        raise HTTPException(status_code=409, detail="this squad is already full")
+    seed, moves = sess.decode(state)
+    new_moves = moves + (sess.Reposition(body.from_slot, body.to_slot),)
     try:
         return _session_out(sess.replay(STATE["deck"], seed, new_moves))
     except sess.InvalidState as exc:

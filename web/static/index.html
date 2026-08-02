@@ -495,6 +495,15 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         <div id="legality" class="legality note col-scroll">Take players straight into a batting
           position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
           options, and eleven batting positions.</div>
+        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
+        <div class="room-choices hide" id="simModeChoices">
+          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
+            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
+          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
+            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
+          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
+            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
+        </div>
         <div class="foot-actions">
           <button class="act lead hide" id="simBtn" onclick="simulate()">Play the season</button>
           <button class="act" onclick="go('home')">Abandon</button>
@@ -660,6 +669,26 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
     </div>
   </section>
 
+  <!-- ============ MATCH-BY-MATCH REVEAL ============ -->
+  <section id="reveal" class="hide">
+    <div class="report">
+      <div class="over-line" id="revealStage"></div>
+      <div class="call" id="revealHeadline"></div>
+      <div class="margin" id="revealMargin"></div>
+    </div>
+    <div class="spread" style="margin-top:6px">
+      <div>
+        <div class="fx" id="revealLine" onclick="showRevealScorecard()" style="cursor:pointer"></div>
+        <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
+        <div class="actions" style="margin-top:24px">
+          <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
+          <button class="act" onclick="showRevealScorecard()">View scorecard</button>
+          <button class="act" onclick="revealSkipToEnd()">Skip to end</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
     <div class="card-frame">
       <canvas id="journeyCanvas" width="1080" height="1920"></canvas>
@@ -738,7 +767,7 @@ function slip(msg){
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
 }
 function go(id){
-  for (const s of ['home','draft','result','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
+  for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
   window.scrollTo(0,0);
 }
 // A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
@@ -983,6 +1012,8 @@ function renderPanels(){
   $('#simBtn').classList.toggle('hide', !s.squad_complete);
   $('#simBtn').disabled = !s.playable;
   $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
+  $('#simModeLabel').classList.toggle('hide', !s.squad_complete);
+  $('#simModeChoices').classList.toggle('hide', !s.squad_complete);
 
   function orderRow(slot, got, label, isImpact){
     const classes = ['orderline'];
@@ -1022,10 +1053,36 @@ function showOrderStat(slot){
 }
 
 /* --- the season --- */
+
+// 'whole' plays out exactly as this always has: fetch once, show everything. The other
+// two are pure pacing over the SAME single response -- the season is fully determined by
+// the seed the moment the draft ends (nobody decides anything mid-match), so "match by
+// match" never re-simulates anything, it only controls how much of an already-computed
+// result the screen reveals at once.
+let SIM_MODE = 'whole';
+
+function setSimMode(mode){
+  SIM_MODE = mode;
+  document.querySelectorAll('#simModeChoices .room-choice').forEach(b =>
+    b.classList.toggle('sel', b.dataset.simmode === mode));
+}
+
 async function simulate(){
   $('#simBtn').disabled = true;
   $('#simBtn').textContent = 'Playing the season…';
-  try { showSeason(await api('/api/season/' + S.state)); }
+  try {
+    const d = await api('/api/season/' + S.state);
+    if (SIM_MODE === 'matchbymatch'){
+      startReveal(d, 'league');
+    } else if (SIM_MODE === 'groupstage'){
+      renderTableAndForm(d);
+      const me = d.table.find(r => r.you);
+      if (me.pos <= 4) showGroupStageChoice(d); else renderVerdictAndBracket(d);
+      go('result');
+    } else {
+      showSeason(d);
+    }
+  }
   catch(e){ slip(e.message); }
   finally { $('#simBtn').disabled = false; $('#simBtn').textContent = 'Play the season'; }
 }
@@ -1033,18 +1090,13 @@ async function simulate(){
 let SEASON_DATA = null, ROOM_MATCH_DATA = null;
 
 function showSeason(d){
-  SEASON_DATA = d;
-  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
-  const me = d.table.find(r => r.you);
-  const won = d.you_champion;
-  $('#resVerdict').textContent = won ? 'Champions'
-    : (me.pos <= 4 ? 'Into the playoffs' : 'The season ends here');
-  $('#resVerdict').classList.toggle('won', won);
-  $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
-  $('#resMargin').textContent = won
-    ? `Your eleven take the title, finishing ${ordinal(me.pos)} in the league.`
-    : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
+  renderTableAndForm(d);
+  renderVerdictAndBracket(d);
+  go('result');
+}
 
+function renderTableAndForm(d){
+  SEASON_DATA = d;
   $('#tableNote').textContent = `${d.matches_each} each`;
   $('#ladder').innerHTML =
     `<tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
@@ -1066,6 +1118,20 @@ function showSeason(d){
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span></div>`;
   }).join('');
+}
+
+function renderVerdictAndBracket(d){
+  SEASON_DATA = d;
+  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
+  const me = d.table.find(r => r.you);
+  const won = d.you_champion;
+  $('#resVerdict').textContent = won ? 'Champions'
+    : (me.pos <= 4 ? 'Into the playoffs' : 'The season ends here');
+  $('#resVerdict').classList.toggle('won', won);
+  $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
+  $('#resMargin').textContent = won
+    ? `Your eleven take the title, finishing ${ordinal(me.pos)} in the league.`
+    : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
 
   $('#bracket').innerHTML = d.playoffs.map((r, i) => `
     <div class="tie-stage">${r.stage}</div>
@@ -1076,11 +1142,113 @@ function showSeason(d){
       <span class="sc">${r.home_score} · ${r.away_score}</span></div>
     <div class="fx" style="border:0;padding-top:2px"><span></span>
       <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
-  go('result');
+}
+
+function showGroupStageChoice(d){
+  const me = d.table.find(r => r.you);
+  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
+  $('#resVerdict').textContent = 'Group stage complete';
+  $('#resVerdict').classList.remove('won');
+  $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
+  $('#resMargin').textContent = `${ordinal(me.pos)} of ${d.teams} -- into the playoffs.`;
+  $('#bracket').innerHTML = `
+    <p class="deck" style="max-width:none">You're through to the knockouts. Play them all
+      at once, or one result at a time?</p>
+    <div class="actions" style="margin-top:16px">
+      <button class="act lead" onclick="renderVerdictAndBracket(SEASON_DATA); go('result')"
+        >Simulate knockouts</button>
+      <button class="act" onclick="startReveal(SEASON_DATA, 'playoffs')">Match by match</button>
+    </div>`;
 }
 
 function showScorecard(list, i){
   renderScorecard(SEASON_DATA[list === 'league' ? 'your_results' : 'playoffs'][i]);
+}
+
+/* --- match-by-match reveal: pure pacing over an already-computed season -------------- */
+
+let REVEAL = null;   // {data, phase: 'league'|'playoffs', idx, current}
+
+function startReveal(d, phase){
+  REVEAL = { data: d, phase, idx: 0, current: null };
+  showRevealMatch();
+  go('reveal');
+}
+
+function showRevealMatch(){
+  const { data, phase, idx } = REVEAL;
+  const list = phase === 'league' ? data.your_results : data.playoffs;
+  const r = list[idx];
+  REVEAL.current = r;
+
+  if (phase === 'league'){
+    $('#revealStage').textContent = `League · match ${idx + 1} of ${data.matches_each}`;
+    const them = r.home === 'YOU' ? r.away : r.home;
+    const mine = r.home === 'YOU' ? r.home_score : r.away_score;
+    const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
+    $('#revealHeadline').textContent = r.winner === 'YOU' ? 'You win'
+      : (r.winner === null ? 'Tied' : `${them} win`);
+    $('#revealHeadline').classList.toggle('won', r.winner === 'YOU');
+    $('#revealMargin').textContent = r.margin;
+    $('#revealLine').innerHTML =
+      `<span class="wl ${r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l')}"
+        >${r.winner === 'YOU' ? 'W' : (r.winner === null ? 'T' : 'L')}</span>
+       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span>`;
+    const soFar = list.slice(0, idx + 1);
+    const w = soFar.filter(m => m.winner === 'YOU').length;
+    const l = soFar.filter(m => m.winner && m.winner !== 'YOU').length;
+    const t = soFar.length - w - l;
+    $('#revealRecord').textContent =
+      `${w}W ${l}L${t ? ' ' + t + 'T' : ''} so far, ${soFar.length} of ${data.matches_each} played`;
+  } else {
+    $('#revealStage').textContent = r.stage;
+    $('#revealHeadline').textContent = r.winner ? `${r.winner} win` : 'Tied';
+    $('#revealHeadline').classList.toggle('won', r.yours && r.winner === 'YOU');
+    $('#revealMargin').textContent = r.margin;
+    $('#revealLine').innerHTML =
+      `<span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
+        >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
+       <span>${r.home} v ${r.away}</span><span class="sc">${r.home_score} · ${r.away_score}</span>`;
+    $('#revealRecord').textContent = r.yours ? "You're in this one." : 'Setting up your next match.';
+  }
+
+  const isLast = idx === list.length - 1;
+  $('#revealNextBtn').textContent = isLast
+    ? (phase === 'league' ? 'See the table' : 'See the result')
+    : 'Next match';
+}
+
+function revealNext(){
+  const { data, phase, idx } = REVEAL;
+  const list = phase === 'league' ? data.your_results : data.playoffs;
+  if (idx < list.length - 1){
+    REVEAL.idx++;
+    showRevealMatch();
+    return;
+  }
+  if (phase === 'league'){
+    renderTableAndForm(data);
+    const me = data.table.find(r => r.you);
+    if (me.pos <= 4){
+      REVEAL.phase = 'playoffs';
+      REVEAL.idx = 0;
+      showRevealMatch();
+    } else {
+      renderVerdictAndBracket(data);
+      go('result');
+    }
+  } else {
+    renderVerdictAndBracket(data);
+    go('result');
+  }
+}
+
+function revealSkipToEnd(){
+  showSeason(REVEAL.data);
+}
+
+function showRevealScorecard(){
+  if (REVEAL && REVEAL.current) renderScorecard(REVEAL.current);
 }
 
 function showRoomScorecard(kind, i){

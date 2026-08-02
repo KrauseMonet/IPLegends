@@ -682,8 +682,10 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
         <div class="actions" style="margin-top:24px">
           <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
+          <button class="act hide" onclick="revealSkipGroupStage()" id="revealSkipGroupBtn"
+            >Rest of the group stage</button>
+          <button class="act" onclick="revealSkipToEnd()">Simulate rest of the tournament</button>
           <button class="act" onclick="showRevealScorecard()">View scorecard</button>
-          <button class="act" onclick="revealSkipToEnd()">Skip to end</button>
         </div>
       </div>
     </div>
@@ -1216,6 +1218,10 @@ function showRevealMatch(){
   $('#revealNextBtn').textContent = isLast
     ? (phase === 'league' ? 'See the table' : 'See the result')
     : 'Next match';
+  // only worth offering while there is more than one league match left to skip past --
+  // playoffs have no separate "group stage" to jump to, and "Next match" already covers
+  // the one-match-left case.
+  $('#revealSkipGroupBtn').classList.toggle('hide', phase !== 'league' || isLast);
 }
 
 function revealNext(){
@@ -1245,6 +1251,19 @@ function revealNext(){
 
 function revealSkipToEnd(){
   showSeason(REVEAL.data);
+}
+
+// Mid-reveal escape hatch: seen enough matches one at a time for now, want the rest of
+// the group stage at once. Converts to exactly the state "Group stage first" mode is in
+// right after its own league reveal -- same table, same choice of how to pace the
+// knockouts -- so nothing here is a new code path, just an earlier entry into the
+// existing one.
+function revealSkipGroupStage(){
+  const { data } = REVEAL;
+  renderTableAndForm(data);
+  const me = data.table.find(r => r.you);
+  if (me.pos <= 4) showGroupStageChoice(data); else renderVerdictAndBracket(data);
+  go('result');
 }
 
 function showRevealScorecard(){

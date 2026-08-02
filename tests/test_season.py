@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections import Counter
 
+import pytest
+
 from etl.feasibility import Card
 from game.season import (
     DOUBLE_AT, IMPACT_SIT_OUT_BAR, IMPACT_TOO_GOOD_GAIN, MATCHES_EACH, POINTS_TIE,
@@ -330,3 +332,37 @@ def test_a_side_with_no_impact_player_never_substitutes():
     xi = own_xi()
     me = Side(name="ME", short="ME", xi=xi, impact=None)
     assert decide_impact(me, opp_side()) == (None, None)
+
+
+# --- A50's invariant: the attack needs BOWLERS_IN_TWELVE, whatever the situation says ---
+
+def thin_bowling_xi():
+    """Like `own_xi`, but only FOUR of the eleven bowl -- bowl11 replaced with a plain
+    batter. A legally drafted twelve relies on the Impact Player himself to reach
+    BOWLERS_IN_TWELVE here, so `decide_impact` must never let him sit that out."""
+    xi = own_xi()
+    xi[10] = _card("extra_bat", bat=0.12)
+    return xi
+
+
+def test_he_must_bowl_when_the_xi_alone_falls_short_of_the_attack():
+    """A batting gain this large would win the situational comparison outright on its
+    own (it clears IMPACT_TOO_GOOD_GAIN for batting too) -- the bowling requirement has
+    to override it, not just edge it out on points."""
+    xi = thin_bowling_xi()
+    impact = _card("impact", bat=1.0, bowl=0.05)
+    discipline, target = decide_impact(
+        Side(name="ME", short="ME", xi=xi, impact=impact), opp_side())
+    assert discipline == "bowl"
+    assert target.name == "extra_bat", "still the weakest pure batter, unchanged rule"
+
+
+def test_a_squad_that_cannot_reach_five_bowlers_even_with_impact_is_reported():
+    """Not reachable from a legally drafted twelve (order_errors already requires the
+    TWELVE to clear BOWLERS_IN_TWELVE) -- only from a hand-built Side, which is exactly
+    what this test is. Must be reported, not silently field an attack `choose_bowler`
+    cannot serve."""
+    xi = thin_bowling_xi()
+    impact = _card("impact", bat=1.0)   # no bowling at all
+    with pytest.raises(ValueError):
+        decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact), opp_side())

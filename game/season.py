@@ -15,7 +15,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from etl.feasibility import Card, Deck
+from etl.feasibility import BOWLERS_IN_TWELVE, Card, Deck
 from game.simulator import BALLS_PER_OVER, Innings, OVERS, Model, play_innings
 
 TEAMS = 10                 # you and nine historical sides
@@ -131,6 +131,27 @@ def decide_impact(side: "Side", opponent: "Side") -> tuple[str | None, Card | No
     bat_target = _pure_bowler_678(side.xi)
     bowl_target = _weakest_pure_batter(side.xi)
     bowl_reference = _weakest_bowler(side.xi)
+
+    # A50's invariant: the bowling ATTACK needs BOWLERS_IN_TWELVE candidates, and it is
+    # only ever drawn from whichever eleven is actually fielded THIS innings (A-impact's
+    # own redesign put an end to attack() seeing the drafted twelve unconditionally). The
+    # draft-time legality check (order_errors) only guarantees the TWELVE clears five --
+    # if the eleven alone falls short, the Impact Player is the only thing making up the
+    # difference, and letting him sit out or bat instead would field an attack short of
+    # bowlers and leave choose_bowler with nobody left partway through the innings. Not a
+    # situational call: this overrides the gain comparison and the sit-out bar both.
+    if sum(c.has_bowl for c in side.xi) < BOWLERS_IN_TWELVE:
+        if side.impact.has_bowl and bowl_target is not None:
+            return "bowl", bowl_target
+        # A legally drafted twelve cannot reach this branch (order_errors already
+        # requires the TWELVE to clear BOWLERS_IN_TWELVE, and if the impact player
+        # himself cannot bowl the eleven must already clear it alone) -- reachable only
+        # from a hand-built Side a test constructs directly, so it is reported rather
+        # than silently producing an attack `choose_bowler` cannot serve.
+        raise ValueError(
+            f"{side.name}'s eleven has only {sum(c.has_bowl for c in side.xi)} bowling "
+            f"option(s) and the Impact Player cannot make up the difference -- not a "
+            f"legally drafted twelve")
 
     options: list[tuple[str, Card, float]] = []
     if side.impact.has_bat and bat_target is not None:

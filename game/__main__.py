@@ -74,9 +74,10 @@ def bat_delta(card: Card, model: Model) -> tuple[float, bool]:
     return model.unrated_bat[band] - model.season_mean[("batting", card.season_year)], False
 
 
-def to_player(card: Card, model: Model) -> Player:
+def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
     delta, rated = bat_delta(card, model)
-    return Player(name=card.name, bat=delta, bowl=card.bowl, rated_bat=rated)
+    return Player(name=card.name, bat=delta, bowl=card.bowl, rated_bat=rated,
+                  is_impact=is_impact)
 
 
 OVERSEAS_LIMIT = 4
@@ -179,25 +180,33 @@ def opposition_order(xi: list[Card]) -> list[Card]:
     )
 
 
-def lineup(order: list[Card], model: Model) -> list[Player]:
+def lineup(order: list[Card], model: Model, impact: Card | None = None) -> list[Player]:
     """Convert an already-arranged batting order into Players. No sorting here -- `order`
     is either the human drafter's own arrangement or `opposition_order`'s algorithmic one;
     this function's only job is the A34/A48 batting-delta conversion, per player, in place.
+
+    `impact`, if given, is the Card `decide_impact` (game/season.py) decided actually
+    plays -- already substituted into `order` in place of whoever he replaced by the time
+    this is called. Passed through only so the resulting `Player` can be tagged for the
+    scorecard; it changes no arithmetic.
     """
-    return [to_player(c, model) for c in order]
+    return [to_player(c, model, is_impact=(impact is not None and c is impact))
+            for c in order]
 
 
-def attack(twelve: list[Card], model: Model) -> list[Player]:
-    """The five who bowl, best first, drawn from up to twelve candidates -- the eleven who
-    bat plus the Impact Player -- not everyone among them who can.
+def attack(xi: list[Card], model: Model, impact: Card | None = None) -> list[Player]:
+    """The five who bowl, best first, drawn from the eleven who actually take the field.
 
-    Capped at five deliberately. `choose_bowler` hands the next over to whoever has bowled
-    least, so a pool of seven or twelve bowl-rated candidates would spread overs thinner
-    still: the extra depth is meant to widen the POOL a captain chooses from, never the
-    attack itself, which is still five bowlers across twenty overs (A50).
+    [Pre-A-impact-fix this took up to twelve candidates -- the eleven plus the Impact
+    Player, widening the POOL without ever putting him in the XI. `decide_impact` now
+    decides, per match, whether he plays at all and in place of whom, before this is ever
+    called -- so `xi` is always the eleven who are actually out there, impact-substituted
+    or not, and this just picks the best five of them.] Capped at five deliberately:
+    `choose_bowler` hands the next over to whoever has bowled least, so a pool bigger than
+    five would spread overs thinner still (A50).
     """
-    return [to_player(c, model)
-            for c in sorted((c for c in twelve if c.has_bowl),
+    return [to_player(c, model, is_impact=(impact is not None and c is impact))
+            for c in sorted((c for c in xi if c.has_bowl),
                             key=lambda c: -c.bowl)[:BOWLERS_IN_TWELVE]]
 
 
@@ -248,13 +257,15 @@ def print_scorecard(innings: Innings, side: str, chasing: bool) -> None:
             continue
         how = "" if card.out else "*"
         flag = "" if card.player.rated_bat else "  (unrated bat)"
-        print(f"      {card.player.name:24} {card.runs:>4}{how} ({card.balls}){flag}")
+        imp = "  (Impact)" if card.player.is_impact else ""
+        print(f"      {card.player.name:24} {card.runs:>4}{how} ({card.balls}){flag}{imp}")
     print(f"      {'extras':24} {innings.extras:>4}")
     print(f"      {'TOTAL':24} {innings.runs:>4}/{innings.wickets}  ({innings.overs} overs)")
     print("      bowling:")
     for b in sorted(innings.bowling, key=lambda b: -b.balls):
         if b.balls:
-            print(f"        {b.player.name:22} {b.overs:>5}  {b.runs:>3}-{b.wickets}")
+            imp = "  (Impact)" if b.player.is_impact else ""
+            print(f"        {b.player.name:22} {b.overs:>5}  {b.runs:>3}-{b.wickets}{imp}")
     if chasing and not innings.chased:
         print("      target not reached")
 
@@ -373,26 +384,19 @@ def main() -> None:
     (side_a, result_a), (side_b, result_b) = squads
     print(f"\n\n=== the match: {side_a} bat first ===")
 
-    all_a = [c for c in result_a.order if c is not None] + [result_a.impact]
-    all_b = [c for c in result_b.order if c is not None] + [result_b.impact]
+    # Reuses game.season.play() rather than hand-rolling the innings pair here a second
+    # time -- this CLI demo and the served game must decide the Impact Player the same
+    # way, or this stops being a faithful sanity check of what a real match does.
+    from game.season import Side, play
+    home = Side(name=side_a, short=side_a[:3], xi=list(result_a.order), impact=result_a.impact)
+    away = Side(name=side_b, short=side_b[:3], xi=list(result_b.order), impact=result_b.impact)
+    r = play(model, home, away, rng)
 
-    first = play_innings(model, lineup(list(result_a.order), model),
-                          attack(all_b, model), rng)
-    print_scorecard(first, f"{side_a} innings", chasing=False)
-
-    second = play_innings(model, lineup(list(result_b.order), model),
-                          attack(all_a, model), rng,
-                          target=first.runs)
-    print_scorecard(second, f"{side_b} innings, chasing {first.runs + 1}", chasing=True)
+    print_scorecard(r.home_innings, f"{side_a} innings", chasing=False)
+    print_scorecard(r.away_innings, f"{side_b} innings, chasing {r.home_runs + 1}", chasing=True)
 
     print()
-    if second.runs > first.runs:
-        print(f"  {side_b} win by {10 - second.wickets} wickets "
-              f"with {OVERS * BALLS_PER_OVER - second.balls} balls to spare")
-    elif second.runs == first.runs:
-        print("  tied")
-    else:
-        print(f"  {side_a} win by {first.runs - second.runs} runs")
+    print(f"  {r.margin}")
 
 
 if __name__ == "__main__":

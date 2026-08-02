@@ -186,6 +186,8 @@ class BatterOut(BaseModel):
     faced_any: bool = Field(description="false means he never came in to bat at all")
     strike_rate: float | None = Field(
         default=None, description="null only when faced_any is false")
+    is_impact: bool = Field(
+        default=False, description="he is playing as this side's Impact Player")
 
 
 class BowlerOut(BaseModel):
@@ -194,6 +196,8 @@ class BowlerOut(BaseModel):
     runs: int
     wickets: int
     economy: float
+    is_impact: bool = Field(
+        default=False, description="he is playing as this side's Impact Player")
 
 
 class InningsOut(BaseModel):
@@ -489,13 +493,14 @@ def _batter_out(b) -> BatterOut:
     return BatterOut(
         name=b.player.name, runs=b.runs, balls=b.balls, out=b.out, faced_any=b.faced_any,
         strike_rate=round(b.runs * 100 / b.balls, 1) if b.faced_any else None,
+        is_impact=b.player.is_impact,
     )
 
 
 def _bowler_out(bo) -> BowlerOut:
     return BowlerOut(
         name=bo.player.name, overs=bo.overs, runs=bo.runs, wickets=bo.wickets,
-        economy=round(bo.runs * 6 / bo.balls, 2),
+        economy=round(bo.runs * 6 / bo.balls, 2), is_impact=bo.player.is_impact,
     )
 
 

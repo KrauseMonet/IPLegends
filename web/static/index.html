@@ -336,6 +336,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .stat-tiles{justify-content:center;gap:28px;margin:20px 0 6px}
 .entry .nm.clickable,.who.clickable{cursor:pointer}
 .entry .nm.clickable:hover,.who.clickable:hover{text-decoration:underline;text-decoration-color:var(--gold)}
+.impact-tag{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:#1a1204;
+  background:var(--gold);border-radius:3px;padding:1px 4px;vertical-align:middle;font-weight:700}
 .fow{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.8;
   padding:12px 0 4px;white-space:pre-line}
 
@@ -1038,14 +1040,18 @@ function hideStat(e){
   $('#statOverlay').classList.add('hide');
 }
 
+function impactTag(isImpact){
+  return isImpact ? ' <span class="impact-tag">IMP</span>' : '';
+}
+
 function scorecardInnings(short, score, inn){
   const batting = inn.batting.map(b => b.faced_any
-    ? `<tr><td>${b.name}${b.out ? '' : ' *'}</td><td class="n">${b.runs}</td>
+    ? `<tr><td>${b.name}${b.out ? '' : ' *'}${impactTag(b.is_impact)}</td><td class="n">${b.runs}</td>
         <td class="n">${b.balls}</td><td class="n">${b.strike_rate}</td></tr>`
-    : `<tr class="tail"><td>${b.name}</td>
+    : `<tr class="tail"><td>${b.name}${impactTag(b.is_impact)}</td>
         <td class="n" colspan="3" style="font-style:italic">did not bat</td></tr>`
   ).join('');
-  const bowling = inn.bowling.map(bo => `<tr><td>${bo.name}</td>
+  const bowling = inn.bowling.map(bo => `<tr><td>${bo.name}${impactTag(bo.is_impact)}</td>
     <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
     <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';

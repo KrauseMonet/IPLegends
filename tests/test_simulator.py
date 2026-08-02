@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from etl.feasibility import BOWLERS_IN_TWELVE, Card
-from game.__main__ import OVERSEAS_LIMIT, attack, enforce_overseas, viable
+from game.__main__ import OVERSEAS_LIMIT, attack, enforce_overseas, lineup, viable
 from game.simulator import (
     BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, OVERS, BowlerCard, Player,
     choose_bowler, tilt,
@@ -125,15 +125,38 @@ def test_the_attack_is_capped_at_five_however_many_can_bowl():
     assert [p.name for p in picked] == ["p6", "p5", "p4", "p3", "p2"]
 
 
-def test_the_attack_may_be_drawn_from_a_twelve_including_the_impact_player():
-    """[A72] The Impact Player widens the bowling POOL, not the cap: passing eleven plus
-    an Impact still returns exactly five, and the Impact may be among them if he is the
-    best-rated bowler on offer."""
-    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(11)]
+def test_attack_tags_the_impact_player_when_he_is_among_the_xi_it_is_given():
+    """`attack` no longer widens a pool -- `game.season.decide_impact`/`_impact_xi`
+    (game/season.py) decide, per match, whether the Impact Player is actually IN the
+    eleven `attack` receives at all, substituted in for whoever he displaced. `attack`'s
+    only remaining job regarding him is to tag his `Player.is_impact` when `impact=` names
+    a card that's actually present -- it does not change who gets picked."""
+    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(10)]
     impact = Card(1, "impact", "impact", bat=0.0, bowl=99.0)
-    picked = attack(xi + [impact], model=None)
+    picked = attack(xi + [impact], model=None, impact=impact)
     assert len(picked) == BOWLERS_IN_TWELVE
-    assert picked[0].name == "impact", "the Impact Player is eligible to be the best bowler"
+    assert picked[0].name == "impact", "still just the best five by rating"
+    assert picked[0].is_impact is True
+    assert all(p.is_impact is False for p in picked[1:])
+
+
+def test_attack_never_tags_anyone_when_no_impact_player_is_in_play():
+    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(7)]
+    picked = attack(xi, model=None)
+    assert all(p.is_impact is False for p in picked)
+
+
+def test_lineup_tags_the_impact_player_in_whatever_slot_he_occupies():
+    xi = [Card(1, "impact" if i == 3 else f"p{i}", "impact" if i == 3 else f"p{i}",
+                bat=0.0) for i in range(11)]
+    impact = xi[3]
+    players = lineup(xi, model=None, impact=impact)
+    assert [p.is_impact for p in players] == [i == 3 for i in range(11)]
+
+
+def test_lineup_tags_nobody_when_impact_is_none():
+    xi = [Card(1, f"p{i}", f"p{i}", bat=0.0) for i in range(11)]
+    assert all(not p.is_impact for p in lineup(xi, model=None))
 
 
 # --- the four-overseas rule, enforced on what is KNOWN --------------------------------

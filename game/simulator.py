@@ -70,6 +70,13 @@ class Player:
     bat: float
     bowl: float | None = None
     rated_bat: bool = True
+    # Whether this IS the side's Impact Player for this match (game/season.py's
+    # decide_impact) -- not whether he was drafted into the Impact slot, which every
+    # Player here already reflects one way or another (he either plays in someone else's
+    # XI spot, having replaced them, or he does not play at all). Carried onto Player
+    # rather than looked up from Card so the scorecard can tag him without threading a
+    # Card reference through BatterCard/BowlerCard as well.
+    is_impact: bool = False
 
 
 @dataclass

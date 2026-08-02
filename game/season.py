@@ -30,13 +30,153 @@ POINTS_TIE = 1
 # rivals twice, the rest once -- and it is symmetric, so no side gets an easier draw.
 DOUBLE_AT = (1, 2, 5)
 
+# Situational Impact Player: a declared game-design term, same category as REPUTATION or
+# ALLROUNDER_RUNS in the data pipeline's own vocabulary for this -- there is no historical
+# "did the Impact Player play" record to fit these against, so they were checked against a
+# batch of simulated matches for a sane play/sit-out rate rather than measured.
+#
+# A sentinel, not an exclusion, for a discipline a card has no rating in at all: he still
+# has to be comparable to a teammate who does have one, and "clearly weaker than anyone
+# rated" is the directionally honest answer, not a special case that drops him from the
+# comparison entirely.
+IMPACT_NO_RATING = -1.0
+# Weight on the OPPONENT's matching threat -- a strong opposing attack raises the value of
+# batting insurance, a strong opposing batting order raises the value of another bowler.
+IMPACT_SITUATIONAL_K = 0.25
+# A raw gain (over his own side's weakest link, ignoring the opponent entirely) this big
+# plays regardless of the matchup -- a player that much better than his replacement plays,
+# full stop.
+IMPACT_TOO_GOOD_GAIN = 0.5
+# The situational score has to clear this before he is worth using at all; short of it he
+# sits out and the drafted/algorithmic XI plays unchanged.
+IMPACT_SIT_OUT_BAR = 0.05
+
+
+def _bat_rating(c: Card) -> float:
+    return c.bat if c.bat is not None else IMPACT_NO_RATING
+
+
+def _bowl_rating(c: Card) -> float:
+    return c.bowl if c.bowl is not None else IMPACT_NO_RATING
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _pure_bowler_678(xi: list[Card]) -> Card | None:
+    """Whoever bats at position 6, 7 or 8 (1-indexed) and bowls -- the batting swap-out
+    candidate for a batting Impact Player, exactly the way a real side frees up a slot for
+    an extra batter: not its best bowler, whichever bowling-capable player is already
+    batting deepest in the order. The weakest batter among any that qualify, if more than
+    one of those three positions holds one."""
+    candidates = [c for i, c in enumerate(xi) if i in (5, 6, 7) and c.has_bowl]
+    return min(candidates, key=_bat_rating) if candidates else None
+
+
+def _weakest_pure_batter(xi: list[Card]) -> Card | None:
+    """The weakest-rated XI member who does not bowl at all -- the bowling swap-out
+    candidate for a bowling Impact Player. Never the keeper: a substitution must not cost
+    the side its wicketkeeper."""
+    candidates = [c for c in xi if not c.has_bowl and c.role != "keeper"]
+    return min(candidates, key=_bat_rating) if candidates else None
+
+
+def _weakest_bowler(xi: list[Card]) -> Card | None:
+    """The weakest-rated bowling option already in the side -- what a bowling Impact
+    Player's OWN quality is measured against. Not the same as `_weakest_pure_batter`,
+    which is WHO he structurally displaces: that player by definition does not bowl at
+    all, so comparing a bowling rating to his would compare against a sentinel every
+    time, making any bowler look like an enormous upgrade regardless of how good he
+    actually is. "Is he better than the option I have" is the real question; "who makes
+    room for him" is a separate one, answered by `_weakest_pure_batter`."""
+    candidates = [c for c in xi if c.has_bowl]
+    return min(candidates, key=_bowl_rating) if candidates else None
+
+
+def decide_impact(side: "Side", opponent: "Side") -> tuple[str | None, Card | None]:
+    """Whether the Impact Player plays, as a batter or a bowler, and in place of whom --
+    a pre-match tactical read, not a mid-innings one: both XIs are fixed for the whole
+    innings once `play_innings` starts (game/simulator.py), so the call has to be made
+    before a ball is bowled, exactly like a real team naming its XI at the toss with the
+    sub already in mind.
+
+    WHO makes room and WHAT he is measured against are not always the same player. For a
+    batting swap both questions have one answer, `_pure_bowler_678` -- a real batting
+    rating to compare against, no different in kind from any other teammate's. For a
+    bowling swap they split: `_weakest_pure_batter` is WHO structurally makes room (he
+    does not bowl at all, by definition), but comparing a bowling rating to his would
+    compare against a sentinel every time and make any bowler look like an enormous
+    upgrade regardless of how good he actually is -- so the bowling GAIN is measured
+    against `_weakest_bowler`, the side's own worst existing bowling option, instead. A
+    SITUATIONAL weight adds the opponent's matching threat on top of whichever gain
+    applies: a strong opposing attack raises the value of batting insurance, a strong
+    opposing batting order raises the value of another bowler. Whichever discipline
+    scores highest plays, provided it clears IMPACT_SIT_OUT_BAR; a big enough raw gain on
+    its own (IMPACT_TOO_GOOD_GAIN) overrides the matchup read entirely -- a player that
+    much better than the relevant reference plays regardless of who is on the other side.
+
+    Returns `(discipline, target)`, never the substituted XI itself -- what actually bats
+    and what actually bowls are two DIFFERENT elevens once he plays (`_impact_xi` below
+    builds each), because a real Impact substitution reverses between the two innings: a
+    batting pick only ever appears while HIS side is batting, freeing the bowler he'd
+    otherwise have displaced to bowl normally when his side takes the field; a bowling
+    pick only ever appears while his side is bowling, and the batter he'd have displaced
+    still opens the batting the rest of the match. `(None, None)` means he sits out
+    entirely and both elevens stay exactly as drafted.
+    """
+    if side.impact is None:
+        return None, None
+
+    bat_target = _pure_bowler_678(side.xi)
+    bowl_target = _weakest_pure_batter(side.xi)
+    bowl_reference = _weakest_bowler(side.xi)
+
+    options: list[tuple[str, Card, float]] = []
+    if side.impact.has_bat and bat_target is not None:
+        options.append(("bat", bat_target, side.impact.bat - _bat_rating(bat_target)))
+    if side.impact.has_bowl and bowl_target is not None and bowl_reference is not None:
+        options.append(
+            ("bowl", bowl_target, side.impact.bowl - _bowl_rating(bowl_reference)))
+    if not options:
+        return None, None
+
+    too_good = [o for o in options if o[2] >= IMPACT_TOO_GOOD_GAIN]
+    if too_good:
+        discipline, target, _ = max(too_good, key=lambda o: o[2])
+        return discipline, target
+
+    opp_bowl_strength = _mean([_bowl_rating(c) for c in opponent.xi if c.has_bowl])
+    opp_bat_strength = _mean([_bat_rating(c) for c in opponent.xi])
+    need = {"bat": opp_bowl_strength, "bowl": opp_bat_strength}
+    scored = [(discipline, target, gain + IMPACT_SITUATIONAL_K * need[discipline])
+              for discipline, target, gain in options]
+    discipline, target, score = max(scored, key=lambda s: s[2])
+    if score < IMPACT_SIT_OUT_BAR:
+        return None, None
+    return discipline, target
+
+
+def _impact_xi(side: "Side", discipline: str | None, target: Card | None,
+               wanted: str) -> tuple[list[Card], Card | None]:
+    """`side.xi` with `target` swapped for `side.impact`, but only when `decide_impact`
+    chose `wanted` ("bat" or "bowl") for this side -- otherwise `side.xi` unchanged.
+    Called once per side per innings with the discipline THAT innings needs, so the same
+    (discipline, target) pair from `decide_impact` naturally produces two different
+    elevens across the match: the substitution only ever shows up in the one innings it
+    was chosen for."""
+    if discipline == wanted and target is not None:
+        return [side.impact if c is target else c for c in side.xi], side.impact
+    return side.xi, None
+
 
 @dataclass
 class Side:
     name: str
     short: str
     xi: list[Card]                    # already in batting order -- position i bats i+1
-    impact: Card | None = None        # [A72] the Impact Player, bowling pool only
+    impact: Card | None = None        # the Impact Player -- decide_impact (below) decides
+                                       # whether he plays, as a batter or a bowler, per match
     you: bool = False
 
 
@@ -203,8 +343,11 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
 
     [A72] `home.xi`/`away.xi` are already in batting order -- the human drafter's own
     arrangement, or `opposition_order`'s algorithmic one for a historical side -- so
-    `lineup` only converts, it does not sort. The Impact Player never bats (only eleven
-    can); he widens the bowling pool `attack` draws from.
+    `lineup` only converts, it does not sort. `decide_impact` decides, for each side
+    independently and before a ball is bowled, whether the Impact Player plays as a
+    batter or a bowler; `_impact_xi` then builds each side's batting eleven and bowling
+    pool SEPARATELY, because a real Impact substitution reverses between the two innings
+    -- see both functions' own docstrings for the rule.
 
     `track`/`stats` are optional and additive: when `track` is one of the two sides in
     THIS match, its own batting and bowling innings are folded into `stats` right here,
@@ -213,11 +356,18 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     """
     from game.__main__ import attack, lineup
 
-    home_twelve = home.xi + ([home.impact] if home.impact is not None else [])
-    away_twelve = away.xi + ([away.impact] if away.impact is not None else [])
+    home_discipline, home_target = decide_impact(home, away)
+    away_discipline, away_target = decide_impact(away, home)
 
-    first = play_innings(model, lineup(home.xi, model), attack(away_twelve, model), rng)
-    second = play_innings(model, lineup(away.xi, model), attack(home_twelve, model),
+    home_batting, home_bat_impact = _impact_xi(home, home_discipline, home_target, "bat")
+    away_bowling, away_bowl_impact = _impact_xi(away, away_discipline, away_target, "bowl")
+    first = play_innings(model, lineup(home_batting, model, home_bat_impact),
+                          attack(away_bowling, model, away_bowl_impact), rng)
+
+    away_batting, away_bat_impact = _impact_xi(away, away_discipline, away_target, "bat")
+    home_bowling, home_bowl_impact = _impact_xi(home, home_discipline, home_target, "bowl")
+    second = play_innings(model, lineup(away_batting, model, away_bat_impact),
+                          attack(home_bowling, model, home_bowl_impact),
                           rng, target=first.runs)
 
     if stats is not None and track is not None:

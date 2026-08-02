@@ -339,6 +339,9 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .entry .nm.clickable:hover,.who.clickable:hover{text-decoration:underline;text-decoration-color:var(--gold)}
 .impact-tag{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:#1a1204;
   background:var(--gold);border-radius:3px;padding:1px 4px;vertical-align:middle;font-weight:700}
+.rating-badge{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--green);
+  border:1px solid rgba(51,209,154,.4);border-radius:3px;padding:1px 5px;
+  vertical-align:middle;margin-left:6px}
 .fow{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.8;
   padding:12px 0 4px;white-space:pre-line}
 
@@ -416,6 +419,13 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           bat, one Impact Player, no more than four overseas. Then your XI plays a full
           season. Fourteen matches against real franchise-sides, a points table, then the
           playoffs.</p>
+        <div class="room-label" style="margin-top:22px">Draft by</div>
+        <div class="room-choices" id="modeChoices">
+          <button class="room-choice sel" data-mode="stat" onclick="setDraftMode('stat')"
+            title="Every card shows its rating, and you can click a name for his season stats.">Stat</button>
+          <button class="room-choice" data-mode="memory" onclick="setDraftMode('memory')"
+            title="No rating, no stats -- just names, roles and where they've batted. Draft on what you remember.">Memory</button>
+        </div>
         <div class="actions">
           <button class="act lead" onclick="newDraft()">Begin a draft</button>
           <button class="act" onclick="promptSeed()">Draft number</button>
@@ -697,6 +707,25 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 const $ = s => document.querySelector(s);
 let META = null, S = null;
 
+// 'stat' shows a rating badge on every card and lets a name be clicked for his season
+// stats; 'memory' shows neither -- name, role and where he's batted, nothing that says
+// how good he was. A pure display choice: the server always computes everything either
+// way (SPEC 11's own stance -- the client decides what to show, never what to compute),
+// so switching modes needs no new API call, only a re-render.
+let DRAFT_MODE = 'stat';
+
+function setDraftMode(mode){
+  DRAFT_MODE = mode;
+  document.querySelectorAll('#modeChoices .room-choice').forEach(b =>
+    b.classList.toggle('sel', b.dataset.mode === mode));
+  if (S) render(S);   // a draft already in progress re-renders under the new mode
+}
+
+function ratingBadge(card){
+  return (DRAFT_MODE === 'stat' && card.rating != null)
+    ? `<span class="rating-badge">${card.rating}</span>` : '';
+}
+
 async function api(path, opts){
   const r = await fetch(path, opts);
   const body = await r.json().catch(() => ({}));
@@ -869,7 +898,13 @@ async function rerollDeal(kind){
 
 function render(s){
   S = s;
-  history.replaceState(null, '', '#' + s.state);
+  // '?mode=memory', never '.memory' -- '.' already separates moves inside the state
+  // string itself (and 'm' already opens a Reposition segment), so anything appended
+  // with a '.' risks being parsed as one. '?' cannot collide with that grammar. 'stat'
+  // is the default and stays unmarked, so an old shared link (no suffix at all) still
+  // opens exactly as it always did.
+  const modeSuffix = DRAFT_MODE === 'memory' ? '?mode=memory' : '';
+  history.replaceState(null, '', '#' + s.state + modeSuffix);
   $('#seedPill').textContent = 'draft no. ' + s.state.split('-')[0];
   $('#pickCount').textContent = `${s.picks_made}/${s.picks_total}`;
   $('#pickBig').textContent = s.picks_made;
@@ -888,21 +923,27 @@ function render(s){
     $('#optCount').textContent = `${s.deal.options.length} of ${s.deal.options.length + blocked.length}`;
     const live = s.deal.options.map((card, i) => {
       const pending = PENDING && PENDING.index === i ? ' pending' : '';
+      const nmClick = DRAFT_MODE === 'stat'
+        ? ` clickable" onclick="showStat(S.deal.options[${i}])"` : '"';
       return `
       <div class="entry${pending}">
-        <span class="nm clickable" onclick="showStat(S.deal.options[${i}])">${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
-          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
+        <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
+          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
         <span class="picks"><button class="take" onclick="take(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
     }).join('');
     // The rest of the squad, greyed with the reason. Kept on the sheet rather than
     // filtered away so the roster reads as a roster.
     const dead = blocked.length ? `<div class="roster-head">Unavailable</div>` +
-      blocked.map((b, i) => `
+      blocked.map((b, i) => {
+        const nmClick = DRAFT_MODE === 'stat'
+          ? ` clickable" onclick="showStat(S.deal.blocked[${i}])"` : '"';
+        return `
       <div class="entry off">
-        <span class="nm clickable" onclick="showStat(S.deal.blocked[${i}])">${ICON[b.kind] || ''}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}</span>
+        <span class="nm${nmClick}>${ICON[b.kind] || ''}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}${ratingBadge(b)}</span>
         <span class="why">${b.blocked || ''}</span>
-      </div>`).join('') : '';
+      </div>`;
+      }).join('') : '';
     $('#options').innerHTML = live + dead;
   } else {
     $('#dealYear').textContent = '';
@@ -965,10 +1006,13 @@ function renderPanels(){
         classes.push(ok ? 'eligible' : 'ineligible');
       }
     }
-    const whoClick = got ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
+    const whoClick = (got && DRAFT_MODE === 'stat')
+      ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
+    const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
+                       : (isImpact ? 'no impact player' : 'to be named');
     return `<div class="${classes.join(' ')}" onclick="rowClick(${slot})">
       <span class="num">${label}</span>
-      <span class="who${whoClick}>${got ? (ICON[got.kind] || '') + got.name : (isImpact ? 'no impact player' : 'to be named')}</span>
+      <span class="who${whoClick}>${label2}</span>
     </div>`;
   }
 }
@@ -1395,9 +1439,10 @@ function renderRoomDraft(r){
     $('#roomDealTeam').textContent = me.deal.franchise;
     $('#roomOptions').innerHTML = me.deal.options.map((card, i) => {
       const pending = ROOM_PENDING && ROOM_PENDING.index === i ? ' pending' : '';
+      const nmClick = DRAFT_MODE === 'stat' ? ` clickable" onclick="showRoomStat(${i})"` : '"';
       return `<div class="entry${pending}">
-        <span class="nm clickable" onclick="showRoomStat(${i})">${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
-          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}</span>
+        <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
+          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
         <span class="picks"><button class="take" onclick="roomTake(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
     }).join('');
@@ -1428,10 +1473,13 @@ function roomOrderRow(slot, got, label, open, isImpact){
       && (slot === 12 || ROOM_PENDING.card.positions.includes(slot));
     classes.push(eligible ? 'eligible' : 'ineligible');
   }
-  const whoClick = got ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
+  const whoClick = (got && DRAFT_MODE === 'stat')
+    ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
+  const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
+                     : (isImpact ? 'no impact player' : 'to be named');
   return `<div class="${classes.join(' ')}" onclick="roomRowClick(${slot})">
     <span class="num">${label}</span>
-    <span class="who${whoClick}>${got ? (ICON[got.kind] || '') + got.name : (isImpact ? 'no impact player' : 'to be named')}</span>
+    <span class="who${whoClick}>${label2}</span>
   </div>`;
 }
 
@@ -1493,7 +1541,8 @@ function showRoomMatch(m){
 }
 
 boot().then(() => {
-  const h = location.hash.slice(1);
+  const [h, query] = location.hash.slice(1).split('?');
+  if (query === 'mode=memory') setDraftMode('memory');
   if (h && h.includes('-')) api('/api/draft/' + h).then(s => { render(s); go('draft'); }).catch(()=>{});
 });
 </script>

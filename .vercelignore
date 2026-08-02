@@ -9,6 +9,8 @@ validation/
 migrations/
 .claude/
 uv.lock
+pyproject.toml
+.python-version
 CLAUDE.md
 SPEC.md
 CREDITS.md

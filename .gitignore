@@ -8,3 +8,4 @@ __pycache__/
 
 # local Claude Code settings
 .claude/settings.local.json
+.vercel

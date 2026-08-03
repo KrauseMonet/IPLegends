@@ -422,6 +422,10 @@ class RoomPendingImpactOut(BaseModel):
     home_name: str
     away_name: str
     first_innings: InningsOut
+    side_xi: list[str] = Field(
+        description="side_name's own drafted batting order, in slot order (1-11) -- "
+                    "pick a slot to swap that player out for the Impact Player, or "
+                    "decline (slot: null)")
     you_decide: bool = Field(description="true only for the room's host")
 
 
@@ -1025,7 +1029,7 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     )
 
 
-def _room_match_out(room: rooms.Room, replay, player_id: str | None) -> RoomMatchOut:
+def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> RoomMatchOut:
     """Maps `web.room_match.RoomMatchReplay` (pids throughout, since that module has no
     concept of display names) to the wire format (names, plus a per-caller `you_decide`
     telling the frontend whether IT is the seat that can act on the pending decision --
@@ -1047,11 +1051,14 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None) -> RoomMatc
         opponent_pid = (replay.pending_away_pid
                         if replay.pending_impact_side_pid == replay.pending_home_pid
                         else replay.pending_home_pid)
+        side_xi = next((order for pid, _, order, _ in rooms.room_sides(room, deck)
+                        if pid == replay.pending_impact_side_pid), [])
         pending = RoomPendingImpactOut(
             stage=replay.pending_stage, side_name=name(replay.pending_impact_side_pid),
             opponent_name=name(opponent_pid), discipline=replay.pending_impact_discipline,
             home_name=name(replay.pending_home_pid), away_name=name(replay.pending_away_pid),
             first_innings=_innings_out(replay.pending_impact_first),
+            side_xi=[c.name for c in side_xi],
             you_decide=player_id == room.host_id,
         )
     elif replay.pending_kind == "advance":
@@ -1096,7 +1103,7 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
         except rooms.RoomError as exc:
             status = 404 if "no room" in str(exc) else 409
             raise HTTPException(status_code=status, detail=str(exc)) from exc
-    return _room_match_out(room, replay, player_id)
+    return _room_match_out(room, replay, player_id, deck)
 
 
 @app.post("/api/rooms/{code}/match/toss", response_model=RoomMatchOut)
@@ -1111,7 +1118,7 @@ def room_match_toss(code: str, body: RoomTossIn) -> RoomMatchOut:
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _room_match_out(room, replay, body.player_id)
+    return _room_match_out(room, replay, body.player_id, deck)
 
 
 @app.post("/api/rooms/{code}/match/impact", response_model=RoomMatchOut)
@@ -1127,7 +1134,7 @@ def room_match_impact(code: str, body: RoomImpactIn) -> RoomMatchOut:
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _room_match_out(room, replay, body.player_id)
+    return _room_match_out(room, replay, body.player_id, deck)
 
 
 @app.post("/api/rooms/{code}/match/advance", response_model=RoomMatchOut)
@@ -1140,4 +1147,4 @@ def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _room_match_out(room, replay, body.player_id)
+    return _room_match_out(room, replay, body.player_id, deck)

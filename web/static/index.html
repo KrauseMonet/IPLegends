@@ -1630,13 +1630,8 @@ function showRevealScorecard(){
   if (REVEAL && REVEAL.current) renderScorecard(REVEAL.current);
 }
 
-function showRoomScorecard(kind, i){
-  const m = ROOM_MATCH_DATA;
-  const r = kind === 'result' ? m.result
-    : kind === 'final' ? m.final
-    : kind === 'semis' ? m.semis[i]
-    : m.playoffs[i];
-  renderScorecard(r);
+function showRoomScorecard(i){
+  renderScorecard(ROOM_MATCH_DATA.results[i].result);
 }
 
 function renderScorecard(r){
@@ -1925,6 +1920,9 @@ function drawJourneyCard(d){
 /* --- rooms: friends draft together, live, turn by turn ------------------------------- */
 
 let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
+// ROOM_MATCH_DATA (the room's own match-phase poll, kept fresh by pollRoom once status
+// is 'complete', same interval as the draft) is already declared above, shared with the
+// solo season's own scorecard popover.
 let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30;
 
 function pickFormat(f){
@@ -1982,6 +1980,12 @@ async function pollRoom(){
     // player_id identifies the caller so the server knows whose options (if anyone's)
     // to include -- only the currently active seat's own caller ever sees them.
     ROOM = await api('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
+    if (ROOM.status === 'complete'){
+      // The match phase keeps polling on the SAME interval as the draft -- a toss
+      // winner, or the host deciding Impact/advancing, needs every other seat's own
+      // screen to pick the change up without a manual refresh.
+      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${encodeURIComponent(MY_PID)}`);
+    }
     renderRoom();
   } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
 }
@@ -2174,51 +2178,154 @@ function showRoomOrderStat(slot){
   if (me) showStat(slot === 12 ? me.impact : me.order[slot - 1]);
 }
 
-async function renderRoomResult(r){
-  if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+function renderRoomResult(r){
+  // Unlike the draft phase, the match phase keeps polling (see pollRoom) -- more than
+  // one seat can have something to do next (whoever wins a toss, then always the
+  // host), so there is no single caller whose own action ends the wait.
   $('#roomResultCode').textContent = r.code;
-  try {
-    const match = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${MY_PID}`);
-    showRoomMatch(match);
-  } catch(e){ slip(e.message); }
+  if (ROOM_MATCH_DATA){
+    showRoomMatch(ROOM_MATCH_DATA);
+    return;
+  }
+  // The draft's own last pick can flip status to 'complete' without the match phase
+  // having been fetched yet (roomSubmitPick has no reason to know about it) -- fetch
+  // once here rather than leaving the panel blank until the next scheduled poll.
+  api(`/api/rooms/${ROOM_CODE}/match?player_id=${encodeURIComponent(MY_PID)}`)
+    .then(m => { ROOM_MATCH_DATA = m; showRoomMatch(m); })
+    .catch(() => {});
 }
 
-function showRoomMatch(m){
-  ROOM_MATCH_DATA = m;
-  const el = $('#roomMatchBody');
-  const stageRow = (r, onclick) => `<div class="fx" onclick="${onclick}">
+function stageRow(r, onclick){
+  return `<div class="fx" onclick="${onclick}">
     <span class="wl ${r.winner ? 'w' : ''}">${r.winner ? 'W' : 'T'}</span>
     <span>${r.stage}: ${r.home} v ${r.away}</span>
     <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
+}
+
+function roomPendingHtml(m){
+  const p = m.pending;
+  if (!p) return '';
+  if (p.kind === 'toss'){
+    return `<div class="report" style="padding:0 0 20px">
+      <div class="over-line">${p.stage}</div>
+      <div class="call">${p.side_a} v ${p.side_b}</div>
+      ${p.you_decide ? `
+        <div class="margin">You won the toss.</div>
+        <div class="foot-actions" style="justify-content:center;padding-top:14px">
+          <button class="act lead" onclick="roomSubmitToss('bat', this)">Bat first</button>
+          <button class="act lead" onclick="roomSubmitToss('bowl', this)">Bowl first</button>
+        </div>` : `<div class="margin">Waiting for ${p.winner_name} to call the toss…</div>`}
+      </div>`;
+  }
+  if (p.kind === 'impact'){
+    // home always bats first in this engine (the toss winner's own elect decides who
+    // home/away ARE, not which of them bats first) -- so the first innings shown here
+    // is always home_name's, regardless of which side's decision this is.
+    const info = `${p.home_name} posted ` +
+      `${p.first_innings.runs}/${p.first_innings.wickets} (${p.first_innings.overs} ov). ` +
+      `${p.side_name} ${p.discipline === 'bat' ? 'bats' : 'bowls'} next.`;
+    return `<div class="report" style="padding:0 0 20px">
+      <div class="over-line">${p.stage}</div>
+      <div class="call">${p.side_name}'s Impact Player</div>
+      <div class="margin">${info}</div>
+      ${p.you_decide ? `
+        <p class="deck" style="margin:16px 0;max-width:none">Send ${p.side_name}'s Impact Player
+          in for one of these, or decline:</p>
+        <div id="roomImpactXiList">${p.side_xi.map((name, i) => `
+          <div class="fx" onclick="roomSubmitImpact(${i + 1}, this)" style="cursor:pointer">
+            <span>${name}</span><span class="sc">slot ${i + 1}</span>
+          </div>`).join('')}</div>
+        <div class="foot-actions" style="justify-content:center;padding-top:14px">
+          <button class="act" onclick="roomSubmitImpact(null, this)">Decline -- no substitution</button>
+        </div>` : `<div class="margin" style="margin-top:10px">Waiting for the host to decide…</div>`}
+      </div>`;
+  }
+  // 'advance'
+  const versus = p.home_name && p.away_name ? `${p.home_name} v ${p.away_name}` : 'the next match';
+  return `<div class="report" style="padding:0 0 20px">
+    <div class="over-line">${p.stage}</div>
+    <div class="call">Ready for ${versus}</div>
+    ${p.you_decide ? `
+      <div class="foot-actions" style="justify-content:center;padding-top:14px">
+        <button class="act lead" onclick="roomAdvanceMatch(this)">Continue</button>
+      </div>` : `<div class="margin">Waiting for the host to continue…</div>`}
+    </div>`;
+}
+
+function showRoomMatch(m){
+  const el = $('#roomMatchBody');
+  const resultsHtml = m.results.map((e, i) =>
+    stageRow(e.result, `showRoomScorecard(${i})`)).join('');
+
+  if (!m.complete){
+    el.innerHTML = roomPendingHtml(m) +
+      (resultsHtml ? `<div style="margin-top:16px">${resultsHtml}</div>` : '');
+    return;
+  }
+
   if (m.format === 'final'){
-    const res = m.result;
+    const res = m.results[0].result;
     el.innerHTML = `<div class="report" style="padding:0 0 20px">
       <div class="call ${res.winner ? 'won' : ''}">${res.winner ? res.winner + ' win' : 'Tied'}</div>
       <div class="figures">${res.home_score} · ${res.away_score}</div>
       <div class="margin">${res.margin}</div>
       <div style="margin-top:14px">
-        <button class="act" onclick="showRoomScorecard('result')">Scorecard</button>
+        <button class="act" onclick="showRoomScorecard(0)">Scorecard</button>
       </div></div>`;
-  } else if (m.format === 'cup'){
+    return;
+  }
+
+  if (m.format === 'cup'){
     el.innerHTML = `<div style="padding:0 0 20px">
       <div class="call won" style="text-align:center;margin-bottom:16px">${m.champion} win the cup</div>
-      ${m.semis.map((r, i) => stageRow(r, `showRoomScorecard('semis',${i})`)).join('')}
-      ${stageRow(m.final, `showRoomScorecard('final')`)}</div>`;
-  } else {
-    el.innerHTML = `<div class="cards2" style="grid-template-columns:1fr">
-      <div><table>
-        <tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
-            <th class="n">Pts</th><th class="n">NRR</th></tr>
-        ${m.table.map(row => `<tr class="${row.you ? 'you' : ''}">
-          <td>${row.pos}</td><td>${row.name}</td><td class="n">${row.played}</td>
-          <td class="n">${row.won}</td><td class="n">${row.lost}</td>
-          <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
-      </table></div></div>
-      <div style="margin-top:16px">
-        ${m.playoffs.map((r, i) => stageRow(r, `showRoomScorecard('playoffs',${i})`)).join('')}
-      </div>
-      <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>`;
+      ${resultsHtml}</div>`;
+    return;
   }
+
+  el.innerHTML = `<div class="cards2" style="grid-template-columns:1fr">
+    <div><table>
+      <tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
+          <th class="n">Pts</th><th class="n">NRR</th></tr>
+      ${(m.table || []).map(row => `<tr class="${row.you ? 'you' : ''}">
+        <td>${row.pos}</td><td>${row.name}</td><td class="n">${row.played}</td>
+        <td class="n">${row.won}</td><td class="n">${row.lost}</td>
+        <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
+    </table></div></div>
+    <div style="margin-top:16px">${resultsHtml}</div>
+    <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>`;
+}
+
+async function roomSubmitToss(elects, ctrl){
+  await busyClick(ctrl, elects === 'bat' ? 'Batting…' : 'Bowling…', async () => {
+    try {
+      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/toss`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, elects})});
+      showRoomMatch(ROOM_MATCH_DATA);
+    } catch(e){ slip(e.message); }
+  });
+}
+
+async function roomSubmitImpact(slot, ctrl){
+  await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
+    try {
+      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/impact`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, slot})});
+      showRoomMatch(ROOM_MATCH_DATA);
+    } catch(e){ slip(e.message); }
+  });
+}
+
+async function roomAdvanceMatch(ctrl){
+  await busyClick(ctrl, 'Continuing…', async () => {
+    try {
+      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/advance`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID})});
+      showRoomMatch(ROOM_MATCH_DATA);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 boot().then(() => {

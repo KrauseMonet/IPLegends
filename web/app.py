@@ -507,10 +507,11 @@ def meta() -> dict:
     shape baked into JavaScript is a second copy of the rules in `etl.feasibility`, and the
     day one of these constants moves the board would show the old shape with nothing to
     catch it. [A72] `template` is gone -- there is no more slot template to serve.
+    [A76] `lower_order_default` is gone too -- there is no single default band any more
+    (a thin-evidence bowler falls to `tail`, but a thin-evidence batter never does), so a
+    single constant could no longer describe the rule.
     """
-    from etl.feasibility import (
-        BOWLERS_IN_TWELVE, IMPACT_SLOT, LOWER_ORDER_BAND, OVERSEAS_CAP, TWELVE_SIZE,
-    )
+    from etl.feasibility import BOWLERS_IN_TWELVE, IMPACT_SLOT, OVERSEAS_CAP, TWELVE_SIZE
     deck = STATE["deck"]
     seasons = {c.season_year for cards in deck.cards_by_fs.values() for c in cards}
     return {
@@ -520,7 +521,6 @@ def meta() -> dict:
         "impact_slot": IMPACT_SLOT,
         "bowlers_needed": BOWLERS_IN_TWELVE,
         "overseas_cap": OVERSEAS_CAP,
-        "lower_order_default": list(LOWER_ORDER_BAND),
         "cards": sum(len(v) for v in deck.cards_by_fs.values()),
         "franchise_seasons": len(deck.fs_ids),
         "seasons": sorted(s for s in seasons if s),

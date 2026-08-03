@@ -63,7 +63,7 @@ BASE_TABLES = {
 STATE_TABLES = {
     "state_ball_outcomes", "state_runs_remaining",
     "player_season_impact", "player_season_rating",
-    "person_batting_positions",
+    "person_batting_positions", "person_season_batting_positions",
 }
 
 # [Migration 019] Live multiplayer room state -- not a category check 6 can even ask
@@ -577,6 +577,22 @@ def check_06_super_overs_excluded(conn) -> Result:
             "exclusion clause may not be doing anything"
         )
 
+    # [A76] `person_season_batting_positions` is written from the exact same scan as
+    # `person_batting_positions` (`etl.career_positions` runs `batting_positions()` once
+    # and re-aggregates it two ways), so their grand totals must be identical -- summing
+    # a person's innings across every season must equal summing them across his career,
+    # by definition. This is the one relationship that could drift if the season write
+    # ever excluded super overs differently from the career write (or excluded a
+    # different filter entirely), which neither table's own row-count alone would catch.
+    (season_total,), = _rows(
+        conn, "select sum(innings) from person_season_batting_positions")
+    if season_total != without_supers:
+        offenders.append(
+            f"person_season_batting_positions totals {season_total:,} innings against "
+            f"person_batting_positions' {without_supers:,} -- the two aggregates of the "
+            "same scan have drifted apart"
+        )
+
     (stored,), = _rows(conn, "select sum(faced) from state_ball_outcomes")
     (rated,), = _rows(conn, "select count(*) from player_season_impact")
     return verdict(
@@ -587,7 +603,8 @@ def check_06_super_overs_excluded(conn) -> Result:
         f"{playable:,} faced or bowled a ball, {zero_evidence:,} are rated from reputation "
         f"alone (A71), and every one of 3,337 squad_members is covered; excluding super "
         f"overs from the career position scan changes {with_supers - without_supers:,} "
-        f"innings",
+        f"innings; the season-grain table totals the same {season_total:,} innings as "
+        "the career-grain one",
         offenders,
     )
 
@@ -1511,119 +1528,106 @@ def check_23_career_positions_match_an_independent_aggregate(conn) -> Result:
     )
 
 
-def check_24_lower_order_widening_lives_in_exactly_one_place(conn) -> Result:
-    """A72/A73/A70. The archive states raw counts; the lower-order widening rule is a game
-    rule applied in `etl.feasibility.Card.positions` alone, never inside the database.
+def check_24_batting_role_cascade_is_correctly_wired(conn) -> Result:
+    """A76, supersedes A72/A73's widening check (same number, the mechanism it pinned no
+    longer exists). `etl.feasibility.load_deck` computes each card's `positions` by
+    calling `etl.batting_roles.batting_role` against three inputs pulled from the
+    database. This checks that the WIRING -- which rows go in, which set comes out -- is
+    right; the algorithm itself (the aggregate-band comparison, the boundary tie-break,
+    the four-tier cascade) is `tests/test_batting_roles.py`'s job, independently and with
+    no database at all, exactly as A26's `role_for` is owned by `tests/test_squads.py`
+    rather than by a check here.
 
-    Four independent claims, checked separately so a fix to one cannot be mistaken for a
-    fix to the rest. First: the table itself holds sub-threshold evidence undecorated --
-    rows with fewer than MIN_INNINGS_AT_POSITION innings exist and are not filtered or
-    defaulted away at write time, which is what makes the threshold a read-time game rule
-    rather than a write-time archive fact. Second: every card with NO qualifying position
-    anywhere widens to the full LOWER_ORDER_BAND. Third [A73]: every card whose qualifying
-    positions are ALL already in the lower order ALSO widens to the full band, rather than
-    staying pinned to its exact narrow measured set. Fourth, the other direction: every
-    card with genuine evidence ABOVE the band keeps its exact measured positions untouched
-    -- the widening never loosens where the evidence itself says otherwise.
-
-    The "no qualifying position" population is bigger than, and different from, the
-    64-person "zero batting evidence at all" population named elsewhere (A72): 64 have
-    NO recorded innings whatsoever (every one a bowler, zero keepers) -- but a broader
-    ~420 have batted plenty without ever concentrating five innings at any ONE position
-    (a career floater, moved around too much to pin down), and that population is NOT
-    all bowlers -- a handful are keepers who never settled. Both populations fall back to
-    the same widened band, which is the point: the widening does not need to know or care
-    which of the two reasons applies -- and neither does a genuine lower-order specialist
-    (a recognised finisher, a bowler who has batted enough to qualify at 7 or 8), who
-    widens identically to either zero-evidence case.
+    Three claims, checked separately so a fix to one is never mistaken for a fix to the
+    rest. First: every card's `positions` is exactly one of the four fixed
+    `BATTING_ROLE_SLOTS` ranges -- nothing else can legally come out of the cascade.
+    Second: recomputing `batting_role` fresh from `person_batting_positions`,
+    `person_season_batting_positions` and `squad_members.role` -- pulled by separate
+    queries from load_deck's own -- reproduces every card's `positions` exactly, which is
+    what makes this an independence check rather than a restatement of load_deck's own
+    logic. Third: a card with literally zero recorded career batting innings is always a
+    bowler -- A26's `role_for` already requires having batted at least once to be tagged
+    batter/allrounder/keeper, so if this ever fires it means that guarantee broke, not
+    that this check found a new legitimate case.
     """
-    title = "the lower-order widening is applied in exactly one place"
+    from etl.batting_roles import MIN_INNINGS_FOR_ROLE, batting_role
+    from etl.feasibility import BATTING_ROLE_SLOTS, load_deck
+
+    title = "the batting-role cascade (A76) is wired correctly end to end"
     offenders = []
 
-    from etl.feasibility import LOWER_ORDER_BAND, MIN_INNINGS_AT_POSITION, load_deck
+    career: dict[str, dict[int, int]] = {}
+    for person_id, position, innings in _rows(
+        conn, "select person_id, position, innings from person_batting_positions",
+    ):
+        career.setdefault(person_id, {})[position] = innings
 
-    (below_threshold,), = _rows(
+    season: dict[tuple[int, str], dict[int, int]] = {}
+    for fs_id, person_id, position, innings in _rows(
         conn,
-        "select count(*) from person_batting_positions where innings < %s",
-        (MIN_INNINGS_AT_POSITION,),
-    )
-    if below_threshold == 0:
-        offenders.append(
-            "no sub-threshold rows exist at all -- either nobody in the archive has a "
-            "thin position (implausible) or the threshold is being applied at write time"
+        "select franchise_season_id, person_id, position, innings "
+        "from person_season_batting_positions",
+    ):
+        season.setdefault((fs_id, person_id), {})[position] = innings
+
+    squad_role = {
+        (fs_id, person_id): role
+        for fs_id, person_id, role in _rows(
+            conn, "select franchise_season_id, person_id, role from squad_members",
         )
-
-    (no_evidence,), = _rows(
-        conn,
-        """
-        select count(*) from (
-            select person_id from squad_members group by person_id
-            having bool_and(
-                person_id not in (
-                    select person_id from person_batting_positions
-                    where innings >= %s
-                )
-            )
-        ) t
-        """,
-        (MIN_INNINGS_AT_POSITION,),
-    )
+    }
 
     deck = load_deck(conn)
     all_cards = [c for cards in deck.cards_by_fs.values() for c in cards]
-    lo, hi = LOWER_ORDER_BAND
-    widened_range = frozenset(range(lo, hi + 1))
 
-    empty_positions = [c for c in all_cards if not c.positions]
+    valid_ranges = set(BATTING_ROLE_SLOTS.values())
+    wrong_shape = [c for c in all_cards if c.positions not in valid_ranges]
 
-    no_evidence_cards = [c for c in all_cards if not c.career_positions]
-    wrong_empty_fallback = [c for c in no_evidence_cards if c.positions != widened_range]
-    fell_back_keepers = [c for c in no_evidence_cards if c.role == "keeper"]
+    mismatches = []
+    tier_counts = Counter()
+    for c in all_cards:
+        key = (c.fs_id, c.person_id)
+        season_counts = season.get(key, {})
+        career_counts = career.get(c.person_id, {})
+        expected_band = batting_role(season_counts, career_counts, squad_role.get(key))
+        if c.positions != BATTING_ROLE_SLOTS[expected_band]:
+            mismatches.append(
+                f"{c.name} {c.season_year}: got {sorted(c.positions)}, "
+                f"expected {sorted(BATTING_ROLE_SLOTS[expected_band])}"
+            )
+        if sum(season_counts.values()) >= MIN_INNINGS_FOR_ROLE:
+            tier_counts["season"] += 1
+        elif sum(career_counts.values()) >= MIN_INNINGS_FOR_ROLE:
+            tier_counts["career"] += 1
+        elif squad_role.get(key) != "bowler" and career_counts:
+            tier_counts["thin, not a bowler"] += 1
+        else:
+            tier_counts["tailender default"] += 1
 
-    lower_order_only = [
-        c for c in all_cards
-        if c.career_positions and min(c.career_positions) >= lo
-    ]
-    wrong_lower_order_widening = [
-        c for c in lower_order_only if c.positions != widened_range
-    ]
+    zero_career_evidence = [c for c in all_cards if not career.get(c.person_id)]
+    zero_evidence_non_bowlers = [c for c in zero_career_evidence if c.role != "bowler"]
 
-    genuine_top_or_middle = [
-        c for c in all_cards
-        if c.career_positions and min(c.career_positions) < lo
-    ]
-    wrongly_widened = [
-        c for c in genuine_top_or_middle if c.positions != c.career_positions
-    ]
-
-    if empty_positions:
+    if wrong_shape:
         offenders.append(
-            f"{len(empty_positions)} card(s) have no positions at all -- no fallback fired"
+            f"{len(wrong_shape)} card(s) have a positions set outside the four fixed bands"
         )
-    if wrong_empty_fallback:
+    if mismatches:
         offenders.append(
-            f"{len(wrong_empty_fallback)} zero-evidence card(s) did not widen to "
-            f"{LOWER_ORDER_BAND}"
+            f"{len(mismatches)} card(s) disagree with an independent recompute: "
+            + "; ".join(mismatches[:5])
         )
-    if wrong_lower_order_widening:
+    if zero_evidence_non_bowlers:
         offenders.append(
-            f"{len(wrong_lower_order_widening)} lower-order-only card(s) did not widen "
-            f"to the full {LOWER_ORDER_BAND} band"
-        )
-    if wrongly_widened:
-        offenders.append(
-            f"{len(wrongly_widened)} card(s) with genuine top/middle evidence were "
-            "widened when they should have kept their exact measured positions"
+            f"{len(zero_evidence_non_bowlers)} card(s) have zero career batting evidence "
+            "but are not bowlers -- A26's role_for guarantee broke"
         )
 
+    tier_summary = ", ".join(f"{n:,} via {tier}" for tier, n in tier_counts.most_common())
     return verdict(
         24, title,
-        f"{below_threshold:,} sub-threshold rows stored undecorated; {no_evidence} "
-        f"people (career-wide) never clear the bar anywhere, {len(fell_back_keepers)} of "
-        f"whom are keepers; {len(lower_order_only):,} cards have evidence confined to the "
-        f"lower order and widen to the full band; {len(genuine_top_or_middle):,} cards "
-        f"keep their exact measured positions; every one of {len(all_cards):,} loaded "
-        f"cards has a non-empty positions set",
+        f"{len(all_cards):,} cards checked, every one reproduced from an independent "
+        f"recompute of the raw tables ({tier_summary}); {len(zero_career_evidence)} "
+        "cards have zero career batting evidence, all of them bowlers",
         offenders,
     )
 
@@ -1703,6 +1707,6 @@ CHECKS = (
     check_09_no_rating_leaks_across_seasons,
     check_13_cohort_offsets_do_not_drift_by_era,
     check_23_career_positions_match_an_independent_aggregate,
-    check_24_lower_order_widening_lives_in_exactly_one_place,
+    check_24_batting_role_cascade_is_correctly_wired,
     check_25_order_errors_agrees_with_the_forward_check,
 )

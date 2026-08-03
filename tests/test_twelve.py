@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 from etl.feasibility import (
-    BOWLERS_IN_TWELVE, LOWER_ORDER_BAND, OVERSEAS_CAP, TWELVE_SIZE, XI_SIZE,
+    BOWLERS_IN_TWELVE, OVERSEAS_CAP, TWELVE_SIZE, XI_SIZE,
     Card, could_still_complete, eligible, order_errors,
 )
 from game.simulator import MAX_OVERS_PER_BOWLER, OVERS
@@ -27,7 +27,7 @@ def card(i: int, positions: frozenset[int], *, role: str = "batter",
          bowl: float | None = None, overseas: bool | None = False) -> Card:
     return Card(
         fs_id=1, person_id=f"c{i}", name=f"c{i}", bat=0.5, bowl=bowl,
-        role=role, overseas=overseas, career_positions=positions,
+        role=role, overseas=overseas, positions=positions,
     )
 
 
@@ -40,38 +40,14 @@ def test_bowlers_in_twelve_matches_the_five_bowler_cap():
     assert BOWLERS_IN_TWELVE == OVERS // MAX_OVERS_PER_BOWLER
 
 
-# --- Card.positions: the widening rule, applied in exactly one place --------------------
-
-def test_genuine_top_or_middle_evidence_is_kept_exactly():
-    """KL Rahul-shaped: real evidence above the lower-order band stays untouched -- the
-    widening rule never loosens where the evidence itself says otherwise."""
-    c = card(0, frozenset({1, 2, 3, 4}))
-    assert c.positions == frozenset({1, 2, 3, 4})
-
-
-def test_evidence_confined_to_the_lower_order_widens_to_the_whole_band():
-    """SP Narine-shaped: a finisher whose only real innings are at 7/8 is, in practice,
-    fungible across the whole lower order -- not pinned to exactly 7 and 8."""
-    c = card(0, frozenset({7, 8}))
-    lo, hi = LOWER_ORDER_BAND
-    assert c.positions == frozenset(range(lo, hi + 1))
-
-
-def test_no_qualifying_position_at_all_also_widens_to_the_whole_band():
-    """Whether from zero batting evidence or evidence too thin to concentrate anywhere --
-    both read the same to a drafter, so both get the same widened band as a specialist
-    bowler who has batted just enough to qualify down at 8."""
-    c = card(0, frozenset())
-    lo, hi = LOWER_ORDER_BAND
-    assert c.positions == frozenset(range(lo, hi + 1))
-
-
-def test_a_single_qualifying_position_at_the_edge_of_the_band_is_not_widened():
-    """A player who qualifies at position 6 alone has genuine evidence just above the
-    band (LOWER_ORDER_BAND starts at 7) -- his exact single position is kept, not widened."""
-    c = card(0, frozenset({6}))
-    assert c.positions == frozenset({6})
-
+# --- Card.positions and Card.slots -------------------------------------------------------
+#
+# [A76] `positions` is now a plain field, set once at load time by
+# `etl.batting_roles.batting_role` to a fixed BATTING_ROLE_SLOTS range -- there is no
+# widening step left in `Card` itself to test here. That algorithm (the aggregate-band
+# comparison, the boundary-position tie-break, the season/career/thin/tail cascade) has
+# its own test file, `tests/test_batting_roles.py`, exactly as A26's `role_for` is tested
+# in `tests/test_squads.py` rather than here.
 
 def test_slots_always_include_the_impact_pseudo_position():
     c = card(0, frozenset({1}))

@@ -32,7 +32,7 @@ def card(n: int, positions: frozenset[int], *, fs: int = 1, role: str = "batter"
          bowl: float | None = None, franchise: str | None = None,
          season_year: int | None = None) -> Card:
     return Card(fs_id=fs, person_id=f"c{n}", name=f"c{n}", bat=0.1, bowl=bowl,
-                role=role, overseas=False, career_positions=positions,
+                role=role, overseas=False, positions=positions,
                 franchise=franchise, season_year=season_year)
 
 

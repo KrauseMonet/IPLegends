@@ -180,29 +180,42 @@ reproducible from the seed alone for leaderboard disputes.
 
 **Phase 1 builds none of that.** This phase is the data pipeline only.
 
-### 1.1a Position eligibility and the final twelve, as actually built [A72/A73]
+### 1.1a Position eligibility and the final twelve, as actually built [A72/A73, A76]
 
 The slot template above (A6/A40) was built, played, and replaced with something
-skill-driven: no slot categories at all. **Eligibility for each numbered batting position
-(1–11) is a career fact about the player**, not a category his card belongs to, and the
-drafter picks a playing **twelve directly** — eleven who bat, one Impact Player — one slot
-at a time, rather than fifteen candidates followed by a separate arranging phase.
+skill-driven: no slot categories at all. The drafter picks a playing **twelve directly**
+— eleven who bat, one Impact Player — one slot at a time, rather than fifteen candidates
+followed by a separate arranging phase.
 
-**Eligibility.** A position is real evidence about a player only if he has batted there in
-at least `MIN_INNINGS_AT_POSITION = 5` separate career innings, counted career-wide across
-all nineteen seasons in `person_batting_positions` (migration 017, derived by
-`etl.career_positions`). The naive alternative — a career `MIN`/`MAX` envelope, already
-stored on `squad_members` — was tried first and measured wrong: one outlier innings widens
-an envelope forever (SV Samson came out 1–8, Rinku Singh 3–8). Counted instead: Samson
-eligible at **1, 2, 3, 4, 6**; Rinku at **5, 6, 7**; Suryavanshi at **2 alone**.
+**Eligibility, as of A76, is a single career-based ROLE, not a per-exact-position set.**
+A72/A73's mechanism (below, kept for the history) is retired. Every player is exactly one
+of `top` (slots 1-3), `middle` (3-5), `finisher` (5-7), or `tail` (8-11), decided by
+`etl.batting_roles.batting_role` against a four-tier cascade: that SEASON's own position
+evidence if it clears `MIN_INNINGS_FOR_ROLE = 5`; else the player's CAREER evidence if
+that clears it; else, if `squad_members.role != 'bowler'`, whatever thin evidence exists
+at all (a short-career domestic batter is not the same population as a bowler who never
+bats, and must not be defaulted the same way — see A76); else `tail`. Within each grain,
+the dominant band is the one with the largest AGGREGATE innings total, positions 3 and 5
+each allocated to whichever neighbouring band has more unambiguous evidence — not "the
+single most-frequent exact position," which is measurably wrong (Rohit Sharma's most
+common individual position is 4, yet his top-order innings, split across positions 1 and
+2, outweigh it in aggregate). New table, migration 021:
+`person_season_batting_positions`, the per-season twin of A72's `person_batting_positions`
+below. Samson now reads `top` in his opener seasons and `middle` in his others; Rinku
+reads `finisher` every season; Suryavanshi reads `top`; Narine swings between `top` and
+`tail` season to season, matching how he actually batted.
 
-**The widening rule.** A player with no qualifying position anywhere, OR whose qualifying
-positions are *all* already in the lower order (a recognised finisher, a part-time bowler
-who has batted enough to qualify at 7 or 8), widens to the full **`LOWER_ORDER_BAND` =
-(7, 11)** — "any position below 6," excluding 6 itself. A player with any qualifying
-position above that band keeps his exact measured set untouched. Both are the same kind of
-fungible lower-order resource in practice; the widening only ever loosens where the
-evidence is silent or already agrees, never where it says otherwise.
+**A72/A73's mechanism, superseded but kept for the history.** A position was real
+evidence about a player only if he had batted there in at least
+`MIN_INNINGS_AT_POSITION = 5` separate career innings, counted career-wide in
+`person_batting_positions` (migration 017, derived by `etl.career_positions`, which A76
+still uses for its own career-grain evidence). The naive alternative — a career
+`MIN`/`MAX` envelope, already stored on `squad_members` — was tried first and measured
+wrong: one outlier innings widens an envelope forever (SV Samson came out 1–8, Rinku
+Singh 3–8). A player with no qualifying position anywhere, or whose qualifying positions
+were *all* already in the lower order, widened to the full `LOWER_ORDER_BAND = (7, 11)`.
+Both `MIN_INNINGS_AT_POSITION` and `LOWER_ORDER_BAND` are deleted from the code; A76's
+own floor and default tier answer the same two questions differently, as above.
 
 **The final twelve is drafted directly, not arranged afterward.** Every pick names both a
 candidate and the slot he occupies (a batting position, or Impact) in one move, **final the

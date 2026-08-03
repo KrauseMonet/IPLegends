@@ -31,29 +31,19 @@ from dataclasses import dataclass, field
 import psycopg
 from dotenv import load_dotenv
 
-# [A72] Career-wide, but counted rather than enveloped. The obvious mechanism -- career
-# MIN(batting_position_min)/MAX(batting_position_max), both already on `squad_members`
-# since migration 004 -- needs no new ETL and was tried first. It does not hold up:
-# measured against the archive, SV Samson comes out 1-8 and RK Singh (Rinku) comes out
-# 3-8, both far looser than reputation, because a single outlier innings widens a MIN/MAX
-# envelope forever. So eligibility counts instead: a position is real evidence about a
-# player only if he has batted there in at least this many separate career innings.
-# Declared by the user directly, not calibrated -- a game-design constant like A57's
-# REPUTATION or A59's ALLROUNDER_RUNS, not a threshold swept against a list.
-MIN_INNINGS_AT_POSITION = 5
+from etl.batting_roles import batting_role
 
-# [A72, widened by A73] The band a player defaults into when his own measured evidence
-# doesn't pin him to the top or middle of the order. Two populations land here: a player
-# with NO qualifying position anywhere (zero batting evidence, or evidence too thin to
-# concentrate anywhere), and a player whose evidence IS real but confined entirely to the
-# lower order already (a specialist finisher, a bowler who has batted enough to qualify
-# but only at 7/8) -- both are "a lower-order hitter," and binding either one to the
-# narrow (9, 11) tail this band used to be was tighter than the user plays: a number 7/8
-# finisher and a part-time bowler batting at 9 are the same kind of flexible lower-order
-# resource in practice, not two different roles. "Below 6" per the user -- confirmed to
-# exclude 6 itself, matching how the earlier Rinku Singh example worked out (measured
-# eligible at 5, 6, 7 for "only below 4", i.e. strictly after 4, not from 4).
-LOWER_ORDER_BAND = (7, 11)
+# [A76, supersedes A72/A73] Eligibility is a single career-based ROLE now, not a set of
+# individually-thresholded exact positions. `etl.batting_roles.batting_role` decides
+# which of these four a player is; this is just the fixed slot range each one grants.
+# Deliberately overlapping at 3 (top/middle) and 5 (middle/finisher), matching ordinary
+# cricket usage where those two positions are genuinely claimed by either neighbour.
+BATTING_ROLE_SLOTS = {
+    "top": frozenset({1, 2, 3}),
+    "middle": frozenset({3, 4, 5}),
+    "finisher": frozenset({5, 6, 7}),
+    "tail": frozenset({8, 9, 10, 11}),
+}
 
 XI_SIZE = 11
 TWELVE_SIZE = XI_SIZE + 1                 # eleven who bat, one Impact Player
@@ -140,10 +130,6 @@ class Card:
 
     `bat`/`bowl` may be None -- not because a discipline fell below a floor (A65/A71 rate
     those too), but because the player never had that discipline at all this season.
-    `career_positions` is the ALREADY-thresholded set of batting numbers this person has
-    at least MIN_INNINGS_AT_POSITION career innings at (possibly empty); `positions`
-    applies the one widening rule on top of it (A73), so the threshold and the widening
-    each live in exactly one place.
     """
 
     fs_id: int
@@ -162,10 +148,10 @@ class Card:
     overseas: bool | None = None
     # A58/A60's integer 70-99, the card's face value.
     display: int | None = None
-    # [A72] The qualifying positions, threshold already applied at load time. Empty
-    # frozenset means "no position has enough evidence," not "no evidence at all" --
-    # those two cases are deliberately not distinguished past this point.
-    career_positions: frozenset[int] = frozenset()
+    # [A76] Which numbered batting positions this card may occupy -- already the FINAL
+    # eligible set, `BATTING_ROLE_SLOTS[batting_role(...)]`, decided once at load time.
+    # No widening happens downstream of this field; there is nothing left to widen.
+    positions: frozenset[int] = frozenset()
 
     # The actual box-score, not derivable from `bat`/`bowl` (those are per-ball ratings
     # against a state model, not counting stats). Read directly off `deliveries` rather
@@ -200,22 +186,6 @@ class Card:
         return max(v for v in (self.bat, self.bowl) if v is not None)
 
     @property
-    def positions(self) -> frozenset[int]:
-        """Batting numbers this player may occupy.
-
-        [A73] Two cases widen to the full LOWER_ORDER_BAND rather than staying pinned to
-        an exact measured set: no qualifying position at all, or every qualifying
-        position already lower-order. Any player with real evidence above the band (a
-        genuine opener/top/middle-order showing) keeps his exact measured positions
-        untouched -- the widening only ever loosens where the evidence itself is silent
-        or already agrees it's a lower-order player, never where it says otherwise.
-        """
-        lo, hi = LOWER_ORDER_BAND
-        if not self.career_positions or min(self.career_positions) >= lo:
-            return frozenset(range(lo, hi + 1))
-        return self.career_positions
-
-    @property
     def slots(self) -> frozenset[int]:
         """`positions`, plus the Impact pseudo-slot every player may occupy."""
         return self.positions | {IMPACT_SLOT}
@@ -237,13 +207,14 @@ class Deck:
 
 
 def load_deck(conn) -> Deck:
-    """Every rated player-season, and the career-wide positions it may bat at.
+    """Every rated player-season, and the batting role (A76) it may bat under.
 
     A player-season with no rated discipline is not draftable at all (A33/A65/A71 rate
     everyone who faced or bowled a ball, or has a career elsewhere, or a shared floor --
-    see player_season_rating). Position eligibility is a PERSON fact (A72), read from
-    `person_batting_positions` and thresholded by MIN_INNINGS_AT_POSITION here, in the
-    one place that threshold is applied.
+    see player_season_rating). Position eligibility is decided once here, per
+    (franchise_season, person), by `etl.batting_roles.batting_role` against that
+    season's own position counts, that person's career counts, and `s.role` -- never
+    re-derived downstream.
     """
     rows = conn.execute(
         """
@@ -288,21 +259,34 @@ def load_deck(conn) -> Deck:
         """
     ).fetchall()
 
-    positions_by_person: dict[str, set[int]] = defaultdict(set)
+    # Raw archive facts only -- no floor, no fallback, no game rule (A19/A70). Both
+    # grains feed `batting_role`, which applies every rule that decides what they mean.
+    career_by_person: dict[str, dict[int, int]] = defaultdict(dict)
     for person_id, position, innings in conn.execute(
         "select person_id, position, innings from person_batting_positions"
     ):
-        if innings >= MIN_INNINGS_AT_POSITION:
-            positions_by_person[person_id].add(position)
+        career_by_person[person_id][position] = innings
+
+    season_by_key: dict[tuple[int, str], dict[int, int]] = defaultdict(dict)
+    for fs_id, person_id, position, innings in conn.execute(
+        "select franchise_season_id, person_id, position, innings "
+        "from person_season_batting_positions"
+    ):
+        season_by_key[(fs_id, person_id)][position] = innings
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for (fs_id, person_id, name, role, band, career_keeper,
          season_year, franchise, overseas, bat, bowl, display,
          bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls) in rows:
+        batting_band = batting_role(
+            season_by_key.get((fs_id, person_id), {}),
+            career_by_person.get(person_id, {}),
+            role,
+        )
         cards_by_fs[fs_id].append(
             Card(fs_id, person_id, name, bat, bowl, band, role, career_keeper,
                  season_year, franchise, overseas, display,
-                 frozenset(positions_by_person.get(person_id, ())),
+                 BATTING_ROLE_SLOTS[batting_band],
                  bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
                  bowl_runs=bowl_runs, bowl_balls=bowl_balls)
         )

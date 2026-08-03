@@ -29,7 +29,7 @@ def card(i: int, positions: frozenset[int], overseas: bool | None, *,
     legal twelve on its own -- these tests are about the overseas cap, not about whether
     a legal twelve is reachable at all."""
     return Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.5, bowl=bowl,
-                role=role, overseas=overseas, career_positions=positions)
+                role=role, overseas=overseas, positions=positions)
 
 
 def deck_of(overseas_per_fs: int, domestic_per_fs: int, n_fs: int = 20) -> Deck:
@@ -199,7 +199,7 @@ def test_a_reposition_frees_a_slot_for_a_pick_that_had_nowhere_else_to_go():
 
     def card(i, positions, *, bowl=None, role="batter"):
         return Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.5, bowl=bowl,
-                    role=role, career_positions=positions)
+                    role=role, positions=positions)
 
     flex = card(0, frozenset({2, 5}))
     locked = card(1, frozenset({2}))
@@ -237,7 +237,7 @@ def test_a_reposition_swap_never_changes_open_slots():
 
     def card(i, positions, *, bowl=None, role="batter"):
         return Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.5, bowl=bowl,
-                    role=role, career_positions=positions)
+                    role=role, positions=positions)
 
     a = card(0, frozenset({2, 5}))
     b = card(1, frozenset({2, 5}))

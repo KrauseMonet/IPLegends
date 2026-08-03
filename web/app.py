@@ -321,7 +321,10 @@ class RoomPlayerOut(BaseModel):
     picks_made: int
     done: bool
     deal: DealOut | None = Field(
-        default=None, description="this round's dealt franchise-season, visible to everyone")
+        default=None,
+        description="only ever set for the seat whose turn it currently is; "
+                     "`options` is populated only for that seat's own caller -- "
+                     "everyone else sees franchise/season_year with options=[]")
     order: list[CardOut | None]
     impact: CardOut | None
 
@@ -333,9 +336,11 @@ class RoomStateOut(BaseModel):
     timer_seconds: int
     host_id: str
     status: str = Field(description="lobby | drafting | complete | failed")
-    round: int
+    round: int = Field(description="len(moves) // seats -- which snake wave we're in")
     rounds_total: int = TWELVE_SIZE
     seconds_remaining: int
+    active_player_id: str | None = Field(
+        description="whose turn it currently is; null outside 'drafting'")
     players: list[RoomPlayerOut]
     failure_reason: str | None = None
 
@@ -684,11 +689,12 @@ def twelve(state: str) -> dict:
 
 # --- rooms ---------------------------------------------------------------------------
 #
-# Friends draft together, live, turn by turn -- Neon-backed (migration 019), see
-# `web.rooms`'s own docstring for why and for the round-by-round mechanic itself. Nothing
-# here decides anything about cricket either: `web.rooms` reuses `web.session.replay` per
-# seat, which reuses `etl.feasibility.run_draft`, so a room's picks are validated exactly
-# the way a solo draft's are.
+# Friends draft together, live, turn by turn, from one shared competitive pool -- Neon-
+# backed (migrations 019/020), see `web.rooms`'s own docstring for why and for the
+# shared-pool/snake-turn mechanic itself. Nothing here decides anything about cricket
+# either: `web.rooms.replay_room` calls `etl.feasibility.eligible`/`could_still_complete`/
+# `choose_slot` directly, so a room's picks are validated exactly the way a solo draft's
+# are -- this module only shapes the response and redacts what a given caller may see.
 
 @contextmanager
 def _room_db():
@@ -701,35 +707,49 @@ def _room_db():
         yield conn
 
 
-def _room_player_out(player: rooms.RoomPlayer, deck) -> RoomPlayerOut:
-    s = rooms.player_session(player, deck)
-    if s is None:
-        order = [None if c is None else _card(c) for c in (player.order or [])]
-        impact = None if player.impact is None else _card(player.impact)
-        deal = None
-    else:
-        order = [None if c is None else _card(c) for c in s.order]
-        impact = None if s.impact is None else _card(s.impact)
-        deal = None if s.deal is None else DealOut(
-            fs_id=s.deal.fs_id, franchise=s.deal.franchise, season_year=s.deal.season_year,
-            options=[_card(c) for c in s.deal.options],
+def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
+                      is_active: bool, caller_id: str | None,
+                      pending_deal) -> RoomPlayerOut:
+    """`deal` is non-null only for the currently active seat, and even then carries
+    `options` only for the caller whose own seat this is -- see `RoomPlayerOut.deal`'s
+    own description. Everyone else sees just franchise/season_year, never the options
+    (this used to be sent to every caller for every seat; `GET /api/rooms/{code}` had
+    no caller-identity parameter at all to redact by)."""
+    deal = None
+    if is_active and pending_deal is not None:
+        fs_id, candidates = pending_deal
+        franchise = candidates[0].franchise if candidates else None
+        season_year = candidates[0].season_year if candidates else None
+        show_options = player.player_id == caller_id
+        deal = DealOut(
+            fs_id=fs_id, franchise=franchise, season_year=season_year,
+            options=[_card(c) for c in candidates] if show_options else [],
         )
     return RoomPlayerOut(
         player_id=player.player_id, name=player.name, is_cpu=player.is_cpu,
-        picks_made=TWELVE_SIZE if player.is_cpu else len(player.moves),
-        done=player.done, deal=deal, order=order, impact=impact,
+        picks_made=len(seat.picks), done=seat.done, deal=deal,
+        order=[None if c is None else _card(c) for c in seat.order],
+        impact=None if seat.impact is None else _card(seat.impact),
     )
 
 
-def _room_state_out(room: rooms.Room, deck) -> RoomStateOut:
+def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
+    replay = rooms.replay_room(room, deck)
     remaining = 0
     if room.status == "drafting":
-        remaining = max(0, round(room.timer_seconds - (time.time() - room.round_started_at)))
+        remaining = max(0, round(room.timer_seconds - (time.time() - room.turn_started_at)))
     return RoomStateOut(
         code=room.code, format=room.format, seats=room.seats,
         timer_seconds=room.timer_seconds, host_id=room.host_id,
-        status=room.status, round=room.round, seconds_remaining=remaining,
-        players=[_room_player_out(p, deck) for p in room.players.values()],
+        status=room.status, round=room.round,
+        seconds_remaining=remaining, active_player_id=replay.pending_seat_id,
+        players=[
+            _room_player_out(
+                p, replay.seats[pid], is_active=(pid == replay.pending_seat_id),
+                caller_id=caller_id, pending_deal=replay.pending_deal,
+            )
+            for pid, p in room.players.items()
+        ],
         failure_reason=room.failure_reason,
     )
 
@@ -742,7 +762,9 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
                 conn, body.format, body.timer_seconds, body.host_name)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
+        return CreatedRoomOut(
+            player_id=player_id,
+            room=_room_state_out(room, STATE["deck"], caller_id=player_id))
 
 
 @app.post("/api/rooms/{code}/join", response_model=CreatedRoomOut)
@@ -752,31 +774,38 @@ def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
             room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return CreatedRoomOut(player_id=player_id, room=_room_state_out(room, STATE["deck"]))
+        return CreatedRoomOut(
+            player_id=player_id,
+            room=_room_state_out(room, STATE["deck"], caller_id=player_id))
 
 
 @app.post("/api/rooms/{code}/start", response_model=RoomStateOut)
 def start_room(code: str, body: HostActionIn) -> RoomStateOut:
-    """Host-only. Fills every seat still empty with a CPU-drafted twelve (instantly, in
-    full) and starts round 0's clock."""
+    """Host-only. Fills every seat still empty with a CPU seat and starts the first
+    turn's clock -- a CPU's own twelve is no longer drafted up front (see web.rooms'
+    own docstring): it depends on what humans take at their own turns, so it resolves
+    turn by turn like everyone else, instantly whenever its turn comes up."""
     with _room_db() as conn:
         try:
             room = rooms.start_room(conn, code, body.player_id, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"])
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 @app.get("/api/rooms/{code}", response_model=RoomStateOut)
-def get_room(code: str) -> RoomStateOut:
-    """Poll target. Resolves any expired round (auto-picking whoever is still waiting)
-    before returning, so a slow-polling client still sees an up-to-date room."""
+def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
+    """Poll target. Resolves any expired turn (auto-picking whoever timed out, or
+    instantly resolving a CPU's turn) before returning, so a slow-polling client still
+    sees an up-to-date room. `player_id` identifies the caller so only the currently
+    active seat's own options are ever sent back to them -- everyone else sees that
+    seat's franchise/season and every seat's team-so-far, never anyone's options."""
     with _room_db() as conn:
         try:
             room = rooms.room_state(conn, code, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"])
+        return _room_state_out(room, STATE["deck"], caller_id=player_id)
 
 
 @app.post("/api/rooms/{code}/pick", response_model=RoomStateOut)
@@ -787,7 +816,7 @@ def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
                 conn, code, body.player_id, body.index, body.slot, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"])
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 @app.get("/api/rooms/{code}/match", response_model=RoomMatchOut)

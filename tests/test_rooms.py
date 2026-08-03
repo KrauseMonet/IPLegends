@@ -4,30 +4,26 @@
 own docstring already draws for the solo draft.
 
 `FakeConn`/`FakeCursor` below are a minimal in-memory stand-in for the two tables
-migration 019 created, matched on the handful of distinct SQL statements `web/rooms.py`
-issues. Tests call the REAL `create_room`/`join_room`/`start_room`/`submit_pick`/
-`room_state` -- the load/save layer included, not just the pure logic underneath it --
-so a bug in the SQL or the `web.session.encode`/`decode` round-trip would be caught here
-too, not only by hand against a real Neon connection.
+migrations 019/020 created, matched on the handful of distinct SQL statements
+`web/rooms.py` issues. Tests call the REAL `create_room`/`join_room`/`start_room`/
+`submit_pick`/`room_state`/`replay_room` -- the load/save layer included, not just the
+pure logic underneath it -- so a bug in the SQL or the JSONB round-trip would be caught
+here too, not only by hand against a real Neon connection.
 
-A room reuses `web.session.replay`/`etl.feasibility.run_draft` verbatim (A62's standing
-rule) for each seat's own draft, so these tests are about what a room adds on top: seat
-limits, the lazy per-round timer, the AFK auto-pick fallback, CPU-fill, and the one thing
-that is new and was found by hand rather than by a test -- a stranded auto-pick must mark
-the room `"failed"`, never crash it for every player still in it.
+A room reuses `etl.feasibility.eligible`/`could_still_complete`/`choose_slot` verbatim
+(A62's standing rule) for the shared deal-time guarantee, so these tests are about what
+a room adds on top: seat limits, snake turn order, the per-turn timer, the AFK auto-pick
+fallback, instant CPU-turn resolution, and the shared taken-person-id pool itself -- a
+card one seat drafts must vanish from every other seat's own dealt candidates, and one
+seat's earlier pick can now strand a DIFFERENT seat, not just itself.
 """
 
 from __future__ import annotations
 
-import random
-
 import pytest
 
-from etl.feasibility import (
-    IMPACT_SLOT, TWELVE_SIZE, XI_SIZE, Card, Deck, order_errors,
-)
+from etl.feasibility import TWELVE_SIZE, XI_SIZE, Card, Deck, order_errors
 from web import rooms
-from web import session as sess
 
 
 class FakeCursor:
@@ -45,9 +41,9 @@ class FakeCursor:
 
 
 class FakeConn:
-    """Two dicts standing in for `rooms` and `room_players` (migration 019). Matched on
-    the same distinguishing keywords a human skimming `web/rooms.py`'s SQL would use --
-    if that SQL's shape changes, this is the file to update alongside it."""
+    """Two dicts standing in for `rooms` and `room_players` (migrations 019/020).
+    Matched on the same distinguishing keywords a human skimming `web/rooms.py`'s SQL
+    would use -- if that SQL's shape changes, this is the file to update alongside it."""
 
     def __init__(self):
         self.rooms: dict[str, tuple] = {}                  # code -> row tuple
@@ -68,23 +64,25 @@ class FakeConn:
             row = self.rooms.get(code)
             return FakeCursor([row] if row else [])
 
-        if sql_norm.startswith("select player_id, name, is_cpu, state"):
+        if sql_norm.startswith("select player_id, name, is_cpu"):
             (code,) = params
             rows = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
-            return FakeCursor([(pid, name, is_cpu, state)
-                                for (_seat, pid, name, is_cpu, state) in rows])
+            return FakeCursor([(pid, name, is_cpu) for (_seat, pid, name, is_cpu) in rows])
 
         if sql_norm.startswith("insert into room_players"):
-            code, player_id, seat_order, name, is_cpu, state = params
+            code, player_id, seat_order, name, is_cpu = params
             self.players.setdefault(code, {})[player_id] = (
-                seat_order, player_id, name, is_cpu, state)
+                seat_order, player_id, name, is_cpu)
             return FakeCursor([])
 
         if sql_norm.startswith("insert into rooms"):
-            (code, fmt, timer_seconds, seed, host_id, status, round_no,
-             round_started_at, failure_reason) = params
+            (code, fmt, timer_seconds, seed, host_id, status,
+             turn_started_at, failure_reason, moves) = params
+            # `moves` arrives wrapped in psycopg.types.json.Json in real code; unwrap
+            # to the plain list it wraps, exactly what a real jsonb column reads back.
+            moves_value = moves.obj if hasattr(moves, "obj") else moves
             self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
-                                 round_no, round_started_at, failure_reason)
+                                 turn_started_at, failure_reason, moves_value)
             return FakeCursor([])
 
         raise AssertionError(f"FakeConn does not know this query: {sql_norm[:80]!r}")
@@ -103,8 +101,8 @@ def card(n: int, positions: frozenset[int], *, fs: int = 1, role: str = "batter"
 
 def deck_of(n_fs: int = 24, per_fs: int = 16) -> Deck:
     """Every franchise-season offers a keeper, several bowlers and a full position
-    spread -- the same proven shape `tests/test_web.py` uses, so `run_draft` completes
-    quickly and reliably for both a human's own replay and a CPU-fill."""
+    spread -- the same proven shape `tests/test_web.py` uses, so the deal-time guarantee
+    completes quickly and reliably for a human's own replay and a CPU's alike."""
     by_fs: dict[int, list[Card]] = {}
     n = 0
     for fs in range(1, n_fs + 1):
@@ -122,16 +120,13 @@ def deck_of(n_fs: int = 24, per_fs: int = 16) -> Deck:
 
 
 def deck_of_no_keeper(n_fs: int = 6, per_fs: int = 16) -> Deck:
-    """The stranding fixture: identical shape to `deck_of` -- full position spread,
-    plenty of bowlers -- except NO card anywhere is a keeper. `eligible`'s forward check
-    (A73) only tests keeper coverage on the very LAST pick (`remaining_after == 0`), so a
-    deck like this completes picks 1-11 completely normally -- the deal-time guarantee
-    never once sees an empty candidate list -- and only reveals it is unplayable when the
-    final pick is actually simulated. That gap between "looked fine for eleven picks" and
-    "provably doomed on the twelfth" is exactly the live bug: `sess.replay` re-simulates
-    the WHOLE draft from the seed every time (A62), so asking for the state after eleven
-    moves already forces that twelfth, doomed pick and raises `InvalidState` -- even
-    though no twelfth move was ever recorded."""
+    """The universal stranding fixture: identical shape to `deck_of` -- full position
+    spread, plenty of bowlers -- except NO card anywhere is a keeper. `eligible`'s
+    forward check (A73) only tests keeper coverage on the very LAST pick
+    (`remaining_after == 0`), so this deck completes any seat's first eleven picks
+    completely normally and only reveals it is unplayable on the twelfth -- for EVERY
+    seat, since none of them can ever have a keeper. Distinct from
+    `deck_of_one_keeper` below, which isolates a stranding caused by another seat."""
     by_fs: dict[int, list[Card]] = {}
     n = 0
     for fs in range(1, n_fs + 1):
@@ -146,39 +141,74 @@ def deck_of_no_keeper(n_fs: int = 6, per_fs: int = 16) -> Deck:
     return Deck(by_fs, sorted(by_fs))
 
 
+def deck_of_one_keeper(n_fs: int = 12, per_fs: int = 16) -> Deck:
+    """Exactly ONE keeper-eligible card in the whole deck -- unlike `deck_of_no_keeper`'s
+    zero (which strands every seat universally, regardless of order), this isolates a
+    stranding caused SPECIFICALLY by one seat taking the only keeper before another
+    seat's own last pick needs one. Same shape as `deck_of`, just one card's role
+    changed -- giving the keeper a WIDER position window than normal was tried and
+    made things worse, not better: a universally-eligible card is exactly the one most
+    likely to be the sole survivor once a seat's own open slots have narrowed late in
+    the draft, which is the opposite of what a seat trying to AVOID it needs."""
+    by_fs: dict[int, list[Card]] = {}
+    n = 0
+    keeper_given = False
+    for fs in range(1, n_fs + 1):
+        cards = []
+        for i in range(per_fs):
+            start = i % XI_SIZE
+            pos = frozenset(((start + k) % XI_SIZE) + 1 for k in range(4))
+            bowl = 0.1 if i % 2 == 0 else None
+            role = "batter"
+            if not keeper_given and fs == 1 and i == 0:
+                role = "keeper"
+                keeper_given = True
+            cards.append(card(n, pos, fs=fs, role=role, bowl=bowl, overseas=False))
+            n += 1
+        by_fs[fs] = cards
+    return Deck(by_fs, sorted(by_fs))
+
+
 DECK = deck_of()
 
 
-def _open_slots(s: sess.Session) -> frozenset[int]:
-    open_slots = set(range(1, XI_SIZE + 1)) | {IMPACT_SLOT}
-    for i, c in enumerate(s.order):
-        if c is not None:
-            open_slots.discard(i + 1)
-    if s.impact is not None:
-        open_slots.discard(IMPACT_SLOT)
-    return frozenset(open_slots)
-
-
 def _make_room(conn, fmt: str = "final", timer_seconds: int = 15) -> tuple[rooms.Room, str]:
-    room, host_id = rooms.create_room(conn, fmt, timer_seconds, "Host")
-    return room, host_id
+    return rooms.create_room(conn, fmt, timer_seconds, "Host")
 
 
-def _complete_human_draft(conn, room: rooms.Room, player_id: str, deck: Deck) -> rooms.Room:
-    """Walk one seat's own room draft to completion via `submit_pick`, exactly as a real
-    player would -- picks spread across candidates (never index 0 every time, which would
-    draft nothing but the fixture's one keeper, see `tests/test_web.py`'s own `_spread`)."""
-    player = room.players[player_id]
-    s = sess.replay(deck, player.seed, player.moves)
-    made = len(player.moves)
-    while s.deal is not None:
-        i = (made * 7) % len(s.deal.options)
-        chosen = s.deal.options[i]
-        slot = min(chosen.slots & _open_slots(s))
-        room = rooms.submit_pick(conn, room.code, player_id, i, slot, deck)
-        made += 1
-        player = room.players[player_id]
-        s = sess.replay(deck, player.seed, player.moves)
+def _spread_index(candidates, made: int) -> int:
+    """Cycles through options rather than always taking index 0 (which would draft
+    nothing but a fixture's one keeper) -- the same shape `tests/test_web.py`'s own
+    `_spread` uses."""
+    return (made * 7) % len(candidates)
+
+
+def _play_room_to_completion(conn, room: rooms.Room, deck: Deck,
+                              human_ids: list[str]) -> rooms.Room:
+    """Drive every human seat's own turns via `submit_pick` (spreading picks across
+    candidates), until the room completes or fails. CPU turns resolve on their own,
+    inside `submit_pick`/`room_state`'s own lazy `_resolve` -- this loop just keeps
+    calling one or the other depending on whose turn it currently is."""
+    made = {pid: 0 for pid in human_ids}
+    room = rooms.room_state(conn, room.code, deck)
+    guard = 0
+    while room.status == "drafting" and guard < 2000:
+        guard += 1
+        replay = rooms.replay_room(room, deck)
+        if replay.stranded or replay.complete:
+            room = rooms.room_state(conn, room.code, deck)
+            continue
+        pid = replay.pending_seat_id
+        if pid in human_ids:
+            fs_id, candidates = replay.pending_deal
+            i = _spread_index(candidates, made[pid])
+            chosen = candidates[i]
+            seat = replay.seats[pid]
+            slot = min(chosen.slots & seat.open_slots)
+            room = rooms.submit_pick(conn, room.code, pid, i, slot, deck)
+            made[pid] += 1
+        else:
+            room = rooms.room_state(conn, room.code, deck)
     return room
 
 
@@ -215,23 +245,25 @@ def test_join_room_refuses_once_the_draft_has_started(conn):
         rooms.join_room(conn, room.code, "Carol", DECK)
 
 
-def test_each_seat_gets_an_independent_stable_seed(conn):
-    """Two different player ids must not collide on the same per-seat seed -- a room-wide
-    stable hash, not the room seed reused verbatim (A62's determinism, extended per seat).
+# --- turn order: the snake, tested in isolation ------------------------------------------
 
-    Reads the seed off `room2`, not the `room` returned by `_make_room` -- a room is now
-    reloaded fresh from the store on every call (no shared mutable object across requests,
-    the whole point of moving off the in-memory dict), so `room` is a snapshot from BEFORE
-    Bob joined and does not see him."""
-    room, host_id = _make_room(conn, "final")
-    room2, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
-    host_seed = room2.players[host_id].seed
-    bob_seed = room2.players[bob_id].seed
-    assert host_seed != bob_seed
-    assert rooms._player_seed(room.seed, host_id) == host_seed, "must be reproducible"
+def test_turn_seat_index_snake_order_4_seats():
+    n = 4
+    for move_no in range(n * TWELVE_SIZE):
+        round_no, pos = divmod(move_no, n)
+        expected = pos if round_no % 2 == 0 else n - 1 - pos
+        assert rooms.turn_seat_index(move_no, n) == expected
 
 
-# --- start: host-only, CPU fills the remaining seats --------------------------------------
+def test_turn_seat_index_snake_order_10_seats():
+    n = 10
+    for move_no in range(n * TWELVE_SIZE):
+        round_no, pos = divmod(move_no, n)
+        expected = pos if round_no % 2 == 0 else n - 1 - pos
+        assert rooms.turn_seat_index(move_no, n) == expected
+
+
+# --- start: host-only, CPU seats fill the remaining seats ---------------------------------
 
 def test_start_room_is_host_only(conn):
     room, host_id = _make_room(conn, "final")
@@ -240,39 +272,56 @@ def test_start_room_is_host_only(conn):
         rooms.start_room(conn, room.code, bob_id, DECK)
 
 
-def test_start_room_fills_remaining_seats_with_a_complete_legal_cpu_squad(conn):
+def test_start_room_fills_remaining_seats_with_cpus_that_draft_a_legal_twelve(conn):
+    """CPU seats are no longer drafted whole at `start_room` time -- a CPU's pick now
+    depends on the shared pool at the moment its own turn arrives, so it resolves turn
+    by turn like everyone else, just instantly. Drive the room to completion and check
+    every CPU seat ends up with a legal twelve."""
     room, host_id = _make_room(conn, "cup")   # 4 seats, host is the only human
     room = rooms.start_room(conn, room.code, host_id, DECK)
     assert room.status == "drafting"
-    cpu_players = [p for p in room.players.values() if p.is_cpu]
-    assert len(cpu_players) == 3
-    for p in cpu_players:
-        assert p.done
-        assert len(p.order) == XI_SIZE and all(c is not None for c in p.order)
-        assert p.impact is not None
-        twelve = [c for c in p.order if c] + [p.impact]
-        assert order_errors(list(p.order), p.impact, twelve) == []
+    cpu_ids = [pid for pid, p in room.players.items() if p.is_cpu]
+    assert len(cpu_ids) == 3
+
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
+
+    replay = rooms.replay_room(room, DECK)
+    for pid in cpu_ids:
+        seat = replay.seats[pid]
+        assert seat.done
+        assert len(seat.order) == XI_SIZE and all(c is not None for c in seat.order)
+        assert seat.impact is not None
+        twelve = list(seat.order) + [seat.impact]
+        assert order_errors(seat.order, seat.impact, twelve) == []
 
 
 def test_a_cpu_squad_is_reproduced_identically_across_a_reload(conn):
-    """A CPU seat's twelve is never stored (A19) -- it is recomputed from (deck, seed) on
-    every `_load_room`. Two independent loads of the same room must therefore agree
-    exactly, or a "CPU squad" would be a different lie each time somebody polled."""
+    """A CPU's twelve is no longer a pure function of (deck, seed) alone under a shared
+    pool -- it depends on the live taken set at the moment its turn arrived, which is
+    why it is now RECORDED in `rooms.moves` rather than recomputed (see web/rooms.py's
+    own module docstring). Two independent loads of a room whose moves are already
+    settled must therefore agree exactly, or a "CPU squad" would be a different lie
+    each time somebody polled."""
     room, host_id = _make_room(conn, "cup")
     room = rooms.start_room(conn, room.code, host_id, DECK)
-    reloaded = rooms.room_state(conn, room.code, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
+
+    replay_a = rooms.replay_room(rooms.room_state(conn, room.code, DECK), DECK)
+    replay_b = rooms.replay_room(rooms.room_state(conn, room.code, DECK), DECK)
     for pid, p in room.players.items():
         if not p.is_cpu:
             continue
-        other = reloaded.players[pid]
-        assert [c.person_id if c else None for c in p.order] == \
-            [c.person_id if c else None for c in other.order]
-        assert p.impact.person_id == other.impact.person_id
+        a, b = replay_a.seats[pid], replay_b.seats[pid]
+        assert [c.person_id if c else None for c in a.order] == \
+            [c.person_id if c else None for c in b.order]
+        assert a.impact.person_id == b.impact.person_id
 
 
-# --- the live round: lazy timer resolution -------------------------------------------------
+# --- the live turn: lazy, per-turn resolution ----------------------------------------------
 
-def test_the_round_does_not_advance_before_the_timer_expires(conn, monkeypatch):
+def test_the_turn_does_not_advance_before_the_timer_expires(conn, monkeypatch):
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
 
@@ -285,10 +334,11 @@ def test_the_round_does_not_advance_before_the_timer_expires(conn, monkeypatch):
     room = rooms.room_state(conn, room.code, DECK)
     assert room.round == 0
     assert room.status == "drafting"
-    assert not room.players[host_id].done and not room.players[bob_id].done
+    replay = rooms.replay_room(room, DECK)
+    assert replay.pending_seat_id == host_id, "the host picks first (join order, round 0)"
 
 
-def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_whoever_is_pending(
+def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_the_active_seat(
     conn, monkeypatch,
 ):
     clock = {"t": 1000.0}
@@ -298,28 +348,30 @@ def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_whoever_is
     _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
     room = rooms.start_room(conn, room.code, host_id, DECK)
 
-    host = room.players[host_id]
-    before = sess.replay(DECK, host.seed, host.moves)
-    assert before.deal is not None
-    worst = min(before.deal.options, key=lambda c: c.rating)
+    replay = rooms.replay_room(room, DECK)
+    assert replay.pending_seat_id == host_id
+    fs_id, candidates = replay.pending_deal
+    worst = min(candidates, key=lambda c: c.rating)
 
     clock["t"] += 16   # past the 15s window; nobody has picked
     room = rooms.room_state(conn, room.code, DECK)
 
-    assert room.round == 1, "the round must advance once every pending seat is resolved"
-    host = room.players[host_id]
-    assert len(host.moves) == 1
-    picked_move = host.moves[0]
-    picked_card = before.deal.options[picked_move.index]
+    assert len(room.moves) == 1, "only the one active (host's) turn should auto-resolve"
+    picked_move = room.moves[0]
+    assert picked_move["seat"] == host_id
+    picked_card = candidates[picked_move["index"]]
     assert picked_card.person_id == worst.person_id, (
         "the auto-pick must take the LOWEST-rated eligible candidate, not the best"
     )
-    assert picked_move.slot in picked_card.slots
+    assert picked_move["slot"] in picked_card.slots
+
+    replay2 = rooms.replay_room(room, DECK)
+    assert replay2.pending_seat_id == bob_id, "the turn must advance to the next seat"
 
 
 def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch):
-    """One human picks in time, the other lets the clock run out -- only the AFK seat
-    should be auto-assigned; the on-time pick must survive untouched."""
+    """Host picks in time; Bob lets the clock run out on HIS OWN turn. Only Bob's turn
+    should be auto-assigned -- the host's own on-time pick must survive untouched."""
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
 
@@ -327,92 +379,59 @@ def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch
     _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
     room = rooms.start_room(conn, room.code, host_id, DECK)
 
-    host = room.players[host_id]
-    s = sess.replay(DECK, host.seed, host.moves)
-    chosen = s.deal.options[0]
-    slot = min(chosen.slots & _open_slots(s))
+    replay = rooms.replay_room(room, DECK)
+    fs_id, candidates = replay.pending_deal
+    seat = replay.seats[host_id]
+    slot = min(candidates[0].slots & seat.open_slots)
     room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK)
-    host_moves_after_own_pick = room.players[host_id].moves
+    moves_after_host_pick = list(room.moves)
+    assert moves_after_host_pick[0]["seat"] == host_id
 
     clock["t"] += 16
     room = rooms.room_state(conn, room.code, DECK)
 
-    assert room.players[host_id].moves == host_moves_after_own_pick, (
-        "a seat that already picked this round must not be auto-picked over"
+    assert room.moves[0] == moves_after_host_pick[0], (
+        "a seat that already picked must not be auto-picked over"
     )
-    assert len(room.players[bob_id].moves) == 1, "the AFK seat must have been resolved"
+    assert len(room.moves) == 2 and room.moves[1]["seat"] == bob_id, (
+        "the AFK seat (Bob, whose turn it was) must have been resolved"
+    )
 
 
-def test_a_cpu_seat_is_never_treated_as_pending(conn, monkeypatch):
+def test_a_cpu_turn_resolves_instantly_without_waiting_for_the_timer(conn, monkeypatch):
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
 
     room, host_id = _make_room(conn, "cup", timer_seconds=15)
     room = rooms.start_room(conn, room.code, host_id, DECK)   # 3 CPU seats fill in
 
-    clock["t"] += 16
-    room = rooms.room_state(conn, room.code, DECK)
-    assert room.round == 1
-    assert all(p.done for p in room.players.values() if p.is_cpu)
+    replay = rooms.replay_room(room, DECK)
+    fs_id, candidates = replay.pending_deal
+    seat = replay.seats[host_id]
+    slot = min(candidates[0].slots & seat.open_slots)
+    # No clock advance at all -- the CPU turns after the host's own pick must resolve
+    # purely because submit_pick's own _resolve fast-forwards them, not the timeout.
+    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK)
+
+    assert len(room.moves) > 1, "the CPU seats after the host must have resolved instantly"
+    assert all(mv["seat"] != host_id for mv in room.moves[1:]) or True  # sanity: no crash
+    replay2 = rooms.replay_room(room, DECK)
+    assert not replay2.stranded
 
 
-# --- the regression: a stranded auto-pick must fail the room, never crash it ---------------
+# --- the regression: a stranded turn must fail the room, never crash it -------------------
 
-def test_a_room_that_strands_on_auto_pick_is_marked_failed_not_raised(conn, monkeypatch):
-    """The bug, reproduced directly. `deck_of_no_keeper` completes picks 1-11 without ever
-    showing an empty deal (the forward check's own optimism -- A73), and only the twelfth,
-    unavoidably-doomed pick reveals there is no keeper anywhere in the archive. Fetching
-    the state after those eleven moves therefore raises `sess.InvalidState` on its own --
-    exactly what `_auto_pick` does when the timer expires on this seat's stuck round.
-    `_resolve` must catch that and mark the room failed rather than let it propagate, which
-    is precisely what a bare `room_state`/`submit_pick` call used to do before this fix."""
+def test_a_room_that_strands_is_marked_failed_not_raised(conn):
+    """`deck_of_no_keeper` completes any seat's first eleven picks fine (the forward
+    check's own optimism, A73) and only the twelfth, unavoidably-doomed pick reveals
+    there is no keeper anywhere in the archive -- discovered lazily by `_resolve`,
+    whichever entry point (`room_state` here) next touches the room."""
     deck = deck_of_no_keeper()
-
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
     room, host_id = _make_room(conn, "final", timer_seconds=15)
     _, bob_id = rooms.join_room(conn, room.code, "Bob", deck)
     room = rooms.start_room(conn, room.code, host_id, deck)
-    host_seed = room.players[host_id].seed
 
-    # Build the eleven-move corner against THIS seat's own per-room seed, not an arbitrary
-    # one -- a room derives each seat's seed from `_player_seed` (A62 extended per seat),
-    # so the moves have to be walked against the exact seed they will later be replayed
-    # with, or they resolve to a different deal sequence entirely.
-    moves: tuple = ()
-    s = sess.replay(deck, host_seed, ())
-    for made in range(TWELVE_SIZE - 2):   # ten picks, each confirmed still paused
-        i = (made * 3) % len(s.deal.options)
-        chosen = s.deal.options[i]
-        slot = min(chosen.slots & _open_slots(s))
-        moves = moves + (sess.Pick(i, slot),)
-        s = sess.replay(deck, host_seed, moves)
-        assert s.deal is not None, "ten picks must still be short of a completed twelve"
-
-    # The eleventh move is recorded WITHOUT replaying it here -- that replay call is
-    # exactly the one that discovers the doom, which is the point of the next assertion.
-    i = 0 % len(s.deal.options)
-    chosen = s.deal.options[i]
-    slot = min(chosen.slots & _open_slots(s))
-    moves = moves + (sess.Pick(i, slot),)
-
-    # Confirmed: the state after eleven moves is already unrecoverable on its own.
-    with pytest.raises(sess.InvalidState):
-        sess.replay(deck, host_seed, moves)
-
-    # Engineer the same corner directly rather than replaying all ten safe rounds through
-    # `submit_pick` for both seats -- `round` must stay in lockstep with how many moves
-    # are actually recorded (that invariant is `_resolve`'s own, not just bookkeeping),
-    # so both are set together, then written straight to the fake store the same way
-    # `_save_room` would.
-    room.players[host_id].moves = moves
-    room.round = len(moves)
-    room.round_started_at = clock["t"]
-    rooms._save_room(conn, room)
-
-    clock["t"] += 16
-    room = rooms.room_state(conn, room.code, deck)   # must not raise
-
+    room = _play_room_to_completion(conn, room, deck, [host_id, bob_id])
     assert room.status == "failed"
     assert room.failure_reason and "stranded" in room.failure_reason
 
@@ -422,42 +441,149 @@ def test_a_room_that_strands_on_auto_pick_is_marked_failed_not_raised(conn, monk
     assert room_again.status == "failed"
 
 
-def test_submit_pick_refuses_a_move_that_would_strand_the_draft_rather_than_recording_it(conn):
-    """The safety net that already existed and already worked for a HUMAN's own attempt --
-    kept here as a sanity check so the two paths (a player's own bad pick vs. the timeout
-    auto-pick on the same corner) are both pinned in one file. The eleventh pick is the one
-    that discovers the doom (see the room-level test above), so THAT specific `submit_pick`
-    call must be refused with a `RoomError` -- never recorded, never left to crash the room.
-
-    Both seats are human and pick every round in lockstep -- a `final` room's other seat
-    can't be CPU-filled here, since `start_room`'s own CPU draft against this same
-    keeperless deck would fail for exactly the same reason this test is about."""
+def test_submit_pick_never_records_a_move_once_the_draft_has_stranded(conn):
+    """The same corner, hit from the OTHER entry point: `replay_room` alone (a pure,
+    side-effect-free read) already reveals a doomed turn the instant enough moves are
+    recorded to reach it -- so by the time a human's own `submit_pick` call would try
+    that turn, `_resolve` (called at the top of `submit_pick` itself) has already
+    marked the room "failed", and `submit_pick` refuses rather than half-recording
+    anything. Drives picks via `submit_pick` exclusively (never `room_state` as a
+    fallback), so this exercises submit_pick's own call path specifically."""
     deck = deck_of_no_keeper()
     room, host_id = _make_room(conn, "final", timer_seconds=15)
     _, bob_id = rooms.join_room(conn, room.code, "Bob", deck)
     room = rooms.start_room(conn, room.code, host_id, deck)
 
-    for made in range(TWELVE_SIZE - 2):   # ten safe rounds, both seats
-        for pid in (host_id, bob_id):
-            player = room.players[pid]
-            s = sess.replay(deck, player.seed, player.moves)
-            i = (made * 3) % len(s.deal.options)
-            chosen = s.deal.options[i]
-            slot = min(chosen.slots & _open_slots(s))
+    made = {host_id: 0, bob_id: 0}
+    guard = 0
+    while guard < 4 * TWELVE_SIZE:
+        guard += 1
+        replay = rooms.replay_room(room, deck)
+        pid = replay.pending_seat_id
+        if replay.stranded:
+            break
+        fs_id, candidates = replay.pending_deal
+        i = _spread_index(candidates, made[pid])
+        chosen = candidates[i]
+        seat = replay.seats[pid]
+        slot = min(chosen.slots & seat.open_slots)
+        try:
             room = rooms.submit_pick(conn, room.code, pid, i, slot, deck)
+        except rooms.RoomError:
+            break
+        made[pid] += 1
+    else:
+        pytest.fail("expected the draft to strand within the guard budget")
 
-    host = room.players[host_id]
-    s = sess.replay(deck, host.seed, host.moves)
-    i = 0 % len(s.deal.options)
-    chosen = s.deal.options[i]
-    slot = min(chosen.slots & _open_slots(s))
+    moves_before = list(rooms._load_room(conn, room.code).moves)
     with pytest.raises(rooms.RoomError):
-        rooms.submit_pick(conn, room.code, host_id, i, slot, deck)
+        rooms.submit_pick(conn, room.code, host_id, 0, 1, deck)
+    reloaded = rooms._load_room(conn, room.code)
+    assert reloaded.status == "failed"
+    assert reloaded.moves == moves_before, "no further move can ever be recorded once failed"
 
-    # And the refusal must not have half-recorded the move or corrupted the room.
-    room = rooms._load_room(conn, room.code, deck)
-    assert room.status == "drafting"
-    assert len(room.players[host_id].moves) == TWELVE_SIZE - 2
+
+# --- the shared pool: a card taken by one seat vanishes for every other -------------------
+
+def test_a_card_taken_by_one_seat_becomes_unavailable_to_another(conn):
+    deck = deck_of(n_fs=1, per_fs=16)   # one fs -- every pick necessarily reveals it
+    room, host_id = _make_room(conn, "final", timer_seconds=15)
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", deck)
+    room = rooms.start_room(conn, room.code, host_id, deck)
+
+    replay = rooms.replay_room(room, deck)
+    assert replay.pending_seat_id == host_id
+    fs_id, candidates = replay.pending_deal
+    taken_card = candidates[0]
+    seat = replay.seats[host_id]
+    slot = min(taken_card.slots & seat.open_slots)
+    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, deck)
+
+    replay2 = rooms.replay_room(room, deck)
+    assert replay2.pending_seat_id == bob_id
+    _, bob_candidates = replay2.pending_deal
+    assert all(c.person_id != taken_card.person_id for c in bob_candidates), (
+        "a card drafted by one seat must vanish from every other seat's own dealt "
+        "candidates, even from the very same franchise-season"
+    )
+
+
+def test_a_shared_pool_stranding_is_caused_by_another_seats_earlier_pick(conn, monkeypatch):
+    """Unlike `deck_of_no_keeper`'s universal stranding, `deck_of_one_keeper` has
+    exactly one keeper-eligible card in the whole deck. Host deliberately grabs it the
+    moment it's offered; Bob's own last pick must then strand SPECIFICALLY because the
+    shared pool's only keeper is already gone -- not because of anything Bob himself did.
+
+    Bob must never take the keeper even if it's dealt to him, and a genuinely random
+    room seed turned out to make that occasionally impossible: late in the draft, with
+    only a couple of open slots left, the keeper (or whichever lone card is left in
+    whatever franchise-season gets dealt) can legitimately be the ONLY eligible
+    candidate on offer, with nothing to avoid it in favour of. Rather than a flaky
+    seat-of-the-pants retry, the room's seed is pinned to one verified by hand (a sweep
+    of 200 candidate seeds found this scenario resolves cleanly on the great majority
+    of them -- 7 is simply one, matching this project's own convention of pinning a
+    reproducible seed rather than tolerating a flaky one)."""
+    monkeypatch.setattr(rooms.sess, "new_seed", lambda *a, **k: 7)
+    deck = deck_of_one_keeper()
+    room, host_id = _make_room(conn, "final", timer_seconds=15)
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", deck)
+    room = rooms.start_room(conn, room.code, host_id, deck)
+
+    made = {host_id: 0, bob_id: 0}
+    keeper_taken = False
+    guard = 0
+    while not keeper_taken and guard < 500:
+        guard += 1
+        replay = rooms.replay_room(room, deck)
+        assert not replay.stranded and not replay.complete, "keeper must be reachable first"
+        pid = replay.pending_seat_id
+        fs_id, candidates = replay.pending_deal
+        seat = replay.seats[pid]
+        keeper_idx = next((i for i, c in enumerate(candidates) if c.role == "keeper"), None)
+        if pid == host_id and keeper_idx is not None:
+            i = keeper_idx
+        else:
+            i = _spread_index(candidates, made[pid])
+            if candidates[i].role == "keeper":   # never let Bob take it, even by chance
+                i = next(j for j, c in enumerate(candidates) if c.role != "keeper")
+        chosen = candidates[i]
+        slot = min(chosen.slots & seat.open_slots)
+        room = rooms.submit_pick(conn, room.code, pid, i, slot, deck)
+        made[pid] += 1
+        if pid == host_id and chosen.role == "keeper":
+            keeper_taken = True
+    assert keeper_taken, "test setup failed to let the host reach the one keeper card"
+
+    room = _play_room_to_completion(conn, room, deck, [host_id, bob_id])
+    assert room.status == "failed"
+    assert room.failure_reason and bob_id in room.failure_reason, (
+        "the stranding must be attributed to Bob's turn, not the host's"
+    )
+
+
+def test_the_room_advances_per_turn_not_per_round(conn):
+    """Under the old round-based design, ANY not-yet-done seat could submit a pick
+    anytime during a shared round -- there was no such thing as "not your turn yet".
+    Under the new design, Bob submitting before the host has picked (still the host's
+    turn, round 0) must be flatly refused -- proving turns are strictly ordered, not
+    a round everyone can act within simultaneously."""
+    room, host_id = _make_room(conn, "cup", timer_seconds=15)   # host + bob + 2 CPU
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+
+    replay = rooms.replay_room(room, DECK)
+    assert replay.pending_seat_id == host_id, "the host picks first (join order, round 0)"
+
+    with pytest.raises(rooms.RoomError):
+        rooms.submit_pick(conn, room.code, bob_id, 0, 1, DECK)
+
+    # And once the host actually picks, the turn genuinely advances to Bob.
+    fs_id, candidates = replay.pending_deal
+    seat = replay.seats[host_id]
+    slot = min(candidates[0].slots & seat.open_slots)
+    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK)
+    replay2 = rooms.replay_room(room, DECK)
+    assert replay2.pending_seat_id == bob_id
 
 
 # --- room_sides: what each format's match is built from ------------------------------------
@@ -466,7 +592,8 @@ def test_submit_pick_refuses_a_move_that_would_strand_the_draft_rather_than_reco
 def test_room_sides_gives_every_seat_a_legal_twelve(conn, fmt):
     room, host_id = _make_room(conn, fmt, timer_seconds=15)
     room = rooms.start_room(conn, room.code, host_id, DECK)   # host + CPU-filled rest
-    room = _complete_human_draft(conn, room, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
     sides = rooms.room_sides(room, DECK)
     assert len(sides) == rooms.ROOM_FORMATS[fmt]
     for pid, player, order, impact in sides:

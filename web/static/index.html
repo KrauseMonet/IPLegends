@@ -776,6 +776,9 @@ function slip(msg){
 }
 function go(id){
   for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
+  // Leaving for home abandons whatever draft/result the hash was replaying -- clear it so
+  // a reload lands back on home instead of resuming a game the drafter already left.
+  if (id === 'home') history.replaceState(null, '', location.pathname + location.search);
   window.scrollTo(0,0);
 }
 // A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one

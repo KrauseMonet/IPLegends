@@ -408,18 +408,24 @@ class RoomMatchOut(BaseModel):
 # --- mapping ---------------------------------------------------------------------------
 
 def _kind(card: Card) -> str:
-    """What the icon shows. Derived from the RATINGS rather than from `squad_members.role`,
-    because the card is what a drafter is buying: a man rated in both disciplines is an
-    all-rounder here even if A26's thresholds classified him as one or the other."""
-    if card.role == "keeper":
-        return "keeper"
-    if card.has_bat and card.has_bowl:
-        return "allrounder"
-    if card.has_bowl:
-        return "bowler"
-    if card.has_bat:
-        return "batter"
-    return "unrated"
+    """What the icon shows. `card.role` (A26) already applies a per-match-average balls
+    threshold calibrated against players whose role is not in dispute, so it IS the
+    "does this man's workload make him an all-rounder" test -- there is no second,
+    stricter test to invent here.
+
+    This used to be derived from `has_bat and has_bowl` instead, on the reasoning that a
+    man rated in both disciplines is an all-rounder even if A26's averages called him one-
+    dimensional. That held only while a discipline was rated at all exclusively when it
+    cleared A33's volume floor (100 balls faced / 150 bowled) -- "has a rating" meant
+    "substantial workload." A65 removed that floor everywhere, so every discipline with
+    so much as one ball faced or bowled now gets a (heavily shrunk) rating, and the old
+    test degenerated into "faced or bowled a ball at least once" -- which tagged Bumrah,
+    Hazlewood and Cummins all-rounders off single-digit balls faced. Measured against the
+    live deck: of 1,816 cards the old test called all-rounder, only 284 actually clear
+    A26's thresholds; the other 1,532 are pure bowlers or batters who happened to face or
+    bowl a token ball. A genuine dual-threat season (Narine 2024: 488 runs AND a rated
+    bowling season) still clears A26's averages on its own, so nothing real is lost."""
+    return card.role or "unrated"
 
 
 def _card(card: Card, blocked: str | None = None) -> CardOut:

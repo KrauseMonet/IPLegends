@@ -887,6 +887,14 @@ pairs are in this position and are excluded, leaving **3,337** rows.
 Measured 2026-07-30: bowler 49.8%, batter 36.8%, all-rounder 8.5%, keeper 4.9%. 483 rows
 (14.5%) had a tied modal position, broken towards the lower number; 352 never batted.
 
+**[A75, 2026-08-03] The API's card `kind` (the icon a drafter sees) now reads this `role`
+directly, and did not always.** It used to be re-derived in `web/app._kind` from whether
+each discipline carried any rating at all — which stopped tracking real workload the
+moment A65 (§7.9) removed the volume floor everywhere, and tagged Bumrah/Hazlewood/
+Cummins-type seasons `allrounder` off a token ball faced. See CLAUDE.md's A75 for the
+measurement (1,816 wrongly tagged down to the correct 284). No schema change: this table
+was always right, only a display-layer copy of the question had drifted from it.
+
 ---
 
 ## 7. The rating model

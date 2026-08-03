@@ -17,6 +17,7 @@ import pathlib
 import random
 import time
 from contextlib import asynccontextmanager, contextmanager
+from typing import Literal
 
 import psycopg
 from dotenv import load_dotenv
@@ -28,12 +29,13 @@ from pydantic import BaseModel, Field
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card
 from game.__main__ import overseas_status
 from game.season import (
-    MATCHES_EACH, TEAMS, JourneyAccumulator, Season, Side, historical_sides,
-    journey_stats, play, run_cup, run_league, run_playoffs,
+    MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, play, run_cup,
+    run_league, run_playoffs,
 )
 from game.simulator import load_model
-from web import session as sess
 from web import rooms
+from web import season_session
+from web import session as sess
 
 # Populated at boot. The deck is 3,337 cards and takes a few seconds to build; the state
 # model is two stored grids. Both are immutable for the life of the process.
@@ -205,6 +207,16 @@ class BowlerOut(BaseModel):
         default=False, description="he is playing as this side's Impact Player")
 
 
+class OverOut(BaseModel):
+    over: int
+    bowler: str
+    runs: int = Field(description="cumulative innings runs after this over")
+    wickets: int = Field(description="cumulative wickets after this over")
+    balls: int = Field(description="cumulative balls after this over")
+    over_runs: int = Field(description="runs scored THIS over alone")
+    over_wickets: int = Field(description="wickets that fell THIS over alone")
+
+
 class InningsOut(BaseModel):
     runs: int
     wickets: int
@@ -214,6 +226,11 @@ class InningsOut(BaseModel):
     bowling: list[BowlerOut] = Field(description="the five who bowled at least one ball")
     commentary: list[str] = Field(
         default_factory=list, description="fall-of-wicket lines, in order")
+    over_log: list[OverOut] = Field(
+        default_factory=list,
+        description="one entry per FULLY completed over, for an over-by-over reveal -- "
+                    "a partial final over (all out, or target chased mid-over) has no "
+                    "entry; the final scorecard already covers that moment")
 
 
 class StandingOut(BaseModel):
@@ -241,6 +258,11 @@ class ResultOut(BaseModel):
     home_innings: InningsOut | None = Field(
         default=None, description="the scorecard -- null only for a hand-built Result")
     away_innings: InningsOut | None = None
+    toss_won_by_you: bool | None = Field(
+        default=None, description="null for every match that isn't your own -- there "
+                                   "is no toss concept at all for one between two "
+                                   "other historical sides")
+    toss_elected: str | None = Field(default=None, description="'bat' | 'bowl' | null")
 
 
 class JourneySquadEntryOut(BaseModel):
@@ -263,33 +285,56 @@ class JourneySquadEntryOut(BaseModel):
     sim_bowl_balls: int | None = None
 
 
-class SeasonOut(BaseModel):
+class PendingTossOut(BaseModel):
+    kind: Literal["toss"] = "toss"
+    stage: str
+    opponent: str
+
+
+class PendingImpactOut(BaseModel):
+    kind: Literal["impact"] = "impact"
+    stage: str
+    opponent: str
+    discipline: str = Field(description="'bat' | 'bowl' -- which of YOUR innings this "
+                                         "affects (always your SECOND this match)")
+    human_bats_first: bool
+    first_innings: InningsOut = Field(description="your already-played first innings")
+    your_xi: list[CardOut] = Field(
+        description="your own drafted eleven, in batting order -- pick a slot (1-11) "
+                     "to swap that player out for your Impact Player, or decline")
+
+
+class SeasonProgressOut(BaseModel):
     state: str
     your_side: str
-    table: list[StandingOut]
-    your_results: list[ResultOut]
-    playoffs: list[ResultOut]
-    champion: str
-    you_champion: bool
+    table: list[StandingOut] = Field(
+        description="empty until the league stage is fully resolved")
+    your_results: list[ResultOut] = Field(description="your completed matches so far")
+    playoffs: list[ResultOut] = Field(default_factory=list)
     matches_each: int = MATCHES_EACH
     teams: int = TEAMS
-    # The journey card's own numbers, folded into the same replay rather than a second
-    # ~3s simulation -- see the note on `season()`. `played`/`won`/`lost`/`tied` here are
-    # NOT `table`'s row for "you": `journey_stats` adds however far the playoffs took the
+    pending: PendingTossOut | PendingImpactOut | None = Field(
+        description="the decision awaiting you right now; null once complete")
+    complete: bool
+    # Populated only once complete -- the journey card's own numbers, folded into the
+    # same replay rather than a second simulation. `played`/`won`/`lost`/`tied` are NOT
+    # `table`'s row for "you": `journey_stats` adds however far the playoffs took the
     # side, which the fourteen-match league table alone does not count.
-    runs: int
-    wickets: int
-    played: int
-    won: int
-    lost: int
-    tied: int
-    top_scorer: str
-    top_scorer_runs: int
-    top_wicket_taker: str
-    top_wicket_taker_wickets: int
-    squad: list[JourneySquadEntryOut] = Field(
-        description="the final twelve, in batting order then Impact, each with this "
-                     "tournament's own simulated figures")
+    champion: str | None = None
+    you_champion: bool | None = None
+    runs: int | None = None
+    wickets: int | None = None
+    played: int | None = None
+    won: int | None = None
+    lost: int | None = None
+    tied: int | None = None
+    top_scorer: str | None = None
+    top_scorer_runs: int | None = None
+    top_wicket_taker: str | None = None
+    top_wicket_taker_wickets: int | None = None
+    squad: list[JourneySquadEntryOut] | None = Field(
+        default=None, description="the final twelve, in batting order then Impact, "
+                     "each with this tournament's own simulated figures")
 
 
 # --- rooms: create/join/lobby/start ------------------------------------------------------
@@ -571,6 +616,11 @@ def _bowler_out(bo) -> BowlerOut:
     )
 
 
+def _over_out(o) -> OverOut:
+    return OverOut(over=o.over, bowler=o.bowler, runs=o.runs, wickets=o.wickets,
+                   balls=o.balls, over_runs=o.over_runs, over_wickets=o.over_wickets)
+
+
 def _innings_out(innings) -> InningsOut:
     return InningsOut(
         runs=innings.runs, wickets=innings.wickets, overs=innings.overs,
@@ -581,6 +631,7 @@ def _innings_out(innings) -> InningsOut:
         # every one of them is guaranteed a turn.
         bowling=[_bowler_out(bo) for bo in innings.bowling if bo.balls > 0],
         commentary=list(innings.commentary),
+        over_log=[_over_out(o) for o in innings.over_log],
     )
 
 
@@ -593,78 +644,155 @@ def _result_out(r, you: Side) -> ResultOut:
         margin=r.margin, yours=(r.home is you or r.away is you),
         home_innings=_innings_out(r.home_innings) if r.home_innings else None,
         away_innings=_innings_out(r.away_innings) if r.away_innings else None,
+        toss_won_by_you=r.toss_won_by_you, toss_elected=r.toss_elected,
     )
 
 
-@app.get("/api/season/{state}", response_model=SeasonOut)
-def season(state: str) -> SeasonOut:
-    """A full campaign: fourteen league matches, a table, then the playoffs.
+def _season_progress_out(state: str, replay: season_session.SeasonReplay
+                          ) -> SeasonProgressOut:
+    """Shared by all four season routes -- a `SeasonReplay` either carries a pending
+    decision or is complete; this shapes whichever one into the wire format."""
+    yours, season = replay.yours, replay.season
+    your_results = [_result_out(r, yours) for r in season.results
+                    if r.home is yours or r.away is yours]
+    playoffs = [_result_out(r, yours) for r in season.playoffs
+                if r.home is yours or r.away is yours]
+    table = [StandingOut(pos=i, name=s.side.name, short=s.side.short, you=s.side.you,
+                         played=s.played, won=s.won, lost=s.lost, tied=s.tied,
+                         points=s.points, nrr=round(s.nrr, 3))
+             for i, s in enumerate(season.table, 1)]
 
-    Gated on `playable`, not just `squad_complete` -- a completed draft whose own
-    arrangement still fails a rule (should not happen once every pick is forward-checked,
-    but is checked rather than assumed) is not a squad that can take the field.
+    pending: PendingTossOut | PendingImpactOut | None = None
+    if replay.pending_kind == "toss":
+        pending = PendingTossOut(stage=replay.pending_stage,
+                                  opponent=replay.pending_opponent.name)
+    elif replay.pending_kind == "impact":
+        pending = PendingImpactOut(
+            stage=replay.pending_stage, opponent=replay.pending_opponent.name,
+            discipline=replay.pending_discipline,
+            human_bats_first=replay.pending_human_bats_first,
+            first_innings=_innings_out(replay.pending_first_innings),
+            your_xi=[_card(c) for c in yours.xi],
+        )
 
-    Around three seconds of simulation -- seventy league matches plus four playoff ties,
-    each two innings scored ball by ball. Done inside the request rather than queued,
-    because it is deterministic from the state and therefore cacheable by anything in
-    front of it; a job queue would add a store to a design whose whole point (SPEC 11)
-    is not having one.
+    if not replay.complete:
+        return SeasonProgressOut(state=state, your_side=yours.name, table=table,
+                                  your_results=your_results, playoffs=playoffs,
+                                  pending=pending, complete=False)
 
-    Also threads a `JourneyAccumulator` through the same replay, so the journey card's
-    numbers (the tracked side's own runs/wickets, top scorer, top wicket-taker) come out
-    of this one simulation rather than a second one. `/api/card` used to replay the whole
-    season again from scratch for exactly these numbers -- same seed, same moves, so the
-    same ~3s of work a second time for no new information, and with no loading state on
-    the button that triggered it, which is what actually made it feel broken rather than
-    merely slow. One simulation now serves both the result page and the journey card.
-    """
-    player = _load(state)
-    if not player.squad_complete:
-        raise HTTPException(status_code=409,
-                            detail=f"{len(player.picks)} of {TWELVE_SIZE} picks made")
-    if not player.playable:
-        raise HTTPException(status_code=409, detail="; ".join(player.errors))
-
-    deck, model = STATE["deck"], STATE["model"]
-    seed, moves = sess.decode(state)
-    rng = random.Random(seed)
-    sess.replay_stream(deck, seed, moves, rng)      # advance exactly as the draft did
-
-    yours = Side(name="Your eleven", short="YOU",
-                 xi=list(player.order), impact=player.impact, you=True)
-    opposition = historical_sides(deck, rng, TEAMS - 1)
-    if len(opposition) < TEAMS - 1:
-        raise HTTPException(status_code=500, detail="could not field a full league")
-
-    sides = [yours] + opposition
-    acc = JourneyAccumulator()
-    league = run_league(model, sides, rng, track=yours, stats=acc)
-    result = run_playoffs(model, league, rng, track=yours, stats=acc)
-    stats = journey_stats(result, yours, acc)
-
-    all_twelve = [c for c in player.order if c is not None]
-    if player.impact is not None:
-        all_twelve.append(player.impact)
-
-    return SeasonOut(
-        state=state,
-        your_side=yours.name,
-        table=[StandingOut(pos=i, name=s.side.name, short=s.side.short, you=s.side.you,
-                           played=s.played, won=s.won, lost=s.lost, tied=s.tied,
-                           points=s.points, nrr=round(s.nrr, 3))
-               for i, s in enumerate(result.table, 1)],
-        your_results=[_result_out(r, yours) for r in result.results
-                      if r.home is yours or r.away is yours],
-        playoffs=[_result_out(r, yours) for r in result.playoffs],
-        champion=result.champion.name,
-        you_champion=result.champion is yours,
+    all_twelve = list(yours.xi) + ([yours.impact] if yours.impact is not None else [])
+    stats = replay.journey
+    return SeasonProgressOut(
+        state=state, your_side=yours.name, table=table,
+        your_results=your_results, playoffs=playoffs, pending=None, complete=True,
+        champion=season.champion.name, you_champion=season.champion is yours,
         runs=stats.runs, wickets=stats.wickets,
         played=stats.played, won=stats.won, lost=stats.lost, tied=stats.tied,
         top_scorer=stats.top_scorer[0], top_scorer_runs=stats.top_scorer[1],
         top_wicket_taker=stats.top_wicket_taker[0],
         top_wicket_taker_wickets=stats.top_wicket_taker[1],
-        squad=[_journey_entry(c, acc) for c in all_twelve],
+        squad=[_journey_entry(c, replay.stats) for c in all_twelve],
     )
+
+
+def _replay_season_or_400(state: str, cursor: season_session.MoveCursor
+                           ) -> season_session.SeasonReplay:
+    """Gated on `playable`, not just `squad_complete` -- a completed draft whose own
+    arrangement still fails a rule (should not happen once every pick is forward-checked,
+    but is checked rather than assumed) is not a squad that can take the field. A bad
+    move recorded against `cursor` (wrong type, out of range) surfaces as `sess.
+    InvalidState` from deep inside the replay -- caught here and reported as a 400, the
+    same convention every other `InvalidState` in this file already gets (the draft's
+    own `pick()` route, for one), rather than a new one invented just for this route."""
+    draft_state, _ = season_session.decode_full(state)
+    player = _load(draft_state)
+    if not player.squad_complete:
+        raise HTTPException(status_code=409,
+                            detail=f"{len(player.picks)} of {TWELVE_SIZE} picks made")
+    if not player.playable:
+        raise HTTPException(status_code=409, detail="; ".join(player.errors))
+    deck, model = STATE["deck"], STATE["model"]
+    try:
+        return season_session.replay_season(deck, model, draft_state, cursor)
+    except sess.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/season/{state}", response_model=SeasonProgressOut)
+def season(state: str) -> SeasonProgressOut:
+    """A full campaign: fourteen league matches, a table, then the playoffs -- for
+    every match that is not the tracked human's own, pre-computed and instant, exactly
+    as always. For the human's own matches, a real toss and a break-time Impact choice
+    now pause the replay (`game.season.NeedToss`/`NeedImpact`) until `state` carries an
+    answer -- read-only here, so a slow-polling or reloading client always sees
+    wherever the season has actually gotten to, never a stale snapshot.
+
+    `state` is `"{draft_state}~{season_moves}"` (`web/season_session.py`); a bare draft
+    state (no `~`) is read as zero season moves, exactly the string the draft flow
+    already hands back the moment a squad completes, so this route needs no separate
+    "start the season" step.
+    """
+    draft_state, season_moves = season_session.decode_full(state)
+    replay = _replay_season_or_400(state, season_session.recorded_moves(season_moves))
+    return _season_progress_out(state, replay)
+
+
+class TossIn(BaseModel):
+    elects: Literal["bat", "bowl"]
+
+
+class ImpactIn(BaseModel):
+    slot: int | None = Field(
+        default=None, ge=1, le=XI_SIZE,
+        description="1-11: swap this member of your drafted XI out for the Impact "
+                    "Player. null = decline")
+
+
+class SkipIn(BaseModel):
+    scope: Literal["this_match", "group_stage", "tournament"]
+
+
+@app.post("/api/season/{state}/toss", response_model=SeasonProgressOut)
+def season_toss(state: str, body: TossIn) -> SeasonProgressOut:
+    """Only valid while a toss is actually pending -- `_replay_season_or_400` turns a
+    submission at the wrong point (already answered, or not your side's toss to call)
+    into a 400 via the cursor's own type-check, never a 500."""
+    draft_state, season_moves = season_session.decode_full(state)
+    cursor = season_session.recorded_moves(season_moves + (TossElect(body.elects),))
+    replay = _replay_season_or_400(state, cursor)
+    new_state = season_session.encode_full(draft_state, tuple(cursor.emitted))
+    return _season_progress_out(new_state, replay)
+
+
+@app.post("/api/season/{state}/impact", response_model=SeasonProgressOut)
+def season_impact(state: str, body: ImpactIn) -> SeasonProgressOut:
+    draft_state, season_moves = season_session.decode_full(state)
+    cursor = season_session.recorded_moves(season_moves + (ImpactPick(body.slot),))
+    replay = _replay_season_or_400(state, cursor)
+    new_state = season_session.encode_full(draft_state, tuple(cursor.emitted))
+    return _season_progress_out(new_state, replay)
+
+
+@app.post("/api/season/{state}/skip", response_model=SeasonProgressOut)
+def season_skip(state: str, body: SkipIn) -> SeasonProgressOut:
+    """One mechanism behind all three bypasses (and `SIM_MODE='whole'`, which just
+    calls `scope="tournament"` immediately instead of polling first): auto-resolve
+    the declared default toss/Impact answer for whichever fixtures `scope` covers,
+    recording a real move for each one rather than an ephemeral request flag -- so
+    the resulting `state` alone replays the exact same completed matches again."""
+    draft_state, season_moves = season_session.decode_full(state)
+    if body.scope == "this_match":
+        probe = _replay_season_or_400(state, season_session.recorded_moves(season_moves))
+        if probe.complete:
+            raise HTTPException(status_code=409, detail="the season is already complete")
+        cursor = season_session.skip_this_match(season_moves, probe.pending_human_match_no)
+    elif body.scope == "group_stage":
+        cursor = season_session.skip_group_stage(season_moves)
+    else:
+        cursor = season_session.skip_tournament(season_moves)
+    replay = _replay_season_or_400(state, cursor)
+    new_state = season_session.encode_full(draft_state, tuple(cursor.emitted))
+    return _season_progress_out(new_state, replay)
 
 
 @app.get("/api/twelve/{state}")

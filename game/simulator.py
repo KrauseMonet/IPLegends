@@ -280,6 +280,27 @@ class BowlerCard:
         return f"{self.balls // BALLS_PER_OVER}.{self.balls % BALLS_PER_OVER}"
 
 
+@dataclass(frozen=True)
+class OverSnapshot:
+    """One completed over, for an over-by-over reveal. Cumulative totals plus this
+    over's own delta, captured at the same natural end-of-over point `commentary`'s
+    fall-of-wicket lines already use -- a pure side effect over state the loop already
+    has in hand, consuming no extra rng draw and touching no ball-resolution logic.
+
+    Only ever appended for a FULLY completed over: an innings that ends mid-over (all
+    out, or target chased) gets no entry for that last partial over. The existing
+    fall-of-wicket commentary and the final scorecard already cover that moment, so a
+    reveal stepping through `over_log` simply ends by showing the final scorecard."""
+
+    over: int              # 0-indexed
+    bowler: str
+    runs: int               # cumulative innings runs after this over
+    wickets: int             # cumulative wickets after this over
+    balls: int               # cumulative balls after this over
+    over_runs: int           # runs scored THIS over alone
+    over_wickets: int        # wickets that fell THIS over alone
+
+
 @dataclass
 class Innings:
     batting: list[BatterCard]
@@ -289,6 +310,7 @@ class Innings:
     balls: int = 0
     extras: int = 0
     commentary: list[str] = field(default_factory=list)
+    over_log: list[OverSnapshot] = field(default_factory=list)
     chased: bool = False
 
     @property
@@ -321,6 +343,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     for over in range(OVERS):
         bowler = choose_bowler(attack, previous)
         previous = bowler
+        over_start_runs, over_start_wickets = innings.runs, innings.wickets
 
         for _ in range(BALLS_PER_OVER):
             # A wide is not a ball faced and does not advance the over, so it is drawn
@@ -375,6 +398,15 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 innings.chased = True
                 return innings
 
+        # Reached only when all six legal-plus-extra balls of the over resolved without
+        # an early return above -- a fully completed over, exactly what OverSnapshot
+        # documents itself as being.
+        innings.over_log.append(OverSnapshot(
+            over=over, bowler=bowler.player.name,
+            runs=innings.runs, wickets=innings.wickets, balls=innings.balls,
+            over_runs=innings.runs - over_start_runs,
+            over_wickets=innings.wickets - over_start_wickets,
+        ))
         striker, non_striker = non_striker, striker
 
     return innings

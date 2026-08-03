@@ -8,6 +8,7 @@ the team that finished first -- none of those crash, and none show up in a score
 
 from __future__ import annotations
 
+import random
 from collections import Counter
 
 import pytest
@@ -15,9 +16,11 @@ import pytest
 from etl.feasibility import Card
 from game.season import (
     DOUBLE_AT, IMPACT_SIT_OUT_BAR, IMPACT_TOO_GOOD_GAIN, MATCHES_EACH, POINTS_TIE,
-    POINTS_WIN, TEAMS, JourneyAccumulator, Result, Season, Side, Standing, _abbrev,
-    _credit, _impact_xi, _leader, _pure_bowler_678, _weakest_bowler, _weakest_pure_batter,
-    decide_impact, fixtures, journey_stats,
+    POINTS_WIN, TEAMS, TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact,
+    NeedToss, Result, Season, Side, Standing, TossElect, _MatchNeedsImpact,
+    _MatchNeedsToss, _abbrev, _credit, _impact_xi, _leader, _play_human_match,
+    _pure_bowler_678, _weakest_bowler, _weakest_pure_batter, decide_impact, fixtures,
+    journey_stats, run_league, run_playoffs, toss,
 )
 from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
@@ -387,3 +390,246 @@ def test_a_squad_that_cannot_reach_five_bowlers_even_with_impact_is_reported():
     impact = _card("impact", bat=1.0)   # no bowling at all
     with pytest.raises(ValueError):
         decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact), opp_side())
+
+
+# --- the toss, a human match that pauses for it, and the season-level resume ------------
+
+class _Model:
+    """A `Model` stand-in with a fixed (over, wickets)-independent distribution -- these
+    tests are about the toss/Impact bookkeeping around a match, not the state grid
+    itself, and no local database exists to fit a real one against (CLAUDE.md)."""
+
+    def __init__(self, probs, values, wide_rate=0.0, wide_runs=1.0, extras_rate=0.0):
+        self._probs, self._values = probs, values
+        self.wide_rate = wide_rate
+        self.wide_runs = wide_runs
+        self.extras_rate = extras_rate
+
+    def state(self, over, wickets):
+        return self._probs, self._values
+
+
+def _model():
+    # Middling, non-degenerate mix -- realistic enough that both sides' innings run a
+    # full twenty overs almost always, without needing to be tuned per test.
+    probs = (0.06, 0.20, 0.30, 0.16, 0.08, 0.12, 0.02, 0.06)
+    values = (-6.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    return _Model(probs, values)
+
+
+def _xi(tag):
+    """Eleven Cards, six of whom bowl -- enough for `attack()` to field a full five-man
+    attack, which `own_xi()`/`opp_side()` above never needed (those are exercised only
+    through `decide_impact` directly, never through a real simulated innings)."""
+    # Every card carries a real `bat` value, never `None` -- these tests need no
+    # `unrated_bat`/`season_mean` fallback machinery on `_Model`, since a card with a
+    # real batting rating never touches it (see `bat_delta` in `game/__main__.py`).
+    return [
+        _card(f"{tag}k", bat=0.10, role="keeper"),
+        _card(f"{tag}b1", bat=0.20), _card(f"{tag}b2", bat=0.15),
+        _card(f"{tag}b3", bat=0.10), _card(f"{tag}b4", bat=0.05),
+        _card(f"{tag}ar1", bat=0.05, bowl=0.10), _card(f"{tag}ar2", bat=0.02, bowl=0.12),
+        _card(f"{tag}bw1", bat=0.0, bowl=0.14), _card(f"{tag}bw2", bat=0.0, bowl=0.16),
+        _card(f"{tag}bw3", bat=0.0, bowl=0.18), _card(f"{tag}bw4", bat=0.0, bowl=0.20),
+    ]
+
+
+def bowling_opp(bat=0.05):
+    """Unlike `opp_side` above, this opponent can actually bowl -- needed here because
+    `_play_human_match` really simulates both innings, and an attack with no bowlers at
+    all would leave `choose_bowler` nothing to hand an over to."""
+    xi = [_card(f"o{i}", bat=bat) for i in range(6)]
+    xi += [_card(f"ob{i}", bat=0.0, bowl=0.15) for i in range(5)]
+    return Side(name="OPP", short="OPP", xi=xi)
+
+
+class _Moves:
+    """A minimal stand-in for `web/season_session.py`'s `MoveCursor` -- only the two
+    methods `_next_toss`/`_next_impact` ever call. Kept local rather than importing
+    `web/`: nothing else in `game/` depends on it, and this file shouldn't be the first
+    exception."""
+
+    def __init__(self, tosses=(), impacts=()):
+        self._tosses = list(tosses)
+        self._impacts = list(impacts)
+
+    def next_toss(self, human_match_no):
+        return self._tosses.pop(0) if self._tosses else None
+
+    def next_impact(self, human_match_no):
+        return self._impacts.pop(0) if self._impacts else None
+
+
+def test_toss_default_elects_is_declared_as_bowl():
+    assert TOSS_DEFAULT_ELECTS == "bowl"
+
+
+def test_toss_is_a_one_draw_coin_flip():
+    # Seeds picked by inspection (`random.Random(seed).random()`), not swept -- `toss`
+    # is a one-line function and this only needs to show both outcomes are reachable.
+    assert toss(random.Random(1)) is True
+    assert toss(random.Random(0)) is False
+
+
+def test_a_lost_toss_never_asks_for_a_move_and_uses_the_default():
+    human = Side(name="ME", short="ME", xi=_xi("h"))
+    opponent = bowling_opp()
+    r = _play_human_match(_model(), human, opponent, random.Random(0), "league", 0,
+                           moves=_Moves())
+    assert r.toss_won_by_you is False
+    assert r.toss_elected == TOSS_DEFAULT_ELECTS
+
+
+def test_winning_the_toss_with_no_move_available_pauses_the_match():
+    human = Side(name="ME", short="ME", xi=_xi("h"))
+    opponent = bowling_opp()
+    with pytest.raises(_MatchNeedsToss):
+        _play_human_match(_model(), human, opponent, random.Random(1), "league", 0,
+                           moves=_Moves())
+
+
+def test_moves_none_is_fully_automatic_and_never_pauses_win_or_lose():
+    """The CLI/no-web path: `moves=None` must behave as an always-auto source, exactly
+    the always-default answer `_next_toss`/`_next_impact` fall back to."""
+    for seed in (0, 1):     # one where the toss is lost, one where it is won
+        human = Side(name="ME", short="ME", xi=_xi("h"), impact=_card("h_imp", bat=0.5))
+        opponent = bowling_opp()
+        r = _play_human_match(_model(), human, opponent, random.Random(seed),
+                               "league", 0, moves=None)
+        assert r.toss_elected == TOSS_DEFAULT_ELECTS
+
+
+def test_the_break_with_no_move_available_pauses_for_impact():
+    human = Side(name="ME", short="ME", xi=_xi("h"), impact=_card("h_imp", bat=0.5))
+    opponent = bowling_opp()
+    with pytest.raises(_MatchNeedsImpact):
+        _play_human_match(_model(), human, opponent, random.Random(0), "league", 0,
+                           moves=_Moves())
+
+
+def test_a_side_with_no_impact_player_never_pauses_for_one():
+    human = Side(name="ME", short="ME", xi=_xi("h"))   # impact=None
+    opponent = bowling_opp()
+    r = _play_human_match(_model(), human, opponent, random.Random(0), "league", 0,
+                           moves=_Moves())
+    assert r is not None
+
+
+def test_the_humans_first_innings_never_carries_the_impact_player():
+    """Won the toss (seed 1), elected to bat -- human bats FIRST, so the break-time
+    decision can only affect innings 2 (`_play_human_match` fixes this discipline as
+    'bowl' here). Even an Impact Player who would clearly play -- he clears
+    IMPACT_TOO_GOOD_GAIN against this opponent's weakest bowler -- must not appear
+    anywhere in innings 1's batting card; declining at the break should still let him
+    appear in innings 2, which is what proves the block is specific to innings 1 rather
+    than a blanket 'never plays' bug."""
+    xi = _xi("h")
+    impact = _card("impact", bat=0.0, bowl=0.14 + IMPACT_TOO_GOOD_GAIN + 0.1)
+    human = Side(name="ME", short="ME", xi=xi, impact=impact)
+    opponent = bowling_opp()
+    r = _play_human_match(_model(), human, opponent, random.Random(1), "league", 0,
+                           moves=_Moves(tosses=[TossElect("bat")], impacts=[ImpactPick(None)]))
+    assert r.home is human
+    assert all(not b.player.is_impact for b in r.home_innings.batting)
+    assert any(bo.player.is_impact for bo in r.away_innings.bowling)
+
+
+def test_an_explicit_slot_overrides_decide_impact_even_when_it_would_sit_him_out():
+    """Neither discipline clears IMPACT_SIT_OUT_BAR against this matchup -- verified
+    directly against `decide_impact` first, the same shape as
+    `test_he_sits_out_when_neither_discipline_clears_the_bar` above. An explicit slot
+    must still force him in regardless: the plan's own "no new legality or desirability
+    check on the human's own swap" simplification."""
+    xi = _xi("h")
+    # 0.13 sits out on its own (below the sit-out bar against this matchup) but still
+    # ranks ABOVE the man at slot 7 he explicitly replaces (0.10) -- high enough that,
+    # once forced in, `attack()`'s own re-ranking by rating does not immediately drop
+    # him again for a different reason than the one this test is pinning.
+    impact = _card("impact", bat=0.0, bowl=0.13)
+    human = Side(name="ME", short="ME", xi=xi, impact=impact)
+    opponent = bowling_opp()
+    assert decide_impact(human, opponent) == (None, None), "sanity: sits out undirected"
+    r = _play_human_match(_model(), human, opponent, random.Random(1), "league", 0,
+                           moves=_Moves(tosses=[TossElect("bat")], impacts=[ImpactPick(7)]))
+    assert any(bo.player.is_impact for bo in r.away_innings.bowling)
+
+
+# --- the season-level pause: the same mechanism, wrapped with match/stage context --------
+
+def _four_a_side(human_impact=True):
+    human = Side(name="ME", short="ME", xi=_xi("h"),
+                 impact=_card("h_imp", bat=0.5) if human_impact else None)
+    others = [Side(name=f"O{i}", short=f"O{i}", xi=_xi(f"o{i}")) for i in range(3)]
+    return [human] + others, human
+
+
+def test_run_league_raises_the_season_scoped_need_toss_enriched_with_match_context():
+    sides, human = _four_a_side()
+    with pytest.raises(NeedToss) as exc:
+        run_league(_model(), sides, random.Random(1), track=human, moves=_Moves())
+    assert exc.value.stage == "league"
+    assert exc.value.human_match_no == 0
+
+
+def test_run_league_resumes_past_a_supplied_toss_and_then_needs_impact():
+    """Replay from scratch with one more move recorded -- exactly SPEC 11.3's contract,
+    proven here at the season level rather than only at the bare match level above."""
+    sides, human = _four_a_side()
+    with pytest.raises(NeedImpact) as exc:
+        run_league(_model(), sides, random.Random(1), track=human,
+                   moves=_Moves(tosses=[TossElect("bat")]))
+    assert exc.value.stage == "league"
+    assert exc.value.human_match_no == 0
+
+
+def test_run_league_completes_the_fixture_and_moves_to_the_next_once_both_are_supplied():
+    sides, human = _four_a_side()
+    # Whichever of NeedToss/NeedImpact the SECOND human fixture pauses on next (its own
+    # toss draw decides which -- irrelevant here), `human_match_no` must have advanced
+    # to 1, proof the FIRST fixture resolved completely rather than pausing again on it.
+    with pytest.raises((NeedToss, NeedImpact)) as exc:
+        run_league(_model(), sides, random.Random(1), track=human,
+                   moves=_Moves(tosses=[TossElect("bat")], impacts=[ImpactPick(None)]))
+    assert exc.value.human_match_no == 1
+
+
+def test_replaying_the_same_recorded_moves_twice_gives_an_identical_season():
+    sides, human = _four_a_side()
+    moves = (TossElect("bat"), ImpactPick(None), TossElect("bowl"))
+
+    def _play_out():
+        s2, h2 = _four_a_side()
+        try:
+            run_league(_model(), s2, random.Random(1), track=h2, moves=_Moves(
+                tosses=[m for m in moves if isinstance(m, TossElect)],
+                impacts=[m for m in moves if isinstance(m, ImpactPick)]))
+        except NeedToss as exc:
+            return exc.human_match_no
+        except NeedImpact as exc:
+            return exc.human_match_no
+        return None
+
+    assert _play_out() == _play_out()
+
+
+# --- the regression anchor: `web/rooms.py` never sets `track`, and never may ------------
+
+def test_no_tracked_side_means_the_human_match_path_can_never_fire(monkeypatch):
+    """`web/rooms.py`'s `room_match` route calls `run_league(model, sides, rng)` and
+    `run_playoffs(model, season, rng)` with no `track` and no `moves` at all -- exactly
+    as it did before this feature existed, and it must go on doing so untouched.
+    Proven directly rather than by comparing numbers: the human-match path is made to
+    explode if it is ever reached, and a full ten-team season is played through it."""
+    import game.season as season_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("the human-match path fired with track=None")
+
+    monkeypatch.setattr(season_mod, "_play_human_match", _boom)
+
+    sides = [Side(name=f"T{i}", short=f"T{i}", xi=_xi(f"t{i}")) for i in range(TEAMS)]
+    rng = random.Random(2024)
+    league = run_league(_model(), sides, rng)
+    playoffs = run_playoffs(_model(), league, rng)
+    assert len(league.results) == TEAMS * MATCHES_EACH // 2
+    assert len(playoffs.playoffs) == 4

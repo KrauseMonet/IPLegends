@@ -12,13 +12,15 @@ the engine against the archive rather than against itself. These check the arith
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from etl.feasibility import BOWLERS_IN_TWELVE, Card
 from game.__main__ import OVERSEAS_LIMIT, attack, enforce_overseas, lineup, viable
 from game.simulator import (
-    BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, OVERS, BowlerCard, Player,
-    choose_bowler, tilt,
+    BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, OVERS, WICKETS, BowlerCard, Player,
+    choose_bowler, play_innings, tilt,
 )
 
 # A death-overs state: dots and boundaries, a wicket worth -12 runs. Shaped like a real
@@ -225,3 +227,115 @@ def test_a_squad_that_cannot_field_a_legal_xi_is_returned_unchanged_not_short():
     repaired = enforce_overseas(xi, squad)
     assert repaired == xi
     assert len(repaired) == 11
+
+
+# --- the over-by-over log: a pure side effect, no extra rng draw, no changed outcome ----
+
+class _FixedModel:
+    """A `Model` stand-in whose `.state()` never varies with (over, wickets) -- these
+    tests are about the LOG, not the state grid, so a fixed distribution keeps every
+    scenario below deterministic and easy to reason about by construction."""
+
+    def __init__(self, probs, values, wide_rate=0.0, wide_runs=1.0, extras_rate=0.0):
+        self._probs, self._values = probs, values
+        self.wide_rate = wide_rate
+        self.wide_runs = wide_runs
+        self.extras_rate = extras_rate
+
+    def state(self, over, wickets):
+        return self._probs, self._values
+
+
+# `values`' shape mirrors the real `Model.state()`: index 0 is the (negative) wicket
+# cost, indices 1-7 are `OFF_THE_BAT` (0..6 runs) -- `outcome == 0` is a dismissal,
+# `outcome == k` (k >= 1) scores `OFF_THE_BAT[k - 1]` runs, so "all singles" needs its
+# mass on index 2 (OFF_THE_BAT[1] == 1), not index 1 (OFF_THE_BAT[0] == 0, a dot ball).
+_VALUES = (-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+ALL_SINGLES = _FixedModel((0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0), _VALUES)
+ALL_WICKETS = _FixedModel((1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), _VALUES)
+
+
+def _players(n, bowl=None):
+    return [Player(f"p{i}", 0.0, bowl=bowl) for i in range(n)]
+
+
+def test_a_full_innings_with_no_wicket_logs_all_twenty_overs_matching_the_final_card():
+    bat = _players(11)
+    bowl = _players(BOWLERS_IN_TWELVE, bowl=0.0)
+    innings = play_innings(ALL_SINGLES, bat, bowl, random.Random(1))
+    assert innings.balls == OVERS * BALLS_PER_OVER
+    assert innings.wickets == 0
+    assert len(innings.over_log) == OVERS
+    last = innings.over_log[-1]
+    assert (last.runs, last.wickets, last.balls) == (innings.runs, innings.wickets, innings.balls)
+    assert last.over == OVERS - 1
+    assert last.over_runs == BALLS_PER_OVER
+    assert last.over_wickets == 0
+
+
+def test_over_runs_and_over_wickets_are_the_deltas_between_consecutive_entries():
+    bat = _players(11)
+    bowl = _players(BOWLERS_IN_TWELVE, bowl=0.0)
+    innings = play_innings(ALL_SINGLES, bat, bowl, random.Random(2))
+    prev_runs, prev_wkts = 0, 0
+    for o in innings.over_log:
+        assert o.runs - prev_runs == o.over_runs
+        assert o.wickets - prev_wkts == o.over_wickets
+        prev_runs, prev_wkts = o.runs, o.wickets
+
+
+def test_a_partial_final_over_gets_no_log_entry():
+    """Ten wickets fall on the tenth delivery here (every ball is a wicket), which is
+    mid-way through the SECOND over -- the first over completed in full and is logged;
+    the second, which ends the innings on its fourth ball, is not."""
+    bat = _players(11)
+    bowl = _players(BOWLERS_IN_TWELVE, bowl=0.0)
+    innings = play_innings(ALL_WICKETS, bat, bowl, random.Random(3))
+    assert innings.wickets == WICKETS
+    assert innings.balls == 10
+    assert len(innings.over_log) == 1
+    assert innings.over_log[0].over == 0
+    assert innings.over_log[0].wickets == BALLS_PER_OVER
+
+
+def test_over_log_records_the_bowler_choose_bowler_actually_picked():
+    """Ties the log's `bowler` field to the already-proven rotation rule
+    (`choose_bowler`, pinned separately above) rather than re-deriving it -- predicted
+    independently here on a fresh copy of the same bowler cards, then compared."""
+    bat = _players(11)
+    bowl_players = [Player(f"b{i}", 0.0, bowl=0.1 * i) for i in range(BOWLERS_IN_TWELVE)]
+
+    cards = [BowlerCard(p) for p in bowl_players]
+    previous = None
+    expected = []
+    for _ in range(OVERS):
+        picked = choose_bowler(cards, previous)
+        expected.append(picked.player.name)
+        picked.balls += BALLS_PER_OVER
+        previous = picked
+
+    innings = play_innings(ALL_SINGLES, bat, bowl_players, random.Random(4))
+    assert [o.bowler for o in innings.over_log] == expected
+
+
+def test_play_innings_is_deterministic_so_the_log_capture_hides_no_state_leak():
+    """Same model, same cards, same seed, twice. If the log capture ever consumed an
+    rng draw or mutated something shared between overs, this would be the first thing
+    to stop reproducing -- a golden-regression stand-in that needs no hardcoded snapshot
+    (CLAUDE.md: no local database, so nothing here can be checked against a fitted
+    model instead)."""
+    probs = (0.08, 0.30, 0.32, 0.10, 0.01, 0.12, 0.00, 0.07)
+    values = (-12.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    model = _FixedModel(probs, values, wide_rate=0.05, wide_runs=1.2, extras_rate=0.03)
+    bat = [Player(f"p{i}", 0.05 * i) for i in range(11)]
+    bowl = [Player(f"b{i}", 0.0, bowl=0.05 * i) for i in range(BOWLERS_IN_TWELVE)]
+
+    a = play_innings(model, bat, bowl, random.Random(42))
+    b = play_innings(model, bat, bowl, random.Random(42))
+
+    assert (a.runs, a.wickets, a.balls, a.extras) == (b.runs, b.wickets, b.balls, b.extras)
+    assert a.commentary == b.commentary
+    assert [(o.over, o.bowler, o.runs, o.wickets, o.over_runs, o.over_wickets)
+            for o in a.over_log] == [
+            (o.over, o.bowler, o.runs, o.wickets, o.over_runs, o.over_wickets)
+            for o in b.over_log]

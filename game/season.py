@@ -250,6 +250,11 @@ class Result:
     # (tests construct one directly to exercise table/points arithmetic in isolation).
     home_innings: Innings | None = None
     away_innings: Innings | None = None
+    # None for every match that isn't the human's own -- there is no toss concept at
+    # all for an opponent-vs-opponent fixture (`play()` never sets these). Only
+    # `_play_human_match` ever populates them.
+    toss_won_by_you: bool | None = None
+    toss_elected: str | None = None
 
 
 @dataclass
@@ -377,6 +382,27 @@ def fixtures(n: int = TEAMS) -> list[tuple[int, int]]:
     return out
 
 
+def _finish_result(home: Side, away: Side, stage: str, first: Innings, second: Innings,
+                    toss_won_by_you: bool | None = None,
+                    toss_elected: str | None = None) -> Result:
+    """The winner/margin arithmetic every match needs, factored out once rather than
+    duplicated between `play()` and `_play_human_match` -- the only difference between
+    an ordinary match and one the human's own side played in is whether a toss actually
+    happened."""
+    r = Result(home=home, away=away, stage=stage,
+               home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
+               away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls,
+               home_innings=first, away_innings=second,
+               toss_won_by_you=toss_won_by_you, toss_elected=toss_elected)
+    if second.runs > first.runs:
+        r.winner, r.margin = away, f"{away.short} by {10 - second.wickets} wickets"
+    elif first.runs > second.runs:
+        r.winner, r.margin = home, f"{home.short} by {first.runs - second.runs} runs"
+    else:
+        r.margin = "tied"
+    return r
+
+
 def play(model: Model, home: Side, away: Side, rng: random.Random,
          stage: str = "league", track: Side | None = None,
          stats: JourneyAccumulator | None = None) -> Result:
@@ -398,6 +424,10 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     THIS match, its own batting and bowling innings are folded into `stats` right here,
     from the exact `Innings` objects the match already computed -- not a second
     simulation, and not something every caller has to know or care about.
+
+    No toss here -- both sides' Impact calls are automatic and pre-match, exactly as
+    they always have been. This function is for every match that is NOT the tracked
+    human's own; see `_play_human_match` below for the interactive one.
     """
     from game.__main__ import attack, lineup
 
@@ -423,17 +453,186 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    r = Result(home=home, away=away, stage=stage,
-               home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
-               away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls,
-               home_innings=first, away_innings=second)
-    if second.runs > first.runs:
-        r.winner, r.margin = away, f"{away.short} by {10 - second.wickets} wickets"
-    elif first.runs > second.runs:
-        r.winner, r.margin = home, f"{home.short} by {first.runs - second.runs} runs"
+    return _finish_result(home, away, stage, first, second)
+
+
+# --- the toss, and a human match that pauses for it -------------------------------------
+
+# Declared, not measured -- same category as REPUTATION/ALLROUNDER_RUNS. Serves BOTH the
+# algorithmic opponent's own choice whenever THEY win the toss, and the fallback answer
+# for a human match's toss when it is being auto-resolved rather than asked live -- one
+# rule for both roles is what lets every skip/bypass path reduce to the same underlying
+# mechanism instead of needing a second invented rule for the human side.
+TOSS_DEFAULT_ELECTS = "bowl"
+
+
+def toss(rng: random.Random) -> bool:
+    """True if the tracked human side wins this match's toss. One rng draw, consumed
+    only for a fixture the human's own side actually plays in -- an opponent-vs-opponent
+    fixture has no toss concept at all and never calls this."""
+    return rng.random() < 0.5
+
+
+@dataclass(frozen=True)
+class TossElect:
+    elects: str           # "bat" | "bowl" -- only ever consumed when the human WON the toss
+
+
+@dataclass(frozen=True)
+class ImpactPick:
+    slot: int | None       # 1-11: swap this member of your drafted XI out for the Impact
+                            # Player. None = decline -- falls back to
+                            # decide_impact(human, opponent) exactly as today, NOT
+                            # "force him to sit out."
+
+
+class _MatchNeedsToss(Exception):
+    """Raised from inside `_play_human_match` when no toss choice is available for a
+    match the human's side just won the toss of. Match-scoped only, no season context
+    -- the same narrow scope `web/session.py`'s own `_NeedChoice` has inside `run_draft`."""
+
+    def __init__(self, opponent: Side):
+        self.opponent = opponent
+
+
+class _MatchNeedsImpact(Exception):
+    """Raised at the innings break when no Impact choice is available for the human's
+    side. Carries what the caller needs to present the decision: the discipline this
+    choice actually affects (always the human's SECOND innings this match -- see
+    `_play_human_match`'s own docstring for why), and the first innings already played,
+    so it can be revealed before asking."""
+
+    def __init__(self, opponent: Side, discipline: str, first: Innings,
+                 human_bats_first: bool):
+        self.opponent = opponent
+        self.discipline = discipline
+        self.first = first
+        self.human_bats_first = human_bats_first
+
+
+class NeedToss(Exception):
+    """The season-level wrapping of `_MatchNeedsToss` -- enriched with what only
+    `run_league`/`run_playoffs`'s own loop has: the `Season` accumulated so far, which
+    stage, and which of the human's own matches this is (0-indexed, in play order).
+    A bare match-level exception has no way to carry these, since `_play_human_match`
+    knows nothing about the season it is part of."""
+
+    def __init__(self, match: _MatchNeedsToss, season: "Season", stage: str,
+                 human_match_no: int):
+        self.match = match
+        self.season = season
+        self.stage = stage
+        self.human_match_no = human_match_no
+
+
+class NeedImpact(Exception):
+    def __init__(self, match: _MatchNeedsImpact, season: "Season", stage: str,
+                 human_match_no: int):
+        self.match = match
+        self.season = season
+        self.stage = stage
+        self.human_match_no = human_match_no
+
+
+def _next_toss(moves, opponent: Side, human_match_no: int) -> TossElect:
+    """`moves=None` (`game.__main__`'s own CLI, or any caller wanting fully-automatic
+    simulation) behaves exactly like an always-auto source -- no `web/` dependency
+    needed for the common case; a real move source (`web/season_session.py`) is only
+    required when a human is actually choosing live."""
+    if moves is None:
+        return TossElect(TOSS_DEFAULT_ELECTS)
+    choice = moves.next_toss(human_match_no)
+    if choice is None:
+        raise _MatchNeedsToss(opponent)
+    return choice
+
+
+def _next_impact(moves, opponent: Side, discipline: str, first: Innings,
+                  human_bats_first: bool, human_match_no: int) -> ImpactPick:
+    if moves is None:
+        return ImpactPick(None)
+    choice = moves.next_impact(human_match_no)
+    if choice is None:
+        raise _MatchNeedsImpact(opponent, discipline, first, human_bats_first)
+    return choice
+
+
+def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Random,
+                       stage: str, human_match_no: int, moves=None,
+                       stats: JourneyAccumulator | None = None) -> Result:
+    """One match the human's own side plays in -- `play()`'s shape, with a real toss and
+    a break-time Impact choice instead of both being decided automatically before a
+    ball is bowled.
+
+    The human's own Impact Player can only ever affect their SECOND innings this match:
+    deciding at the break means their first innings has already been played, with their
+    originally-drafted XI unmodified. This is the accepted consequence of deciding live
+    at a natural pause point rather than retroactively -- not a bug, and not something a
+    later change should "fix" by moving the decision earlier.
+
+    The opponent's own `decide_impact` call is completely unchanged: automatic, computed
+    whenever needed, unrestricted to either innings, exactly as `play()` already does.
+    """
+    from game.__main__ import attack, lineup
+
+    won_toss = toss(rng)
+    elects = _next_toss(moves, opponent, human_match_no).elects if won_toss \
+        else TOSS_DEFAULT_ELECTS
+
+    home, away = (human, opponent) if elects == "bat" else (opponent, human)
+    human_bats_first = home is human
+
+    opp_discipline, opp_target = decide_impact(opponent, human)
+    if human_bats_first:
+        home_discipline, home_target = None, None
+        away_discipline, away_target = opp_discipline, opp_target
     else:
-        r.margin = "tied"
-    return r
+        home_discipline, home_target = opp_discipline, opp_target
+        away_discipline, away_target = None, None
+
+    home_batting, home_bat_impact = _impact_xi(home, home_discipline, home_target, "bat")
+    away_bowling, away_bowl_impact = _impact_xi(away, away_discipline, away_target, "bowl")
+    first = play_innings(model, lineup(home_batting, model, home_bat_impact),
+                          attack(away_bowling, model, away_bowl_impact), rng)
+
+    # At the break: the discipline this decision affects is always the human's SECOND
+    # innings -- "bowl" if he batted first, "bat" if he bowled first.
+    discipline = "bowl" if human_bats_first else "bat"
+    if human.impact is None:
+        human_discipline, human_target = None, None
+    else:
+        impact_pick = _next_impact(moves, opponent, discipline, first, human_bats_first,
+                                    human_match_no)
+        if impact_pick.slot is None:
+            human_discipline, human_target = decide_impact(human, opponent)
+        else:
+            human_discipline, human_target = discipline, human.xi[impact_pick.slot - 1]
+
+    # `home` is the human when `human_bats_first` (he bowls in innings 2, so it is
+    # `home_bowling` that must carry his decision) -- otherwise `away` is the human (he
+    # bats in innings 2, so it is `away_batting` that must). Overwriting the OTHER pair
+    # would silently write the human's own decision into the opponent's slot instead.
+    if human_bats_first:
+        home_discipline, home_target = human_discipline, human_target
+    else:
+        away_discipline, away_target = human_discipline, human_target
+
+    away_batting, away_bat_impact = _impact_xi(away, away_discipline, away_target, "bat")
+    home_bowling, home_bowl_impact = _impact_xi(home, home_discipline, home_target, "bowl")
+    second = play_innings(model, lineup(away_batting, model, away_bat_impact),
+                          attack(home_bowling, model, home_bowl_impact),
+                          rng, target=first.runs)
+
+    if stats is not None:
+        if human is home:
+            stats.add_batting(first)
+            stats.add_bowling(second)
+        else:
+            stats.add_batting(second)
+            stats.add_bowling(first)
+
+    return _finish_result(home, away, stage, first, second,
+                           toss_won_by_you=won_toss, toss_elected=elects)
 
 
 def _credit(standing: Standing, runs: int, balls: int, wickets: int,
@@ -446,14 +645,47 @@ def _credit(standing: Standing, runs: int, balls: int, wickets: int,
     standing.balls_against += full if against_wickets >= 10 else against_balls
 
 
+def _play_fixture(model: Model, a: Side, b: Side, rng: random.Random, stage: str,
+                   human_match_no: int, track: Side | None, moves,
+                   stats: JourneyAccumulator | None, season: "Season") -> Result:
+    """One fixture, human-tracked or not -- shared by `run_league`'s loop and
+    `run_playoffs`'s four call sites.
+
+    `is`, never `==`: `Side` has no `eq=False`, so `==` is structural, and the existing
+    code is already careful to compare identity everywhere (`play()`'s own `if track is
+    home`). A fixture "involves the human" only when `track` IS one of these two
+    objects, never merely equal to one.
+
+    Raises the season-scoped `NeedToss`/`NeedImpact`, enriched with the `Season`
+    accumulated so far, if the human's own match needs a live decision not yet supplied
+    -- `moves=None` never raises (see `_next_toss`/`_next_impact`), so this only ever
+    happens with a real move source that has run out of recorded answers.
+    """
+    if track is not None and (track is a or track is b):
+        human, opponent = (a, b) if track is a else (b, a)
+        try:
+            return _play_human_match(model, human, opponent, rng, stage,
+                                      human_match_no, moves, stats)
+        except _MatchNeedsToss as exc:
+            raise NeedToss(exc, season, stage, human_match_no) from None
+        except _MatchNeedsImpact as exc:
+            raise NeedImpact(exc, season, stage, human_match_no) from None
+    return play(model, a, b, rng, stage=stage, track=track, stats=stats)
+
+
 def run_league(model: Model, sides: list[Side], rng: random.Random,
-               track: Side | None = None, stats: JourneyAccumulator | None = None
-               ) -> Season:
+               track: Side | None = None, stats: JourneyAccumulator | None = None,
+               moves=None) -> Season:
     season = Season(sides=sides)
     standings = {s.name: Standing(side=s) for s in sides}
+    human_match_no = 0
 
     for i, j in fixtures(len(sides)):
-        r = play(model, sides[i], sides[j], rng, track=track, stats=stats)
+        is_human_fixture = track is not None and (track is sides[i] or track is sides[j])
+        r = _play_fixture(model, sides[i], sides[j], rng, "league", human_match_no,
+                           track, moves, stats, season)
+        if is_human_fixture:
+            human_match_no += 1
         season.results.append(r)
         h, a = standings[r.home.name], standings[r.away.name]
         h.played += 1
@@ -477,8 +709,8 @@ def run_league(model: Model, sides: list[Side], rng: random.Random,
 
 
 def run_playoffs(model: Model, season: Season, rng: random.Random,
-                  track: Side | None = None, stats: JourneyAccumulator | None = None
-                  ) -> Season:
+                  track: Side | None = None, stats: JourneyAccumulator | None = None,
+                  moves=None) -> Season:
     """The IPL's own four-team finish, which is not a straight semi-final bracket.
 
     Finishing first or second is worth a second life: Qualifier 1's loser drops into
@@ -486,16 +718,30 @@ def run_playoffs(model: Model, season: Season, rng: random.Random,
     league table is FOR -- a bracket would make positions 1 and 3 nearly equivalent.
     """
     first, second, third, fourth = (s.side for s in season.table[:4])
+    # The league always contributes exactly MATCHES_EACH human-tracked fixtures (every
+    # side plays exactly fourteen, win lose or draw -- test_every_side_plays_exactly_
+    # fourteen pins it), so a playoff-stage human match continues the SAME move sequence
+    # from here, never restarting it.
+    human_match_no = MATCHES_EACH
 
-    q1 = play(model, first, second, rng, stage="Qualifier 1", track=track, stats=stats)
-    elim = play(model, third, fourth, rng, stage="Eliminator", track=track, stats=stats)
+    def _play(a: Side, b: Side, stage: str) -> Result:
+        nonlocal human_match_no
+        is_human_fixture = track is not None and (track is a or track is b)
+        r = _play_fixture(model, a, b, rng, stage, human_match_no, track, moves,
+                           stats, season)
+        if is_human_fixture:
+            human_match_no += 1
+        return r
+
+    q1 = _play(first, second, "Qualifier 1")
+    elim = _play(third, fourth, "Eliminator")
     q1_loser = second if q1.winner is first else first
     elim_winner = elim.winner or third            # a tied eliminator falls to the higher seed
 
-    q2 = play(model, q1_loser, elim_winner, rng, stage="Qualifier 2", track=track, stats=stats)
+    q2 = _play(q1_loser, elim_winner, "Qualifier 2")
     finalist = q1.winner or first
     other = q2.winner or q1_loser
-    final = play(model, finalist, other, rng, stage="Final", track=track, stats=stats)
+    final = _play(finalist, other, "Final")
 
     season.playoffs = [q1, elim, q2, final]
     season.champion = final.winner or finalist

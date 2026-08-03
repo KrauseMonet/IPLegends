@@ -679,21 +679,80 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 
   <!-- ============ MATCH-BY-MATCH REVEAL ============ -->
   <section id="reveal" class="hide">
-    <div class="report">
-      <div class="over-line" id="revealStage"></div>
-      <div class="call" id="revealHeadline"></div>
-      <div class="margin" id="revealMargin"></div>
+
+    <!-- the toss: only ever shown when you actually won it -- otherwise the very next
+         thing shown is the first innings, with a line noting what the opponent chose -->
+    <div id="tossScreen" class="hide">
+      <div class="report">
+        <div class="over-line" id="tossStage"></div>
+        <div class="call">You won the toss</div>
+        <div class="margin" id="tossOpponent"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:24px">
+        <button class="act lead" onclick="submitToss('bat')">Bat first</button>
+        <button class="act lead" onclick="submitToss('bowl')">Bowl first</button>
+        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+      </div>
     </div>
-    <div class="spread" style="margin-top:6px">
-      <div>
-        <div class="fx" id="revealLine" onclick="showRevealScorecard()" style="cursor:pointer"></div>
-        <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
-        <div class="actions" style="margin-top:24px">
-          <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
-          <button class="act hide" onclick="revealSkipGroupStage()" id="revealSkipGroupBtn"
-            >Rest of the group stage</button>
-          <button class="act" onclick="revealSkipToEnd()">Simulate rest of the tournament</button>
-          <button class="act" onclick="showRevealScorecard()">View scorecard</button>
+
+    <!-- the over-by-over stepper: paces through one already-known over_log, entirely
+         client-side (no network call per over) -- speed/pause/skip are all local -->
+    <div id="overStepper" class="hide">
+      <div class="report">
+        <div class="over-line" id="overStage"></div>
+        <div class="call" id="overScoreLine"></div>
+        <div class="margin" id="overLastLine"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip to end of this innings</button>
+        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+      </div>
+    </div>
+
+    <!-- the innings break: your own Impact Player decision, or decline and let the
+         algorithm decide the same way it always has -->
+    <div id="impactScreen" class="hide">
+      <div class="report">
+        <div class="over-line" id="impactStage"></div>
+        <div class="call">Innings break</div>
+        <div class="margin" id="impactFirstInnings"></div>
+      </div>
+      <p class="deck" style="margin:16px 0;max-width:none">Send your Impact Player in for
+        any of your eleven, or leave it to the algorithm.</p>
+      <div id="impactXiList" class="col-scroll"></div>
+      <div class="actions" style="justify-content:center;margin-top:16px">
+        <button class="act" onclick="submitImpact(null)">Decline -- no substitution</button>
+        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+      </div>
+    </div>
+
+    <!-- a completed match's result, live-played or skipped alike -->
+    <div id="revealMatchResult" class="hide">
+      <div class="report">
+        <div class="over-line" id="revealStage"></div>
+        <div class="call" id="revealHeadline"></div>
+        <div class="margin" id="revealMargin"></div>
+      </div>
+      <div class="spread" style="margin-top:6px">
+        <div>
+          <div class="fx" id="revealLine" onclick="showRevealScorecard()" style="cursor:pointer"></div>
+          <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
+          <div class="actions" style="margin-top:24px">
+            <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
+            <button class="act" onclick="revealSkipThisMatch()" id="revealSkipThisBtn"
+              >Skip this match</button>
+            <button class="act hide" onclick="revealSkipGroupStage()" id="revealSkipGroupBtn"
+              >Rest of the group stage</button>
+            <button class="act" onclick="revealSkipToEnd()">Simulate rest of the tournament</button>
+            <button class="act" onclick="showRevealScorecard()">View scorecard</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1067,12 +1126,18 @@ function showOrderStat(slot){
 
 /* --- the season --- */
 
-// 'whole' plays out exactly as this always has: fetch once, show everything. The other
-// two are pure pacing over the SAME single response -- the season is fully determined by
-// the seed the moment the draft ends (nobody decides anything mid-match), so "match by
-// match" never re-simulates anything, it only controls how much of an already-computed
-// result the screen reveals at once.
+// 'whole' and 'groupstage' resolve every remaining fixture with the declared default
+// toss/Impact answers (`POST .../skip`) and just show the outcome. 'matchbymatch' is
+// the only mode where anything is actually decided live -- every one of YOUR OWN
+// matches now pauses for a real toss and a break-time Impact choice, so the season can
+// no longer be computed in one shot the moment the draft ends; it is replayed one
+// human decision at a time, exactly like a room's shared draft pool.
 let SIM_MODE = 'whole';
+
+// The full "{draft_state}~{season moves}" identity of a season in progress -- distinct
+// from `S.state`, which only ever names the draft. Sits alongside it once the season
+// starts, and is what every season-route call below actually uses.
+let SEASON_STATE = null;
 
 function setSimMode(mode){
   SIM_MODE = mode;
@@ -1080,20 +1145,29 @@ function setSimMode(mode){
     b.classList.toggle('sel', b.dataset.simmode === mode));
 }
 
+async function seasonSkip(scope){
+  const d = await api(`/api/season/${SEASON_STATE}/skip`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({scope})});
+  SEASON_STATE = d.state;
+  return d;
+}
+
 async function simulate(){
   $('#simBtn').disabled = true;
   $('#simBtn').textContent = 'Playing the season…';
   try {
-    const d = await api('/api/season/' + S.state);
+    SEASON_STATE = S.state;
     if (SIM_MODE === 'matchbymatch'){
-      startReveal(d, 'league');
+      const d = await api('/api/season/' + SEASON_STATE);
+      enterRevealStage(d);
     } else if (SIM_MODE === 'groupstage'){
+      const d = await seasonSkip('group_stage');
       renderTableAndForm(d);
-      const me = d.table.find(r => r.you);
-      if (me.pos <= 4) showGroupStageChoice(d); else renderVerdictAndBracket(d);
-      go('result');
+      if (d.complete){ renderVerdictAndBracket(d); go('result'); }
+      else showGroupStageChoice(d);
     } else {
-      showSeason(d);
+      showSeason(await seasonSkip('tournament'));
     }
   }
   catch(e){ slip(e.message); }
@@ -1110,6 +1184,7 @@ function showSeason(d){
 
 function renderTableAndForm(d){
   SEASON_DATA = d;
+  SEASON_STATE = d.state;
   $('#tableNote').textContent = `${d.matches_each} each`;
   $('#ladder').innerHTML =
     `<tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
@@ -1168,113 +1243,264 @@ function showGroupStageChoice(d){
     <p class="deck" style="max-width:none">You're through to the knockouts. Play them all
       at once, or one result at a time?</p>
     <div class="actions" style="margin-top:16px">
-      <button class="act lead" onclick="renderVerdictAndBracket(SEASON_DATA); go('result')"
-        >Simulate knockouts</button>
-      <button class="act" onclick="startReveal(SEASON_DATA, 'playoffs')">Match by match</button>
+      <button class="act lead" onclick="revealSkipToEnd()">Simulate knockouts</button>
+      <button class="act" onclick="enterRevealStage(SEASON_DATA)">Match by match</button>
     </div>`;
+  go('result');
 }
 
 function showScorecard(list, i){
   renderScorecard(SEASON_DATA[list === 'league' ? 'your_results' : 'playoffs'][i]);
 }
 
-/* --- match-by-match reveal: pure pacing over an already-computed season -------------- */
+/* --- match-by-match reveal: a real toss, a real Impact choice, a real over-by-over --- */
 
-let REVEAL = null;   // {data, phase: 'league'|'playoffs', idx, current}
+let REVEAL = null;     // the latest SeasonProgressOut driving these screens, plus `.current`
+                        // (the most recently completed match, for showRevealScorecard)
+let OVER_STEP = null;  // {log, i, timer, speed, paused, onDone} -- purely local pacing
+                        // over an over_log the server already computed in full
 
-function startReveal(d, phase){
-  REVEAL = { data: d, phase, idx: 0, current: null };
-  showRevealMatch();
-  go('reveal');
+function hideAllRevealScreens(){
+  ['tossScreen', 'overStepper', 'impactScreen', 'revealMatchResult'].forEach(id =>
+    $('#' + id).classList.add('hide'));
 }
 
-function showRevealMatch(){
-  const { data, phase, idx } = REVEAL;
-  const list = phase === 'league' ? data.your_results : data.playoffs;
-  const r = list[idx];
-  REVEAL.current = r;
+function matchLabel(stage, n, total){
+  return stage === 'league' ? `League · match ${n} of ${total}` : stage;
+}
 
-  if (phase === 'league'){
-    $('#revealStage').textContent = `League · match ${idx + 1} of ${data.matches_each}`;
-    const them = r.home === 'YOU' ? r.away : r.home;
-    const mine = r.home === 'YOU' ? r.home_score : r.away_score;
-    const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
-    $('#revealHeadline').textContent = r.winner === 'YOU' ? 'You win'
-      : (r.winner === null ? 'Tied' : `${them} win`);
-    $('#revealHeadline').classList.toggle('won', r.winner === 'YOU');
-    $('#revealMargin').textContent = r.margin;
-    $('#revealLine').innerHTML =
-      `<span class="wl ${r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l')}"
-        >${r.winner === 'YOU' ? 'W' : (r.winner === null ? 'T' : 'L')}</span>
-       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span>`;
-    const soFar = list.slice(0, idx + 1);
-    const w = soFar.filter(m => m.winner === 'YOU').length;
-    const l = soFar.filter(m => m.winner && m.winner !== 'YOU').length;
-    const t = soFar.length - w - l;
-    $('#revealRecord').textContent =
-      `${w}W ${l}L${t ? ' ' + t + 'T' : ''} so far, ${soFar.length} of ${data.matches_each} played`;
+// Entry point for match-by-match mode, and every step after it: `d` is whatever the
+// server just returned -- a fresh GET, or the response to a toss/impact/skip POST.
+// Its `pending` (if any) decides which screen comes up next; `complete` ends the reveal
+// the same way `showSeason` always has.
+function enterRevealStage(d){
+  REVEAL = d;
+  SEASON_STATE = d.state;
+  go('reveal');
+  if (d.complete){ showSeason(d); return; }
+  if (d.pending.kind === 'toss'){
+    hideAllRevealScreens();
+    showTossScreen(d.pending);
   } else {
-    $('#revealStage').textContent = r.stage;
-    $('#revealHeadline').textContent = r.winner ? `${r.winner} win` : 'Tied';
-    $('#revealHeadline').classList.toggle('won', r.yours && r.winner === 'YOU');
-    $('#revealMargin').textContent = r.margin;
-    $('#revealLine').innerHTML =
-      `<span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
-        >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
-       <span>${r.home} v ${r.away}</span><span class="sc">${r.home_score} · ${r.away_score}</span>`;
-    $('#revealRecord').textContent = r.yours ? "You're in this one." : 'Setting up your next match.';
+    // A lost toss never raises `NeedToss` at all (`_play_human_match` only asks when
+    // you won it), so this is also where a match that skipped the toss screen entirely
+    // first appears -- the first innings is already fully known, so it plays out
+    // over-by-over before the break-time choice itself is shown.
+    startOverStepper(d.pending.first_innings,
+      matchLabel(d.pending.stage, d.your_results.length + 1, d.matches_each),
+      () => showImpactScreen(d.pending));
+  }
+}
+
+function showTossScreen(pending){
+  $('#tossStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
+  $('#tossOpponent').textContent = `v ${pending.opponent} -- elect to bat or bowl first.`;
+  $('#tossScreen').classList.remove('hide');
+}
+
+async function submitToss(elects){
+  try {
+    const d = await api(`/api/season/${SEASON_STATE}/toss`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({elects})});
+    enterRevealStage(d);
+  } catch(e){ slip(e.message); }
+}
+
+/* --- the over-by-over stepper: paces through one already-known over_log, no network
+   call per over -- speed/pause/skip are all local, and `onDone` is whatever the reveal
+   flow wants to show once the innings runs out (the Impact screen, or the match result) */
+
+function clearOverTimer(){
+  if (OVER_STEP && OVER_STEP.timer){ clearTimeout(OVER_STEP.timer); OVER_STEP.timer = null; }
+}
+
+function startOverStepper(innings, stageText, onDone){
+  hideAllRevealScreens();
+  OVER_STEP = {
+    log: innings.over_log, i: 0, timer: null,
+    speed: Number($('#overSpeedSelect').value) || 500,
+    paused: false, onDone, stageText, innings,
+  };
+  $('#overStepper').classList.remove('hide');
+  renderOverStep();
+  if (OVER_STEP) scheduleNextOver();
+}
+
+function renderOverStep(){
+  const { log, i, stageText, innings } = OVER_STEP;
+  $('#overStage').textContent = stageText;
+  if (i >= log.length){
+    // either a genuinely over-free innings, or the log just ran out -- either way the
+    // final total is already known, so show it and hand off immediately.
+    $('#overScoreLine').textContent = `${innings.runs}/${innings.wickets}`;
+    $('#overLastLine').textContent = `${innings.overs} overs, ${innings.extras} extras`;
+    finishOverStepper();
+    return;
+  }
+  const o = log[i];
+  $('#overScoreLine').textContent = `${o.runs}/${o.wickets} after ${o.over + 1} overs`;
+  $('#overLastLine').textContent =
+    `Over ${o.over + 1}: ${o.bowler} -- ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
+    (o.over_wickets ? `, ${o.over_wickets} wicket${o.over_wickets === 1 ? '' : 's'}` : '');
+}
+
+function scheduleNextOver(){
+  clearOverTimer();
+  if (!OVER_STEP || OVER_STEP.paused) return;
+  OVER_STEP.timer = setTimeout(() => {
+    if (!OVER_STEP) return;
+    OVER_STEP.i++;
+    const more = OVER_STEP.i < OVER_STEP.log.length;
+    renderOverStep();
+    if (more) scheduleNextOver();
+  }, OVER_STEP.speed);
+}
+
+function toggleOverPause(){
+  if (!OVER_STEP) return;
+  OVER_STEP.paused = !OVER_STEP.paused;
+  $('#overPauseBtn').textContent = OVER_STEP.paused ? 'Resume' : 'Pause';
+  if (OVER_STEP.paused) clearOverTimer(); else scheduleNextOver();
+}
+
+function setOverSpeed(ms){
+  if (!OVER_STEP) return;
+  OVER_STEP.speed = Number(ms);
+  if (!OVER_STEP.paused){ clearOverTimer(); scheduleNextOver(); }
+}
+
+function skipOverStepper(){
+  if (!OVER_STEP) return;
+  clearOverTimer();
+  OVER_STEP.i = OVER_STEP.log.length;
+  renderOverStep();
+}
+
+function finishOverStepper(){
+  clearOverTimer();
+  const onDone = OVER_STEP && OVER_STEP.onDone;
+  OVER_STEP = null;
+  hideAllRevealScreens();
+  if (onDone) onDone();
+}
+
+/* --- the innings break: your own Impact Player choice, or decline --------------------- */
+
+function showImpactScreen(pending){
+  $('#impactStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
+  const battingSide = pending.human_bats_first ? 'Your eleven' : pending.opponent;
+  $('#impactFirstInnings').textContent =
+    `${battingSide} posted ${pending.first_innings.runs}/${pending.first_innings.wickets} ` +
+    `(${pending.first_innings.overs} ov). You're ${pending.discipline === 'bat' ? 'batting' : 'bowling'} next.`;
+  $('#impactXiList').innerHTML = pending.your_xi.map((c, i) => `
+    <div class="fx" onclick="submitImpact(${i + 1})" style="cursor:pointer">
+      <span>${c.name}</span><span class="sc">slot ${i + 1}</span>
+    </div>`).join('');
+  $('#impactScreen').classList.remove('hide');
+}
+
+async function submitImpact(slot){
+  const stage = REVEAL.pending.stage;
+  try {
+    const d = await api(`/api/season/${SEASON_STATE}/impact`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({slot})});
+    SEASON_STATE = d.state;
+    // Impact resolves the whole rest of the match in one step -- no further pause is
+    // possible until the NEXT match -- so the second innings is already fully known
+    // too, and gets its own over-by-over pass before the result is shown.
+    const list = stage === 'league' ? d.your_results : d.playoffs;
+    const match = list[list.length - 1];
+    startOverStepper(match.away_innings,
+      matchLabel(stage, d.your_results.length, d.matches_each),
+      () => revealCompletedMatch(match, d));
+  } catch(e){ slip(e.message); }
+}
+
+/* --- a completed match's result, live-played or skipped alike ------------------------- */
+
+function revealCompletedMatch(match, d){
+  REVEAL = d;
+  REVEAL.current = match;
+  SEASON_STATE = d.state;
+  hideAllRevealScreens();
+
+  const isLeague = match.stage === 'league';
+  $('#revealStage').textContent = isLeague
+    ? `League · match ${d.your_results.length} of ${d.matches_each}` : match.stage;
+
+  const them = match.home === 'YOU' ? match.away : match.home;
+  const mine = match.home === 'YOU' ? match.home_score : match.away_score;
+  const theirs = match.home === 'YOU' ? match.away_score : match.home_score;
+  $('#revealHeadline').textContent = match.winner === 'YOU' ? 'You win'
+    : (match.winner === null ? 'Tied' : (isLeague ? `${them} win` : `${match.winner} win`));
+  $('#revealHeadline').classList.toggle('won', match.winner === 'YOU');
+  $('#revealMargin').textContent = match.margin;
+  $('#revealLine').innerHTML = isLeague
+    ? `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
+        >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
+       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span>`
+    : `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
+        >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
+       <span>${match.home} v ${match.away}</span>
+       <span class="sc">${match.home_score} · ${match.away_score}</span>`;
+
+  if (isLeague){
+    const w = d.your_results.filter(r => r.winner === 'YOU').length;
+    const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
+    const t = d.your_results.length - w - l;
+    $('#revealRecord').textContent =
+      `${w}W ${l}L${t ? ' ' + t + 'T' : ''} so far, ${d.your_results.length} of ${d.matches_each} played`;
+  } else {
+    $('#revealRecord').textContent = "You're in this one.";
   }
 
-  const isLast = idx === list.length - 1;
-  $('#revealNextBtn').textContent = isLast
-    ? (phase === 'league' ? 'See the table' : 'See the result')
-    : 'Next match';
-  // only worth offering while there is more than one league match left to skip past --
-  // playoffs have no separate "group stage" to jump to, and "Next match" already covers
-  // the one-match-left case.
-  $('#revealSkipGroupBtn').classList.toggle('hide', phase !== 'league' || isLast);
+  const isDone = d.complete;
+  $('#revealNextBtn').textContent = isDone ? 'See the result' : 'Next match';
+  $('#revealSkipThisBtn').classList.toggle('hide', isDone);
+  $('#revealSkipGroupBtn').classList.toggle('hide',
+    isDone || !d.pending || d.pending.stage !== 'league');
+  $('#revealMatchResult').classList.remove('hide');
 }
 
 function revealNext(){
-  const { data, phase, idx } = REVEAL;
-  const list = phase === 'league' ? data.your_results : data.playoffs;
-  if (idx < list.length - 1){
-    REVEAL.idx++;
-    showRevealMatch();
-    return;
-  }
-  if (phase === 'league'){
-    renderTableAndForm(data);
-    const me = data.table.find(r => r.you);
-    if (me.pos <= 4){
-      REVEAL.phase = 'playoffs';
-      REVEAL.idx = 0;
-      showRevealMatch();
-    } else {
-      renderVerdictAndBracket(data);
-      go('result');
-    }
-  } else {
-    renderVerdictAndBracket(data);
-    go('result');
-  }
+  if (REVEAL.complete) showSeason(REVEAL); else enterRevealStage(REVEAL);
 }
 
-function revealSkipToEnd(){
-  showSeason(REVEAL.data);
+// One of the three escape hatches: bypass just the CURRENTLY pending match's toss/
+// Impact/over-pacing and jump straight to its result -- available from the toss screen,
+// the over stepper, the Impact screen, or a previous match's result screen alike, since
+// all four just mean "whatever match is next awaiting me, answer it with the default."
+async function revealSkipThisMatch(){
+  const stage = REVEAL && REVEAL.pending ? REVEAL.pending.stage : null;
+  clearOverTimer();
+  OVER_STEP = null;
+  try {
+    const d = await seasonSkip('this_match');
+    const list = stage === 'league' ? d.your_results : d.playoffs;
+    revealCompletedMatch(list[list.length - 1], d);
+  } catch(e){ slip(e.message); }
 }
 
 // Mid-reveal escape hatch: seen enough matches one at a time for now, want the rest of
-// the group stage at once. Converts to exactly the state "Group stage first" mode is in
-// right after its own league reveal -- same table, same choice of how to pace the
-// knockouts -- so nothing here is a new code path, just an earlier entry into the
-// existing one.
-function revealSkipGroupStage(){
-  const { data } = REVEAL;
-  renderTableAndForm(data);
-  const me = data.table.find(r => r.you);
-  if (me.pos <= 4) showGroupStageChoice(data); else renderVerdictAndBracket(data);
-  go('result');
+// the group stage at once. Lands exactly where "Group stage first" mode does right
+// after its own league skip -- same table, same choice of how to pace the knockouts.
+async function revealSkipGroupStage(){
+  try {
+    const d = await seasonSkip('group_stage');
+    renderTableAndForm(d);
+    if (d.complete){ renderVerdictAndBracket(d); go('result'); }
+    else showGroupStageChoice(d);
+  } catch(e){ slip(e.message); }
+}
+
+// The other escape hatch: resolve every remaining fixture, human or not, with the
+// declared defaults, and show the finished season -- same landing point `showSeason`
+// always has, whether reached from the reveal screen or the group-stage choice screen.
+async function revealSkipToEnd(){
+  try { showSeason(await seasonSkip('tournament')); }
+  catch(e){ slip(e.message); }
 }
 
 function showRevealScorecard(){

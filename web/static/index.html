@@ -526,7 +526,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
     <div class="folio" style="grid-template-columns:1fr">
       <div class="col" style="max-width:560px;margin:40px auto;width:100%">
         <div class="col-head"><span>Play with friends</span></div>
-        <div style="padding:22px">
+        <div class="col-scroll" style="padding:22px">
           <label class="room-label">Your name</label>
           <input id="roomName" class="room-input" placeholder="Your name" maxlength="40">
 
@@ -576,7 +576,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             </div>
           </div>
           <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
-          <div id="lobbyPlayers"></div>
+          <div id="lobbyPlayers" class="col-scroll"></div>
           <div class="foot-actions">
             <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft()">Start draft</button>
             <button class="act" onclick="leaveRoom()">Leave</button>

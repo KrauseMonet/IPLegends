@@ -15,12 +15,14 @@ import pytest
 
 from etl.feasibility import Card
 from game.season import (
-    DOUBLE_AT, IMPACT_SIT_OUT_BAR, IMPACT_TOO_GOOD_GAIN, MATCHES_EACH, POINTS_TIE,
-    POINTS_WIN, TEAMS, TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact,
-    NeedToss, Result, Season, Side, Standing, TossElect, _MatchNeedsImpact,
-    _MatchNeedsToss, _abbrev, _credit, _impact_xi, _leader, _play_human_match,
-    _pure_bowler_678, _weakest_bowler, _weakest_pure_batter, decide_impact, fixtures,
-    journey_stats, run_league, run_playoffs, toss,
+    DOUBLE_AT, IMPACT_PAR_SCORE, IMPACT_SIT_OUT_BAR, IMPACT_SITUATIONAL_K,
+    IMPACT_TOO_GOOD_GAIN, MATCHES_EACH, POINTS_TIE, POINTS_WIN, TEAMS,
+    TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact, NeedToss, Result,
+    Season, Side, Standing, TossElect, _MatchNeedsImpact, _MatchNeedsToss, _abbrev,
+    _apply_batting_impact, _apply_bowling_impact, _bowling_depth_shortfall, _credit,
+    _insert_batting_impact, _leader, _play_human_match, _tailender_bowler,
+    _weakest_bowler, _weakest_pure_batter, decide_impact, fixtures, journey_stats,
+    run_league, run_playoffs, toss,
 )
 from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
@@ -226,26 +228,33 @@ def test_journey_stats_for_a_side_that_never_reached_the_playoffs():
     assert stats.won == 4 and stats.lost == 10
 
 
-# --- the situational Impact Player --------------------------------------------------------
+# --- the situational Impact Player, decided at the break (A78) -------------------------
 
-def _card(name, bat=None, bowl=None, role=None):
-    return Card(1, name, name, bat=bat, bowl=bowl, role=role)
+def _card(name, bat=None, bowl=None, role=None, positions=frozenset({1, 2, 3})):
+    """`positions` defaults non-empty -- a real Card always has one (A76) -- so a test
+    exercising a full match can build an Impact Player who bats without separately
+    worrying about it; override it directly on the handful of tests that pin
+    `_insert_batting_impact`'s own band-dependent placement."""
+    return Card(1, name, name, bat=bat, bowl=bowl, role=role, positions=positions)
 
 
 def own_xi():
-    """A shaped eleven, not a uniform one: two candidates exist for each kind of swap, so
-    picking the WRONG one (not just any eligible one) is what these tests pin.
-
-    bowl8 (bat .02) is the weaker of the two bowlers at 7/8, so a batting Impact Player
-    must free him up, not bowl7 (bat .05). mid5 (bat .15) is the weakest player who does
-    not bowl at all, so a bowling Impact Player must free him up, not the keeper -- who
-    is weaker still (.01) but is never a candidate."""
+    """A shaped eleven, not a uniform one: bowl7 bowls and bats WORSE than everyone in the
+    tail (.01) but bats at position 7 -- the finisher band, not the tail -- so if the new
+    zone boundary were wrong (still including position 7) this would pick him instead of
+    bowl10, making the boundary self-checking rather than needing a second test. bowl8-11
+    (positions 8-11, A76's own `tail` band) all bowl and carry distinct real bat ratings so
+    "picks the weakest of several real candidates" is meaningfully exercised; bowl10 (.02)
+    is the weakest. mid5 (.15) is the weakest player who does not bowl at all, so a bowling
+    Impact Player must free him up, not the keeper -- who is weaker still (.01) but is
+    never a candidate."""
     return [
         _card("op1", bat=0.30), _card("op2", bat=0.28), _card("top3", bat=0.25),
         _card("mid4", bat=0.20), _card("mid5", bat=0.15),
         _card("keeper", bat=0.01, role="keeper"),
-        _card("bowl7", bat=0.05, bowl=0.15), _card("bowl8", bat=0.02, bowl=0.20),
-        _card("bowl9", bowl=0.25), _card("bowl10", bowl=0.22), _card("bowl11", bowl=0.10),
+        _card("bowl7", bat=0.01, bowl=0.15),
+        _card("bowl8", bat=0.10, bowl=0.20), _card("bowl9", bat=0.05, bowl=0.25),
+        _card("bowl10", bat=0.02, bowl=0.22), _card("bowl11", bat=0.12, bowl=0.10),
     ]
 
 
@@ -254,19 +263,28 @@ def opp_side(bat=0.05, bowl=None):
     return Side(name="OPP", short="OPP", xi=xi)
 
 
-def test_pure_bowler_678_takes_the_weaker_bat_of_the_two_candidates():
-    target = _pure_bowler_678(own_xi())
-    assert target is not None and target.name == "bowl8"
+def test_tailender_bowler_takes_the_weaker_bat_of_the_tail_candidates():
+    target = _tailender_bowler(own_xi())
+    assert target is not None and target.name == "bowl10"
 
 
-def test_pure_bowler_678_is_none_when_no_bowler_sits_at_six_seven_or_eight():
-    """Replaces positions 7 and 8 with non-bowlers IN PLACE, keeping bowl9-11 at their
-    original positions 9-11 -- appending replacements at the end instead would shift
-    bowl9-11 up into slots 6-8, changing what the test claims to check."""
+def test_tailender_bowler_is_none_when_nobody_in_the_tail_bowls():
     xi = own_xi()
-    xi[6] = _card("nonbowler7", bat=0.10)
-    xi[7] = _card("nonbowler8", bat=0.08)
-    assert _pure_bowler_678(xi) is None
+    for name in ("bowl8", "bowl9", "bowl10", "bowl11"):
+        idx = next(i for i, c in enumerate(xi) if c.name == name)
+        xi[idx] = _card(f"non_{name}", bat=0.05)
+    assert _tailender_bowler(xi) is None
+
+
+def test_tailender_bowler_never_picks_the_keeper():
+    """Same shape as `_weakest_pure_batter`'s own keeper guard, ported to the new zone --
+    a keeper who happens to bat in the tail and bowls must never be a swap-out
+    candidate, whatever his bat rating."""
+    xi = own_xi()
+    idx = next(i for i, c in enumerate(xi) if c.name == "bowl9")
+    xi[idx] = _card("keeper2", bat=0.0, bowl=0.30, role="keeper")
+    target = _tailender_bowler(xi)
+    assert target is not None and target.name != "keeper2"
 
 
 def test_weakest_pure_batter_never_picks_the_keeper():
@@ -285,77 +303,123 @@ def test_weakest_bowler_is_measured_within_the_bowlers_not_against_a_non_bowler(
     assert target is not None and target.name == "bowl11"
 
 
-def test_a_big_enough_raw_gain_plays_regardless_of_the_matchup():
-    """IMPACT_TOO_GOOD_GAIN: a batting Impact Player far better than bowl8 plays even
-    against a side with no matching threat at all."""
+def test_a_big_enough_raw_gain_plays_regardless_of_the_situation():
+    """IMPACT_TOO_GOOD_GAIN: a batting Impact Player far better than bowl10 plays even
+    with no first innings at all to weigh a situational read against."""
     xi = own_xi()
     impact = _card("impact", bat=0.02 + IMPACT_TOO_GOOD_GAIN + 0.1)
-    weak_opponent = opp_side(bat=0.0, bowl=None)
-    discipline, target = decide_impact(
-        Side(name="ME", short="ME", xi=xi, impact=impact), weak_opponent)
-    assert discipline == "bat"
-    assert target.name == "bowl8"
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bat", None)
+    assert target is not None and target.name == "bowl10"
 
 
-def test_a_big_enough_bowling_gain_also_overrides_the_matchup():
+def test_a_big_enough_bowling_gain_also_overrides_the_situation():
     xi = own_xi()
-    impact = _card("impact", bowl=0.15 + IMPACT_TOO_GOOD_GAIN + 0.1)
-    weak_opponent = opp_side(bat=0.0, bowl=None)
-    discipline, target = decide_impact(
-        Side(name="ME", short="ME", xi=xi, impact=impact), weak_opponent)
-    assert discipline == "bowl"
-    assert target.name == "mid5"
+    impact = _card("impact", bowl=0.10 + IMPACT_TOO_GOOD_GAIN + 0.1)
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bowl", None)
+    assert target is not None and target.name == "mid5"
 
 
-def test_he_sits_out_when_neither_discipline_clears_the_bar():
+def test_he_sits_out_when_the_gain_never_clears_the_bar():
     xi = own_xi()
-    # gain_bat == 0 (ties bowl8), gain_bowl slightly negative (below mid5's bowl rating
-    # via the no-rating sentinel) -- and an opponent with nothing to exploit either way.
-    impact = _card("impact", bat=0.02, bowl=0.10)
-    weak_opponent = opp_side(bat=0.0, bowl=None)
-    discipline, target = decide_impact(
-        Side(name="ME", short="ME", xi=xi, impact=impact), weak_opponent)
-    assert (discipline, target) == (None, None)
+    # gain_bat == 0 (ties bowl10) -- with no first innings, the situational term is
+    # zero too, so the raw gain alone decides and it is short of IMPACT_SIT_OUT_BAR.
+    impact = _card("impact", bat=0.02)
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bat", None)
+    assert target is None
 
 
-def test_a_strong_opposing_batting_order_can_flip_the_choice_to_bowling():
-    """Raw gain alone would favour batting here (.18 vs .15) -- the situational weight on
-    the opponent's batting strength is what has to flip it to bowling."""
+def test_a_big_first_innings_total_can_tip_a_borderline_batting_gain():
+    """Raw gain alone (.03) is short of IMPACT_SIT_OUT_BAR (.05) -- a first innings well
+    above IMPACT_PAR_SCORE raises the value of batting insurance for the side about to
+    chase, and has to be what tips this one over the bar."""
     xi = own_xi()
-    impact = _card("impact", bat=0.20, bowl=0.30)   # gain_bat .18, gain_bowl .15
-    strong_batting_opponent = opp_side(bat=0.6, bowl=None)   # no bowlers: opp_bowl = 0
-    discipline, target = decide_impact(
-        Side(name="ME", short="ME", xi=xi, impact=impact), strong_batting_opponent)
-    assert discipline == "bowl"
-    assert target.name == "mid5"
+    impact = _card("impact", bat=0.05)   # gain over bowl10 (.02) is .03
+    gain = 0.05 - 0.02
+    high_total = IMPACT_PAR_SCORE + (IMPACT_SIT_OUT_BAR - gain) / IMPACT_SITUATIONAL_K + 1
+    first = Innings(batting=[], bowling=[], runs=round(high_total))
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bat", first)
+    assert target is not None and target.name == "bowl10"
+    # Sanity: the same gain against a first innings well BELOW par never clears the bar.
+    low_first = Innings(batting=[], bowling=[], runs=IMPACT_PAR_SCORE - 60)
+    assert decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                          opp_side(), "bat", low_first) is None
 
 
-def test_impact_xi_only_substitutes_for_the_discipline_actually_chosen():
+def test_a_low_first_innings_total_can_tip_a_borderline_bowling_gain():
+    """The mirror of the test above: a total well BELOW par raises the value of another
+    bowler for the side about to defend it."""
     xi = own_xi()
-    impact = _card("impact", bat=1.0)
-    me = Side(name="ME", short="ME", xi=xi, impact=impact)
-
-    batting, bat_impact = _impact_xi(me, "bat", xi[7], "bat")   # xi[7] is bowl8
-    assert bat_impact is impact
-    assert impact in batting and xi[7] not in batting
-
-    bowling, bowl_impact = _impact_xi(me, "bat", xi[7], "bowl")
-    assert bowl_impact is None
-    assert bowling == xi, "chosen for batting only -- the bowling pool must be untouched"
-
-
-def test_impact_xi_is_a_no_op_when_he_sits_out():
-    xi = own_xi()
-    me = Side(name="ME", short="ME", xi=xi, impact=_card("impact", bat=0.02))
-    for wanted in ("bat", "bowl"):
-        result_xi, played = _impact_xi(me, None, None, wanted)
-        assert result_xi == xi and played is None
+    impact = _card("impact", bowl=0.12)   # gain over bowl11 (.10) is .02
+    gain = 0.12 - 0.10
+    low_total = IMPACT_PAR_SCORE - (IMPACT_SIT_OUT_BAR - gain) / IMPACT_SITUATIONAL_K - 1
+    first = Innings(batting=[], bowling=[], runs=round(low_total))
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bowl", first)
+    assert target is not None and target.name == "mid5"
 
 
 def test_a_side_with_no_impact_player_never_substitutes():
     xi = own_xi()
     me = Side(name="ME", short="ME", xi=xi, impact=None)
-    assert decide_impact(me, opp_side()) == (None, None)
+    assert decide_impact(me, opp_side(), "bat", None) is None
+    assert decide_impact(me, opp_side(), "bowl", None) is None
+
+
+# --- applying the decision: a batting swap reshuffles, a bowling swap is a straight one --
+
+def test_insert_batting_impact_slots_a_top_order_man_at_the_top():
+    """A top-order Impact (positions {1,2,3}) is inserted at slot 1 -- everyone from op1
+    down to where the target used to bat shifts down by one place, and the target is
+    gone entirely."""
+    xi = own_xi()
+    target = next(c for c in xi if c.name == "bowl10")
+    impact = _card("impact", bat=0.5, positions=frozenset({1, 2, 3}))
+    result = _insert_batting_impact(xi, target, impact)
+    assert len(result) == len(xi)
+    assert result[0] is impact
+    assert [c.name for c in result[1:5]] == ["op1", "op2", "top3", "mid4"]
+    assert target not in result
+
+
+def test_insert_batting_impact_slots_a_finisher_in_the_middle_of_the_order():
+    """A finisher (positions {5,6,7}) is inserted at slot 5 -- everyone ABOVE him is
+    untouched, only the order from slot 5 down compresses."""
+    xi = own_xi()
+    target = next(c for c in xi if c.name == "bowl9")
+    impact = _card("impact", bat=0.5, positions=frozenset({5, 6, 7}))
+    result = _insert_batting_impact(xi, target, impact)
+    assert [c.name for c in result[:4]] == ["op1", "op2", "top3", "mid4"]
+    assert result[4] is impact
+    assert target not in result
+    assert len(result) == len(xi)
+
+
+def test_apply_batting_impact_is_a_no_op_when_there_is_no_target_or_no_impact():
+    xi = own_xi()
+    impact = _card("impact", bat=0.5, positions=frozenset({1}))
+    assert _apply_batting_impact(xi, None, impact) == xi
+    assert _apply_batting_impact(xi, xi[0], None) == xi
+
+
+def test_apply_bowling_impact_is_a_straight_swap():
+    xi = own_xi()
+    target = next(c for c in xi if c.name == "mid5")
+    impact = _card("impact", bowl=0.5)
+    result = _apply_bowling_impact(xi, target, impact)
+    assert len(result) == len(xi)
+    assert result[4] is impact, "the target's own slot, unchanged, is where he lands"
+    assert target not in result
+
+
+def test_apply_bowling_impact_is_a_no_op_when_there_is_no_target_or_no_impact():
+    xi = own_xi()
+    impact = _card("impact", bowl=0.5)
+    assert _apply_bowling_impact(xi, None, impact) == xi
+    assert _apply_bowling_impact(xi, xi[4], None) == xi
 
 
 # --- A50's invariant: the attack needs BOWLERS_IN_TWELVE, whatever the situation says ---
@@ -363,22 +427,42 @@ def test_a_side_with_no_impact_player_never_substitutes():
 def thin_bowling_xi():
     """Like `own_xi`, but only FOUR of the eleven bowl -- bowl11 replaced with a plain
     batter. A legally drafted twelve relies on the Impact Player himself to reach
-    BOWLERS_IN_TWELVE here, so `decide_impact` must never let him sit that out."""
+    BOWLERS_IN_TWELVE here, so neither `_bowling_depth_shortfall` nor `decide_impact`'s
+    own "bowl" branch may ever let him sit that out."""
     xi = own_xi()
-    xi[10] = _card("extra_bat", bat=0.12)
+    idx = next(i for i, c in enumerate(xi) if c.name == "bowl11")
+    xi[idx] = _card("extra_bat", bat=0.12)
     return xi
 
 
-def test_he_must_bowl_when_the_xi_alone_falls_short_of_the_attack():
-    """A batting gain this large would win the situational comparison outright on its
-    own (it clears IMPACT_TOO_GOOD_GAIN for batting too) -- the bowling requirement has
-    to override it, not just edge it out on points."""
+def test_bowling_depth_shortfall_forces_the_weakest_pure_batter_out():
+    xi = thin_bowling_xi()
+    impact = _card("impact", bowl=0.05)
+    target = _bowling_depth_shortfall(Side(name="ME", short="ME", xi=xi, impact=impact))
+    assert target is not None and target.name == "extra_bat"
+
+
+def test_bowling_depth_shortfall_is_none_when_the_eleven_alone_clears_it():
+    assert _bowling_depth_shortfall(
+        Side(name="ME", short="ME", xi=own_xi(), impact=_card("impact", bowl=0.05))) is None
+
+
+def test_bowling_depth_shortfall_is_none_with_no_impact_player_at_all():
+    assert _bowling_depth_shortfall(
+        Side(name="ME", short="ME", xi=thin_bowling_xi(), impact=None)) is None
+
+
+def test_decide_impact_forces_bowling_when_the_xi_alone_falls_short_of_the_attack():
+    """A batting gain this large would win outright on its own (it clears
+    IMPACT_TOO_GOOD_GAIN for batting too, and the discipline being asked about here is
+    "bat") -- the bowling depth requirement is checked from `play()`/`_play_human_match`
+    themselves before innings 1 even starts, never from a "bat" call to `decide_impact`,
+    which is exactly why this is exercised through the "bowl" discipline directly."""
     xi = thin_bowling_xi()
     impact = _card("impact", bat=1.0, bowl=0.05)
-    discipline, target = decide_impact(
-        Side(name="ME", short="ME", xi=xi, impact=impact), opp_side())
-    assert discipline == "bowl"
-    assert target.name == "extra_bat", "still the weakest pure batter, unchanged rule"
+    target = decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                            opp_side(), "bowl", None)
+    assert target is not None and target.name == "extra_bat"
 
 
 def test_a_squad_that_cannot_reach_five_bowlers_even_with_impact_is_reported():
@@ -389,7 +473,10 @@ def test_a_squad_that_cannot_reach_five_bowlers_even_with_impact_is_reported():
     xi = thin_bowling_xi()
     impact = _card("impact", bat=1.0)   # no bowling at all
     with pytest.raises(ValueError):
-        decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact), opp_side())
+        decide_impact(Side(name="ME", short="ME", xi=xi, impact=impact),
+                       opp_side(), "bowl", None)
+    with pytest.raises(ValueError):
+        _bowling_depth_shortfall(Side(name="ME", short="ME", xi=xi, impact=impact))
 
 
 # --- the toss, a human match that pauses for it, and the season-level resume ------------
@@ -535,20 +622,21 @@ def test_the_humans_first_innings_never_carries_the_impact_player():
 
 
 def test_an_explicit_slot_overrides_decide_impact_even_when_it_would_sit_him_out():
-    """Neither discipline clears IMPACT_SIT_OUT_BAR against this matchup -- verified
-    directly against `decide_impact` first, the same shape as
-    `test_he_sits_out_when_neither_discipline_clears_the_bar` above. An explicit slot
-    must still force him in regardless: the plan's own "no new legality or desirability
-    check on the human's own swap" simplification."""
+    """The raw gain never clears IMPACT_SIT_OUT_BAR on its own -- verified directly
+    against `decide_impact` first, the same shape as
+    `test_he_sits_out_when_the_gain_never_clears_the_bar` above. An explicit slot must
+    still force him in regardless: the plan's own "no new legality or desirability check
+    on the human's own swap" simplification."""
     xi = _xi("h")
-    # 0.13 sits out on its own (below the sit-out bar against this matchup) but still
-    # ranks ABOVE the man at slot 7 he explicitly replaces (0.10) -- high enough that,
-    # once forced in, `attack()`'s own re-ranking by rating does not immediately drop
-    # him again for a different reason than the one this test is pinning.
+    # 0.13 sits out on its own (below the sit-out bar with no situational push) but
+    # still ranks ABOVE the man at slot 7 he explicitly replaces (0.12) -- high enough
+    # that, once forced in, `attack()`'s own re-ranking by rating does not immediately
+    # drop him again for a different reason than the one this test is pinning.
     impact = _card("impact", bat=0.0, bowl=0.13)
     human = Side(name="ME", short="ME", xi=xi, impact=impact)
     opponent = bowling_opp()
-    assert decide_impact(human, opponent) == (None, None), "sanity: sits out undirected"
+    assert decide_impact(human, opponent, "bowl", None) is None, \
+        "sanity: sits out undirected"
     r = _play_human_match(_model(), human, opponent, random.Random(1), "league", 0,
                            moves=_Moves(tosses=[TossElect("bat")], impacts=[ImpactPick(7)]))
     assert any(bo.player.is_impact for bo in r.away_innings.bowling)

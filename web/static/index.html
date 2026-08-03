@@ -98,6 +98,10 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
   border:1px solid var(--gold);box-shadow:0 10px 26px -12px rgba(245,184,61,.55)}
 .act.lead:hover{filter:brightness(1.06)}
 .act:disabled{opacity:.4;cursor:not-allowed}
+/* a screen mid network/engine call: the whole thing stops responding to clicks and dims
+   slightly, so a multi-second wait (a full-tournament skip is ~3s, A63) reads as "working"
+   rather than as the click having done nothing */
+section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
 
 .colophon{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px}
 .stat{display:flex;align-items:center;gap:9px}
@@ -513,7 +517,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
         </div>
         <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate()">Play the season</button>
+          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
           <button class="act" onclick="go('home')">Abandon</button>
           <span class="stamp" id="seedPill"></span>
         </div>
@@ -689,9 +693,9 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         <div class="margin" id="tossOpponent"></div>
       </div>
       <div class="actions" style="justify-content:center;margin-top:24px">
-        <button class="act lead" onclick="submitToss('bat')">Bat first</button>
-        <button class="act lead" onclick="submitToss('bowl')">Bowl first</button>
-        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+        <button class="act lead" onclick="submitToss('bat', this)">Bat first</button>
+        <button class="act lead" onclick="submitToss('bowl', this)">Bowl first</button>
+        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
       </div>
     </div>
 
@@ -712,7 +716,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <option value="150">Fast</option>
         </select>
         <button class="act" onclick="skipOverStepper()">Skip to end of this innings</button>
-        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
       </div>
     </div>
 
@@ -728,8 +732,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         any of your eleven, or leave it to the algorithm.</p>
       <div id="impactXiList" class="col-scroll"></div>
       <div class="actions" style="justify-content:center;margin-top:16px">
-        <button class="act" onclick="submitImpact(null)">Decline -- no substitution</button>
-        <button class="act" onclick="revealSkipThisMatch()">Skip this match</button>
+        <button class="act" onclick="submitImpact(null, this)">Decline -- no substitution</button>
+        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
       </div>
     </div>
 
@@ -746,11 +750,11 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
           <div class="actions" style="margin-top:24px">
             <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
-            <button class="act" onclick="revealSkipThisMatch()" id="revealSkipThisBtn"
+            <button class="act" onclick="revealSkipThisMatch(this)" id="revealSkipThisBtn"
               >Skip this match</button>
-            <button class="act hide" onclick="revealSkipGroupStage()" id="revealSkipGroupBtn"
+            <button class="act hide" onclick="revealSkipGroupStage(this)" id="revealSkipGroupBtn"
               >Rest of the group stage</button>
-            <button class="act" onclick="revealSkipToEnd()">Simulate rest of the tournament</button>
+            <button class="act" onclick="revealSkipToEnd(this)">Simulate rest of the tournament</button>
             <button class="act" onclick="showRevealScorecard()">View scorecard</button>
           </div>
         </div>
@@ -834,6 +838,21 @@ function slip(msg){
   const t = document.createElement('div');
   t.className = 'slip'; t.textContent = msg;
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
+}
+// Real feedback for a click that waits on the network or the match engine (a group-stage
+// or full-tournament skip runs server-side, ~3s for the whole thing per A63): freeze the
+// entire screen the control lives on so a second click can't fire a second request, and
+// relabel the control itself so the wait is visibly registered rather than looking dead.
+async function busyClick(ctrl, busyLabel, fn){
+  const scope = ctrl.closest('section') || document.body;
+  scope.classList.add('busy-wait');
+  const prevText = ctrl.textContent;
+  ctrl.textContent = busyLabel;
+  try { await fn(); }
+  finally {
+    scope.classList.remove('busy-wait');
+    ctrl.textContent = prevText;
+  }
 }
 function go(id){
   for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
@@ -1153,25 +1172,24 @@ async function seasonSkip(scope){
   return d;
 }
 
-async function simulate(){
-  $('#simBtn').disabled = true;
-  $('#simBtn').textContent = 'Playing the season…';
-  try {
-    SEASON_STATE = S.state;
-    if (SIM_MODE === 'matchbymatch'){
-      const d = await api('/api/season/' + SEASON_STATE);
-      enterRevealStage(d);
-    } else if (SIM_MODE === 'groupstage'){
-      const d = await seasonSkip('group_stage');
-      renderTableAndForm(d);
-      if (d.complete){ renderVerdictAndBracket(d); go('result'); }
-      else showGroupStageChoice(d);
-    } else {
-      showSeason(await seasonSkip('tournament'));
+async function simulate(ctrl){
+  await busyClick(ctrl, 'Playing the season…', async () => {
+    try {
+      SEASON_STATE = S.state;
+      if (SIM_MODE === 'matchbymatch'){
+        const d = await api('/api/season/' + SEASON_STATE);
+        enterRevealStage(d);
+      } else if (SIM_MODE === 'groupstage'){
+        const d = await seasonSkip('group_stage');
+        renderTableAndForm(d);
+        if (d.complete){ renderVerdictAndBracket(d); go('result'); }
+        else showGroupStageChoice(d);
+      } else {
+        showSeason(await seasonSkip('tournament'));
+      }
     }
-  }
-  catch(e){ slip(e.message); }
-  finally { $('#simBtn').disabled = false; $('#simBtn').textContent = 'Play the season'; }
+    catch(e){ slip(e.message); }
+  });
 }
 
 let SEASON_DATA = null, ROOM_MATCH_DATA = null;
@@ -1243,7 +1261,7 @@ function showGroupStageChoice(d){
     <p class="deck" style="max-width:none">You're through to the knockouts. Play them all
       at once, or one result at a time?</p>
     <div class="actions" style="margin-top:16px">
-      <button class="act lead" onclick="revealSkipToEnd()">Simulate knockouts</button>
+      <button class="act lead" onclick="revealSkipToEnd(this)">Simulate knockouts</button>
       <button class="act" onclick="enterRevealStage(SEASON_DATA)">Match by match</button>
     </div>`;
   go('result');
@@ -1298,13 +1316,15 @@ function showTossScreen(pending){
   $('#tossScreen').classList.remove('hide');
 }
 
-async function submitToss(elects){
-  try {
-    const d = await api(`/api/season/${SEASON_STATE}/toss`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({elects})});
-    enterRevealStage(d);
-  } catch(e){ slip(e.message); }
+async function submitToss(elects, ctrl){
+  await busyClick(ctrl, elects === 'bat' ? 'Batting…' : 'Bowling…', async () => {
+    try {
+      const d = await api(`/api/season/${SEASON_STATE}/toss`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({elects})});
+      enterRevealStage(d);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 /* --- the over-by-over stepper: paces through one already-known over_log, no network
@@ -1394,28 +1414,30 @@ function showImpactScreen(pending){
     `${battingSide} posted ${pending.first_innings.runs}/${pending.first_innings.wickets} ` +
     `(${pending.first_innings.overs} ov). You're ${pending.discipline === 'bat' ? 'batting' : 'bowling'} next.`;
   $('#impactXiList').innerHTML = pending.your_xi.map((c, i) => `
-    <div class="fx" onclick="submitImpact(${i + 1})" style="cursor:pointer">
+    <div class="fx" onclick="submitImpact(${i + 1}, this)" style="cursor:pointer">
       <span>${c.name}</span><span class="sc">slot ${i + 1}</span>
     </div>`).join('');
   $('#impactScreen').classList.remove('hide');
 }
 
-async function submitImpact(slot){
+async function submitImpact(slot, ctrl){
   const stage = REVEAL.pending.stage;
-  try {
-    const d = await api(`/api/season/${SEASON_STATE}/impact`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({slot})});
-    SEASON_STATE = d.state;
-    // Impact resolves the whole rest of the match in one step -- no further pause is
-    // possible until the NEXT match -- so the second innings is already fully known
-    // too, and gets its own over-by-over pass before the result is shown.
-    const list = stage === 'league' ? d.your_results : d.playoffs;
-    const match = list[list.length - 1];
-    startOverStepper(match.away_innings,
-      matchLabel(stage, d.your_results.length, d.matches_each),
-      () => revealCompletedMatch(match, d));
-  } catch(e){ slip(e.message); }
+  await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
+    try {
+      const d = await api(`/api/season/${SEASON_STATE}/impact`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({slot})});
+      SEASON_STATE = d.state;
+      // Impact resolves the whole rest of the match in one step -- no further pause is
+      // possible until the NEXT match -- so the second innings is already fully known
+      // too, and gets its own over-by-over pass before the result is shown.
+      const list = stage === 'league' ? d.your_results : d.playoffs;
+      const match = list[list.length - 1];
+      startOverStepper(match.away_innings,
+        matchLabel(stage, d.your_results.length, d.matches_each),
+        () => revealCompletedMatch(match, d));
+    } catch(e){ slip(e.message); }
+  });
 }
 
 /* --- a completed match's result, live-played or skipped alike ------------------------- */
@@ -1472,35 +1494,41 @@ function revealNext(){
 // Impact/over-pacing and jump straight to its result -- available from the toss screen,
 // the over stepper, the Impact screen, or a previous match's result screen alike, since
 // all four just mean "whatever match is next awaiting me, answer it with the default."
-async function revealSkipThisMatch(){
+async function revealSkipThisMatch(ctrl){
   const stage = REVEAL && REVEAL.pending ? REVEAL.pending.stage : null;
   clearOverTimer();
   OVER_STEP = null;
-  try {
-    const d = await seasonSkip('this_match');
-    const list = stage === 'league' ? d.your_results : d.playoffs;
-    revealCompletedMatch(list[list.length - 1], d);
-  } catch(e){ slip(e.message); }
+  await busyClick(ctrl, 'Skipping…', async () => {
+    try {
+      const d = await seasonSkip('this_match');
+      const list = stage === 'league' ? d.your_results : d.playoffs;
+      revealCompletedMatch(list[list.length - 1], d);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 // Mid-reveal escape hatch: seen enough matches one at a time for now, want the rest of
 // the group stage at once. Lands exactly where "Group stage first" mode does right
 // after its own league skip -- same table, same choice of how to pace the knockouts.
-async function revealSkipGroupStage(){
-  try {
-    const d = await seasonSkip('group_stage');
-    renderTableAndForm(d);
-    if (d.complete){ renderVerdictAndBracket(d); go('result'); }
-    else showGroupStageChoice(d);
-  } catch(e){ slip(e.message); }
+async function revealSkipGroupStage(ctrl){
+  await busyClick(ctrl, 'Simulating…', async () => {
+    try {
+      const d = await seasonSkip('group_stage');
+      renderTableAndForm(d);
+      if (d.complete){ renderVerdictAndBracket(d); go('result'); }
+      else showGroupStageChoice(d);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 // The other escape hatch: resolve every remaining fixture, human or not, with the
 // declared defaults, and show the finished season -- same landing point `showSeason`
 // always has, whether reached from the reveal screen or the group-stage choice screen.
-async function revealSkipToEnd(){
-  try { showSeason(await seasonSkip('tournament')); }
-  catch(e){ slip(e.message); }
+async function revealSkipToEnd(ctrl){
+  await busyClick(ctrl, 'Simulating…', async () => {
+    try { showSeason(await seasonSkip('tournament')); }
+    catch(e){ slip(e.message); }
+  });
 }
 
 function showRevealScorecard(){

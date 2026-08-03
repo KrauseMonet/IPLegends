@@ -439,8 +439,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             title="No rating, no stats -- just names, roles and where they've batted. Draft on what you remember.">Memory</button>
         </div>
         <div class="actions">
-          <button class="act lead" onclick="newDraft()">Begin a draft</button>
-          <button class="act" onclick="promptSeed()">Draft number</button>
+          <button class="act lead" onclick="newDraft(this)">Begin a draft</button>
+          <button class="act" onclick="promptSeed(this)">Draft number</button>
           <button class="act" onclick="go('roomSetup')">Play with friends</button>
         </div>
         <div class="colophon" id="homeStats"></div>
@@ -482,8 +482,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <div class="yr" id="dealYear"></div>
           <div class="club" id="dealTeam">—</div>
           <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team')">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season')">Another season</button>
+            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
+            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
             <span id="rerollCount"></span>
           </div>
         </div>
@@ -549,7 +549,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           </div>
 
           <div class="actions" style="margin-top:24px">
-            <button class="act lead" onclick="createRoom()">Create a room</button>
+            <button class="act lead" onclick="createRoom(this)">Create a room</button>
           </div>
 
           <div style="margin:28px 0;border-top:1px solid var(--line)"></div>
@@ -558,7 +558,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <input id="joinCode" class="room-input" placeholder="ABC123" maxlength="6"
             style="text-transform:uppercase">
           <div class="actions" style="margin-top:16px">
-            <button class="act" onclick="joinRoom()">Join a room</button>
+            <button class="act" onclick="joinRoom(this)">Join a room</button>
             <button class="act" onclick="go('home')">Back</button>
           </div>
         </div>
@@ -582,7 +582,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
           <div id="lobbyPlayers" class="col-scroll"></div>
           <div class="foot-actions">
-            <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft()">Start draft</button>
+            <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
             <button class="act" onclick="leaveRoom()">Leave</button>
           </div>
         </div>
@@ -658,7 +658,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
       <div class="margin" id="resMargin"></div>
       <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
         <div class="actions">
-          <button class="act lead" onclick="newDraft()">Draft again</button>
+          <button class="act lead" onclick="newDraft(this)">Draft again</button>
           <button class="act" onclick="copyLink()">Copy this game</button>
           <button class="act" onclick="showJourneyCard()">Journey card</button>
         </div>
@@ -839,19 +839,24 @@ function slip(msg){
   t.className = 'slip'; t.textContent = msg;
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
 }
-// Real feedback for a click that waits on the network or the match engine (a group-stage
-// or full-tournament skip runs server-side, ~3s for the whole thing per A63): freeze the
-// entire screen the control lives on so a second click can't fire a second request, and
-// relabel the control itself so the wait is visibly registered rather than looking dead.
+// Real feedback for a click that waits on the network (every request here is at least
+// one round trip to Neon through Vercel, never truly instant): freeze the entire screen
+// the control lives on so a second click can't fire a second request, and relabel the
+// control itself so the wait is visibly registered rather than looking dead. `busyLabel`
+// only ever replaces a <button>'s text -- a clicked row (a "Take" target, an order-sheet
+// slot) can be a complex element with its own child spans, and blanking its content to
+// plain text would be a worse flash than just dimming it via the section-wide freeze;
+// pass null for those callers and rely on the freeze alone.
 async function busyClick(ctrl, busyLabel, fn){
   const scope = ctrl.closest('section') || document.body;
   scope.classList.add('busy-wait');
+  const relabel = busyLabel && ctrl.tagName === 'BUTTON';
   const prevText = ctrl.textContent;
-  ctrl.textContent = busyLabel;
+  if (relabel) ctrl.textContent = busyLabel;
   try { await fn(); }
   finally {
     scope.classList.remove('busy-wait');
-    ctrl.textContent = prevText;
+    if (relabel) ctrl.textContent = prevText;
   }
 }
 function go(id){
@@ -913,15 +918,22 @@ function drawField(){
 }
 
 /* --- draft --- */
-async function newDraft(){ render(await api('/api/draft', {method:'POST'})); go('draft'); }
-function promptSeed(){
+async function newDraft(ctrl){
+  await busyClick(ctrl, 'Dealing…', async () => {
+    try { render(await api('/api/draft', {method:'POST'})); go('draft'); }
+    catch(e){ slip(e.message); }
+  });
+}
+function promptSeed(ctrl){
   const v = prompt('Enter a draft number. The same number always deals the same squads in '
     + 'the same order, so share it and a friend faces exactly your draft.');
-  if (v !== null && v.trim() !== '') openSeed(v.trim());
+  if (v !== null && v.trim() !== '') openSeed(v.trim(), ctrl);
 }
-async function openSeed(v){
-  try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
-  catch(e){ slip(e.message); }
+async function openSeed(v, ctrl){
+  await busyClick(ctrl, 'Dealing…', async () => {
+    try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
+    catch(e){ slip(e.message); }
+  });
 }
 // [A73] A pick names both the candidate AND the slot he bats at, in one request --
 // placement is final the instant it lands, so there is no bench and nothing to move
@@ -943,36 +955,38 @@ function openSlots(s){
   return open;
 }
 
-async function submitPick(i, slot){
-  try {
-    S = await api(`/api/draft/${S.state}/pick`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({index: i, slot})});
-    PENDING = null;
-    render(S);
-  } catch(e){ slip(e.message); }
+async function submitPick(i, slot, ctrl){
+  await busyClick(ctrl, 'Taking…', async () => {
+    try {
+      S = await api(`/api/draft/${S.state}/pick`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({index: i, slot})});
+      PENDING = null;
+      render(S);
+    } catch(e){ slip(e.message); }
+  });
 }
 
-function take(i){
+function take(i, ctrl){
   REPOSITION_PENDING = null;   // a new pick and a reposition are never chosen at once
   const card = S.deal.options[i];
   const open = openSlots(S);
   const eligibleOpen = card.positions.filter(p => open.has(p));
   if (open.has(12)) eligibleOpen.push(12);
   if (eligibleOpen.length === 1){
-    submitPick(i, eligibleOpen[0]);
+    submitPick(i, eligibleOpen[0], ctrl);
     return;
   }
   PENDING = (PENDING && PENDING.index === i) ? null : {index: i, card};
   render(S);   // the deal list's "pending" highlight lives here too, not just the order sheet
 }
 
-function rowClick(slot){
+function rowClick(slot, ctrl){
   if (PENDING){
-    submitPick(PENDING.index, slot);
+    submitPick(PENDING.index, slot, ctrl);
     return;
   }
-  repositionClick(slot);
+  repositionClick(slot, ctrl);
 }
 
 // Repositioning: click an already-placed pick to select him, click a second already-placed
@@ -980,7 +994,7 @@ function rowClick(slot){
 // final say, this is just the affordance). Click the same row again to deselect. Nothing
 // here touches PENDING/take()'s new-pick flow; the two selections are mutually exclusive
 // by construction (rowClick only reaches this branch when no new pick is PENDING).
-function repositionClick(slot){
+function repositionClick(slot, ctrl){
   const got = slot === 12 ? S.impact : S.order[slot - 1];
   if (REPOSITION_PENDING === slot){
     REPOSITION_PENDING = null;
@@ -993,27 +1007,31 @@ function repositionClick(slot){
     renderPanels();
     return;
   }
-  submitReposition(REPOSITION_PENDING, slot);
+  submitReposition(REPOSITION_PENDING, slot, ctrl);
 }
 
-async function submitReposition(fromSlot, toSlot){
+async function submitReposition(fromSlot, toSlot, ctrl){
   const from = fromSlot;
   REPOSITION_PENDING = null;
-  try {
-    S = await api(`/api/draft/${S.state}/reposition`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({from_slot: from, to_slot: toSlot})});
-    render(S);
-  } catch(e){ slip(e.message); renderPanels(); }
+  await busyClick(ctrl, null, async () => {
+    try {
+      S = await api(`/api/draft/${S.state}/reposition`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({from_slot: from, to_slot: toSlot})});
+      render(S);
+    } catch(e){ slip(e.message); renderPanels(); }
+  });
 }
 
-async function rerollDeal(kind){
-  try {
-    S = await api(`/api/draft/${S.state}/reroll`, {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
-    PENDING = null;
-    render(S);
-  } catch(e){ slip(e.message); }
+async function rerollDeal(kind, ctrl){
+  await busyClick(ctrl, 'Rerolling…', async () => {
+    try {
+      S = await api(`/api/draft/${S.state}/reroll`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
+      PENDING = null;
+      render(S);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 function render(s){
@@ -1049,7 +1067,7 @@ function render(s){
       <div class="entry${pending}">
         <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
-        <span class="picks"><button class="take" onclick="take(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
+        <span class="picks"><button class="take" onclick="take(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
     }).join('');
     // The rest of the squad, greyed with the reason. Kept on the sheet rather than
@@ -1132,7 +1150,7 @@ function renderPanels(){
       ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
     const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
                        : (isImpact ? 'no impact player' : 'to be named');
-    return `<div class="${classes.join(' ')}" onclick="rowClick(${slot})">
+    return `<div class="${classes.join(' ')}" onclick="rowClick(${slot}, this)">
       <span class="num">${label}</span>
       <span class="who${whoClick}>${label2}</span>
     </div>`;
@@ -1843,24 +1861,28 @@ function pickTimer(t){
     .forEach(b => b.classList.toggle('sel', +b.dataset.timer === t));
 }
 
-async function createRoom(){
+async function createRoom(ctrl){
   const name = $('#roomName').value.trim() || 'Player';
-  try {
-    const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER, host_name: name})});
-    enterRoom(r.room.code, r.player_id);
-  } catch(e){ slip(e.message); }
+  await busyClick(ctrl, 'Creating…', async () => {
+    try {
+      const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER, host_name: name})});
+      enterRoom(r.room.code, r.player_id);
+    } catch(e){ slip(e.message); }
+  });
 }
 
-async function joinRoom(){
+async function joinRoom(ctrl){
   const code = $('#joinCode').value.trim().toUpperCase();
   const name = $('#roomName').value.trim() || 'Player';
   if (!code){ slip('Enter a room code.'); return; }
-  try {
-    const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name})});
-    enterRoom(code, r.player_id);
-  } catch(e){ slip(e.message); }
+  await busyClick(ctrl, 'Joining…', async () => {
+    try {
+      const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name})});
+      enterRoom(code, r.player_id);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 function enterRoom(code, playerId){
@@ -1887,12 +1909,14 @@ async function pollRoom(){
   } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
 }
 
-async function startRoomDraft(){
-  try {
-    ROOM = await api(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
-    renderRoom();
-  } catch(e){ slip(e.message); }
+async function startRoomDraft(ctrl){
+  await busyClick(ctrl, 'Starting…', async () => {
+    try {
+      ROOM = await api(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
 }
 
 function roomOpenSlots(me){
@@ -1903,33 +1927,35 @@ function roomOpenSlots(me){
   return open;
 }
 
-function roomTake(i){
+function roomTake(i, ctrl){
   const me = ROOM.players.find(p => p.player_id === MY_PID);
   const card = me.deal.options[i];
   const open = roomOpenSlots(me);
   const eligibleOpen = card.positions.filter(p => open.has(p));
   if (open.has(12)) eligibleOpen.push(12);
   if (eligibleOpen.length === 1){
-    roomSubmitPick(i, eligibleOpen[0]);
+    roomSubmitPick(i, eligibleOpen[0], ctrl);
     return;
   }
   ROOM_PENDING = (ROOM_PENDING && ROOM_PENDING.index === i) ? null : {index: i, card};
   renderRoom();
 }
 
-function roomRowClick(slot){
+function roomRowClick(slot, ctrl){
   if (!ROOM_PENDING) return;
-  roomSubmitPick(ROOM_PENDING.index, slot);
+  roomSubmitPick(ROOM_PENDING.index, slot, ctrl);
 }
 
-async function roomSubmitPick(index, slot){
-  try {
-    ROOM = await api(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({player_id: MY_PID, index, slot})});
-    ROOM_PENDING = null;
-    renderRoom();
-  } catch(e){ slip(e.message); }
+async function roomSubmitPick(index, slot, ctrl){
+  await busyClick(ctrl, 'Taking…', async () => {
+    try {
+      ROOM = await api(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, index, slot})});
+      ROOM_PENDING = null;
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
 }
 
 function renderRoom(){
@@ -1986,7 +2012,7 @@ function renderRoomDraft(r){
       return `<div class="entry${pending}">
         <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
-        <span class="picks"><button class="take" onclick="roomTake(${i})">${pending ? 'Choose a row' : 'Take'}</button></span>
+        <span class="picks"><button class="take" onclick="roomTake(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
     }).join('');
 
@@ -2040,7 +2066,7 @@ function roomOrderRow(slot, got, label, open, isImpact, readOnly){
     ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
   const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
                      : (isImpact ? 'no impact player' : 'to be named');
-  const rowClick = readOnly ? '' : ` onclick="roomRowClick(${slot})"`;
+  const rowClick = readOnly ? '' : ` onclick="roomRowClick(${slot}, this)"`;
   return `<div class="${classes.join(' ')}"${rowClick}>
     <span class="num">${label}</span>
     <span class="who${whoClick}>${label2}</span>

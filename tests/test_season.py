@@ -120,13 +120,19 @@ def test_a_missing_franchise_does_not_produce_a_blank_side():
 
 
 # --- the journey card's stats accumulator ------------------------------------------------
+#
+# JourneyAccumulator keys by person_id, not name (see its docstring) -- these helpers
+# default person_id to the given name so every existing assertion below, keyed by name,
+# still holds: one name in these tests always means one person.
 
-def _batter(name, runs, balls, faced_any=True):
-    return BatterCard(Player(name, 0.0), runs=runs, balls=balls, faced_any=faced_any)
+def _batter(name, runs, balls, faced_any=True, person_id=None):
+    return BatterCard(Player(name, 0.0, person_id=person_id or name),
+                       runs=runs, balls=balls, faced_any=faced_any)
 
 
-def _bowler(name, wickets, balls=24):
-    return BowlerCard(Player(name, 0.0), balls=balls, wickets=wickets)
+def _bowler(name, wickets, balls=24, person_id=None):
+    return BowlerCard(Player(name, 0.0, person_id=person_id or name),
+                       balls=balls, wickets=wickets)
 
 
 def test_add_batting_accumulates_runs_across_matches():
@@ -156,6 +162,21 @@ def test_a_bowler_who_never_bowled_a_ball_is_not_counted():
     acc = JourneyAccumulator()
     acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 0, balls=0)]))
     assert acc.wickets == {}
+
+
+def test_two_different_people_sharing_a_name_do_not_collapse_into_one_total():
+    """The whole reason this accumulator keys by person_id rather than name (CLAUDE.md's
+    standing rule): two drafted seasons can share a registry name, and if the dict keyed
+    on that name, their runs would merge into one total and `_leader` could crown a person
+    who never scored most of the runs credited to him."""
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[
+        _batter("S Sharma", 80, 40, person_id="p1"),
+        _batter("S Sharma", 5, 10, person_id="p2"),
+    ], bowling=[]))
+    assert acc.runs == {"p1": 80, "p2": 5}
+    assert acc.names == {"p1": "S Sharma", "p2": "S Sharma"}
+    assert _leader(acc.runs, acc.names) == ("S Sharma", 80)
 
 
 def test_leader_breaks_ties_alphabetically():

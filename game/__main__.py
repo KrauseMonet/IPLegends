@@ -77,7 +77,7 @@ def bat_delta(card: Card, model: Model) -> tuple[float, bool]:
 def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
     delta, rated = bat_delta(card, model)
     return Player(name=card.name, bat=delta, bowl=card.bowl, rated_bat=rated,
-                  is_impact=is_impact)
+                  is_impact=is_impact, person_id=card.person_id)
 
 
 OVERSEAS_LIMIT = 4

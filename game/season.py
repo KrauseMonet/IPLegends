@@ -258,10 +258,20 @@ class JourneyAccumulator:
     the season is played -- not a second pass over stored scorecards, since none are
     stored (SPEC 11: nothing here touches a database). `play()` feeds this from the two
     `Innings` it already computes; nothing re-simulates anything to get it.
+
+    Keyed by `person_id`, not name (CLAUDE.md's own standing rule) -- two different
+    drafted seasons can share a registry name, and this dict is looked up per person for
+    the journey card's per-player breakdown, not just for the single tournament-wide
+    leader `_leader` used to pick out. `names` carries the display name alongside, since
+    the engine's own `Player` is the only place that name still lives.
     """
 
     runs: dict[str, int] = field(default_factory=dict)
+    balls_faced: dict[str, int] = field(default_factory=dict)
     wickets: dict[str, int] = field(default_factory=dict)
+    runs_conceded: dict[str, int] = field(default_factory=dict)
+    balls_bowled: dict[str, int] = field(default_factory=dict)
+    names: dict[str, str] = field(default_factory=dict)
     total_runs: int = 0
     total_wickets: int = 0
 
@@ -269,26 +279,39 @@ class JourneyAccumulator:
         for b in innings.batting:
             if not b.faced_any:
                 continue
-            self.runs[b.player.name] = self.runs.get(b.player.name, 0) + b.runs
+            pid = b.player.person_id
+            self.names[pid] = b.player.name
+            self.runs[pid] = self.runs.get(pid, 0) + b.runs
+            self.balls_faced[pid] = self.balls_faced.get(pid, 0) + b.balls
             self.total_runs += b.runs
 
     def add_bowling(self, innings) -> None:
         for bo in innings.bowling:
             if not bo.balls:
                 continue
-            self.wickets[bo.player.name] = self.wickets.get(bo.player.name, 0) + bo.wickets
+            pid = bo.player.person_id
+            self.names[pid] = bo.player.name
+            self.wickets[pid] = self.wickets.get(pid, 0) + bo.wickets
+            self.runs_conceded[pid] = self.runs_conceded.get(pid, 0) + bo.runs
+            self.balls_bowled[pid] = self.balls_bowled.get(pid, 0) + bo.balls
             self.total_wickets += bo.wickets
 
 
-def _leader(totals: dict[str, int]) -> tuple[str, int]:
+def _leader(totals: dict[str, int], names: dict[str, str] | None = None) -> tuple[str, int]:
     """The name with the highest total, ties broken alphabetically (lowest name) for a
     deterministic answer -- the same shape of tie-break `positions.py`'s `modal_position`
-    already uses, rather than an arbitrary dict-iteration-order pick."""
+    already uses, rather than an arbitrary dict-iteration-order pick.
+
+    `totals` is keyed by person_id; `names` maps that back to a display name. Left
+    optional, and falling back to the key itself when omitted, so a caller with no name
+    to give (or a test with no collision to worry about) can still key by name directly.
+    """
     if not totals:
         return "", 0
+    names = names or {}
     best = max(totals.values())
-    name = min(n for n, v in totals.items() if v == best)
-    return name, best
+    key = min((k for k, v in totals.items() if v == best), key=lambda k: names.get(k, k))
+    return names.get(key, key), best
 
 
 @dataclass
@@ -328,7 +351,8 @@ def journey_stats(season: Season, track: Side, acc: JourneyAccumulator) -> Journ
         runs=acc.total_runs, wickets=acc.total_wickets,
         played=played, won=won, lost=lost, tied=tied,
         champion=season.champion is track,
-        top_scorer=_leader(acc.runs), top_wicket_taker=_leader(acc.wickets),
+        top_scorer=_leader(acc.runs, acc.names),
+        top_wicket_taker=_leader(acc.wickets, acc.names),
     )
 
 

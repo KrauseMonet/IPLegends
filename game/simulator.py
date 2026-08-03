@@ -77,6 +77,11 @@ class Player:
     # rather than looked up from Card so the scorecard can tag him without threading a
     # Card reference through BatterCard/BowlerCard as well.
     is_impact: bool = False
+    # Never key a player on the name string (CLAUDE.md's own standing rule) -- carried
+    # through so JourneyAccumulator can total a tracked side's own runs/wickets by the
+    # person rather than by a name two different drafted seasons could share. Empty only
+    # for the synthetic "average XI" filler, which is never looked up by identity.
+    person_id: str = ""
 
 
 @dataclass

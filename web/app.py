@@ -243,6 +243,26 @@ class ResultOut(BaseModel):
     away_innings: InningsOut | None = None
 
 
+class JourneySquadEntryOut(BaseModel):
+    """One drafted player as the journey card shows him: who he actually was that season
+    (franchise, season, so the card reads as a real squad rather than a roster of loose
+    names) plus what he did in THIS simulated tournament -- distinct from `CardOut`'s
+    `bat_runs`/`bowl_wickets`, which are his real archive figures from the one season he
+    was drafted out of, not this playthrough. Null means he never batted/bowled in this
+    tournament, same convention as `CardOut` (never a manufactured zero)."""
+
+    person_id: str
+    name: str
+    franchise: str | None
+    season_year: int | None
+    kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
+    sim_bat_runs: int | None = None
+    sim_bat_balls: int | None = None
+    sim_bowl_wickets: int | None = None
+    sim_bowl_runs: int | None = None
+    sim_bowl_balls: int | None = None
+
+
 class SeasonOut(BaseModel):
     state: str
     your_side: str
@@ -253,22 +273,23 @@ class SeasonOut(BaseModel):
     you_champion: bool
     matches_each: int = MATCHES_EACH
     teams: int = TEAMS
-
-
-class JourneyStatsOut(BaseModel):
-    state: str
+    # The journey card's own numbers, folded into the same replay rather than a second
+    # ~3s simulation -- see the note on `season()`. `played`/`won`/`lost`/`tied` here are
+    # NOT `table`'s row for "you": `journey_stats` adds however far the playoffs took the
+    # side, which the fourteen-match league table alone does not count.
     runs: int
     wickets: int
     played: int
     won: int
     lost: int
     tied: int
-    champion: bool
     top_scorer: str
     top_scorer_runs: int
     top_wicket_taker: str
     top_wicket_taker_wickets: int
-    squad: list[CardOut] = Field(description="the final twelve, in batting order then Impact")
+    squad: list[JourneySquadEntryOut] = Field(
+        description="the final twelve, in batting order then Impact, each with this "
+                     "tournament's own simulated figures")
 
 
 # --- rooms: create/join/lobby/start ------------------------------------------------------
@@ -360,6 +381,20 @@ def _card(card: Card, blocked: str | None = None) -> CardOut:
         bat_runs=card.bat_runs, bat_balls=card.bat_balls, bat_strike_rate=card.strike_rate,
         bowl_wickets=card.bowl_wickets, bowl_runs=card.bowl_runs, bowl_balls=card.bowl_balls,
         bowl_economy=card.economy,
+    )
+
+
+def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
+    """`.get(person_id)` with no default -- None means he never faced/bowled a ball in
+    THIS simulated tournament, same "unobserved stays null" convention `_card` already
+    uses for the real archive figures (never a manufactured zero, A23/A71's rule)."""
+    pid = card.person_id
+    return JourneySquadEntryOut(
+        person_id=pid, name=card.name, franchise=card.franchise,
+        season_year=card.season_year, kind=_kind(card),
+        sim_bat_runs=acc.runs.get(pid), sim_bat_balls=acc.balls_faced.get(pid),
+        sim_bowl_wickets=acc.wickets.get(pid), sim_bowl_runs=acc.runs_conceded.get(pid),
+        sim_bowl_balls=acc.balls_bowled.get(pid),
     )
 
 
@@ -569,6 +604,14 @@ def season(state: str) -> SeasonOut:
     because it is deterministic from the state and therefore cacheable by anything in
     front of it; a job queue would add a store to a design whose whole point (SPEC 11)
     is not having one.
+
+    Also threads a `JourneyAccumulator` through the same replay, so the journey card's
+    numbers (the tracked side's own runs/wickets, top scorer, top wicket-taker) come out
+    of this one simulation rather than a second one. `/api/card` used to replay the whole
+    season again from scratch for exactly these numbers -- same seed, same moves, so the
+    same ~3s of work a second time for no new information, and with no loading state on
+    the button that triggered it, which is what actually made it feel broken rather than
+    merely slow. One simulation now serves both the result page and the journey card.
     """
     player = _load(state)
     if not player.squad_complete:
@@ -589,7 +632,14 @@ def season(state: str) -> SeasonOut:
         raise HTTPException(status_code=500, detail="could not field a full league")
 
     sides = [yours] + opposition
-    result = run_playoffs(model, run_league(model, sides, rng), rng)
+    acc = JourneyAccumulator()
+    league = run_league(model, sides, rng, track=yours, stats=acc)
+    result = run_playoffs(model, league, rng, track=yours, stats=acc)
+    stats = journey_stats(result, yours, acc)
+
+    all_twelve = [c for c in player.order if c is not None]
+    if player.impact is not None:
+        all_twelve.append(player.impact)
 
     return SeasonOut(
         state=state,
@@ -603,57 +653,12 @@ def season(state: str) -> SeasonOut:
         playoffs=[_result_out(r, yours) for r in result.playoffs],
         champion=result.champion.name,
         you_champion=result.champion is yours,
-    )
-
-
-@app.get("/api/card/{state}", response_model=JourneyStatsOut)
-def card_stats(state: str) -> JourneyStatsOut:
-    """The end-of-tournament journey card: runs, wickets, record, champion or not, the
-    top scorer and top wicket-taker among the player's OWN twelve, and the squad itself --
-    everything the shareable card needs.
-
-    Replays the exact same season `/api/season` does -- same seed, same moves, so the same
-    opposition and the same match sequence come out (SPEC 11.3's determinism) -- and
-    additionally threads a `JourneyAccumulator` through so the player's own runs and
-    wickets are folded in match by match rather than re-derived from a stored scorecard
-    that does not exist.
-    """
-    player = _load(state)
-    if not player.squad_complete:
-        raise HTTPException(status_code=409,
-                            detail=f"{len(player.picks)} of {TWELVE_SIZE} picks made")
-    if not player.playable:
-        raise HTTPException(status_code=409, detail="; ".join(player.errors))
-
-    deck, model = STATE["deck"], STATE["model"]
-    seed, moves = sess.decode(state)
-    rng = random.Random(seed)
-    sess.replay_stream(deck, seed, moves, rng)
-
-    yours = Side(name="Your eleven", short="YOU",
-                 xi=list(player.order), impact=player.impact, you=True)
-    opposition = historical_sides(deck, rng, TEAMS - 1)
-    if len(opposition) < TEAMS - 1:
-        raise HTTPException(status_code=500, detail="could not field a full league")
-
-    sides = [yours] + opposition
-    acc = JourneyAccumulator()
-    league = run_league(model, sides, rng, track=yours, stats=acc)
-    season_result = run_playoffs(model, league, rng, track=yours, stats=acc)
-    stats = journey_stats(season_result, yours, acc)
-
-    all_twelve = [c for c in player.order if c is not None]
-    if player.impact is not None:
-        all_twelve.append(player.impact)
-
-    return JourneyStatsOut(
-        state=state, runs=stats.runs, wickets=stats.wickets,
+        runs=stats.runs, wickets=stats.wickets,
         played=stats.played, won=stats.won, lost=stats.lost, tied=stats.tied,
-        champion=stats.champion,
         top_scorer=stats.top_scorer[0], top_scorer_runs=stats.top_scorer[1],
         top_wicket_taker=stats.top_wicket_taker[0],
         top_wicket_taker_wickets=stats.top_wicket_taker[1],
-        squad=[_card(c) for c in all_twelve],
+        squad=[_journey_entry(c, acc) for c in all_twelve],
     )
 
 

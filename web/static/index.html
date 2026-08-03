@@ -699,7 +699,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 
   <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
     <div class="card-frame">
-      <canvas id="journeyCanvas" width="1080" height="1920"></canvas>
+      <canvas id="journeyCanvas" width="1080" height="2470"></canvas>
       <div class="card-actions">
         <a id="cardDownload" class="act lead" download="legends-almanack-card.png">Download</a>
         <button class="act" onclick="hideJourneyCard()">Close</button>
@@ -1384,12 +1384,14 @@ function themeColor(name){
   return getComputedStyle(document.documentElement).getPropertyValue('--' + name).trim();
 }
 
-async function showJourneyCard(){
-  try {
-    const d = await api('/api/card/' + S.state);
-    drawJourneyCard(d);
-    $('#cardOverlay').classList.remove('hide');
-  } catch(e){ slip(e.message); }
+function showJourneyCard(){
+  // SEASON_DATA already carries the journey card's own numbers (runs, wickets, top
+  // scorer, squad) -- they're folded into the same /api/season replay server-side now,
+  // so opening the card is a synchronous re-draw of data already in hand, not a second
+  // ~3s simulation behind an unlabelled fetch.
+  if (!SEASON_DATA){ slip('Play the season first.'); return; }
+  drawJourneyCard(SEASON_DATA);
+  $('#cardOverlay').classList.remove('hide');
 }
 
 function hideJourneyCard(e){
@@ -1397,13 +1399,50 @@ function hideJourneyCard(e){
   $('#cardOverlay').classList.add('hide');
 }
 
+// What a player actually did in THIS simulated tournament -- distinct from his real
+// archive figures shown during the draft. Null balls means he never got the chance
+// (e.g. an Impact Player rarely summoned), reported plainly rather than as a zero.
+//
+// Which figure leads is the player's ROLE, not just which happened to exist: a bowler
+// who scratched together a few batting balls still leads with his bowling, and vice
+// versa. An all-rounder has no fixed lead discipline, so it goes to whichever one he
+// actually did more of THIS tournament (more balls involved in it) -- a bowling
+// all-rounder having a rare big innings still reads as a bowler's card most of the time,
+// which is what "predominantly" means for someone who is genuinely both.
+function simFigures(c){
+  const bat = (c.sim_bat_balls != null && c.sim_bat_balls > 0)
+    ? {text: `${c.sim_bat_runs} runs · SR ${(c.sim_bat_runs / c.sim_bat_balls * 100).toFixed(1)}`,
+       balls: c.sim_bat_balls}
+    : null;
+  const bowl = (c.sim_bowl_balls != null && c.sim_bowl_balls > 0)
+    ? {text: `${c.sim_bowl_wickets} wkts · ER ${(c.sim_bowl_runs / (c.sim_bowl_balls / 6)).toFixed(2)}`,
+       balls: c.sim_bowl_balls}
+    : null;
+
+  if (!bat && !bowl) return {primary: 'DID NOT PLAY', secondary: null};
+  if (bat && !bowl) return {primary: bat.text, secondary: null};
+  if (bowl && !bat) return {primary: bowl.text, secondary: null};
+
+  const batLeads = c.kind === 'bowler' ? false
+    : (c.kind === 'batter' || c.kind === 'keeper') ? true
+    : bat.balls >= bowl.balls;   // allrounder/unrated: whichever he did more of this run
+  return batLeads ? {primary: bat.text, secondary: bowl.text}
+                  : {primary: bowl.text, secondary: bat.text};
+}
+
+const KIND_CHIP = {
+  batter: ['BAT', 'ink2'], bowler: ['BOWL', 'red'], allrounder: ['ALL', 'gold'],
+  keeper: ['WK', 'gold2'], unrated: ['—', 'ink2'],
+};
+
 function drawJourneyCard(d){
   const canvas = $('#journeyCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height, cx = W / 2;
-  const gold = themeColor('gold'), ink = themeColor('ink'), ink3 = themeColor('ink-3'),
-        green = themeColor('green'), red2 = themeColor('red-2'),
-        lineStrong = themeColor('line-strong'), bg = themeColor('bg'), bg2 = themeColor('bg-2');
+  const gold = themeColor('gold'), gold2 = themeColor('gold-2'), ink = themeColor('ink'),
+        ink2 = themeColor('ink-2'), ink3 = themeColor('ink-3'), green = themeColor('green'),
+        red = themeColor('red'), red2 = themeColor('red-2'), lineStrong = themeColor('line-strong'),
+        line = themeColor('line'), bg = themeColor('bg'), bg2 = themeColor('bg-2');
 
   ctx.clearRect(0, 0, W, H);
   const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -1414,21 +1453,29 @@ function drawJourneyCard(d){
   ctx.strokeStyle = gold;
   ctx.lineWidth = 5;
   ctx.strokeRect(30, 30, W - 60, H - 60);
+  ctx.strokeStyle = lineStrong;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(40, 40, W - 80, H - 80);
 
   ctx.textAlign = 'center';
   ctx.fillStyle = ink3;
   ctx.font = `600 24px ${CARD_MONO}`;
   ctx.fillText('SEED ' + d.state.split('-')[0], cx, 110);
 
-  ctx.fillStyle = d.champion ? gold : red2;
+  // a soft glow behind the headline/score -- champion gets the warm one, an eliminated
+  // side a duller red, so the two outcomes read apart even before the words register
+  ctx.save();
+  ctx.shadowColor = d.you_champion ? gold : red2;
+  ctx.shadowBlur = d.you_champion ? 26 : 12;
+  ctx.fillStyle = d.you_champion ? gold : red2;
   ctx.font = `800 56px ${CARD_SANS}`;
-  ctx.fillText(d.champion ? 'CHAMPION' : 'THE SEASON ENDS HERE', cx, 190);
-
+  ctx.fillText(d.you_champion ? 'CHAMPION' : 'THE SEASON ENDS HERE', cx, 190);
   ctx.fillStyle = ink;
   ctx.font = `800 140px ${CARD_MONO}`;
   ctx.fillText(`${d.won}-${d.lost}${d.tied ? '-' + d.tied : ''}`, cx, 350);
+  ctx.restore();
 
-  // four stat tiles
+  // three stat tiles
   const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES']];
   const gap = 24, tileW = (W - 120 - gap * (tiles.length - 1)) / tiles.length;
   const tileY = 420, tileH = 150;
@@ -1436,7 +1483,7 @@ function drawJourneyCard(d){
     const x = 60 + i * (tileW + gap);
     ctx.strokeStyle = lineStrong;
     ctx.lineWidth = 1;
-    ctx.strokeRect(x, tileY, tileW, tileH);
+    ctx.beginPath(); ctx.roundRect(x, tileY, tileW, tileH, 12); ctx.stroke();
     ctx.fillStyle = green;
     ctx.font = `700 52px ${CARD_MONO}`;
     ctx.fillText(String(val), x + tileW / 2, tileY + 78);
@@ -1445,11 +1492,11 @@ function drawJourneyCard(d){
     ctx.fillText(label, x + tileW / 2, tileY + 118);
   });
 
-  // top performers, dashed box like the "golden boot" callout
+  // top performers, dashed box like a "golden boot" callout
   const boxY = 610, boxH = 200;
   ctx.setLineDash([10, 8]);
   ctx.strokeStyle = gold;
-  ctx.strokeRect(60, boxY, W - 120, boxH);
+  ctx.beginPath(); ctx.roundRect(60, boxY, W - 120, boxH, 14); ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = gold;
   ctx.font = `600 22px ${CARD_MONO}`;
@@ -1459,28 +1506,67 @@ function drawJourneyCard(d){
   ctx.fillText(`${d.top_scorer} · ${d.top_scorer_runs} runs`, cx, boxY + 100);
   ctx.fillText(`${d.top_wicket_taker} · ${d.top_wicket_taker_wickets} wkts`, cx, boxY + 150);
 
-  // the twelve, in the order the drafter arranged them
+  // the twelve, in the order the drafter arranged them -- each row its own bordered
+  // card: who he actually was that season (franchise, season) and what he did in THIS
+  // simulated tournament, not the real archive figures the draft screen already showed
   ctx.textAlign = 'left';
   ctx.fillStyle = ink3;
   ctx.font = `600 20px ${CARD_MONO}`;
   ctx.fillText('YOUR TWELVE', 60, boxY + boxH + 60);
 
-  const listTop = boxY + boxH + 110, listBottom = H - 140;
-  const rowH = (listBottom - listTop) / d.squad.length;
+  const listTop = boxY + boxH + 110, rowH = 108, rowGap = 14, rowX = 60, rowW = W - 120;
   d.squad.forEach((c, i) => {
-    const y = listTop + i * rowH + rowH * 0.7;
+    const y = listTop + i * (rowH + rowGap);
+    ctx.strokeStyle = line;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(rowX, y, rowW, rowH, 12); ctx.stroke();
+
+    const padX = 24, midY1 = y + 40, midY2 = y + 78;
+
+    ctx.textAlign = 'left';
     ctx.fillStyle = ink3;
     ctx.font = `600 22px ${CARD_MONO}`;
-    ctx.fillText(i === 11 ? 'IMP' : String(i + 1), 60, y);
+    ctx.fillText(i === 11 ? 'IMP' : String(i + 1), rowX + padX, midY1);
+
+    const [chipLabel, chipColorKey] = KIND_CHIP[c.kind] || KIND_CHIP.unrated;
+    const chipColor = {ink2, red, gold, gold2}[chipColorKey] || ink2;
+    const chipX = rowX + padX + 46, chipW = 64, chipH = 26, chipTop = midY1 - 19;
+    ctx.strokeStyle = chipColor;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.roundRect(chipX, chipTop, chipW, chipH, 13); ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';   // centres the label in the pill; fillText below is baseline-relative again
+    ctx.fillStyle = chipColor;
+    ctx.font = `700 13px ${CARD_MONO}`;
+    ctx.fillText(chipLabel, chipX + chipW / 2, chipTop + chipH / 2);
+    ctx.textBaseline = 'alphabetic';
+
+    const nameX = chipX + chipW + 20;
+    ctx.textAlign = 'left';
     ctx.fillStyle = ink;
-    ctx.font = `700 32px ${CARD_SANS}`;
-    ctx.fillText(c.name, 130, y);
+    ctx.font = `700 30px ${CARD_SANS}`;
+    ctx.fillText(c.name, nameX, midY1);
+
+    ctx.font = `500 18px ${CARD_MONO}`;
+    ctx.fillStyle = ink3;
+    ctx.fillText([c.franchise, c.season_year].filter(Boolean).join(' · ') || '—', nameX, midY2);
+
+    const fig = simFigures(c);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = fig.primary === 'DID NOT PLAY' ? ink3 : green;
+    ctx.font = `700 24px ${CARD_MONO}`;
+    ctx.fillText(fig.primary, rowX + rowW - padX, midY1);
+    if (fig.secondary){
+      ctx.fillStyle = ink3;
+      ctx.font = `500 17px ${CARD_MONO}`;
+      ctx.fillText(fig.secondary, rowX + rowW - padX, midY2);
+    }
   });
 
   ctx.textAlign = 'center';
   ctx.fillStyle = ink3;
   ctx.font = `600 20px ${CARD_MONO}`;
-  ctx.fillText('THE LEGENDS ALMANACK', cx, H - 60);
+  ctx.fillText('THE LEGENDS ALMANACK', cx, listTop + d.squad.length * (rowH + rowGap) - rowGap + 60);
 
   $('#cardDownload').href = canvas.toDataURL('image/png');
 }

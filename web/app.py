@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-import random
 import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Literal
@@ -28,11 +27,9 @@ from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card
 from game.__main__ import overseas_status
-from game.season import (
-    MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, play, run_cup,
-    run_league, run_playoffs,
-)
+from game.season import MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect
 from game.simulator import load_model
+from web import room_match as room_match_lib
 from web import rooms
 from web import season_session
 from web import session as sess
@@ -400,14 +397,64 @@ class CreatedRoomOut(BaseModel):
     room: RoomStateOut
 
 
+class RoomMatchResultOut(BaseModel):
+    stage: str
+    result: ResultOut
+
+
+class RoomPendingTossOut(BaseModel):
+    kind: Literal["toss"] = "toss"
+    stage: str
+    side_a: str
+    side_b: str
+    winner_name: str
+    you_decide: bool = Field(
+        description="true only for the seat that actually won this toss")
+
+
+class RoomPendingImpactOut(BaseModel):
+    kind: Literal["impact"] = "impact"
+    stage: str
+    side_name: str = Field(description="whose Impact Player this decision is about")
+    opponent_name: str
+    discipline: str = Field(description="'bat' | 'bowl' -- which of side_name's own "
+                                        "innings this affects")
+    home_name: str
+    away_name: str
+    first_innings: InningsOut
+    you_decide: bool = Field(description="true only for the room's host")
+
+
+class RoomPendingAdvanceOut(BaseModel):
+    kind: Literal["advance"] = "advance"
+    stage: str
+    home_name: str | None = None
+    away_name: str | None = None
+    you_decide: bool = Field(description="true only for the room's host")
+
+
 class RoomMatchOut(BaseModel):
     format: str
-    result: ResultOut | None = None            # "final"
-    semis: list[ResultOut] | None = None       # "cup"
-    final: ResultOut | None = None             # "cup"
-    table: list[StandingOut] | None = None     # "league"
-    playoffs: list[ResultOut] | None = None    # "league"
-    champion: str | None = None                # "cup" | "league"
+    results: list[RoomMatchResultOut]
+    table: list[StandingOut] | None = None      # "league" only, progressive
+    complete: bool
+    champion: str | None = None                 # "cup" | "league", complete only
+    you_champion: bool | None = None
+    pending: RoomPendingTossOut | RoomPendingImpactOut | RoomPendingAdvanceOut | None = None
+
+
+class RoomTossIn(BaseModel):
+    player_id: str
+    elects: str = Field(description="'bat' | 'bowl' -- only honoured from the seat "
+                                    "that actually won the toss")
+
+
+class RoomImpactIn(BaseModel):
+    player_id: str
+    slot: int | None = Field(
+        default=None, ge=1, le=XI_SIZE,
+        description="1-11: swap that member of the drafted XI out for the Impact "
+                    "Player. null = decline")
 
 
 # --- mapping ---------------------------------------------------------------------------
@@ -959,56 +1006,138 @@ def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
-@app.get("/api/rooms/{code}/match", response_model=RoomMatchOut)
-def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
-    """Once every seat's twelve is drafted: a single match ('final'), a three-match
-    knockout ('cup'), or a full league-plus-playoffs ('league') -- the same `play`/
-    `run_cup`/`run_league`+`run_playoffs` the solo season already uses, just fed the
-    room's own drafted sides instead of nine historical ones."""
-    deck, model = STATE["deck"], STATE["model"]
-    # Only the room lookup needs the connection -- released before the (up to ~3s)
-    # match simulation below, which touches no database.
-    with _room_db() as conn:
-        try:
-            room = rooms.room_state(conn, code, deck)
-        except rooms.RoomError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if room.status != "complete":
-        raise HTTPException(status_code=409,
-                            detail=f"room is not complete yet (status: {room.status})")
+def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
+    r = entry.result
+    return RoomMatchResultOut(
+        stage=entry.stage,
+        result=ResultOut(
+            stage=r.stage, home=r.home.short, away=r.away.short,
+            home_score=_score(r.home_runs, r.home_wickets),
+            away_score=_score(r.away_runs, r.away_wickets),
+            winner=None if r.winner is None else r.winner.short,
+            margin=r.margin, yours=player_id in (entry.a_pid, entry.b_pid),
+            home_innings=_innings_out(r.home_innings) if r.home_innings else None,
+            away_innings=_innings_out(r.away_innings) if r.away_innings else None,
+            # No single "the human" in a room -- see game.season.play_open's own
+            # docstring for why a peer-to-peer match records neither of these at all.
+            toss_won_by_you=None, toss_elected=None,
+        ),
+    )
 
-    sides = []
-    you_side = None
-    for pid, p, order, impact in rooms.room_sides(room, deck):
-        short = "".join(w[0] for w in p.name.split())[:4].upper() or pid[:4].upper()
-        side = Side(name=p.name, short=short, xi=order, impact=impact)
-        if pid == player_id:
-            you_side = side
-        sides.append(side)
-    you_side = you_side or sides[0]
 
-    rng = random.Random(room.seed)
+def _room_match_out(room: rooms.Room, replay, player_id: str | None) -> RoomMatchOut:
+    """Maps `web.room_match.RoomMatchReplay` (pids throughout, since that module has no
+    concept of display names) to the wire format (names, plus a per-caller `you_decide`
+    telling the frontend whether IT is the seat that can act on the pending decision --
+    the toss winner's own seat for a toss, the host's for Impact or advancing)."""
 
-    if room.format == "final":
-        r = play(model, sides[0], sides[1], rng)
-        return RoomMatchOut(format="final", result=_result_out(r, you_side))
+    def name(pid: str | None) -> str:
+        p = room.players.get(pid) if pid else None
+        return p.name if p else ""
 
-    if room.format == "cup":
-        semi1, semi2, final = run_cup(model, sides, rng)
-        return RoomMatchOut(
-            format="cup",
-            semis=[_result_out(semi1, you_side), _result_out(semi2, you_side)],
-            final=_result_out(final, you_side),
-            champion=final.winner.name if final.winner else None,
+    pending: RoomPendingTossOut | RoomPendingImpactOut | RoomPendingAdvanceOut | None = None
+    if replay.pending_kind == "toss":
+        pending = RoomPendingTossOut(
+            stage=replay.pending_stage, side_a=name(replay.pending_a_pid),
+            side_b=name(replay.pending_b_pid),
+            winner_name=name(replay.pending_toss_winner_pid),
+            you_decide=player_id == replay.pending_toss_winner_pid,
+        )
+    elif replay.pending_kind == "impact":
+        opponent_pid = (replay.pending_away_pid
+                        if replay.pending_impact_side_pid == replay.pending_home_pid
+                        else replay.pending_home_pid)
+        pending = RoomPendingImpactOut(
+            stage=replay.pending_stage, side_name=name(replay.pending_impact_side_pid),
+            opponent_name=name(opponent_pid), discipline=replay.pending_impact_discipline,
+            home_name=name(replay.pending_home_pid), away_name=name(replay.pending_away_pid),
+            first_innings=_innings_out(replay.pending_impact_first),
+            you_decide=player_id == room.host_id,
+        )
+    elif replay.pending_kind == "advance":
+        pending = RoomPendingAdvanceOut(
+            stage=replay.pending_stage,
+            home_name=name(replay.pending_home_pid) if replay.pending_home_pid else None,
+            away_name=name(replay.pending_away_pid) if replay.pending_away_pid else None,
+            you_decide=player_id == room.host_id,
         )
 
-    season = run_playoffs(model, run_league(model, sides, rng), rng)
+    table = None
+    if replay.table is not None:
+        table = [StandingOut(pos=i, name=row.standing.side.name, short=row.standing.side.short,
+                             you=row.pid == player_id, played=row.standing.played,
+                             won=row.standing.won, lost=row.standing.lost,
+                             tied=row.standing.tied, points=row.standing.points,
+                             nrr=round(row.standing.nrr, 3))
+                 for i, row in enumerate(replay.table, 1)]
+
     return RoomMatchOut(
-        format="league",
-        table=[StandingOut(pos=i, name=s.side.name, short=s.side.short,
-                           you=s.side is you_side, played=s.played, won=s.won,
-                           lost=s.lost, tied=s.tied, points=s.points, nrr=round(s.nrr, 3))
-               for i, s in enumerate(season.table, 1)],
-        playoffs=[_result_out(r, you_side) for r in season.playoffs],
-        champion=season.champion.name,
+        format=room.format,
+        results=[_room_result_out(e, player_id) for e in replay.results],
+        table=table, complete=replay.complete,
+        champion=name(replay.champion_pid) if replay.champion_pid else None,
+        you_champion=(replay.champion_pid == player_id) if replay.champion_pid else None,
+        pending=pending,
     )
+
+
+@app.get("/api/rooms/{code}/match", response_model=RoomMatchOut)
+def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
+    """Once every seat's twelve is drafted: a real toss (called live by whichever seat
+    wins it) and break-time Impact decisions (always the host's call, for either side)
+    for a single match ('final'), a three-match knockout ('cup'), or a full
+    league-plus-playoffs ('league') -- `game.season.play_open` via
+    `web.room_match.replay_room_matches`, replayed from scratch on every poll exactly
+    like the draft phase (A62)."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room, replay = room_match_lib.room_match_state(conn, code, deck, model)
+        except rooms.RoomError as exc:
+            status = 404 if "no room" in str(exc) else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return _room_match_out(room, replay, player_id)
+
+
+@app.post("/api/rooms/{code}/match/toss", response_model=RoomMatchOut)
+def room_match_toss(code: str, body: RoomTossIn) -> RoomMatchOut:
+    """Only the seat that actually won this toss may call it -- `submit_toss` itself
+    enforces that; a wrong-seat or wrong-moment call is a 409, not a silent no-op."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room = room_match_lib.submit_toss(
+                conn, code, body.player_id, body.elects, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id)
+
+
+@app.post("/api/rooms/{code}/match/impact", response_model=RoomMatchOut)
+def room_match_impact(code: str, body: RoomImpactIn) -> RoomMatchOut:
+    """Only the host may decide an Impact Player substitution, for either side, in
+    every match -- simulation decisions are the host's job (confirmed with the user),
+    not the owning player's."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room = room_match_lib.submit_impact(
+                conn, code, body.player_id, body.slot, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id)
+
+
+@app.post("/api/rooms/{code}/match/advance", response_model=RoomMatchOut)
+def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
+    """Only the host paces the room from one match's result to the next."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room = room_match_lib.advance_match(conn, code, body.player_id, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id)

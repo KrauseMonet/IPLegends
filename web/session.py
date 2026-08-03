@@ -371,7 +371,7 @@ def _why_blocked(card: Card, state: DraftState) -> str:
     if not candidate_slots:
         return "no open batting position he's eligible for right now"
     remaining_after = state.remaining - 1
-    new_keeper_have = state.keeper_have or card.role == "keeper"
+    new_keeper_have = state.keeper_have or card.keeper_eligible
     new_bowl_have = state.bowl_have + (1 if card.has_bowl else 0)
     if any(could_still_complete(state.open_slots - {slot}, new_keeper_have,
                                  new_bowl_have, remaining_after)

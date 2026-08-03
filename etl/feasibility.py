@@ -139,7 +139,13 @@ class Card:
     bowl: float | None = None
     band: str | None = None
     role: str | None = None
-    career_keeper: bool = False
+    # [A77] True if `role == "keeper"` THIS season, OR this person is `role == "keeper"`
+    # in some OTHER season of their own career -- derived from squad_members' own
+    # per-season role (A24/A52's trustworthy signal), never from the stale, mostly-
+    # blank `people.is_keeper` CSV column A24 already superseded (that column is not
+    # read here at all any more). A season's `role`/rating/icon are untouched either
+    # way; only whether a card can satisfy the squad's keeper requirement widens.
+    keeper_eligible: bool = False
     season_year: int | None = None
     franchise: str | None = None
     # NULL is a real and common value here, never False (A23): an unknown passport must
@@ -239,7 +245,7 @@ def load_deck(conn) -> Deck:
              group by 1, 2
         )
         select s.franchise_season_id, s.person_id, p.primary_name,
-               s.role, s.batting_band, coalesce(p.is_keeper, false),
+               s.role, s.batting_band,
                f.season_year, f.display_name, p.is_overseas,
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,
                max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl,
@@ -255,7 +261,7 @@ def load_deck(conn) -> Deck:
             on bt.person_id = s.person_id and bt.fs_id = s.franchise_season_id
           left join bowling bw
             on bw.person_id = s.person_id and bw.fs_id = s.franchise_season_id
-         group by 1, 2, 3, 4, 5, 6, 7, 8, 9, bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
+         group by 1, 2, 3, 4, 5, 6, 7, 8, bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
         """
     ).fetchall()
 
@@ -274,8 +280,17 @@ def load_deck(conn) -> Deck:
     ):
         season_by_key[(fs_id, person_id)][position] = innings
 
+    # [A77] Who has EVER kept in some season of their own career, per squad_members'
+    # own per-season role -- the same trustworthy signal A24/A52 built (stumpings,
+    # gap-filled from the public record), not the stale `people.is_keeper` CSV (A24
+    # already superseded it; it is not read here at all any more).
+    ever_kept = {
+        row[0] for row in conn.execute("select distinct person_id from squad_members "
+                                        "where role = 'keeper'")
+    }
+
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
-    for (fs_id, person_id, name, role, band, career_keeper,
+    for (fs_id, person_id, name, role, band,
          season_year, franchise, overseas, bat, bowl, display,
          bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls) in rows:
         batting_band = batting_role(
@@ -283,8 +298,9 @@ def load_deck(conn) -> Deck:
             career_by_person.get(person_id, {}),
             role,
         )
+        keeper_eligible = role == "keeper" or person_id in ever_kept
         cards_by_fs[fs_id].append(
-            Card(fs_id, person_id, name, bat, bowl, band, role, career_keeper,
+            Card(fs_id, person_id, name, bat, bowl, band, role, keeper_eligible,
                  season_year, franchise, overseas, display,
                  BATTING_ROLE_SLOTS[batting_band],
                  bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
@@ -331,7 +347,7 @@ def order_errors(order: list[Card | None], impact: Card | None,
         if c is not None and (i + 1) not in c.positions:
             errors.append(f"{c.name} cannot bat at {i + 1}")
 
-    if not any(c.role == "keeper" for c in twelve):
+    if not any(c.keeper_eligible for c in twelve):
         errors.append("no wicketkeeper in the final twelve")
 
     bowl_count = sum(c.has_bowl for c in twelve)
@@ -386,7 +402,7 @@ def eligible(cards, taken: set[str], open_slots: frozenset[int], keeper_have: bo
         candidate_slots = card.slots & open_slots
         if not candidate_slots:
             continue
-        new_keeper_have = keeper_have or card.role == "keeper"
+        new_keeper_have = keeper_have or card.keeper_eligible
         new_bowl_have = bowl_have + (1 if card.has_bowl else 0)
         remaining_after = remaining - 1
         if any(
@@ -446,7 +462,7 @@ def pick_rational(candidates: list[Card], state: DraftState,
 
     def key(c: Card):
         return (
-            0 if (not state.keeper_have and c.role == "keeper") else 1,
+            0 if (not state.keeper_have and c.keeper_eligible) else 1,
             0 if (needs_bowler and c.has_bowl) else 1,
             -c.rating,
         )
@@ -633,7 +649,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         taken.add(card.person_id)
         if card.overseas is True:
             overseas_taken += 1
-        if card.role == "keeper":
+        if card.keeper_eligible:
             keeper_have = True
         if card.has_bowl:
             bowl_have += 1
@@ -678,7 +694,7 @@ def report(deck: Deck, trials: int, seed: int) -> None:
         print(f"      {pos:<10} {n:4} of {len(deck.fs_ids)}   {len(people[pos]):8}{flag}")
 
     keeper_people = {c.person_id for cards in deck.cards_by_fs.values()
-                     for c in cards if c.role == "keeper"}
+                     for c in cards if c.keeper_eligible}
     bowler_people = {c.person_id for cards in deck.cards_by_fs.values()
                       for c in cards if c.has_bowl}
     print(f"\n    distinct people who can keep:  {len(keeper_people)}")

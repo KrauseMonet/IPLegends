@@ -33,7 +33,8 @@ def card(n: int, positions: frozenset[int], *, fs: int = 1, role: str = "batter"
          season_year: int | None = None) -> Card:
     return Card(fs_id=fs, person_id=f"c{n}", name=f"c{n}", bat=0.1, bowl=bowl,
                 role=role, overseas=False, positions=positions,
-                franchise=franchise, season_year=season_year)
+                franchise=franchise, season_year=season_year,
+                keeper_eligible=(role == "keeper"))
 
 
 def deck_of(n_fs: int = 24, per_fs: int = 16) -> Deck:

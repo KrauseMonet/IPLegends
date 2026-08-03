@@ -84,7 +84,14 @@ OVERSEAS_LIMIT = 4
 
 
 def viable(xi: list[Card]) -> bool:
-    """An XI has to keep wicket and get through twenty overs."""
+    """An XI has to keep wicket and get through twenty overs.
+
+    [A77] Deliberately `role == "keeper"`, not `keeper_eligible`: this XI is meant to be
+    one that "really took the field" (see `opposition_xi` below), so it must use the
+    squad's OWN season, not a career fact about who else the player has been. The
+    career-fallback widening is a human-drafter squad-legality rule; it has no business
+    here.
+    """
     return (any(c.role == "keeper" for c in xi)
             and sum(c.has_bowl for c in xi) >= BOWLERS_IN_TWELVE)
 

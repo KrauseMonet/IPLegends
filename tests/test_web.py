@@ -35,7 +35,8 @@ def card(n: int, positions: frozenset[int], *, fs: int = 1, role: str = "batter"
          franchise: str | None = None, season_year: int | None = None) -> Card:
     return Card(fs_id=fs, person_id=f"c{n}", name=f"c{n}", bat=0.5, bowl=bowl,
                 role=role, overseas=overseas, positions=positions,
-                franchise=franchise, season_year=season_year)
+                franchise=franchise, season_year=season_year,
+                keeper_eligible=(role == "keeper"))
 
 
 # Four synthetic franchises, cycled across the fixture's franchise-seasons so each one

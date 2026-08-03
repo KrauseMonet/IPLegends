@@ -128,6 +128,11 @@ class CardOut(BaseModel):
     band: str | None
     role: str | None
     kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
+    keeper_eligible: bool = Field(
+        description="A77: counts toward the squad's keeper requirement -- true if "
+                    "`role` is 'keeper' this season, OR he kept in some OTHER season "
+                    "of his own career. Independent of `kind`/`role`, which always "
+                    "reflect THIS season alone.")
     rating: int | None = Field(description="A58/A60's integer 70-99 card rating")
     overseas: bool | None = Field(description="null means unknown, never domestic (A23)")
     positions: list[int] = Field(
@@ -433,6 +438,7 @@ def _card(card: Card, blocked: str | None = None) -> CardOut:
         person_id=card.person_id, name=card.name, franchise=card.franchise,
         season_year=card.season_year, band=card.band, role=card.role,
         kind=_kind(card), rating=card.display, overseas=card.overseas,
+        keeper_eligible=card.keeper_eligible,
         positions=sorted(card.positions), blocked=blocked,
         bat_runs=card.bat_runs, bat_balls=card.bat_balls, bat_strike_rate=card.strike_rate,
         bowl_wickets=card.bowl_wickets, bowl_runs=card.bowl_runs, bowl_balls=card.bowl_balls,

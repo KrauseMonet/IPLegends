@@ -293,7 +293,7 @@ def _apply(seat: SeatProgress, taken: set[str], card: Card, slot: int) -> None:
     taken.add(card.person_id)
     if card.overseas is True:
         seat.overseas_taken += 1
-    if card.role == "keeper":
+    if card.keeper_eligible:
         seat.keeper_have = True
     if card.has_bowl:
         seat.bowl_have += 1

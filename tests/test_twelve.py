@@ -28,6 +28,7 @@ def card(i: int, positions: frozenset[int], *, role: str = "batter",
     return Card(
         fs_id=1, person_id=f"c{i}", name=f"c{i}", bat=0.5, bowl=bowl,
         role=role, overseas=overseas, positions=positions,
+        keeper_eligible=(role == "keeper"),
     )
 
 
@@ -93,6 +94,23 @@ def test_no_keeper_is_named():
     impact = squad[XI_SIZE]
     errors = order_errors(order, impact, squad)
     assert any("wicketkeeper" in e for e in errors)
+
+
+def test_a_career_keeper_satisfies_the_requirement_even_off_season():
+    """[A77] A genuine keeper's OTHER seasons -- ones where the archive says someone
+    else kept -- must still satisfy the squad's keeper requirement. This is exactly
+    the Buttler-2022 shape: `role="batter"` for THIS season (nobody else's business
+    to relabel it), but `keeper_eligible=True` because he kept in other seasons of
+    his own career. Falsifiable against a revert to `c.role == "keeper"`: with every
+    card here reading `role="batter"`, that check alone would still fire the error."""
+    squad = [card(i, frozenset({i + 1}), bowl=0.1) for i in range(TWELVE_SIZE)]
+    squad[0] = Card(fs_id=1, person_id="p0", name="p0", bat=0.5, bowl=None,
+                     role="batter", positions=frozenset({1}), keeper_eligible=True)
+    order = squad[:XI_SIZE]
+    impact = squad[XI_SIZE]
+    errors = order_errors(order, impact, squad)
+    assert not any("wicketkeeper" in e for e in errors)
+    assert squad[0].role == "batter", "the season's own role must stay exactly what it was"
 
 
 def test_fewer_than_five_bowling_options_is_named():
@@ -164,6 +182,21 @@ def test_a_non_keeper_is_excluded_on_the_last_pick_with_no_keeper_yet():
                              keeper_have=False, bowl_have=BOWLERS_IN_TWELVE,
                              overseas_taken=0, remaining=1))
     assert offered == []
+
+
+def test_a_career_keeper_batter_is_offered_on_the_last_pick_with_no_keeper_yet():
+    """[A77] The forward check's own keeper tracking must recognise the career
+    fallback too, not just `order_errors` -- `eligible()` computes its
+    `new_keeper_have` from `card.keeper_eligible`, so a card whose OWN season role
+    is "batter" but who kept in some other season of his career must still be
+    offered as a legal last pick, the mirror of the test above."""
+    open_slots = frozenset({11})
+    cards = [Card(fs_id=1, person_id="c0", name="c0", bat=0.5, bowl=0.1,
+                  role="batter", positions=frozenset({11}), keeper_eligible=True)]
+    offered = list(eligible(cards, taken=set(), open_slots=open_slots,
+                             keeper_have=False, bowl_have=BOWLERS_IN_TWELVE,
+                             overseas_taken=0, remaining=1))
+    assert len(offered) == 1
 
 
 def test_a_keeper_is_offered_for_the_same_last_pick():

@@ -186,6 +186,10 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
 .ic.ball path{stroke:var(--panel);stroke-width:1.2}
 .ic.all circle{fill:var(--gold)}
 .ic.glove path{stroke:var(--gold-2)}
+/* [A77] The secondary "also a proven keeper" badge -- smaller and dimmer than the
+   primary icon it sits beside, so it reads as a footnote rather than a second role. */
+.ic.glove-badge{width:11px;height:11px;margin-right:6px;margin-left:-3px;opacity:.7}
+.ic.glove-badge path{stroke:var(--gold-2)}
 .entry.off .ic path,.entry.off .ic circle{stroke:var(--ink-3)}
 .entry.off .ic.ball circle{fill:var(--ink-3);stroke:var(--ink-3)}
 .entry .nm .flag{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);
@@ -905,6 +909,15 @@ const ICON = {
 };
 function svg(inner){ return `<svg viewBox="0 0 16 16" aria-hidden="true">${inner}</svg>`; }
 
+// [A77] A career keeper still counts toward the squad's keeper requirement even in a
+// season the archive says someone else kept -- invisible otherwise, so this small
+// secondary glove marks it wherever the primary icon isn't already "keeper".
+const KEEPER_BADGE =
+  `<span class="ic glove-badge" title="Also a proven keeper -- kept in another season">${svg(GLOVE)}</span>`;
+function keeperBadge(card){
+  return (card.keeper_eligible && card.kind !== 'keeper') ? KEEPER_BADGE : '';
+}
+
 async function boot(){
   META = await api('/api/meta');
   const s = META.seasons;
@@ -1127,7 +1140,7 @@ function render(s){
         ? ` clickable" onclick="showStat(S.deal.options[${i}])"` : '"';
       return `
       <div class="entry${pending}">
-        <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
+        <span class="nm${nmClick}>${ICON[card.kind] || ''}${keeperBadge(card)}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
         <span class="picks"><button class="take" onclick="take(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
@@ -1140,7 +1153,7 @@ function render(s){
           ? ` clickable" onclick="showStat(S.deal.blocked[${i}])"` : '"';
         return `
       <div class="entry off">
-        <span class="nm${nmClick}>${ICON[b.kind] || ''}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}${ratingBadge(b)}</span>
+        <span class="nm${nmClick}>${ICON[b.kind] || ''}${keeperBadge(b)}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}${ratingBadge(b)}</span>
         <span class="why">${b.blocked || ''}</span>
       </div>`;
       }).join('') : '';
@@ -1212,7 +1225,7 @@ function renderPanels(){
     }
     const whoClick = (got && DRAFT_MODE === 'stat')
       ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
-    const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
+    const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got)
                        : (isImpact ? 'no impact player' : 'to be named');
     return `<div class="${classes.join(' ')}" onclick="rowClick(${slot}, this)">
       <span class="num">${label}</span>
@@ -2090,7 +2103,7 @@ function renderRoomDraft(r){
       const pending = ROOM_PENDING && ROOM_PENDING.index === i ? ' pending' : '';
       const nmClick = DRAFT_MODE === 'stat' ? ` clickable" onclick="showRoomStat(${i})"` : '"';
       return `<div class="entry${pending}">
-        <span class="nm${nmClick}>${ICON[card.kind] || ''}<span class="flag ${card.overseas ? '' : 'home'}"
+        <span class="nm${nmClick}>${ICON[card.kind] || ''}${keeperBadge(card)}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
         <span class="picks"><button class="take" onclick="roomTake(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
       </div>`;
@@ -2142,7 +2155,7 @@ function roomOrderRow(slot, got, label, open, isImpact, readOnly){
   }
   const whoClick = (!readOnly && got && DRAFT_MODE === 'stat')
     ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
-  const label2 = got ? (ICON[got.kind] || '') + got.name + ratingBadge(got)
+  const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got)
                      : (isImpact ? 'no impact player' : 'to be named');
   const rowClick = readOnly ? '' : ` onclick="roomRowClick(${slot}, this)"`;
   return `<div class="${classes.join(' ')}"${rowClick}>

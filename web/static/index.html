@@ -963,6 +963,8 @@ async function openSeed(v, ctrl){
 // again afterward. If a candidate has exactly one open slot he's eligible for right now,
 // taking him settles it immediately; with more than one, PENDING holds him while the
 // order sheet asks which slot, and clicking an eligible row finishes the pick.
+let LAST_DEAL_FS = null;   // fs_id last shown in "Dealt to you", so render() only replays
+                            // the roll flourish when the deal actually changed
 let PENDING = null;   // {index, card} for a deal option awaiting a slot choice, or null
 let REPOSITION_PENDING = null;   // slot number of an already-placed pick awaiting a swap target, or null
 
@@ -1057,6 +1059,41 @@ async function rerollDeal(kind, ctrl){
   });
 }
 
+// A slot-machine flourish for the moment a franchise-season lands on screen: a quick
+// flicker through a handful of OTHER real teams before settling on the actual deal,
+// fast at first and slowing down like a wheel losing momentum, so it reads as landing
+// rather than a jump-cut. Purely cosmetic -- the flickered names are never the real
+// deal (the actual year/team are set only on the final step), so nobody can mistake a
+// mid-roll frame for the real one even on a slow connection.
+const ROLL_FLAVOUR = [
+  'Mumbai Indians', 'Chennai Super Kings', 'Kolkata Knight Riders',
+  'Royal Challengers Bangalore', 'Delhi Capitals', 'Rajasthan Royals',
+  'Punjab Kings', 'Sunrisers Hyderabad', 'Gujarat Titans', 'Lucknow Super Giants',
+  'Deccan Chargers', 'Pune Warriors', 'Gujarat Lions', 'Rising Pune Supergiants',
+  'Kochi Tuskers Kerala',
+];
+const ROLL_STEP_MS = [55, 65, 80, 95, 120, 150, 190];   // decelerating; ~755ms total
+const ROLL_TIMERS = new Map();   // teamEl -> pending timeout, so overlapping calls on
+                                  // the same slot cancel each other rather than racing
+
+function rollDeal(yearEl, teamEl, finalYear, finalTeam){
+  clearTimeout(ROLL_TIMERS.get(teamEl));
+  let i = 0;
+  const step = () => {
+    if (i >= ROLL_STEP_MS.length){
+      yearEl.textContent = finalYear;
+      teamEl.textContent = finalTeam;
+      ROLL_TIMERS.delete(teamEl);
+      return;
+    }
+    yearEl.textContent = 2008 + Math.floor(Math.random() * 19);
+    teamEl.textContent = ROLL_FLAVOUR[Math.floor(Math.random() * ROLL_FLAVOUR.length)];
+    ROLL_TIMERS.set(teamEl, setTimeout(step, ROLL_STEP_MS[i]));
+    i++;
+  };
+  step();
+}
+
 function render(s){
   S = s;
   // '?mode=memory', never '.memory' -- '.' already separates moves inside the state
@@ -1073,8 +1110,10 @@ function render(s){
   $('#progBar').style.width = (100 * s.picks_made / s.picks_total) + '%';
 
   if (s.deal){
-    $('#dealYear').textContent = s.deal.season_year;
-    $('#dealTeam').textContent = s.deal.franchise;
+    if (s.deal.fs_id !== LAST_DEAL_FS){
+      LAST_DEAL_FS = s.deal.fs_id;
+      rollDeal($('#dealYear'), $('#dealTeam'), s.deal.season_year, s.deal.franchise);
+    }
     $('#rerollRow').classList.remove('hide');
     const rerollsLeft = s.rerolls_allowed - s.rerolls_used;
     $('#rerollTeamBtn').disabled = rerollsLeft <= 0;
@@ -1107,6 +1146,8 @@ function render(s){
       }).join('') : '';
     $('#options').innerHTML = live + dead;
   } else {
+    LAST_DEAL_FS = null;
+    clearTimeout(ROLL_TIMERS.get($('#dealTeam')));
     $('#dealYear').textContent = '';
     $('#dealTeam').textContent = 'Selection closed';
     $('#rerollRow').classList.add('hide');
@@ -2013,6 +2054,23 @@ function renderRoomLobby(r){
   $('#lobbyStartBtn').classList.toggle('hide', MY_PID !== r.host_id);
 }
 
+let LAST_ROOM_DEAL_FS = null;   // fs_id last shown in the room's deal card -- shared by
+                                 // both branches below since they write the same elements
+
+function showRoomDeal(deal, fallbackText){
+  if (deal){
+    if (deal.fs_id !== LAST_ROOM_DEAL_FS){
+      LAST_ROOM_DEAL_FS = deal.fs_id;
+      rollDeal($('#roomDealYear'), $('#roomDealTeam'), deal.season_year, deal.franchise);
+    }
+  } else {
+    LAST_ROOM_DEAL_FS = null;
+    clearTimeout(ROLL_TIMERS.get($('#roomDealTeam')));
+    $('#roomDealYear').textContent = '';
+    $('#roomDealTeam').textContent = fallbackText;
+  }
+}
+
 function renderRoomDraft(r){
   const me = r.players.find(p => p.player_id === MY_PID);
   const active = r.players.find(p => p.player_id === r.active_player_id);
@@ -2027,8 +2085,7 @@ function renderRoomDraft(r){
     $('#roomDealLabel').textContent = 'Dealt to you';
     $('#roomOptionsLabel').textContent = 'Available';
     $('#roomOrderLabel').textContent = 'Batting order';
-    $('#roomDealYear').textContent = me.deal ? me.deal.season_year : '';
-    $('#roomDealTeam').textContent = me.deal ? me.deal.franchise : (me.done ? 'Your twelve is set' : '—');
+    showRoomDeal(me.deal, me.done ? 'Your twelve is set' : '—');
     $('#roomOptions').innerHTML = !me.deal ? '' : me.deal.options.map((card, i) => {
       const pending = ROOM_PENDING && ROOM_PENDING.index === i ? ' pending' : '';
       const nmClick = DRAFT_MODE === 'stat' ? ` clickable" onclick="showRoomStat(${i})"` : '"';
@@ -2051,9 +2108,7 @@ function renderRoomDraft(r){
     $('#roomDealLabel').textContent = active ? `${active.name}'s turn` : 'Waiting…';
     $('#roomOptionsLabel').textContent = '';
     $('#roomOrderLabel').textContent = active ? `${active.name}'s team so far` : 'Batting order';
-    $('#roomDealYear').textContent = active && active.deal ? active.deal.season_year : '';
-    $('#roomDealTeam').textContent = active && active.deal ? active.deal.franchise
-      : (r.status === 'complete' ? 'Draft complete' : '—');
+    showRoomDeal(active && active.deal, r.status === 'complete' ? 'Draft complete' : '—');
     $('#roomOptions').innerHTML = '<div class="note">'
       + (active ? `${active.name} is choosing -- options stay hidden until it's their turn to show.`
                 : 'Waiting on the rest of the room…') + '</div>';

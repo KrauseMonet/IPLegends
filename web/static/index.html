@@ -384,6 +384,18 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   .actions{width:100%;flex-direction:column;flex-wrap:nowrap}
   .act{text-align:center}
   .ledger{grid-template-columns:1fr 1fr}
+  /* The desktop .col height cap (max-height:calc(100vh - 200px)) exists so three
+     side-by-side columns of different lengths don't grow to different heights --
+     once .folio stacks them to one column above, that reason is gone, and keeping the
+     cap just means three separate nearly-full-screen scrolling boxes in a row instead
+     of one page that scrolls naturally. */
+  .col{max-height:none}
+  /* Tap targets: the highest-frequency interaction in the app (Take, an order-sheet
+     slot) measured 27px/39px tall on a real phone viewport, both under the ~44px
+     minimum every mobile HIG recommends. Desktop density is untouched. */
+  .take{min-height:44px;padding:0 16px;display:inline-flex;align-items:center;
+    justify-content:center;font-size:11px}
+  .orderline{min-height:44px}
 }
 </style>
 </head>

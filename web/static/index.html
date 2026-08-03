@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Legends Almanack · an all-time IPL draft</title>
+<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
 <style>
 /* ---------------------------------------------------------------------------------------
    THE LEGENDS ALMANACK, under the lights.
@@ -54,12 +64,10 @@ body{
 /* --- masthead --- */
 .masthead{display:flex;align-items:center;gap:16px;padding:26px 0 22px;
   border-bottom:1px solid var(--line);flex-wrap:wrap;position:relative;z-index:1}
-.wordmark{display:flex;align-items:center;gap:13px;cursor:pointer}
-.crest{width:46px;height:46px;flex:none;border-radius:50%;background:var(--panel-2);
-  border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 0 4px rgba(245,184,61,.10), 0 6px 18px -8px rgba(245,184,61,.5)}
-.crest svg{width:24px;height:24px}
-.crest path{fill:var(--gold);stroke:none}
+.wordmark{display:flex;align-items:center;gap:11px;cursor:pointer}
+.crest{width:50px;height:53px;flex:none;display:flex;align-items:center;justify-content:center}
+.crest img{width:100%;height:100%;object-fit:contain;
+  filter:drop-shadow(0 4px 14px rgba(245,184,61,.35))}
 .wordmark .the{font-family:var(--mono);font-size:10px;letter-spacing:.36em;text-transform:uppercase;
   color:var(--ink-3);display:block;margin-bottom:1px}
 .wordmark h1{font-size:24px;margin:0;font-weight:800;letter-spacing:.5px;line-height:1;
@@ -393,9 +401,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 
   <div class="masthead">
     <div class="wordmark" onclick="go('home')">
-      <div class="crest"><svg viewBox="0 0 16 16">
-        <path d="M8 1.1c-1 0-1.8.9-1.8 2.2v4.9c0 .8.5 1.4 1.2 1.7l-.4 4.4c0 .35.3.6.65.6h.7c.35 0 .65-.25.65-.6l-.4-4.4c.7-.3 1.2-.9 1.2-1.7V3.3c0-1.3-.8-2.2-1.8-2.2Z"/>
-      </svg></div>
+      <div class="crest"><img src="/static/logo-emblem.png" alt="" width="220" height="235"></div>
       <div>
         <span class="the">The</span>
         <h1>Legends <span class="leg">Almanack</span></h1>

@@ -332,13 +332,22 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   border:1px solid var(--gold);border-radius:8px}
 
 /* the shareable journey card: a hand-drawn canvas, previewed full height and downloadable
-   as a real PNG -- no server-side image generation, no new dependency */
+   as a real PNG -- no server-side image generation, no new dependency.
+   The canvas is drawn portrait, phone-screen shaped (1080x2470) -- capping its PREVIEW
+   by height (the original rule: max-height:80vh;width:auto) forces that whole tall
+   image into 80% of the viewport regardless of width, which on an ordinary desktop
+   window scales it down to roughly 30% of native size and every font on it along with
+   it. `.scorecard-frame` right below solves the same "content taller than the screen"
+   problem the other way -- cap by width, scroll for height -- and that is the
+   correct direction for a portrait image; only the canvas itself scrolls, so Download/
+   Close stay pinned and reachable without hunting for them at the bottom. */
 .card-overlay{position:fixed;inset:0;background:rgba(3,7,17,.92);z-index:70;
   display:flex;align-items:center;justify-content:center;padding:24px}
 .card-frame{display:flex;flex-direction:column;align-items:center;gap:16px;max-height:100%}
-.card-frame canvas{max-height:80vh;width:auto;border-radius:14px;
+.card-scroll{max-height:calc(100vh - 140px);overflow-y:auto;border-radius:14px}
+.card-frame canvas{display:block;width:min(92vw,640px);height:auto;border-radius:14px;
   box-shadow:0 20px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line-strong)}
-.card-actions{display:flex;gap:12px}
+.card-actions{display:flex;gap:12px;flex:none}
 .card-actions a.act{text-decoration:none;display:inline-flex;align-items:center}
 
 /* the scorecard overlay: reuses .card-overlay's backdrop, a scrolling frame of its own
@@ -776,7 +785,9 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 
   <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
     <div class="card-frame">
-      <canvas id="journeyCanvas" width="1080" height="2470"></canvas>
+      <div class="card-scroll">
+        <canvas id="journeyCanvas" width="1080" height="2470"></canvas>
+      </div>
       <div class="card-actions">
         <a id="cardDownload" class="act lead" download="legends-almanack-card.png">Download</a>
         <button class="act" onclick="hideJourneyCard()">Close</button>

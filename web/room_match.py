@@ -31,8 +31,8 @@ import random
 from dataclasses import dataclass, field, replace
 
 from game.season import (
-    ImpactPick, Result, Side, Standing, _OpenMatchNeedsImpact, _OpenMatchNeedsToss,
-    _credit, fixtures as league_fixtures, play_open,
+    TOSS_DEFAULT_ELECTS, ImpactPick, Result, Side, Standing, _OpenMatchNeedsImpact,
+    _OpenMatchNeedsToss, _credit, fixtures as league_fixtures, play_open,
 )
 from game.simulator import Model
 from web import rooms
@@ -48,9 +48,10 @@ class _RoomMatchCursor:
     mirrors `MoveCursor.emitted`'s own bookkeeping role.
     """
 
-    def __init__(self, moves: list):
+    def __init__(self, moves: list, is_cpu_side=lambda side: False):
         self._moves = moves
         self._i = 0
+        self._is_cpu_side = is_cpu_side
 
     @property
     def consumed(self) -> int:
@@ -68,6 +69,11 @@ class _RoomMatchCursor:
         return mv
 
     def next_toss(self, winner: Side) -> str | None:
+        # A CPU-owned winner auto-resolves to TOSS_DEFAULT_ELECTS -- there is no seat to
+        # ask, and the shared move log has nothing to say about it either (a CPU's toss
+        # call is never recorded, exactly A19: nobody's decision, nothing to store).
+        if self._is_cpu_side(winner):
+            return TOSS_DEFAULT_ELECTS
         mv = self._next("toss")
         return None if mv is None else mv["elects"]
 
@@ -85,6 +91,12 @@ class RoomResultEntry:
 
 
 @dataclass
+class RoomStandingRow:
+    pid: str
+    standing: Standing
+
+
+@dataclass
 class RoomMatchReplay:
     """Everything `web/app.py` needs to build either a paused or a completed match-phase
     response -- rebuilt from scratch on every call, exactly `web.rooms.RoomReplay` one
@@ -92,7 +104,7 @@ class RoomMatchReplay:
 
     results: list[RoomResultEntry] = field(default_factory=list)
     complete: bool = False
-    table: list[Standing] | None = None              # league only, progressive
+    table: list[RoomStandingRow] | None = None        # league only, progressive
     champion_pid: str | None = None                   # cup/league only, complete only
     pending_kind: str | None = None                   # "toss" | "impact" | "advance" | None
     pending_stage: str | None = None
@@ -122,7 +134,19 @@ class _Driver:
     """One pass over `room.match_moves`, replaying every fixture the room's format has
     produced so far and stopping at the first pause or the natural end. Holding this as
     an object rather than a long function keeps `_play_fixture`'s pause-handling in one
-    place regardless of which format's fixture-building calls it."""
+    place regardless of which format's fixture-building calls it.
+
+    `interactive=False` (the "league" format's own round-robin, and ONLY that) skips
+    the move log entirely and plays every fixture through automatically, exactly A78's
+    own algorithmic `play()` -- never `_OpenMatchNeedsToss`/`_OpenMatchNeedsImpact`,
+    because `play_open(moves=None)` never raises them. This is a measured, not assumed,
+    scope decision: `replay_room_matches` replays every already-resolved fixture from
+    scratch on every call (A62's own cost, same profile solo's `replay_season` already
+    accepts), and a seventy-fixture round-robin genuinely paced match by match was
+    timed at multiple SECONDS per step by fixture 20 and climbing -- a real, measured
+    architectural ceiling, not a guess. `final` (one fixture) and `cup` (three) stay
+    fully interactive; `league`'s own PLAYOFFS (at most four fixtures, the dramatic
+    part) still pause normally, only the bulk round-robin is exempted."""
 
     def __init__(self, room: Room, model: Model, pairs: list[tuple[str, Side]]):
         self.room = room
@@ -136,14 +160,23 @@ class _Driver:
     def _pid(self, side: Side) -> str:
         return _pid_of(side, self.pairs)
 
-    def play_fixture(self, side_a: Side, side_b: Side, stage: str) -> Result | None:
+    def _is_cpu(self, side: Side) -> bool:
+        return self.room.players[self._pid(side)].is_cpu
+
+    def play_fixture(self, side_a: Side, side_b: Side, stage: str,
+                      interactive: bool = True) -> Result | None:
         """Returns the `Result` if this fixture resolved AND an advance move was found
         (or it is the very last fixture, handled by the caller), or `None` if replay
         should stop here -- `self.paused` is set to the reason in that case."""
         if self.paused is not None:
             return None
-        cursor = _RoomMatchCursor(self.room.match_moves[self.pos:])
         a_pid, b_pid = self._pid(side_a), self._pid(side_b)
+        if not interactive:
+            r = play_open(self.model, side_a, side_b, self.rng, stage=stage, moves=None)
+            self.entries.append(RoomResultEntry(stage=stage, result=r,
+                                                a_pid=a_pid, b_pid=b_pid))
+            return r
+        cursor = _RoomMatchCursor(self.room.match_moves[self.pos:], is_cpu_side=self._is_cpu)
         try:
             r = play_open(self.model, side_a, side_b, self.rng, stage=stage, moves=cursor)
         except _OpenMatchNeedsToss as exc:
@@ -193,7 +226,7 @@ class _Driver:
 
 
 def _standings_table(pairs: list[tuple[str, Side]],
-                      entries: list[RoomResultEntry]) -> list[Standing]:
+                      entries: list[RoomResultEntry]) -> list[RoomStandingRow]:
     standings = {pid: Standing(side=side) for pid, side in pairs}
     for e in entries:
         if e.stage != "league":
@@ -215,7 +248,8 @@ def _standings_table(pairs: list[tuple[str, Side]],
         else:
             a.won += 1
             h.lost += 1
-    return sorted(standings.values(), key=lambda s: (-s.points, -s.nrr, s.side.name))
+    ordered = sorted(standings.items(), key=lambda kv: (-kv[1].points, -kv[1].nrr, kv[1].side.name))
+    return [RoomStandingRow(pid=pid, standing=s) for pid, s in ordered]
 
 
 def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
@@ -258,22 +292,28 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # "league": TEAMS seats exactly (ROOM_FORMATS["league"] == game.season.TEAMS), the
     # full round-robin plus the IPL's own four-team playoff finish -- game.season.
     # run_league/run_playoffs' own fixture list and bracket, reproduced here fixture by
-    # fixture instead of called once each, so the live toss/Impact pause can land
-    # between any two of them.
+    # fixture instead of called once each.
+    #
+    # The round-robin plays through NON-interactively (`interactive=False` -- A78's
+    # automatic engine decides every toss and every Impact call for every one of the
+    # seventy fixtures, nobody is ever asked live). This is a measured, not assumed,
+    # scope decision: `replay_room_matches` replays every already-resolved fixture from
+    # scratch on every call (A62's own "resolve on read"), and pacing all seventy
+    # round-robin fixtures the way `final`/`cup` pace every match of theirs was timed at
+    # multiple SECONDS per step by fixture 20 and climbing -- a real ceiling, not a
+    # guess. `final` (one fixture) and `cup` (three) stay fully interactive throughout.
+    # `league`'s own PLAYOFFS -- at most four fixtures, the dramatic part -- still pause
+    # normally; only the bulk round-robin is exempted, so the host's pacing control is
+    # reserved for where the volume actually allows it.
     side_by_index = [side for _, side in pairs]
     league_fx = league_fixtures(len(pairs))
     for i, j in league_fx:
-        r = d.play_fixture(side_by_index[i], side_by_index[j], "league")
-        if d.paused is not None:
-            return d.paused
-        # Gated even after the LAST regular-season fixture -- the host should see the
-        # final table settle before the playoffs begin, not have Qualifier 1 arrive in
-        # the same breath as the match that decided the last playoff spot.
-        if not d.gate_on_advance(d._pid(r.home), d._pid(r.away), "league"):
-            return replace(d.paused, table=_standings_table(pairs, d.entries))
+        d.play_fixture(side_by_index[i], side_by_index[j], "league", interactive=False)
 
     table = _standings_table(pairs, d.entries)
-    first, second, third, fourth = (s.side for s in table[:4])
+    if not d.gate_on_advance(None, None, "league"):
+        return replace(d.paused, table=table)
+    first, second, third, fourth = (row.standing.side for row in table[:4])
 
     q1 = d.play_fixture(first, second, "Qualifier 1")
     if d.paused is not None:

@@ -40,9 +40,11 @@ def _pinned_seed(monkeypatch):
     """A genuinely random room seed can occasionally strand this tiny synthetic deck --
     `tests/test_rooms.py`'s own `test_a_shared_pool_stranding_is_caused_by_another_
     seats_earlier_pick` documents exactly this and pins a seed for the same reason.
-    0 is verified by hand (swept 0-49, all clean) to complete without stranding for
-    both a 2-seat 'final' and a 4-seat 'cup' room drafted entirely by humans."""
-    monkeypatch.setattr(rooms.sess, "new_seed", lambda *a, **k: 0)
+    1 is verified by hand (swept 0-29) to complete without stranding for a 2-seat
+    'final', a 4-seat 'cup' AND a 10-seat 'league' room drafted entirely by humans --
+    0 works for the first two but strands the ten-seat league, so it is 1 across the
+    whole file rather than a second, format-specific seed."""
+    monkeypatch.setattr(rooms.sess, "new_seed", lambda *a, **k: 1)
 
 
 def _complete_final_room(conn) -> tuple[rooms.Room, str, str]:
@@ -219,6 +221,64 @@ def test_replaying_the_same_room_twice_reconstructs_identically(conn):
     _, b = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert a.pending_kind == b.pending_kind
     assert a.pending_toss_winner_pid == b.pending_toss_winner_pid
+
+
+def _drive_room_to_completion(conn, room, host_id):
+    """Answers whatever is pending, one decision at a time, until the whole match phase
+    completes -- toss to its actual winner, Impact and advance to the host. A guard
+    generous enough for a ten-seat league (70 league fixtures + up to 4 playoff ones,
+    each contributing at most a toss, up to two Impact decisions and an advance)."""
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    guard = 0
+    while not replay.complete and guard < 1000:
+        guard += 1
+        if replay.pending_kind == "toss":
+            room_match.submit_toss(conn, room.code, replay.pending_toss_winner_pid,
+                                    "bat", DECK, MODEL)
+        elif replay.pending_kind == "impact":
+            room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
+        elif replay.pending_kind == "advance":
+            room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+        else:
+            raise AssertionError(f"not complete but nothing pending: {replay}")
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete, f"did not complete within {guard} steps"
+    return replay
+
+
+def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(conn):
+    """Two human seats, eight CPU -- a realistic room, not the worst case. The
+    round-robin plays NON-interactively (see room_match.py's own comment on why: it is
+    a measured architectural ceiling, not a style choice), so this is the ONE call that
+    matters for proving it -- seventy fixtures resolve in a single `replay_room_matches`
+    call, with a well-formed table and the dynamically-built Qualifier 1 already
+    pending. Finishing the four playoff matches too (each interactive, each re-
+    replaying the whole round-robin from scratch per A62) is NOT done here: it would
+    only re-prove what the 'cup' tests already cover in isolation, at real extra cost
+    for no new coverage."""
+    room, host_id = _make_room(conn, "league")
+    _, guest_id = rooms.join_room(conn, room.code, "Guest", DECK)
+    seat_ids = [host_id, guest_id]
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, seat_ids)
+    assert room.status == "complete", room.failure_reason
+
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert len(replay.results) == 70             # game.season.fixtures(10)
+    assert all(e.stage == "league" for e in replay.results)
+    assert replay.table is not None and len(replay.table) == 10
+    assert sum(row.standing.played for row in replay.table) == 70 * 2
+    # The round-robin -> playoffs transition is the one host-paced gate in this format
+    # (see room_match.py's own comment); Qualifier 1's fixture is only built AFTER the
+    # host advances past it, so what should be pending here is that gate itself.
+    assert replay.pending_kind == "advance"
+    assert replay.pending_stage == "league"
+
+    room2 = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+    _, replay2 = room_match.room_match_state(conn, room2.code, DECK, MODEL)
+    assert replay2.pending_stage == "Qualifier 1"
+    first, second = replay.table[0].pid, replay.table[1].pid
+    assert {replay2.pending_a_pid, replay2.pending_b_pid} == {first, second}
 
 
 def test_a_wrong_kind_of_move_at_the_current_position_is_rejected(conn):

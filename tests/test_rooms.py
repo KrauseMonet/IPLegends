@@ -77,12 +77,15 @@ class FakeConn:
 
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
-             turn_started_at, failure_reason, moves) = params
-            # `moves` arrives wrapped in psycopg.types.json.Json in real code; unwrap
-            # to the plain list it wraps, exactly what a real jsonb column reads back.
+             turn_started_at, failure_reason, moves, match_moves) = params
+            # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
+            # code; unwrap to the plain list each wraps, exactly what a real jsonb
+            # column reads back.
             moves_value = moves.obj if hasattr(moves, "obj") else moves
+            match_moves_value = match_moves.obj if hasattr(match_moves, "obj") else match_moves
             self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
-                                 turn_started_at, failure_reason, moves_value)
+                                 turn_started_at, failure_reason, moves_value,
+                                 match_moves_value)
             return FakeCursor([])
 
         raise AssertionError(f"FakeConn does not know this query: {sql_norm[:80]!r}")

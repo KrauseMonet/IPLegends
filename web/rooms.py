@@ -97,6 +97,10 @@ class Room:
     moves: list = field(default_factory=list)      # the one shared, ordered turn log
     turn_started_at: float = 0.0
     failure_reason: str | None = None
+    # The match-phase shared move log (migration 022) -- see web/room_match.py. Empty
+    # for a room that hasn't reached "complete" yet, and generally still empty for a
+    # while after: nothing here starts consuming it until the first `/match` poll.
+    match_moves: list = field(default_factory=list)
 
     @property
     def seats(self) -> int:
@@ -141,7 +145,7 @@ def _load_room(conn, code: str) -> Room:
     row = conn.execute(
         """
         select code, format, timer_seconds, seed, host_id, status,
-               turn_started_at, failure_reason, moves
+               turn_started_at, failure_reason, moves, match_moves
           from rooms where code = %s for update
         """,
         (code,),
@@ -149,11 +153,11 @@ def _load_room(conn, code: str) -> Room:
     if row is None:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
-     turn_started_at, failure_reason, moves) = row
+     turn_started_at, failure_reason, moves, match_moves) = row
     room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
                 host_id=host_id, status=status,
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
-                moves=list(moves or []))
+                moves=list(moves or []), match_moves=list(match_moves or []))
     for player_id, name, is_cpu in conn.execute(
         "select player_id, name, is_cpu from room_players "
         "where room_code = %s order by seat_order",
@@ -167,14 +171,16 @@ def _save_room(conn, room: Room) -> None:
     conn.execute(
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
-                            turn_started_at, failure_reason, moves)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            turn_started_at, failure_reason, moves, match_moves)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
-            failure_reason = excluded.failure_reason, moves = excluded.moves
+            failure_reason = excluded.failure_reason, moves = excluded.moves,
+            match_moves = excluded.match_moves
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
-         room.status, room.turn_started_at, room.failure_reason, Json(room.moves)),
+         room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
+         Json(room.match_moves)),
     )
     for seat_order, (player_id, p) in enumerate(room.players.items()):
         conn.execute(

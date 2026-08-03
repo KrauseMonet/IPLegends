@@ -20,9 +20,9 @@ from game.season import (
     TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact, NeedToss, Result,
     Season, Side, Standing, TossElect, _MatchNeedsImpact, _MatchNeedsToss, _abbrev,
     _apply_batting_impact, _apply_bowling_impact, _bowling_depth_shortfall, _credit,
-    _insert_batting_impact, _leader, _play_human_match, _tailender_bowler,
-    _weakest_bowler, _weakest_pure_batter, decide_impact, fixtures, journey_stats,
-    run_league, run_playoffs, toss,
+    _insert_batting_impact, _leader, _OpenMatchNeedsImpact, _OpenMatchNeedsToss,
+    _play_human_match, _tailender_bowler, _weakest_bowler, _weakest_pure_batter,
+    decide_impact, fixtures, journey_stats, play_open, run_league, run_playoffs, toss,
 )
 from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
@@ -640,6 +640,103 @@ def test_an_explicit_slot_overrides_decide_impact_even_when_it_would_sit_him_out
     r = _play_human_match(_model(), human, opponent, random.Random(1), "league", 0,
                            moves=_Moves(tosses=[TossElect("bat")], impacts=[ImpactPick(7)]))
     assert any(bo.player.is_impact for bo in r.away_innings.bowling)
+
+
+# --- play_open: peer-to-peer toss + Impact, built for rooms (no single "the human") ------
+
+class _OpenMoves:
+    """Minimal stand-in for play_open's own move protocol -- identity-keyed, not seat-
+    indexed, since play_open has no concept of a seat to index by; it only ever asks
+    "whose decision is this" via the Side identity carried on each pause exception."""
+
+    def __init__(self, tosses=(), impacts=()):
+        self._tosses = list(tosses)
+        self._impacts = list(impacts)
+
+    def next_toss(self, winner):
+        return self._tosses.pop(0) if self._tosses else None
+
+    def next_impact(self, side):
+        return self._impacts.pop(0) if self._impacts else None
+
+
+def _thin_bowling_open_xi(tag):
+    """Like `_xi`, but only FOUR of the eleven bowl (the two pure bowlers at the tail
+    replaced with plain batters) -- relies on the Impact Player to reach
+    BOWLERS_IN_TWELVE if this side ends up bowling first."""
+    xi = _xi(tag)
+    xi[9] = _card(f"{tag}_extra_bat1", bat=0.12)
+    xi[10] = _card(f"{tag}_extra_bat2", bat=0.10)
+    return xi
+
+
+def test_play_open_lets_the_actual_toss_winner_call_it():
+    """Seed 1: rng.random() < 0.5 is True (the same draw `toss()` itself makes on this
+    seed) -- side_a wins, so side_a's OWN call ("bowl") decides who bats first, not
+    side_b's."""
+    a = Side(name="A", short="A", xi=_xi("a"))
+    b = Side(name="B", short="B", xi=_xi("b"))
+    r = play_open(_model(), a, b, random.Random(1), moves=_OpenMoves(tosses=["bowl"]))
+    assert r.home is b and r.away is a, "a won and elected to bowl, so b bats first"
+
+
+def test_play_open_pauses_on_the_winners_own_toss_when_no_move_is_available():
+    a = Side(name="A", short="A", xi=_xi("a"))
+    b = Side(name="B", short="B", xi=_xi("b"))
+    with pytest.raises(_OpenMatchNeedsToss) as exc:
+        play_open(_model(), a, b, random.Random(1), moves=_OpenMoves())
+    assert exc.value.winner is a
+
+
+def test_play_open_with_moves_none_is_fully_automatic():
+    a = Side(name="A", short="A", xi=_xi("a"))
+    b = Side(name="B", short="B", xi=_xi("b"))
+    assert play_open(_model(), a, b, random.Random(1), moves=None) is not None
+
+
+def test_play_open_asks_homes_impact_before_aways_when_both_have_one():
+    """Both a and b carry an Impact Player -- home's ("bowl") decision is asked before
+    away's ("bat") one, per play_open's own documented, fixed order."""
+    a = Side(name="A", short="A", xi=_xi("a"), impact=_card("a_imp", bat=0.5, bowl=0.5))
+    b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
+    with pytest.raises(_OpenMatchNeedsImpact) as exc:
+        play_open(_model(), a, b, random.Random(1), moves=_OpenMoves(tosses=["bowl"]))
+    # a won and elected to bowl -> home=b (bats first), away=a (bowls first). Home's
+    # decision is asked first, so it must be b's, not a's.
+    assert exc.value.side is b
+
+
+def test_play_open_resolves_both_impact_decisions_once_both_moves_are_supplied():
+    a = Side(name="A", short="A", xi=_xi("a"), impact=_card("a_imp", bat=0.5, bowl=0.5))
+    b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
+    r = play_open(_model(), a, b, random.Random(1),
+                  moves=_OpenMoves(tosses=["bowl"], impacts=[ImpactPick(7), ImpactPick(7)]))
+    # a won and elected to bowl -> home=b (bats first), away=a (bowls first, bats
+    # second). Home's decision (b, "bowl") lands in innings 2's bowling; away's
+    # decision (a, "bat") lands in innings 2's batting -- both inside r.away_innings.
+    assert any(bo.player.is_impact for bo in r.away_innings.bowling)
+    assert any(bt.player.is_impact for bt in r.away_innings.batting)
+
+
+def test_play_open_skips_a_sides_impact_call_entirely_when_it_has_none():
+    a = Side(name="A", short="A", xi=_xi("a"), impact=None)
+    b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
+    r = play_open(_model(), a, b, random.Random(1),
+                  moves=_OpenMoves(tosses=["bowl"], impacts=[ImpactPick(7)]))
+    assert r is not None, "only b's own decision should ever be asked for"
+
+
+def test_play_open_forces_the_bowling_impact_before_the_toss_winners_call_even_matters():
+    """b's bare eleven can't reach BOWLERS_IN_TWELVE alone, and b is the one who ends up
+    bowling FIRST here -- his Impact Player must already be in the innings-1 attack,
+    with no move needed at all, exactly like play()/_play_human_match's own A50
+    exception. Seed 0: rng.random() < 0.5 is False, so side_b wins the toss."""
+    a = Side(name="A", short="A", xi=_xi("a"))
+    b = Side(name="B", short="B", xi=_thin_bowling_open_xi("b"),
+             impact=_card("b_imp", bat=1.0, bowl=0.05))
+    r = play_open(_model(), a, b, random.Random(0), moves=_OpenMoves(tosses=["bowl"]))
+    assert r.home is a and r.away is b
+    assert any(bo.player.is_impact for bo in r.home_innings.bowling)
 
 
 # --- the season-level pause: the same mechanism, wrapped with match/stage context --------

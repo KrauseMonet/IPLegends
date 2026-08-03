@@ -677,6 +677,124 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
                            toss_won_by_you=won_toss, toss_elected=elects)
 
 
+class _OpenMatchNeedsToss(Exception):
+    """Raised from `play_open` when the toss has been won but no elect is available yet.
+    `winner` is whichever of the two `Side`s passed to `play_open` won it -- carried by
+    IDENTITY, not by a fixed home/away or human/opponent role, since neither is decided
+    until the winner's own call is known. The caller (a room, where more than one seat can
+    be a real human) maps `winner` back to whichever seat owns it however it likes;
+    `game.season` itself has no concept of a player_id to do that mapping with."""
+
+    def __init__(self, winner: Side):
+        self.winner = winner
+
+
+class _OpenMatchNeedsImpact(Exception):
+    """Raised from `play_open` at the break when a side's own Impact decision has no move
+    available yet. `side` is whoever the decision belongs to; `opponent` and `discipline`
+    are exactly what `decide_impact` itself would need to resolve it live."""
+
+    def __init__(self, side: Side, opponent: Side, discipline: str, first: Innings):
+        self.side = side
+        self.opponent = opponent
+        self.discipline = discipline
+        self.first = first
+
+
+def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
+               stage: str = "league", moves=None,
+               stats: JourneyAccumulator | None = None,
+               track: Side | None = None) -> Result:
+    """One match between two PEER sides, where EITHER can win the toss and EITHER can
+    have a break-time Impact decision to make -- unlike `play()` (fully automatic, no
+    toss at all) and `_play_human_match` (one FIXED tracked human, a real toss, and a
+    break-time choice restricted to that one side's own second innings). Built for rooms,
+    where more than one seat at the table can be a real human and there is no single
+    "the human" role to special-case around.
+
+    `moves` exposes two methods, the same shape as `_next_toss`/`_next_impact` generalised
+    to not assume a fixed side: `next_toss(winner: Side) -> str | None` (the WINNER's own
+    call, "bat" or "bowl"; `None` pauses via `_OpenMatchNeedsToss`) and
+    `next_impact(side: Side) -> ImpactPick | None` (whoever the break-time decision
+    belongs to; `None` pauses via `_OpenMatchNeedsImpact`). `moves=None` behaves exactly
+    like every other automatic move source in this module: `TOSS_DEFAULT_ELECTS` for the
+    toss, decline (falling back to `decide_impact`) for Impact.
+
+    WHO is allowed to actually answer `next_toss`/`next_impact` -- the toss winner's own
+    seat and nobody else's for the toss, the room's host and nobody else's for every
+    Impact decision regardless of whose side it is -- is entirely the caller's concern,
+    enforced by whatever `moves` object it passes in. `play_open` itself has no concept of
+    a player_id and does not need one: it only ever asks "whose decision is this" via the
+    `Side` identity carried on each pause exception.
+
+    A real toss is drawn here (`rng.random() < 0.5` decides which of the two SIDES wins
+    it, not which of two fixed roles) -- `toss()` above is left exactly as it is, written
+    around a single tracked human, since generalising the coin flip here rather than
+    there keeps that function's own contract, and every existing caller of it, completely
+    undisturbed. Whoever bowls FIRST is the one A50 exception, exactly as in `play()`/
+    `_play_human_match`: if that side's plain eleven alone falls short of
+    BOWLERS_IN_TWELVE, its Impact Player already bowls from over one of innings 1, using
+    up that side's one substitution before the break is ever reached.
+    """
+    from game.__main__ import attack, lineup
+
+    a_wins_toss = rng.random() < 0.5
+    winner, loser = (side_a, side_b) if a_wins_toss else (side_b, side_a)
+    if moves is None:
+        elects = TOSS_DEFAULT_ELECTS
+    else:
+        elects = moves.next_toss(winner)
+        if elects is None:
+            raise _OpenMatchNeedsToss(winner)
+
+    home, away = (winner, loser) if elects == "bat" else (loser, winner)
+
+    away_forced_target = _bowling_depth_shortfall(away)
+    away_forced = away_forced_target is not None
+    away_bowling_1 = (_apply_bowling_impact(away.xi, away_forced_target, away.impact)
+                       if away_forced else away.xi)
+    away_bowl_impact_1 = away.impact if away_forced else None
+    first = play_innings(model, lineup(home.xi, model, None),
+                          attack(away_bowling_1, model, away_bowl_impact_1), rng)
+
+    def _decide(side: Side, opponent: Side, discipline: str, forced: bool) -> Card | None:
+        if side.impact is None or forced:
+            return None
+        if moves is None:
+            pick = ImpactPick(None)
+        else:
+            pick = moves.next_impact(side)
+            if pick is None:
+                raise _OpenMatchNeedsImpact(side, opponent, discipline, first)
+        if pick.slot is not None:
+            return side.xi[pick.slot - 1]
+        return decide_impact(side, opponent, discipline, first)
+
+    # Home's "bowl" decision is asked before away's "bat" one -- arbitrary, but fixed and
+    # documented, since both draw from the same flat, positional move log and the order
+    # decides which one a caller sees pause first when both are genuinely pending.
+    home_target = _decide(home, away, "bowl", forced=False)
+    away_target = _decide(away, home, "bat", forced=away_forced)
+
+    away_batting = _apply_batting_impact(away.xi, away_target, away.impact)
+    away_bat_impact = away.impact if away_target is not None else None
+    home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
+    home_bowl_impact = home.impact if home_target is not None else None
+    second = play_innings(model, lineup(away_batting, model, away_bat_impact),
+                          attack(home_bowling, model, home_bowl_impact),
+                          rng, target=first.runs)
+
+    if stats is not None and track is not None:
+        if track is home:
+            stats.add_batting(first)
+            stats.add_bowling(second)
+        elif track is away:
+            stats.add_batting(second)
+            stats.add_bowling(first)
+
+    return _finish_result(home, away, stage, first, second)
+
+
 def _credit(standing: Standing, runs: int, balls: int, wickets: int,
             against_runs: int, against_balls: int, against_wickets: int) -> None:
     """Add one match to a side's record, applying the all-out full-quota rule."""

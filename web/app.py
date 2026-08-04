@@ -454,6 +454,20 @@ class RoomMatchOut(BaseModel):
                     "round is not the terminal one")
     you_decide_advance: bool = Field(
         default=False, description="true only for the room's host, while advance_ready")
+    league_revealed: int | None = Field(
+        default=None, description="how many of the league's own round-robin fixtures "
+                    "have been revealed so far -- null unless this room is a 'league' "
+                    "whose group stage is still being paced through")
+    league_total: int | None = Field(
+        default=None, description="the group stage's own fixture count, alongside "
+                    "league_revealed -- null under the same conditions")
+    you_decide_league_reveal: bool = Field(
+        default=False, description="true only for the room's host, while league_revealed "
+                    "< league_total")
+    league_next_result: RoomMatchResultOut | None = Field(
+        default=None, description="the next group-stage fixture waiting to be revealed, "
+                    "shaped exactly like an entry in `results` so the client's existing "
+                    "reveal engine needs no changes to play it")
     you_are_out: bool = Field(
         description="true once the CALLING player's own tournament has ended -- win, "
                     "lose, or eliminated earlier -- even if the room as a whole is not "
@@ -1167,6 +1181,10 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
                              nrr=round(row.standing.nrr, 3))
                  for i, row in enumerate(replay.table, 1)]
 
+    league_revealed = league_total = None
+    if replay.league_progress is not None:
+        league_revealed, league_total = replay.league_progress
+
     you_are_out = player_id is not None and (
         player_id == replay.champion_pid or player_id in replay.eliminated_pids)
     journey = room_match_lib.room_journey(room, replay, player_id) if player_id else None
@@ -1189,6 +1207,11 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         current_matches=current_matches,
         advance_ready=replay.advance_ready,
         you_decide_advance=replay.advance_ready and player_id == room.host_id,
+        league_revealed=league_revealed, league_total=league_total,
+        you_decide_league_reveal=(replay.league_progress is not None
+                                   and player_id == room.host_id),
+        league_next_result=(_room_result_out(replay.league_next, player_id)
+                             if replay.league_next is not None else None),
         you_are_out=you_are_out,
         runs=journey.runs if journey else None,
         wickets=journey.wickets if journey else None,
@@ -1247,6 +1270,29 @@ def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
     with _room_db() as conn:
         try:
             room = room_match_lib.advance_match(conn, code, body.player_id, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id, deck)
+
+
+class RoomLeagueRevealIn(BaseModel):
+    player_id: str
+    through: int = Field(ge=1, description="reveal the group stage through this many fixtures")
+
+
+@app.post("/api/rooms/{code}/match/league-advance", response_model=RoomMatchOut)
+def room_league_advance(code: str, body: RoomLeagueRevealIn) -> RoomMatchOut:
+    """Only the host paces a league room's own round-robin, one fixture ('Continue',
+    through = revealed + 1) or the whole rest of it ('Skip ahead', through = the group
+    stage's own total) at a time -- the round-robin's OUTCOME is already fully decided
+    (cached) the instant it's first simulated; this only controls how much of it has
+    been shown."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room = room_match_lib.advance_league_reveal(
+                conn, code, body.player_id, body.through, deck, model)
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

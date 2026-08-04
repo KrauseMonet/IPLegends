@@ -2017,8 +2017,12 @@ let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
 // data still lands in ROOM_MATCH_DATA and is read the moment the reveal finishes.
 // ROOM_REVEALED_STAGE remembers the last stage we've already animated, so a fixture is
 // never re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
-// is over" choice screen. All three reset per room in enterRoom.
+// is over" choice screen. ROOM_LEAGUE_REVEALED_THROUGH is ROOM_REVEALED_STAGE's own
+// analogue for a league room's round-robin, which needs a COUNT rather than a stage
+// name -- every one of its fixtures shares the literal stage "league", not a unique
+// label like "Semi-final 1". All four reset per room in enterRoom.
 let ROOM_REVEAL_ACTIVE = null, ROOM_REVEALED_STAGE = null, ROOM_SPECTATE_SHOWN = false;
+let ROOM_LEAGUE_REVEALED_THROUGH = 0;
 // Bumped ONLY by a mutation (toss/advance/pick/kick/start) -- never by pollRoom itself.
 // A poll captures the CURRENT generation before its request and only applies its result
 // if nothing bumped it in the meantime, which is what stops a poll that was already in
@@ -2087,6 +2091,7 @@ async function joinRoom(ctrl){
 function enterRoom(code, playerId){
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
   ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
+  ROOM_LEAGUE_REVEALED_THROUGH = 0;
   go('room');
   pollRoom();
   if (ROOM_POLL) clearInterval(ROOM_POLL);
@@ -2423,6 +2428,26 @@ function roomTableHtml(m){
 }
 
 function roomWaitingHtml(m, myMatch){
+  // A league room's own group stage: paced one fixture at a time (or all at once via
+  // Skip ahead), mutually exclusive with the knockout-round logic below it since this
+  // phase always has advance_ready=false -- the round-robin never has anyone's toss to
+  // wait on, only the host's own pacing.
+  if (m.league_revealed != null && m.league_revealed < m.league_total){
+    const actions = m.you_decide_league_reveal
+      ? `<div class="foot-actions room-actions">
+           <button class="act lead" onclick="roomLeagueAdvance(${m.league_revealed + 1}, this)">Continue</button>
+           <button class="act" onclick="roomLeagueAdvance(${m.league_total}, this)">Skip ahead</button>
+         </div>`
+      : `<div class="margin">Waiting for the host to continue…</div>`;
+    const leagueTableHtml = roomTableHtml(m);
+    return `<div class="report compact">
+      <div class="over-line">League: ${m.league_revealed} of ${m.league_total} played</div>
+      <div class="margin">Playing…</div>
+      ${actions}
+    </div>
+    ${leagueTableHtml ? `<div class="room-gap">${leagueTableHtml}</div>` : ''}`;
+  }
+
   // Every fixture in the current round that hasn't resolved yet -- several can be open
   // at once (a cup's two semis, a league's Qualifier 1 + Eliminator), and a resolved
   // one needs no placeholder here at all: it already appears in the results list below
@@ -2564,6 +2589,19 @@ function showRoomMatch(m){
   // the stepper is actually done.
   if (ROOM_REVEAL_ACTIVE) return;
 
+  // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
+  // round-robin fixture isn't participant-scoped the way a knockout fixture is -- every
+  // viewer in the room watches the same reveal, whether or not their own seat played in
+  // it. ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED_STAGE) tracks how far THIS
+  // client has already watched, since every round-robin entry shares the literal stage
+  // "league" and can't be told apart by name the way "Semi-final 1" can.
+  if (m.league_revealed != null && m.league_next_result &&
+      m.league_revealed > ROOM_LEAGUE_REVEALED_THROUGH){
+    ROOM_LEAGUE_REVEALED_THROUGH = m.league_revealed;
+    roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
+    return;
+  }
+
   // Checked BEFORE `m.complete`, not after: the tournament's very last fixture can
   // resolve and complete the whole room in the same response (roomMyMatchToReveal's own
   // comment has the why), so a straight `if (m.complete)` check here would show that
@@ -2644,7 +2682,7 @@ async function roomPlayAgain(ctrl){
       // otherwise show the game just finished instead of the new one).
       ROOM_MATCH_DATA = null;
       ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null;
-      ROOM_SPECTATE_SHOWN = false;
+      ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
       renderRoom();
     } catch(e){ slip(e.message); }
   });
@@ -2665,6 +2703,25 @@ async function roomAdvanceMatch(ctrl){
       const m = await api(`/api/rooms/${ROOM_CODE}/match/advance`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({player_id: MY_PID})});
+      if (myGen !== ROOM_GEN) return;
+      ROOM_MATCH_DATA = m;
+      showRoomMatch(m);
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// `through` is the TARGET cursor, not an increment -- Continue sends revealed + 1,
+// Skip ahead sends the group stage's own total, so this is one round trip either way
+// rather than a client-side loop (unlike roomSkipAhead, which loops a handful of ROUND
+// advances -- looping 70 times here would be both slower and pointless, since the
+// server already knows how to jump straight to any cursor in one call).
+async function roomLeagueAdvance(through, ctrl){
+  await busyClick(ctrl, 'Revealing…', async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const m = await api(`/api/rooms/${ROOM_CODE}/match/league-advance`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, through})});
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
       showRoomMatch(m);

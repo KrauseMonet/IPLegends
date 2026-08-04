@@ -128,6 +128,16 @@ class RoomMatchReplay:
     `eliminated_pids` grows monotonically round by round -- see `replay_room_matches`'s
     per-format elimination logic -- so a player's own tournament can be known to be
     over well before the room as a whole reaches `complete`.
+
+    `league_progress`/`league_next` are set ONLY while a league room's round-robin is
+    still being revealed (`league_progress[0] < league_progress[1]`) -- `(revealed,
+    total)` and the single fixture waiting at the `revealed` position, respectively.
+    Both `None` the rest of the time (every other format, and a league room once its
+    group stage has been fully revealed). This is a distinct concept from
+    `current_round`/`advance_ready`, which describe a round of KNOCKOUT fixtures a real
+    seat might still need to call a toss for -- a round-robin fixture is always already
+    resolved (`resolve_auto` never pauses), so there is nothing to wait ON here beyond
+    the host's own pacing.
     """
 
     results: list[RoomResultEntry] = field(default_factory=list)
@@ -138,6 +148,8 @@ class RoomMatchReplay:
     round_label: str | None = None
     advance_ready: bool = False
     eliminated_pids: frozenset[str] = field(default_factory=frozenset)
+    league_progress: tuple[int, int] | None = None
+    league_next: RoomResultEntry | None = None
 
 
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
@@ -239,6 +251,16 @@ def _advance_recorded(room: Room, round_label: str) -> bool:
                for mv in room.match_moves)
 
 
+def _league_revealed_count(room: Room) -> int:
+    """How many of the round-robin's fixtures the host has revealed so far -- the
+    highest `through` value recorded, or 0. Monotonic by construction: a write only ever
+    raises it (see `advance_league_reveal`, which refuses to record a `through` at or
+    below what's already there)."""
+    throughs = [mv.get("through", 0) for mv in room.match_moves
+                if isinstance(mv, dict) and mv.get("kind") == "league-reveal"]
+    return max(throughs, default=0)
+
+
 def _paused(entries: list[RoomResultEntry], states: list[RoomFixtureState], label: str,
             eliminated: set[str], *, advance_ready: bool = False,
             table: list[RoomStandingRow] | None = None) -> RoomMatchReplay:
@@ -292,25 +314,31 @@ def _standings_table(pairs: list[tuple[str, Side]],
 # without paying for it twice: restoring the RNG's own internal state, not just the
 # entries it produced. Verified by test, not just reasoned about: see
 # `test_round_robin_cache_does_not_change_playoff_outcomes`.
-_ROUND_ROBIN_CACHE: dict[tuple[str, int], tuple[list[RoomResultEntry], list[RoomStandingRow], tuple]] = {}
+#
+# Stores the raw fixture list, not a precomputed table -- the table now depends on how
+# much of the round-robin has been REVEALED (see `replay_room_matches`'s own league
+# branch), which is unrelated to whether the underlying simulation is cached. Computing
+# a table fresh from whatever slice is relevant is cheap (70 rows at most) and needs no
+# caching of its own.
+_ROUND_ROBIN_CACHE: dict[tuple[str, int], tuple[list[RoomResultEntry], tuple]] = {}
 
 
 def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
-                          ) -> list[RoomStandingRow]:
+                          ) -> list[RoomResultEntry]:
     key = (room.code, room.seed)
     cached = _ROUND_ROBIN_CACHE.get(key)
     if cached is not None:
-        entries, table, rng_state = cached
+        entries, rng_state = cached
         d.entries.extend(entries)
         d.rng.setstate(rng_state)
-        return table
+        return entries
 
     side_by_index = [side for _, side in pairs]
     for i, j in league_fixtures(len(pairs)):
         d.resolve_auto(side_by_index[i], side_by_index[j], "league")
-    table = _standings_table(pairs, d.entries)
-    _ROUND_ROBIN_CACHE[key] = (list(d.entries), table, d.rng.getstate())
-    return table
+    entries = list(d.entries)
+    _ROUND_ROBIN_CACHE[key] = (entries, d.rng.getstate())
+    return entries
 
 
 def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
@@ -373,7 +401,27 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # round instead of called once each. The round-robin itself is cached (see
     # `_round_robin_results`'s own docstring) -- it is the dominant cost of replaying a
     # league room and depends on nothing this room's own moves could change.
-    table = _round_robin_results(d, room, pairs)
+    all_entries = _round_robin_results(d, room, pairs)
+    total = len(all_entries)
+    revealed = min(_league_revealed_count(room), total)
+
+    if revealed < total:
+        # The round-robin's OUTCOME is already fully decided by the cache above --
+        # revealing it is pure presentation, paced by the host, never a re-simulation.
+        # Nobody is marked eliminated from a table that hasn't finished being SHOWN yet,
+        # even though the true final table is already sitting in `all_entries`: leaking
+        # who's really out before the host gets there would spoil the one thing this
+        # pacing exists to protect.
+        d.entries[:] = all_entries[:revealed]
+        partial_table = _standings_table(pairs, d.entries) if revealed else None
+        return RoomMatchReplay(
+            results=list(d.entries), complete=False, table=partial_table,
+            current_round=[], round_label="League",
+            league_progress=(revealed, total), league_next=all_entries[revealed],
+            advance_ready=False, eliminated_pids=frozenset())
+
+    d.entries[:] = all_entries
+    table = _standings_table(pairs, d.entries)
     top4_pids = {row.pid for row in table[:4]}
     # The non-top-4 are out the INSTANT the table settles -- well before the playoffs
     # even open, let alone finish. Nothing about their own tournament changes from here.
@@ -536,5 +584,29 @@ def advance_match(conn, code: str, player_id: str, deck, model) -> Room:
     if not replay.advance_ready:
         raise RoomError("this room is not waiting to advance right now")
     room.match_moves = room.match_moves + [{"kind": "advance", "round": replay.round_label}]
+    rooms._save_room(conn, room)
+    return room
+
+
+def advance_league_reveal(conn, code: str, player_id: str, through: int, deck, model) -> Room:
+    """Host-only, mirroring `advance_match`'s own authorisation. `through` is the
+    TARGET cursor the caller wants revealed, not an increment -- "Continue" sends
+    `revealed + 1`, "Skip ahead" sends the group stage's own total, so both are just
+    different values of the same call. Idempotent on a stale request rather than an
+    error (matching `rooms.play_again`'s own convergence philosophy): a double-click or
+    a network retry sending the same `through` twice is a real, expected case here, not
+    a bug to reject."""
+    room = rooms._load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can reveal the next league match")
+    replay = replay_room_matches(room, deck, model)
+    if replay.league_progress is None:
+        raise RoomError("the group stage is not being revealed right now")
+    revealed, total = replay.league_progress
+    if through > total:
+        raise RoomError(f"only {total} group-stage fixtures exist")
+    if through <= revealed:
+        return room
+    room.match_moves = room.match_moves + [{"kind": "league-reveal", "through": through}]
     rooms._save_room(conn, room)
     return room

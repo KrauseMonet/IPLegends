@@ -284,21 +284,27 @@ def test_the_league_final_is_reachable_via_results_once_it_completes(conn):
 
 def _drive_room_to_completion(conn, room, host_id):
     """Answers whatever is pending, one decision at a time, until the whole match phase
-    completes -- a toss to its actual winner, or an advance to the host once a round is
-    fully resolved. A guard generous enough for a ten-seat league (70 league fixtures +
-    up to 4 playoff ones, each contributing at most a toss)."""
+    completes -- a toss to its actual winner, an advance to the host once a round is
+    fully resolved, or (for a league room) a single jump straight through the rest of
+    the group-stage reveal, since these tests are about the KNOCKOUT stages and don't
+    care about reveal pacing itself. A guard generous enough for a ten-seat league (70
+    league fixtures + up to 4 playoff ones, each contributing at most a toss)."""
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     guard = 0
     while not replay.complete and guard < 1000:
         guard += 1
-        pending = _find_pending_toss(replay)
-        if pending is not None:
-            stage, winner_pid = pending
-            room_match.submit_toss(conn, room.code, winner_pid, stage, "bat", DECK, MODEL)
-        elif replay.advance_ready:
-            room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+        if replay.league_progress is not None:
+            _, total = replay.league_progress
+            room_match.advance_league_reveal(conn, room.code, host_id, total, DECK, MODEL)
         else:
-            raise AssertionError(f"not complete but nothing pending/advance_ready: {replay}")
+            pending = _find_pending_toss(replay)
+            if pending is not None:
+                stage, winner_pid = pending
+                room_match.submit_toss(conn, room.code, winner_pid, stage, "bat", DECK, MODEL)
+            elif replay.advance_ready:
+                room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+            else:
+                raise AssertionError(f"not complete but nothing pending/advance_ready: {replay}")
         _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay.complete, f"did not complete within {guard} steps"
     return replay
@@ -310,6 +316,19 @@ def _make_and_complete_league(conn):
     room = _play_room_to_completion(conn, room, DECK, [host_id])
     assert room.status == "complete", room.failure_reason
     return room, host_id
+
+
+def _settle_league_table(conn, room, host_id):
+    """Jump straight through a league room's own group-stage reveal to the settled
+    table in one call -- for tests that assert post-round-robin state directly (the
+    table, who's eliminated, opening the playoffs) and aren't exercising reveal pacing
+    itself. A no-op if the room isn't a league room, or the reveal is already settled."""
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    if replay.league_progress is not None:
+        _, total = replay.league_progress
+        room_match.advance_league_reveal(conn, room.code, host_id, total, DECK, MODEL)
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    return replay
 
 
 def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(conn):
@@ -329,7 +348,7 @@ def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(co
     room = _play_room_to_completion(conn, room, DECK, seat_ids)
     assert room.status == "complete", room.failure_reason
 
-    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    replay = _settle_league_table(conn, room, host_id)
     assert len(replay.results) == 70             # game.season.fixtures(10)
     assert all(e.stage == "league" for e in replay.results)
     assert replay.table is not None and len(replay.table) == 10
@@ -357,7 +376,7 @@ def test_the_non_top_four_are_eliminated_the_instant_the_table_settles(conn):
     round-robin resolves -- well before the host has even advanced past it, let alone
     before any playoff match is played."""
     room, host_id = _make_and_complete_league(conn)
-    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    replay = _settle_league_table(conn, room, host_id)
     assert replay.round_label == "League"
     assert not replay.complete
     bottom_six = {row.pid for row in replay.table[4:]}
@@ -369,6 +388,7 @@ def test_the_eliminator_loser_is_out_but_qualifier_one_loser_is_not(conn):
     Qualifier 1 loss earns a second life via Qualifier 2 -- reproduced here from
     `game.season.run_playoffs`'s own adjacency, not a new bracket design."""
     room, host_id = _make_and_complete_league(conn)
+    _settle_league_table(conn, room, host_id)
     room = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
     replay = _drain_to_advance_or_complete(conn, room, host_id)
     assert replay.round_label == "Qualifiers"
@@ -411,6 +431,7 @@ def test_a_qualifiers_fixture_that_resolves_first_updates_elimination_on_its_own
     Eliminator's loser is out immediately; Qualifier 1's is not), without waiting on
     its still-pending sibling."""
     room, host_id = _make_and_complete_league(conn)
+    _settle_league_table(conn, room, host_id)
     room = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay.round_label == "Qualifiers"
@@ -467,6 +488,97 @@ def test_round_robin_cache_does_not_change_playoff_outcomes(conn):
     _, replay_cached = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay_cached.champion_pid == replay.champion_pid
     assert _fingerprint(replay_cached.table) == _fingerprint(replay.table)
+
+
+# --- the group-stage reveal: pure presentation on an outcome already fully decided ------
+
+def test_league_reveal_pacing_does_not_change_the_final_outcome(conn):
+    """Revealing is pure presentation on an outcome the round-robin cache already fully
+    decided -- proven by revealing two otherwise-identical rooms' group stages two
+    different ways (one fixture at a time, all the way through, versus a single jump to
+    the end via `_drive_room_to_completion`'s own skip) and confirming they land on the
+    exact same table and champion either way. Compared by side NAME, not pid -- two
+    separate rooms mint their own random pids even under the same pinned seed, but the
+    CPU numbering and host name are deterministic."""
+    def _fingerprint(rows):
+        return [(row.standing.side.name, row.standing.points, round(row.standing.nrr, 6))
+                for row in rows]
+
+    room_a, host_a = _make_and_complete_league(conn)
+    _, replay_a = room_match.room_match_state(conn, room_a.code, DECK, MODEL)
+    assert replay_a.league_progress is not None
+    _, total = replay_a.league_progress
+    for through in range(1, total + 1):
+        room_match.advance_league_reveal(conn, room_a.code, host_a, through, DECK, MODEL)
+    replay_a = _drive_room_to_completion(conn, room_a, host_a)
+
+    room_b, host_b = _make_and_complete_league(conn)
+    replay_b = _drive_room_to_completion(conn, room_b, host_b)   # skips straight to the end
+
+    assert replay_a.complete and replay_b.complete
+    assert room_a.players[replay_a.champion_pid].name == \
+        room_b.players[replay_b.champion_pid].name
+    assert _fingerprint(replay_a.table) == _fingerprint(replay_b.table)
+
+
+def test_eliminated_pids_are_empty_while_the_group_stage_is_still_revealing(conn):
+    """Nobody reads as 'out' before the host has actually reached the settled table --
+    even once a PARTIAL table's own top 4 would already exclude someone, revealing more
+    fixtures could still change who's really in it, so nothing here may leak the true
+    final answer early."""
+    room, host_id = _make_and_complete_league(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.league_progress == (0, 70)
+    assert replay.eliminated_pids == frozenset()
+
+    room_match.advance_league_reveal(conn, room.code, host_id, 40, DECK, MODEL)
+    _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay2.league_progress == (40, 70)
+    assert replay2.eliminated_pids == frozenset()
+
+
+def test_league_reveal_is_host_only(conn):
+    room, host_id = _make_and_complete_league(conn)
+    with pytest.raises(rooms.RoomError):
+        room_match.advance_league_reveal(conn, room.code, "not-the-host", 1, DECK, MODEL)
+
+
+def test_league_reveal_through_at_or_below_current_is_a_no_op(conn):
+    room, host_id = _make_and_complete_league(conn)
+    room_match.advance_league_reveal(conn, room.code, host_id, 5, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.league_progress == (5, 70)
+
+    # A repeat of the same through, or a lower one, must not raise and must not move
+    # the cursor backwards or forwards -- a double-click or a network retry sending the
+    # same request twice is a real, expected case here, not a bug to reject.
+    room_match.advance_league_reveal(conn, room.code, host_id, 5, DECK, MODEL)
+    room_match.advance_league_reveal(conn, room.code, host_id, 3, DECK, MODEL)
+    _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay2.league_progress == (5, 70)
+
+
+def test_league_reveal_beyond_the_total_is_refused(conn):
+    room, host_id = _make_and_complete_league(conn)
+    with pytest.raises(rooms.RoomError):
+        room_match.advance_league_reveal(conn, room.code, host_id, 71, DECK, MODEL)
+
+
+def test_league_next_always_matches_the_fixture_at_the_current_cursor(conn):
+    """The exposed 'next fixture to reveal' never skips or repeats one, walking the
+    cursor one at a time from 0 all the way to the group stage's own total."""
+    room, host_id = _make_and_complete_league(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    _, total = replay.league_progress
+    seen = []
+    while replay.league_progress is not None:
+        revealed, _ = replay.league_progress
+        assert replay.league_next is not None
+        seen.append(replay.league_next)
+        room_match.advance_league_reveal(conn, room.code, host_id, revealed + 1, DECK, MODEL)
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert len(seen) == total
+    assert replay.league_next is None
 
 
 def test_the_finals_loser_is_marked_eliminated_the_same_way_as_an_earlier_loss(conn):

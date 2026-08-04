@@ -1085,15 +1085,12 @@ async function submitPick(i, slot, ctrl){
 }
 
 function take(i, ctrl){
+  // Always a two-step confirm, even when only one slot is eligible -- clicking "Take"
+  // must never itself commit the pick. A single eligible row still gets highlighted
+  // (the order sheet's own eligibility check already handles that), the player just has
+  // to click it, the same as when there's a real choice among several rows.
   REPOSITION_PENDING = null;   // a new pick and a reposition are never chosen at once
   const card = S.deal.options[i];
-  const open = openSlots(S);
-  const eligibleOpen = card.positions.filter(p => open.has(p));
-  if (open.has(12)) eligibleOpen.push(12);
-  if (eligibleOpen.length === 1){
-    submitPick(i, eligibleOpen[0], ctrl);
-    return;
-  }
   PENDING = (PENDING && PENDING.index === i) ? null : {index: i, card};
   render(S);   // the deal list's "pending" highlight lives here too, not just the order sheet
 }
@@ -2145,15 +2142,12 @@ function roomOpenSlots(me){
 }
 
 function roomTake(i, ctrl){
+  // Always a two-step confirm, even when only one slot is eligible -- clicking "Take"
+  // must never itself commit the pick. A single eligible row still gets highlighted
+  // (roomOrderRow's own eligibility check already handles that), the player just has
+  // to click it, the same as when there's a real choice among several rows.
   const me = ROOM.players.find(p => p.player_id === MY_PID);
   const card = me.deal.options[i];
-  const open = roomOpenSlots(me);
-  const eligibleOpen = card.positions.filter(p => open.has(p));
-  if (open.has(12)) eligibleOpen.push(12);
-  if (eligibleOpen.length === 1){
-    roomSubmitPick(i, eligibleOpen[0], ctrl);
-    return;
-  }
   ROOM_PENDING = (ROOM_PENDING && ROOM_PENDING.index === i) ? null : {index: i, card};
   renderRoom();
 }

@@ -345,6 +345,11 @@ class CreateRoomIn(BaseModel):
     format: str = Field(description="'final' (2 seats), 'cup' (4), or 'league' (10)")
     timer_seconds: int = Field(description="seconds per round: 15, 30, or 45")
     host_name: str = Field(min_length=1, max_length=40)
+    draft_mode: str = Field(
+        default="stat",
+        description="'stat' (rating badges, clickable stats) or 'memory' (neither) -- "
+                    "chosen once here by the host, binding on every seat in the room; "
+                    "the join flow has no draft_mode of its own")
 
 
 class JoinRoomIn(BaseModel):
@@ -390,6 +395,10 @@ class RoomStateOut(BaseModel):
         description="whose turn it currently is; null outside 'drafting'")
     players: list[RoomPlayerOut]
     failure_reason: str | None = None
+    draft_mode: str = Field(
+        description="'stat' | 'memory' -- the host's own choice at creation, binding "
+                    "on every seat; every client renders this room under it, not its "
+                    "own local preference")
 
 
 class CreatedRoomOut(BaseModel):
@@ -956,6 +965,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
             for pid, p in room.players.items()
         ],
         failure_reason=room.failure_reason,
+        draft_mode=room.draft_mode,
     )
 
 
@@ -964,7 +974,7 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
     with _room_db() as conn:
         try:
             room, player_id = rooms.create_room(
-                conn, body.format, body.timer_seconds, body.host_name)
+                conn, body.format, body.timer_seconds, body.host_name, body.draft_mode)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(

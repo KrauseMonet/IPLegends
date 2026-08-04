@@ -77,7 +77,7 @@ class FakeConn:
 
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
-             turn_started_at, failure_reason, moves, match_moves) = params
+             turn_started_at, failure_reason, moves, match_moves, draft_mode) = params
             # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
             # code; unwrap to the plain list each wraps, exactly what a real jsonb
             # column reads back.
@@ -85,7 +85,7 @@ class FakeConn:
             match_moves_value = match_moves.obj if hasattr(match_moves, "obj") else match_moves
             self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                  turn_started_at, failure_reason, moves_value,
-                                 match_moves_value)
+                                 match_moves_value, draft_mode)
             return FakeCursor([])
 
         raise AssertionError(f"FakeConn does not know this query: {sql_norm[:80]!r}")
@@ -231,6 +231,26 @@ def test_create_room_refuses_an_unknown_format_or_timer(conn):
         rooms.create_room(conn, "triangular", 15, "Host")
     with pytest.raises(rooms.RoomError):
         rooms.create_room(conn, "final", 20, "Host")
+
+
+def test_create_room_defaults_to_stat_mode(conn):
+    room, _ = rooms.create_room(conn, "final", 15, "Host")
+    assert room.draft_mode == "stat"
+
+
+def test_create_room_honours_an_explicit_memory_mode(conn):
+    room, _ = rooms.create_room(conn, "final", 15, "Host", draft_mode="memory")
+    assert room.draft_mode == "memory"
+    # Binding on every seat, not just the host's own choice at the moment of joining --
+    # a later reload of the SAME room must still report it, proving it round-trips
+    # through the DB rather than being a value only the creating call ever saw.
+    reloaded = rooms._load_room(conn, room.code)
+    assert reloaded.draft_mode == "memory"
+
+
+def test_create_room_refuses_an_unknown_draft_mode(conn):
+    with pytest.raises(rooms.RoomError):
+        rooms.create_room(conn, "final", 15, "Host", draft_mode="illegible")
 
 
 def test_join_room_fills_seats_until_full_then_refuses(conn):

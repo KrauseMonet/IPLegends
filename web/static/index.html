@@ -161,7 +161,15 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
    screen this is what keeps the draft usable at all without constant scrolling. */
 .col{padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;
   overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 200px)}
-.col-scroll{flex:1 1 auto;min-height:0;overflow-y:auto}
+/* -webkit-overflow-scrolling:touch matters more than the max-height rule above on an
+   actual phone: without it, an overflow-y:auto div can simply refuse to respond to a
+   touch-drag at all in iOS Safari and many in-app browsers (a shared link opened from
+   Messages/WhatsApp/Instagram), rather than merely scrolling without momentum -- and a
+   desktop-driven or CDP-automated check (mouse wheel, synthetic scroll events) never
+   exercises the touch path, so this class of bug hides from every test that isn't a
+   real touch gesture on a real phone. Applied to every genuinely-scrolling container
+   in the sheet, not just this one. */
+.col-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .col-head{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
   color:var(--ink-3);padding:14px 18px;border-bottom:1px solid var(--line);margin-bottom:2px;
   display:flex;justify-content:space-between;align-items:baseline;background:var(--panel-2)}
@@ -348,18 +356,26 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .card-overlay{position:fixed;inset:0;background:rgba(3,7,17,.92);z-index:70;
   display:flex;align-items:center;justify-content:center;padding:24px}
 .card-frame{display:flex;flex-direction:column;align-items:center;gap:16px;max-height:100%}
-.card-scroll{max-height:calc(100vh - 140px);overflow-y:auto;border-radius:14px}
+.card-scroll{max-height:calc(100vh - 140px);overflow-y:auto;-webkit-overflow-scrolling:touch;border-radius:14px}
 .card-frame canvas{display:block;width:min(92vw,640px);height:auto;border-radius:14px;
   box-shadow:0 20px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line-strong)}
 .card-actions{display:flex;gap:12px;flex:none}
 .card-actions a.act{text-decoration:none;display:inline-flex;align-items:center}
 
 /* the scorecard overlay: reuses .card-overlay's backdrop, a scrolling frame of its own
-   since two full elevens' worth of batting and bowling can run taller than the screen */
+   since two full elevens' worth of batting and bowling can run taller than the screen.
+   Close is a SIBLING of the scrolling frame, not its last child -- the journey card's
+   own .card-actions already got this right (pinned, always visible); the scorecard/stat
+   overlays originally buried Close at the very bottom of the scrollable content itself,
+   so reaching it meant scrolling past two full innings' worth of batting and bowling
+   first, which on a phone reads as "stuck" long before it reads as "just needs a scroll". */
+.scorecard-shell{display:flex;flex-direction:column;align-items:stretch;gap:10px;
+  max-height:100%;width:100%;max-width:960px}
 .scorecard-frame{background:var(--bg-2);border:1px solid var(--line-strong);border-radius:14px;
-  max-width:960px;width:100%;max-height:88vh;overflow-y:auto;padding:6px 26px 26px}
+  width:100%;max-height:calc(88vh - 64px);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:6px 26px 26px}
 .scorecard-frame .report{padding:22px 0 4px}
-.scorecard-close{display:flex;justify-content:flex-end;padding-top:10px}
+.scorecard-close{display:flex;justify-content:center;flex:none}
 .stat-frame{max-width:340px}
 .stat-tiles{justify-content:center;gap:28px;margin:20px 0 6px}
 .entry .nm.clickable,.who.clickable{cursor:pointer}
@@ -384,6 +400,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   border-radius:7px;border:1px solid var(--line-strong);background:var(--panel-2);
   color:var(--ink-2)}
 .room-choice.sel{border-color:var(--gold);color:var(--gold);background:rgba(245,184,61,.08)}
+.room-note{margin:8px 0 0;font-family:var(--mono);font-size:11.5px;color:var(--ink-4);
+  line-height:1.5}
 .imprint{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
   font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--ink-3);text-align:center;line-height:2.2;position:relative;z-index:1}
@@ -573,6 +591,13 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
           </div>
 
+          <div class="room-label" style="margin-top:20px">Draft by</div>
+          <div class="room-choices" id="roomModeChoices">
+            <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
+            <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
+          </div>
+          <p class="room-note">Your choice -- every seat in the room drafts under it, not their own.</p>
+
           <div class="actions" style="margin-top:24px">
             <button class="act lead" onclick="createRoom(this)">Create a room</button>
           </div>
@@ -601,7 +626,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             <div class="yr">ROOM CODE</div>
             <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
             <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px">
-              <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span>
+              <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span> · <span id="lobbyMode"></span>
             </div>
           </div>
           <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
@@ -800,13 +825,15 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   </div>
 
   <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
-    <div class="scorecard-frame">
-      <div class="report">
-        <div class="over-line" id="scStage"></div>
-        <div class="call" id="scHeadline"></div>
-        <div class="margin" id="scMargin"></div>
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
       </div>
-      <div class="cards2" id="scInnings"></div>
       <div class="scorecard-close">
         <button class="act" onclick="hideScorecard()">Close</button>
       </div>
@@ -814,12 +841,14 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
   </div>
 
   <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-frame stat-frame">
-      <div class="report">
-        <div class="over-line" id="statSub"></div>
-        <div class="call" id="statName"></div>
+    <div class="scorecard-shell stat-frame">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="statSub"></div>
+          <div class="call" id="statName"></div>
+        </div>
+        <div class="colophon stat-tiles" id="statBody"></div>
       </div>
-      <div class="colophon stat-tiles" id="statBody"></div>
       <div class="scorecard-close">
         <button class="act" onclick="hideStat()">Close</button>
       </div>
@@ -850,8 +879,18 @@ function setDraftMode(mode){
   if (S) render(S);   // a draft already in progress re-renders under the new mode
 }
 
+// Inside a room this defers to the ROOM's own mode (set once by the host at creation,
+// binding on every seat -- see migration 023) rather than the caller's own local
+// DRAFT_MODE; outside a room (ROOM_CODE null) it is exactly DRAFT_MODE, so solo play is
+// completely unaffected. `roomDraftMode()` itself is declared further down with the
+// rest of the room code, but function declarations hoist -- by the time this is ever
+// actually CALLED (a render, always after boot()), both are defined either way.
+function effectiveDraftMode(){
+  return ROOM_CODE ? roomDraftMode() : DRAFT_MODE;
+}
+
 function ratingBadge(card){
-  return (DRAFT_MODE === 'stat' && card.rating != null)
+  return (effectiveDraftMode() === 'stat' && card.rating != null)
     ? `<span class="rating-badge">${card.rating}</span>` : '';
 }
 
@@ -1923,7 +1962,7 @@ let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING
 // ROOM_MATCH_DATA (the room's own match-phase poll, kept fresh by pollRoom once status
 // is 'complete', same interval as the draft) is already declared above, shared with the
 // solo season's own scorecard popover.
-let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30;
+let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 
 function pickFormat(f){
   CHOSEN_FORMAT = f;
@@ -1935,13 +1974,28 @@ function pickTimer(t){
   document.querySelectorAll('#timerChoices .room-choice')
     .forEach(b => b.classList.toggle('sel', +b.dataset.timer === t));
 }
+function pickRoomDraftMode(mode){
+  CHOSEN_ROOM_DRAFT_MODE = mode;
+  document.querySelectorAll('#roomModeChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', b.dataset.mode === mode));
+}
+
+// The room's OWN mode, not the caller's local DRAFT_MODE preference (the whole point --
+// see migration 023's own note): every mode-gated render inside a room reads THIS,
+// falling back to 'stat' before ROOM has loaded at all. Outside a room (ROOM_CODE is
+// null) this is never consulted; solo play keeps reading the shared DRAFT_MODE exactly
+// as before.
+function roomDraftMode(){
+  return (ROOM && ROOM.draft_mode) || 'stat';
+}
 
 async function createRoom(ctrl){
   const name = $('#roomName').value.trim() || 'Player';
   await busyClick(ctrl, 'Creating…', async () => {
     try {
       const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER, host_name: name})});
+        body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER,
+          host_name: name, draft_mode: CHOSEN_ROOM_DRAFT_MODE})});
       enterRoom(r.room.code, r.player_id);
     } catch(e){ slip(e.message); }
   });
@@ -2064,6 +2118,7 @@ function renderRoomLobby(r){
   $('#lobbySeats').textContent = `${r.players.length} of ${r.seats}`;
   $('#lobbyFormat').textContent = r.format.toUpperCase();
   $('#lobbyTimer').textContent = r.timer_seconds + 's per pick';
+  $('#lobbyMode').textContent = r.draft_mode === 'memory' ? 'Memory' : 'Stat';
   $('#lobbyPlayers').innerHTML = r.players.map(p => `
     <div class="entry"><span class="nm">${p.name}${p.player_id === r.host_id
       ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}</span></div>`
@@ -2105,7 +2160,7 @@ function renderRoomDraft(r){
     showRoomDeal(me.deal, me.done ? 'Your twelve is set' : '—');
     $('#roomOptions').innerHTML = !me.deal ? '' : me.deal.options.map((card, i) => {
       const pending = ROOM_PENDING && ROOM_PENDING.index === i ? ' pending' : '';
-      const nmClick = DRAFT_MODE === 'stat' ? ` clickable" onclick="showRoomStat(${i})"` : '"';
+      const nmClick = roomDraftMode() === 'stat' ? ` clickable" onclick="showRoomStat(${i})"` : '"';
       return `<div class="entry${pending}">
         <span class="nm${nmClick}>${ICON[card.kind] || ''}${keeperBadge(card)}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
@@ -2157,7 +2212,7 @@ function roomOrderRow(slot, got, label, open, isImpact, readOnly){
       && (slot === 12 || ROOM_PENDING.card.positions.includes(slot));
     classes.push(eligible ? 'eligible' : 'ineligible');
   }
-  const whoClick = (!readOnly && got && DRAFT_MODE === 'stat')
+  const whoClick = (!readOnly && got && roomDraftMode() === 'stat')
     ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
   const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got)
                      : (isImpact ? 'no impact player' : 'to be named');

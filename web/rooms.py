@@ -67,6 +67,11 @@ from web import session as sess
 
 ROOM_FORMATS = {"final": 2, "cup": 4, "league": 10}
 TIMER_CHOICES = (15, 30, 45)
+# A pure display choice, exactly the solo draft's own client-side DRAFT_MODE distinction
+# (web/static/index.html) -- 'stat' shows a rating badge and lets a name be clicked for
+# his season stats, 'memory' shows neither. Chosen once by the host at creation and
+# binding on every seat (migration 023); the join flow gets no choice of its own.
+DRAFT_MODES = ("stat", "memory")
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 6
 
@@ -101,6 +106,7 @@ class Room:
     # for a room that hasn't reached "complete" yet, and generally still empty for a
     # while after: nothing here starts consuming it until the first `/match` poll.
     match_moves: list = field(default_factory=list)
+    draft_mode: str = "stat"       # migration 023 -- see DRAFT_MODES above
 
     @property
     def seats(self) -> int:
@@ -145,7 +151,7 @@ def _load_room(conn, code: str) -> Room:
     row = conn.execute(
         """
         select code, format, timer_seconds, seed, host_id, status,
-               turn_started_at, failure_reason, moves, match_moves
+               turn_started_at, failure_reason, moves, match_moves, draft_mode
           from rooms where code = %s for update
         """,
         (code,),
@@ -153,11 +159,12 @@ def _load_room(conn, code: str) -> Room:
     if row is None:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
-     turn_started_at, failure_reason, moves, match_moves) = row
+     turn_started_at, failure_reason, moves, match_moves, draft_mode) = row
     room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
                 host_id=host_id, status=status,
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
-                moves=list(moves or []), match_moves=list(match_moves or []))
+                moves=list(moves or []), match_moves=list(match_moves or []),
+                draft_mode=draft_mode)
     for player_id, name, is_cpu in conn.execute(
         "select player_id, name, is_cpu from room_players "
         "where room_code = %s order by seat_order",
@@ -168,11 +175,15 @@ def _load_room(conn, code: str) -> Room:
 
 
 def _save_room(conn, room: Room) -> None:
+    # draft_mode joins format/timer_seconds/seed/host_id as "set once at creation,
+    # never updated" -- deliberately absent from the ON CONFLICT clause below, same as
+    # those four already are.
     conn.execute(
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
-                            turn_started_at, failure_reason, moves, match_moves)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            turn_started_at, failure_reason, moves, match_moves,
+                            draft_mode)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
@@ -180,7 +191,7 @@ def _save_room(conn, room: Room) -> None:
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
-         Json(room.match_moves)),
+         Json(room.match_moves), room.draft_mode),
     )
     for seat_order, (player_id, p) in enumerate(room.players.items()):
         conn.execute(
@@ -193,16 +204,19 @@ def _save_room(conn, room: Room) -> None:
         )
 
 
-def create_room(conn, fmt: str, timer_seconds: int, host_name: str) -> tuple[Room, str]:
+def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
+                 draft_mode: str = "stat") -> tuple[Room, str]:
     if fmt not in ROOM_FORMATS:
         raise RoomError(f"unknown format {fmt!r}: choose one of {sorted(ROOM_FORMATS)}")
     if timer_seconds not in TIMER_CHOICES:
         raise RoomError(f"timer must be one of {TIMER_CHOICES}")
+    if draft_mode not in DRAFT_MODES:
+        raise RoomError(f"unknown draft_mode {draft_mode!r}: choose one of {DRAFT_MODES}")
     _sweep_stale_rooms(conn)
     room_seed = sess.new_seed()
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
-                seed=room_seed, host_id=host_id)
+                seed=room_seed, host_id=host_id, draft_mode=draft_mode)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     _save_room(conn, room)
     return room, host_id

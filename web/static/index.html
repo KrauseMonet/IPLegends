@@ -174,6 +174,10 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
   color:var(--ink-3);padding:14px 18px;border-bottom:1px solid var(--line);margin-bottom:2px;
   display:flex;justify-content:space-between;align-items:baseline;background:var(--panel-2)}
 .col-head em{font-style:normal;color:var(--gold);font-family:var(--mono);letter-spacing:0;font-weight:600}
+.col-head-toggle{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:none;
+  padding:4px 10px;border-radius:5px;border:1px solid var(--line-strong);background:var(--panel-3);
+  color:var(--ink-2);cursor:pointer}
+.col-head-toggle:hover{border-color:var(--gold);color:var(--gold)}
 
 .fixture{padding:18px 18px 16px}
 .fixture .yr{font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.12em;font-weight:600}
@@ -666,7 +670,9 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         </div>
 
         <div class="col">
-          <div class="col-head"><span id="roomOrderLabel">Batting order</span></div>
+          <div class="col-head"><span id="roomOrderLabel">Batting order</span>
+            <button id="roomViewToggle" class="col-head-toggle hide" onclick="toggleRoomView()"></button>
+          </div>
           <div class="tally">
             <div class="n" id="roomTimer">–</div>
             <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
@@ -1973,6 +1979,10 @@ function drawJourneyCard(d, header){
 /* --- rooms: friends draft together, live, turn by turn ------------------------------- */
 
 let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
+// Whose squad the "Batting order" column shows during someone else's turn: false = the
+// active player's (the default), true = my own. Resets whenever the active player changes
+// so a stale choice doesn't linger into the next person's turn.
+let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
 // ROOM_MATCH_DATA (the room's own match-phase poll, kept fresh by pollRoom once status
 // is 'complete', same interval as the draft) is already declared above, shared with the
 // solo season's own scorecard popover.
@@ -2186,23 +2196,40 @@ function renderRoomDraft(r){
     const rows = me.order.map((got, i) => roomOrderRow(i + 1, got, `${i + 1}`, open));
     rows.push(roomOrderRow(12, me.impact, 'IMP', open, true));
     $('#roomOrderSheet').innerHTML = rows.join('');
+    $('#roomViewToggle').classList.add('hide');
   } else {
     // Someone else's turn: their franchise/season is visible, never their options
     // (the server already redacts `options` to [] for anyone but the active seat's
-    // own caller) -- and their team-so-far takes over the order-sheet column, since
-    // mine doesn't change while I wait.
+    // own caller). The order-sheet column defaults to their team-so-far, since mine
+    // doesn't change while I wait -- but a toggle lets me check my own squad too.
+    if (r.active_player_id !== ROOM_VIEW_LAST_ACTIVE){
+      ROOM_VIEW_MINE = false;
+      ROOM_VIEW_LAST_ACTIVE = r.active_player_id;
+    }
+    const showMine = ROOM_VIEW_MINE && !!me;
+    const shown = showMine ? me : active;
+
     $('#roomDealLabel').textContent = active ? `${active.name}'s turn` : 'Waiting…';
     $('#roomOptionsLabel').textContent = '';
-    $('#roomOrderLabel').textContent = active ? `${active.name}'s team so far` : 'Batting order';
+    $('#roomOrderLabel').textContent = showMine ? 'Your team so far'
+      : (active ? `${active.name}'s team so far` : 'Batting order');
     showRoomDeal(active && active.deal, r.status === 'complete' ? 'Draft complete' : '—');
     $('#roomOptions').innerHTML = '<div class="note">'
       + (active ? `${active.name} is choosing -- options stay hidden until it's their turn to show.`
                 : 'Waiting on the rest of the room…') + '</div>';
 
-    const rows = (active ? active.order : Array(11).fill(null))
+    const rows = (shown ? shown.order : Array(11).fill(null))
       .map((got, i) => roomOrderRow(i + 1, got, `${i + 1}`, new Set(), false, true));
-    rows.push(roomOrderRow(12, active ? active.impact : null, 'IMP', new Set(), true, true));
+    rows.push(roomOrderRow(12, shown ? shown.impact : null, 'IMP', new Set(), true, true));
     $('#roomOrderSheet').innerHTML = rows.join('');
+
+    const toggle = $('#roomViewToggle');
+    if (active && me && active.player_id !== me.player_id){
+      toggle.classList.remove('hide');
+      toggle.textContent = showMine ? `View ${active.name}'s squad` : 'View your squad';
+    } else {
+      toggle.classList.add('hide');
+    }
   }
 
   $('#roomOthers').innerHTML = r.players.filter(p => p.player_id !== MY_PID).map(p => {
@@ -2215,6 +2242,11 @@ function renderRoomDraft(r){
       <span class="fig">${p.picks_made}/12</span>
     </div>`;
   }).join('');
+}
+
+function toggleRoomView(){
+  ROOM_VIEW_MINE = !ROOM_VIEW_MINE;
+  if (ROOM) renderRoomDraft(ROOM);
 }
 
 function roomOrderRow(slot, got, label, open, isImpact, readOnly){

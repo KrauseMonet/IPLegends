@@ -442,9 +442,23 @@ class RoomMatchOut(BaseModel):
     results: list[RoomMatchResultOut]
     table: list[StandingOut] | None = None      # "league" only, progressive
     complete: bool
-    champion: str | None = None                 # "cup" | "league", complete only
+    champion: str | None = None                 # the room's own overall winner, any format
     you_champion: bool | None = None
     pending: RoomPendingTossOut | RoomPendingImpactOut | RoomPendingAdvanceOut | None = None
+    # The journey card's own numbers -- null until complete, exactly SeasonProgressOut's
+    # contract for solo play. Yours alone: a room has no single "the human", so this is
+    # always the CALLING player_id's own tournament, never a second seat's.
+    runs: int | None = None
+    wickets: int | None = None
+    played: int | None = None
+    won: int | None = None
+    lost: int | None = None
+    tied: int | None = None
+    top_scorer: str | None = None
+    top_scorer_runs: int | None = None
+    top_wicket_taker: str | None = None
+    top_wicket_taker_wickets: int | None = None
+    squad: list[JourneySquadEntryOut] | None = None
 
 
 class RoomTossIn(BaseModel):
@@ -1078,13 +1092,33 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
                              nrr=round(row.standing.nrr, 3))
                  for i, row in enumerate(replay.table, 1)]
 
+    journey = room_match_lib.room_journey(room, replay, player_id) if player_id else None
+    squad = None
+    if journey is not None:
+        your_order, your_impact = next(
+            ((order, impact) for pid, _, order, impact in rooms.room_sides(room, deck)
+             if pid == player_id), ([], None))
+        all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
+        squad = [_journey_entry(c, journey.acc) for c in all_twelve]
+
     return RoomMatchOut(
         format=room.format,
         results=[_room_result_out(e, player_id) for e in replay.results],
         table=table, complete=replay.complete,
         champion=name(replay.champion_pid) if replay.champion_pid else None,
-        you_champion=(replay.champion_pid == player_id) if replay.champion_pid else None,
+        you_champion=(replay.champion_pid == player_id) if replay.complete else None,
         pending=pending,
+        runs=journey.runs if journey else None,
+        wickets=journey.wickets if journey else None,
+        played=journey.played if journey else None,
+        won=journey.won if journey else None,
+        lost=journey.lost if journey else None,
+        tied=journey.tied if journey else None,
+        top_scorer=journey.top_scorer[0] if journey else None,
+        top_scorer_runs=journey.top_scorer[1] if journey else None,
+        top_wicket_taker=journey.top_wicket_taker[0] if journey else None,
+        top_wicket_taker_wickets=journey.top_wicket_taker[1] if journey else None,
+        squad=squad,
     )
 
 

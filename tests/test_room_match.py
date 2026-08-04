@@ -291,3 +291,76 @@ def test_a_wrong_kind_of_move_at_the_current_position_is_rejected(conn):
     rooms._save_room(conn, room)
     with pytest.raises(rooms.RoomError):
         room_match.room_match_state(conn, room.code, DECK, MODEL)
+
+
+# --- room_journey: the journey card's own numbers, one seat at a time -------------------
+
+def test_room_journey_is_none_before_the_match_phase_completes(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert not replay.complete
+    assert room_match.room_journey(room, replay, host_id) is None
+
+
+def test_room_journey_is_none_for_a_pid_not_seated_in_the_room(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    replay = _drain_final_to_completion(conn, room, host_id, guest_id)
+    assert room_match.room_journey(room, replay, "not-a-real-seat") is None
+
+
+def _drain_final_to_completion(conn, room, host_id, guest_id):
+    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    while replay.pending_kind == "impact":
+        room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete
+    return replay
+
+
+def test_room_journey_records_exactly_one_played_match_for_a_final(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    replay = _drain_final_to_completion(conn, room, host_id, guest_id)
+    host_journey = room_match.room_journey(room, replay, host_id)
+    guest_journey = room_match.room_journey(room, replay, guest_id)
+    assert host_journey.played == 1 and guest_journey.played == 1
+    # exactly one of the two actually won (a tie is possible in principle but this
+    # seed's own drafted sides, verified by hand, do not produce one)
+    assert host_journey.won + guest_journey.won == 1
+    assert host_journey.lost + guest_journey.lost == 1
+    winner_journey = host_journey if host_journey.won else guest_journey
+    assert winner_journey.champion
+    loser_journey = guest_journey if host_journey.won else host_journey
+    assert not loser_journey.champion
+
+
+def test_room_journey_accumulator_totals_reconcile_with_the_reported_runs(conn):
+    """`journey.runs`/`journey.wickets` are folded from `journey.acc` at the moment
+    `room_journey` builds it -- this pins that they can never quietly drift apart."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    replay = _drain_final_to_completion(conn, room, host_id, guest_id)
+    journey = room_match.room_journey(room, replay, host_id)
+    assert journey.runs == sum(journey.acc.runs.values())
+    assert journey.wickets == sum(journey.acc.wickets.values())
+    assert journey.top_scorer[1] <= journey.runs
+    assert journey.top_wicket_taker[1] <= journey.wickets
+
+
+def test_room_journey_accumulates_across_every_match_a_seat_actually_played(conn):
+    """A cup finalist plays TWO matches (semi + final); a seat eliminated in the semis
+    plays only one. Summed across all four seats, total `played` must be exactly
+    2 x 3 (three matches, two participants each) -- proving no match is double-counted
+    or dropped for any seat, win or lose."""
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    replay = _drive_room_to_completion(conn, room, host_id)
+    assert replay.complete
+    journeys = [room_match.room_journey(room, replay, pid) for pid in seat_ids]
+    assert all(j is not None for j in journeys)
+    assert sum(j.played for j in journeys) == 2 * 3
+    # The champion played the final, so at least two matches; nobody else can have
+    # played more than two either (semi + final is the whole bracket's depth).
+    champion_journeys = [j for j in journeys if j.champion]
+    assert len(champion_journeys) == 1
+    assert champion_journeys[0].played == 2
+    assert all(j.played in (1, 2) for j in journeys)

@@ -31,8 +31,9 @@ import random
 from dataclasses import dataclass, field, replace
 
 from game.season import (
-    TOSS_DEFAULT_ELECTS, ImpactPick, Result, Side, Standing, _OpenMatchNeedsImpact,
-    _OpenMatchNeedsToss, _credit, fixtures as league_fixtures, play_open,
+    TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, Result, Side, Standing,
+    _leader, _OpenMatchNeedsImpact, _OpenMatchNeedsToss, _credit,
+    fixtures as league_fixtures, play_open,
 )
 from game.simulator import Model
 from web import rooms
@@ -88,6 +89,16 @@ class RoomResultEntry:
     result: Result
     a_pid: str
     b_pid: str
+    # Resolved ONCE, at the moment this fixture's own `pairs` (a single `_Driver`'s own
+    # consistent list) is in scope -- never re-derived later via `_pid_of(r.home, ...)`
+    # against a FRESH `_sides_with_pid` call, which would rebuild brand new `Side`
+    # objects and make every `is` identity check fail silently (a real bug this
+    # project's own dataclasses are otherwise careful about: `Side` has no `eq=False`,
+    # and two structurally-identical-looking `Side`s from two different calls are
+    # still different objects). `a_pid`/`b_pid` are "the two contesting this fixture,"
+    # not necessarily home/away (the toss decides that); these two are.
+    home_pid: str
+    away_pid: str
 
 
 @dataclass
@@ -173,8 +184,10 @@ class _Driver:
         a_pid, b_pid = self._pid(side_a), self._pid(side_b)
         if not interactive:
             r = play_open(self.model, side_a, side_b, self.rng, stage=stage, moves=None)
-            self.entries.append(RoomResultEntry(stage=stage, result=r,
-                                                a_pid=a_pid, b_pid=b_pid))
+            self.entries.append(RoomResultEntry(
+                stage=stage, result=r, a_pid=a_pid, b_pid=b_pid,
+                home_pid=a_pid if r.home is side_a else b_pid,
+                away_pid=a_pid if r.away is side_a else b_pid))
             return r
         cursor = _RoomMatchCursor(self.room.match_moves[self.pos:], is_cpu_side=self._is_cpu)
         try:
@@ -199,7 +212,10 @@ class _Driver:
                 pending_impact_discipline=exc.discipline, pending_impact_first=exc.first)
             return None
 
-        self.entries.append(RoomResultEntry(stage=stage, result=r, a_pid=a_pid, b_pid=b_pid))
+        self.entries.append(RoomResultEntry(
+            stage=stage, result=r, a_pid=a_pid, b_pid=b_pid,
+            home_pid=a_pid if r.home is side_a else b_pid,
+            away_pid=a_pid if r.away is side_a else b_pid))
         self.pos += cursor.consumed
         return r
 
@@ -232,7 +248,7 @@ def _standings_table(pairs: list[tuple[str, Side]],
         if e.stage != "league":
             continue
         r = e.result
-        h, a = standings[_pid_of(r.home, pairs)], standings[_pid_of(r.away, pairs)]
+        h, a = standings[e.home_pid], standings[e.away_pid]
         h.played += 1
         a.played += 1
         _credit(h, r.home_runs, r.home_balls, r.home_wickets,
@@ -264,7 +280,11 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
         r = d.play_fixture(side_a, side_b, "Final")
         if d.paused is not None:
             return d.paused
-        return RoomMatchReplay(results=list(d.entries), complete=True)
+        # A one-match format's "champion" is just its winner -- the same field cup/
+        # league already use, so the journey card's own you_champion check needs no
+        # per-format special case. None (not a fabricated winner) on a tie.
+        return RoomMatchReplay(results=list(d.entries), complete=True,
+                                champion_pid=d._pid(r.winner) if r.winner else None)
 
     if room.format == "cup":
         # 1v4, 2v3 by JOIN order -- a room has no league table to seed a bracket from,
@@ -343,6 +363,73 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
 
     return RoomMatchReplay(results=list(d.entries), complete=True, table=table,
                             champion_pid=d._pid(final.winner or finalist))
+
+
+@dataclass
+class RoomJourney:
+    """One seat's own tournament, for the journey card -- the room-match analogue of
+    `game.season.JourneyStats`, which cannot be reused directly (A79 note: it hard-
+    requires a `Season` object's `.table`/`.playoffs`/`.champion`, none of which a room
+    has -- every fixture here, round-robin or knockout, lives in one flat `results`
+    list keyed by `.stage`). `acc` is exposed alongside the totals it was built from so
+    the caller can map the seat's own twelve through it card by card, exactly
+    `web/app.py`'s existing `_journey_entry(card, acc)` already does for solo play."""
+
+    runs: int
+    wickets: int
+    played: int
+    won: int
+    lost: int
+    tied: int
+    champion: bool
+    top_scorer: tuple[str, int]
+    top_wicket_taker: tuple[str, int]
+    acc: JourneyAccumulator
+
+
+def room_journey(room: Room, replay: RoomMatchReplay, pid: str) -> RoomJourney | None:
+    """`None` if the match phase isn't complete yet, or `pid` is not a real seat --
+    mirrors solo's own "no journey fields at all until complete" contract exactly.
+
+    Played/won/lost/tied are counted by scanning `replay.results` directly rather than
+    reading a `Standing` row, because `final`/`cup` never build one at all (A79: no
+    league stage) and a scan is correct for every format uniformly, including league.
+    Reads `e.home_pid`/`e.away_pid` -- resolved ONCE inside `_Driver.play_fixture`
+    against its own consistent `pairs` -- rather than re-deriving them here via a
+    fresh `_sides_with_pid(room, deck)` call, which would rebuild brand new `Side`
+    objects and make every `is` identity check against `replay.results[i].result.home/
+    away` fail silently (found exactly this way, not assumed away: see A79's test
+    coverage note). No `deck` parameter needed as a result.
+    """
+    if not replay.complete or pid not in room.players:
+        return None
+    acc = JourneyAccumulator()
+    played = won = lost = tied = 0
+    for e in replay.results:
+        if pid not in (e.home_pid, e.away_pid):
+            continue
+        played += 1
+        is_home = pid == e.home_pid
+        if is_home:
+            acc.add_batting(e.result.home_innings)
+            acc.add_bowling(e.result.away_innings)
+        else:
+            acc.add_batting(e.result.away_innings)
+            acc.add_bowling(e.result.home_innings)
+        if e.result.winner is None:
+            tied += 1
+        elif (e.result.winner is e.result.home) == is_home:
+            won += 1
+        else:
+            lost += 1
+    return RoomJourney(
+        runs=acc.total_runs, wickets=acc.total_wickets,
+        played=played, won=won, lost=lost, tied=tied,
+        champion=replay.champion_pid == pid,
+        top_scorer=_leader(acc.runs, acc.names),
+        top_wicket_taker=_leader(acc.wickets, acc.names),
+        acc=acc,
+    )
 
 
 def room_match_state(conn, code: str, deck, model) -> tuple[Room, RoomMatchReplay]:

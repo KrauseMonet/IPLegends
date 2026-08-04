@@ -2590,6 +2590,11 @@ function showRoomMatchComplete(m){
 
   const journeyBtn = m.squad
     ? `<button class="act" onclick="showRoomJourneyCard()">Journey card</button>` : '';
+  // Lead action, same as solo's own "Draft again" on its result screen -- any seated
+  // player (not just the host) can fire it; the room resets in place (same code, same
+  // seats) and everyone else's next poll picks the reset up on its own (roomPlayAgain's
+  // own comment has the why), so this button doesn't need to coordinate with anyone.
+  const playAgainBtn = `<button class="act lead" onclick="roomPlayAgain(this)">Play again</button>`;
 
   if (m.format === 'final'){
     const res = m.results[0].result;
@@ -2598,6 +2603,7 @@ function showRoomMatchComplete(m){
       <div class="figures">${res.home_score} · ${res.away_score}</div>
       <div class="margin">${res.margin}</div>
       <div class="foot-actions room-actions">
+        ${playAgainBtn}
         <button class="act" onclick="showRoomScorecard(0)">Scorecard</button>
         ${journeyBtn}
       </div></div>`;
@@ -2609,7 +2615,7 @@ function showRoomMatchComplete(m){
       <div class="call won room-banner">${m.champion} win the cup</div>
       </div>
       ${resultsHtml}
-      <div class="foot-actions room-actions">${journeyBtn}</div>`;
+      <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
     return;
   }
 
@@ -2617,7 +2623,27 @@ function showRoomMatchComplete(m){
     <div>${roomTableHtml(m)}</div></div>
     <div class="room-gap">${resultsHtml}</div>
     <div class="report compact"><div class="call won room-banner">${m.champion} win the league</div></div>
-    <div class="foot-actions room-actions">${journeyBtn}</div>`;
+    <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
+}
+
+async function roomPlayAgain(ctrl){
+  await busyClick(ctrl, 'Resetting…', async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await api(`/api/rooms/${ROOM_CODE}/play-again`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
+      if (myGen !== ROOM_GEN) return;
+      ROOM = room;
+      // A fresh lobby has no match of its own yet -- cleared explicitly rather than
+      // left stale, so a later completion can never be masked by this game's leftovers
+      // (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut would
+      // otherwise show the game just finished instead of the new one).
+      ROOM_MATCH_DATA = null;
+      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null;
+      ROOM_SPECTATE_SHOWN = false;
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
 }
 
 function showRoomJourneyCard(){

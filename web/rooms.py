@@ -308,6 +308,50 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
     return room
 
 
+def play_again(conn, code: str, player_id: str) -> Room:
+    """Any seated player, not the host only -- resets a finished room back to its own
+    lobby, in place: same code, same host, same format/timer_seconds/draft_mode, same
+    real seats, but a FRESH seed (so playing again is a genuinely new draft and match,
+    not a rerun of the one just finished) and both move logs wiped. CPU seats are
+    dropped rather than carried over -- `start_room` refills whatever's still empty when
+    the host next clicks Start, so keeping last game's CPU count would misrepresent who
+    actually showed up this time, the same reasoning `leave_room`/`kick_player` already
+    apply to a departing seat.
+
+    Idempotent by design: if the room is already back in 'lobby' -- because some OTHER
+    seat's own "play again" click already reset it -- this is a no-op rather than a
+    second reset, so several players clicking within the same couple of seconds converge
+    on one shared lobby instead of racing or double-resetting each other's fresh seed.
+    `_load_room`'s row lock (its own docstring) is what makes that convergence safe
+    rather than a check-then-act gap: two concurrent calls serialise through it, and
+    whichever runs second sees the first's already-'lobby' room and returns immediately.
+    """
+    room = _load_room(conn, code)
+    if player_id not in room.players:
+        raise RoomError("you are not seated in this room")
+    if room.status == "lobby":
+        return room
+    if room.status not in ("complete", "failed"):
+        raise RoomError(f"cannot play again while the room is still {room.status}")
+
+    for cpu_id in [pid for pid, p in room.players.items() if p.is_cpu]:
+        _remove_seat(conn, room, code, cpu_id)
+
+    room.status = "lobby"
+    room.seed = sess.new_seed()
+    room.moves = []
+    room.match_moves = []
+    room.turn_started_at = 0.0
+    room.failure_reason = None
+    _save_room(conn, room)
+    # `_save_room`'s own ON CONFLICT clause deliberately excludes `seed` -- it's "set
+    # once at creation, never updated" for every OTHER mutator, and this is the one
+    # place in the whole module that's meant to be the exception, so it gets its own
+    # narrow write rather than loosening the general one for everybody.
+    conn.execute("update rooms set seed = %s where code = %s", (room.seed, code))
+    return room
+
+
 # --- turn order -------------------------------------------------------------------------
 
 def turn_seat_index(move_no: int, n_seats: int) -> int:

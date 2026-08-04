@@ -88,9 +88,35 @@ class FakeConn:
             # column reads back.
             moves_value = moves.obj if hasattr(moves, "obj") else moves
             match_moves_value = match_moves.obj if hasattr(match_moves, "obj") else match_moves
-            self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
-                                 turn_started_at, failure_reason, moves_value,
-                                 match_moves_value, draft_mode)
+            existing = self.rooms.get(code)
+            if existing is None:
+                self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
+                                     turn_started_at, failure_reason, moves_value,
+                                     match_moves_value, draft_mode)
+            else:
+                # Mirrors the real `on conflict (code) do update set` clause exactly --
+                # only status/turn_started_at/failure_reason/moves/match_moves are ever
+                # written to an EXISTING row; format/timer_seconds/seed/host_id/
+                # draft_mode keep whatever the row already had, "set once at creation,
+                # never updated" per `_save_room`'s own comment. Getting this wrong here
+                # would make `test_play_again_resets_a_complete_room_to_lobby`'s own
+                # `seed != ` assertion pass for the wrong reason -- a plain `_save_room`
+                # call NOT actually changing the seed in real Postgres, silently
+                # papered over by a fake that changes it anyway.
+                (ecode, efmt, etimer, eseed, ehost, _estatus,
+                 _eturn, _efail, _emoves, _ematch, edraft) = existing
+                self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
+                                     turn_started_at, failure_reason, moves_value,
+                                     match_moves_value, edraft)
+            return FakeCursor([])
+
+        if sql_norm.startswith("update rooms set seed"):
+            seed, code = params
+            existing = self.rooms.get(code)
+            if existing is not None:
+                row = list(existing)
+                row[3] = seed
+                self.rooms[code] = tuple(row)
             return FakeCursor([])
 
         raise AssertionError(f"FakeConn does not know this query: {sql_norm[:80]!r}")
@@ -447,6 +473,113 @@ def test_a_cpu_squad_is_reproduced_identically_across_a_reload(conn):
         assert [c.person_id if c else None for c in a.order] == \
             [c.person_id if c else None for c in b.order]
         assert a.impact.person_id == b.impact.person_id
+
+
+# --- play again: resets a finished room back to its own lobby, in place -------------------
+
+def test_play_again_resets_a_complete_room_to_lobby(conn):
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
+    assert room.status == "complete"
+
+    room2 = rooms.play_again(conn, room.code, bob_id)
+    assert room2.status == "lobby"
+    assert room2.moves == []
+    assert room2.match_moves == []
+    assert room2.failure_reason is None
+    # Same code, same real seats, same settings -- only the seed (and status/logs)
+    # actually changes.
+    assert room2.code == room.code
+    assert room2.host_id == room.host_id
+    assert room2.format == room.format
+    assert room2.timer_seconds == room.timer_seconds
+    assert room2.draft_mode == room.draft_mode
+    assert set(room2.players) == {host_id, bob_id}
+
+    # The seed check is against a FRESH reload, not `room2` itself: `_save_room`'s own
+    # `on conflict` clause deliberately excludes `seed` (same as format/timer_seconds/
+    # host_id/draft_mode -- "set once at creation, never updated"), so the seed change
+    # needs its own dedicated write. Comparing `room2.seed` alone would still read the
+    # new value even if that write were missing, since it's the same in-memory object
+    # `play_again` set `.seed` on before ever touching the database -- only a reload
+    # proves the new seed actually reached the row rather than living in Python only.
+    reloaded = rooms._load_room(conn, room.code)
+    assert reloaded.seed == room2.seed
+    assert reloaded.seed != room.seed
+
+
+def test_play_again_drops_cpu_seats(conn):
+    room, host_id = _make_room(conn, "cup")   # 4 seats, host is the only human
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    cpu_ids = [pid for pid, p in room.players.items() if p.is_cpu]
+    assert len(cpu_ids) == 3
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
+
+    room2 = rooms.play_again(conn, room.code, host_id)
+    assert list(room2.players) == [host_id]
+    assert not any(p.is_cpu for p in room2.players.values())
+
+
+def test_play_again_works_on_a_failed_room_too(conn):
+    room, host_id = _make_room(conn, "final")
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = rooms._load_room(conn, room.code)
+    room.status = "failed"
+    room.failure_reason = "stranded on seat X's turn"
+    rooms._save_room(conn, room)
+
+    room2 = rooms.play_again(conn, room.code, host_id)
+    assert room2.status == "lobby"
+    assert room2.failure_reason is None
+
+
+def test_play_again_is_a_no_op_once_the_room_is_already_back_in_lobby(conn):
+    """Idempotent by design: a second player's own click landing after the first's
+    reset already went through must not re-roll the seed or otherwise mutate the room
+    a second time -- it just returns the already-reset room."""
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
+
+    room2 = rooms.play_again(conn, room.code, host_id)
+    room3 = rooms.play_again(conn, room.code, bob_id)
+    assert room3.seed == room2.seed
+    assert room3.status == "lobby"
+
+
+def test_play_again_refuses_a_seat_not_in_the_room(conn):
+    room, host_id = _make_room(conn, "final")
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    with pytest.raises(rooms.RoomError):
+        rooms.play_again(conn, room.code, "not-a-real-seat")
+
+
+def test_play_again_refuses_a_room_still_in_progress(conn):
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.play_again(conn, room.code, host_id)
+
+
+def test_play_again_gives_the_new_lobby_a_fully_working_next_draft(conn):
+    """Not just a status flip -- the reset room must actually be playable end to end,
+    same as any other fresh lobby."""
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
+
+    room = rooms.play_again(conn, room.code, host_id)
+    assert room.status == "lobby"
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
+    assert room.status == "complete"
 
 
 # --- the live turn: lazy, per-turn resolution ----------------------------------------------

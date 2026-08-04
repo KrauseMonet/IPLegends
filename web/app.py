@@ -1042,6 +1042,21 @@ def start_room(code: str, body: HostActionIn) -> RoomStateOut:
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
+@app.post("/api/rooms/{code}/play-again", response_model=RoomStateOut)
+def play_again_room(code: str, body: HostActionIn) -> RoomStateOut:
+    """Any seated player, not the host only -- resets a finished ('complete' or
+    'failed') room back to its own lobby: same code, same seats, same format/timer/
+    draft_mode, but a fresh seed and both move logs cleared, ready for the host to
+    start a new draft. Idempotent (see `rooms.play_again`'s own docstring), so it's
+    safe for more than one player to click "play again" without coordinating."""
+    with _room_db() as conn:
+        try:
+            room = rooms.play_again(conn, code, body.player_id)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
 @app.get("/api/rooms/{code}", response_model=RoomStateOut)
 def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
     """Poll target. Resolves any expired turn (auto-picking whoever timed out, or

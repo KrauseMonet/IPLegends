@@ -1781,7 +1781,7 @@ const KIND_CHIP = {
   keeper: ['WK', 'gold2'], unrated: ['—', 'ink2'],
 };
 
-function drawJourneyCard(d){
+function drawJourneyCard(d, header){
   const canvas = $('#journeyCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height, cx = W / 2;
@@ -1806,7 +1806,7 @@ function drawJourneyCard(d){
   ctx.textAlign = 'center';
   ctx.fillStyle = ink3;
   ctx.font = `600 24px ${CARD_MONO}`;
-  ctx.fillText('SEED ' + d.state.split('-')[0], cx, 110);
+  ctx.fillText(header || 'SEED ' + d.state.split('-')[0], cx, 110);
 
   // a soft glow behind the headline/score -- champion gets the warm one, an eliminated
   // side a duller red, so the two outcomes read apart even before the words register
@@ -2263,6 +2263,9 @@ function showRoomMatch(m){
     return;
   }
 
+  const journeyBtn = m.squad
+    ? `<button class="act" onclick="showRoomJourneyCard()">Journey card</button>` : '';
+
   if (m.format === 'final'){
     const res = m.results[0].result;
     el.innerHTML = `<div class="report" style="padding:0 0 20px">
@@ -2271,6 +2274,7 @@ function showRoomMatch(m){
       <div class="margin">${res.margin}</div>
       <div style="margin-top:14px">
         <button class="act" onclick="showRoomScorecard(0)">Scorecard</button>
+        ${journeyBtn}
       </div></div>`;
     return;
   }
@@ -2278,7 +2282,8 @@ function showRoomMatch(m){
   if (m.format === 'cup'){
     el.innerHTML = `<div style="padding:0 0 20px">
       <div class="call won" style="text-align:center;margin-bottom:16px">${m.champion} win the cup</div>
-      ${resultsHtml}</div>`;
+      ${resultsHtml}
+      <div style="margin-top:16px;text-align:center">${journeyBtn}</div></div>`;
     return;
   }
 
@@ -2292,7 +2297,16 @@ function showRoomMatch(m){
         <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
     </table></div></div>
     <div style="margin-top:16px">${resultsHtml}</div>
-    <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>`;
+    <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>
+    <div style="margin-top:16px;text-align:center">${journeyBtn}</div>`;
+}
+
+function showRoomJourneyCard(){
+  // ROOM_MATCH_DATA already carries the journey card's own numbers once complete --
+  // no second fetch, same reasoning as solo's own showJourneyCard.
+  if (!ROOM_MATCH_DATA || !ROOM_MATCH_DATA.squad){ slip('Play the match first.'); return; }
+  drawJourneyCard(ROOM_MATCH_DATA, 'ROOM ' + ROOM_CODE);
+  $('#cardOverlay').classList.remove('hide');
 }
 
 async function roomSubmitToss(elects, ctrl){

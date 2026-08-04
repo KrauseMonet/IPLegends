@@ -2404,11 +2404,58 @@ function renderRoomResult(r){
     .catch(() => {});
 }
 
-function stageRow(r, onclick){
-  return `<div class="fx" onclick="${onclick}">
-    <span class="wl ${r.winner ? 'w' : ''}">${r.winner ? 'W' : 'T'}</span>
-    <span>${r.stage}: ${r.home} v ${r.away}</span>
-    <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
+// A room's group stage is up to 70 matches, most of them between two OTHER sides --
+// dumping all of them in one flat list (the design this replaced) meant scrolling past
+// 70+ undifferentiated rows to find your own eleven's story, or the champion banner,
+// and every decided match showed the SAME green "W" regardless of who actually won,
+// since nothing distinguished "somebody won" from "you won". `roomYourResults` and
+// `roomPlayoffsHtml` split the two things a viewer actually wants -- their own
+// group-stage form, and the small, universally-relevant knockout bracket -- mirroring
+// solo's own result screen (`renderTableAndForm`'s `yourForm` / `renderVerdictAndBracket`'s
+// `bracket`) exactly, including the personalised win/loss badge neither of those needed
+// to invent since solo's own side is always home-or-away-resolvable by construction.
+
+function roomYourResults(m){
+  // Returns {html, won} -- the CALLER's own group-stage matches only (`stage ===
+  // 'league'`), never the other ~56 of 70 that don't involve them. `i` is preserved as
+  // the ORIGINAL index into `m.results`, since showRoomScorecard(i) indexes that array
+  // directly, not whatever subset ends up rendered here.
+  const mine = [];
+  m.results.forEach((e, i) => { if (e.stage === 'league' && e.result.yours) mine.push([i, e.result]); });
+  let won = 0;
+  const html = mine.map(([i, r]) => {
+    const myShort = r.you_home ? r.home : r.away;
+    const them = r.you_home ? r.away : r.home;
+    const mineScore = r.you_home ? r.home_score : r.away_score;
+    const theirsScore = r.you_home ? r.away_score : r.home_score;
+    const k = r.winner === myShort ? 'w' : (r.winner === null ? '' : 'l');
+    if (k === 'w') won++;
+    return `<div class="fx" onclick="showRoomScorecard(${i})">
+      <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
+      <span>v ${them}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
+  }).join('');
+  return {html, won};
+}
+
+function roomPlayoffsHtml(m){
+  // Every playoff-stage fixture (`stage !== 'league'`) -- small and universally
+  // relevant, so shown to everyone rather than filtered to "yours" the way the group
+  // stage is. Badged from the CALLER's own perspective when they played in it, a
+  // neutral dot otherwise, exactly like solo's own bracket.
+  const rows = [];
+  m.results.forEach((e, i) => { if (e.stage !== 'league') rows.push([i, e]); });
+  return rows.map(([i, e]) => {
+    const r = e.result;
+    const myShort = r.yours ? (r.you_home ? r.home : r.away) : null;
+    const k = !r.yours ? '' : (r.winner === myShort ? 'w' : (r.winner === null ? '' : 'l'));
+    return `<div class="tie-stage">${e.stage}</div>
+      <div class="fx" onclick="showRoomScorecard(${i})">
+        <span class="wl ${k}">${r.yours ? (k ? k.toUpperCase() : 'T') : '·'}</span>
+        <span>${r.home} v ${r.away}</span>
+        <span class="sc">${r.home_score} · ${r.away_score}</span></div>
+      <div class="fx" style="border:0;padding-top:2px"><span></span>
+        <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`;
+  }).join('');
 }
 
 function roomTableHtml(m){
@@ -2613,9 +2660,15 @@ function showRoomMatch(m){
 
   const myMatch = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
   const el = $('#roomMatchBody');
-  const resultsHtml = m.results.map((e, i) =>
-    stageRow(e.result, `showRoomScorecard(${i})`)).join('');
-  const gap = resultsHtml ? `<div class="room-gap">${resultsHtml}</div>` : '';
+  // 'final'/'cup' have no 'league' stage at all, so `yourHtml` is naturally empty there
+  // and this collapses to just the (small, in-progress) playoffs bracket -- the same
+  // split used once the room completes, so the shape doesn't change out from under a
+  // viewer the moment their room finishes.
+  const yourHtml = roomYourResults(m).html;
+  const playoffsHtml = roomPlayoffsHtml(m);
+  const gapBody = (yourHtml ? `<div class="col-head" style="margin:20px 0 0"><span>Your matches</span></div>${yourHtml}` : '')
+    + (playoffsHtml ? `<div class="col-head" style="margin:20px 0 0"><span>Playoffs</span></div>${playoffsHtml}` : '');
+  const gap = gapBody ? `<div class="room-gap">${gapBody}</div>` : '';
 
   if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
     el.innerHTML = roomSpectateChoiceHtml() + gap;
@@ -2627,8 +2680,6 @@ function showRoomMatch(m){
 
 function showRoomMatchComplete(m){
   const el = $('#roomMatchBody');
-  const resultsHtml = m.results.map((e, i) =>
-    stageRow(e.result, `showRoomScorecard(${i})`)).join('');
 
   const journeyBtn = m.squad
     ? `<button class="act" onclick="showRoomJourneyCard()">Journey card</button>` : '';
@@ -2653,18 +2704,40 @@ function showRoomMatchComplete(m){
   }
 
   if (m.format === 'cup'){
+    // Every cup match IS a playoff match (a cup has no 'league' stage at all), so
+    // roomPlayoffsHtml alone covers the whole tournament here -- grouped by stage with
+    // its margin line, not the flat "stage: home v away" rows this replaced.
     el.innerHTML = `<div class="report compact">
       <div class="call won room-banner">${m.champion} win the cup</div>
       </div>
-      ${resultsHtml}
+      ${roomPlayoffsHtml(m)}
       <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
     return;
   }
 
-  el.innerHTML = `<div class="cards2 room-table">
-    <div>${roomTableHtml(m)}</div></div>
-    <div class="room-gap">${resultsHtml}</div>
-    <div class="report compact"><div class="call won room-banner">${m.champion} win the league</div></div>
+  // The league banner moves to the TOP here, matching 'cup'/'final' and solo's own
+  // report-first layout -- it used to sit after a wall of up to 74 match rows, so
+  // finding out who won meant scrolling past all of them first. The table and the two
+  // results sections mirror solo's own two-column result screen (`.season`): your own
+  // group-stage form on the right (14 matches, not 70), the small universally-relevant
+  // playoffs bracket beneath it, never the full round-robin dumped in one flat list.
+  const your = roomYourResults(m);
+  const playoffsHtml = roomPlayoffsHtml(m);
+  el.innerHTML = `<div class="report compact">
+      <div class="call won room-banner">${m.champion} win the league</div>
+    </div>
+    <div class="season">
+      <div>
+        <div class="col-head" style="margin:26px -18px 0"><span>League table</span></div>
+        ${roomTableHtml(m)}
+      </div>
+      <div>
+        ${your.html ? `<div class="col-head" style="margin:26px -18px 0">
+          <span>Your matches</span><em>${your.won} won</em></div>${your.html}` : ''}
+        ${playoffsHtml ? `<div class="col-head" style="margin:26px -18px 0">
+          <span>Playoffs</span></div>${playoffsHtml}` : ''}
+      </div>
+    </div>
     <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
 }
 

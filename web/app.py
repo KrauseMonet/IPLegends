@@ -257,6 +257,10 @@ class ResultOut(BaseModel):
     winner: str | None
     margin: str
     yours: bool
+    you_home: bool | None = Field(
+        default=None, description="null unless `yours` -- true if the CALLER's own side "
+                    "batted/bowled as the home side, so a per-viewer win/loss badge can "
+                    "be computed without hardcoding which of home/away is 'you'")
     home_innings: InningsOut | None = Field(
         default=None, description="the scorecard -- null only for a hand-built Result")
     away_innings: InningsOut | None = None
@@ -1111,6 +1115,14 @@ def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
 
 def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     r = entry.result
+    # `home_pid`/`away_pid` (not `a_pid`/`b_pid`) decide `you_home` -- the toss, not the
+    # fixture list, is what actually assigns home/away, and `RoomResultEntry` keeps the
+    # two pairs separate for exactly this reason (its own docstring has the why).
+    you_home = None
+    if player_id == entry.home_pid:
+        you_home = True
+    elif player_id == entry.away_pid:
+        you_home = False
     return RoomMatchResultOut(
         stage=entry.stage,
         result=ResultOut(
@@ -1119,6 +1131,7 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
             away_score=_score(r.away_runs, r.away_wickets),
             winner=None if r.winner is None else r.winner.short,
             margin=r.margin, yours=player_id in (entry.a_pid, entry.b_pid),
+            you_home=you_home,
             home_innings=_innings_out(r.home_innings) if r.home_innings else None,
             away_innings=_innings_out(r.away_innings) if r.away_innings else None,
             # No single "the human" in a room -- see game.season.play_open's own

@@ -946,9 +946,21 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
             blocked=([_card(c, why) for c, why in (pending_blocked or [])]
                      + STATE["unrated"].get(fs_id, [])) if show_options else [],
         )
+    # A filler (`is_cpu`) seat's roster is complete the instant the room starts drafting
+    # -- a real historical franchise-season's own eleven, never built turn by turn -- so
+    # `picks_made`/`done` are reported as fully complete unconditionally rather than via
+    # `seat.done`/`len(seat.picks)`, which would read "11/12, not done" for a filler
+    # whose historical squad happens to have no Impact-eligible bench player at all
+    # (`impact` can legitimately be `None`) even though nothing further will ever happen
+    # for that seat. `name` prefers `seat.historical_name` for the same reason
+    # `rooms.room_sides` does -- the stored `RoomPlayer.name` for a filler is just an
+    # internal placeholder ("CPU 1"), never meant to be shown once a real squad exists.
     return RoomPlayerOut(
-        player_id=player.player_id, name=player.name, is_cpu=player.is_cpu,
-        picks_made=len(seat.picks), done=seat.done, deal=deal,
+        player_id=player.player_id, name=seat.historical_name or player.name,
+        is_cpu=player.is_cpu,
+        picks_made=TWELVE_SIZE if player.is_cpu else len(seat.picks),
+        done=True if player.is_cpu else seat.done,
+        deal=deal,
         order=[None if c is None else _card(c) for c in seat.order],
         impact=None if seat.impact is None else _card(seat.impact),
     )
@@ -1102,10 +1114,9 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     )
 
 
-def _room_current_match_out(fs, room: rooms.Room, player_id: str | None) -> RoomCurrentMatchOut:
+def _room_current_match_out(fs, display_names: dict, player_id: str | None) -> RoomCurrentMatchOut:
     def name(pid: str) -> str:
-        p = room.players.get(pid)
-        return p.name if p else ""
+        return display_names.get(pid, "")
 
     return RoomCurrentMatchOut(
         stage=fs.stage, a_name=name(fs.a_pid), b_name=name(fs.b_pid),
@@ -1132,11 +1143,19 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     flags telling the frontend whether IT is the seat that can act -- the toss winner's
     own seat for a fixture's toss, the host's for advancing the round)."""
 
-    def name(pid: str | None) -> str:
-        p = room.players.get(pid) if pid else None
-        return p.name if p else ""
+    # A filler seat's display name is its historical squad's own name (`room_sides`'s
+    # own override, `RoomPlayer.name` for a REAL seat) -- read from ONE `room_sides`
+    # call rather than separately in every place that names a seat below (the champion
+    # banner, each current fixture's a_name/b_name, the journey squad), so none of them
+    # can drift back to the raw stored placeholder ("CPU 1") the way
+    # `_room_current_match_out` used to.
+    sides = rooms.room_sides(room, deck)
+    display_names = {pid: p.name for pid, p, _, _ in sides}
 
-    current_matches = [_room_current_match_out(fs, room, player_id)
+    def name(pid: str | None) -> str:
+        return display_names.get(pid, "") if pid else ""
+
+    current_matches = [_room_current_match_out(fs, display_names, player_id)
                         for fs in (replay.current_round or [])]
 
     table = None
@@ -1154,8 +1173,8 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     squad = None
     if journey is not None:
         your_order, your_impact = next(
-            ((order, impact) for pid, _, order, impact in rooms.room_sides(room, deck)
-             if pid == player_id), ([], None))
+            ((order, impact) for pid, _, order, impact in sides if pid == player_id),
+            ([], None))
         all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
         squad = [_journey_entry(c, journey.acc) for c in all_twelve]
 

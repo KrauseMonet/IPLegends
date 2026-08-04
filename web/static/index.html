@@ -2326,7 +2326,11 @@ function renderRoomDraft(r){
 
   $('#roomOthers').innerHTML = r.players.filter(p => p.player_id !== MY_PID).map(p => {
     const isActive = p.player_id === r.active_player_id;
-    const role = isActive ? 'ACTIVE' : (p.is_cpu ? 'CPU' : (p.done ? 'DONE' : 'WAITING'));
+    // A filler seat (is_cpu) is never active -- it never takes a turn at all, a real
+    // historical franchise-season's own eleven from the moment the room starts drafting
+    // (p.name is already that squad's name, p.picks_made already reads 12/12) -- so
+    // there's no "waiting"/"done" distinction left to make for one.
+    const role = isActive ? 'ACTIVE' : (p.is_cpu ? 'HISTORICAL' : (p.done ? 'DONE' : 'WAITING'));
     return `<div class="line ${p.done ? 'set' : ''} ${isActive ? 'active-turn' : ''}">
       <span class="role">${role}</span>
       <span class="who">${p.name}</span>

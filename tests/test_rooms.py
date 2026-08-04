@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import pytest
 
-from etl.feasibility import TWELVE_SIZE, XI_SIZE, Card, Deck, order_errors
+from etl.feasibility import TWELVE_SIZE, XI_SIZE, Card, Deck, eligible, order_errors
+from game.__main__ import viable
 from web import rooms
 
 
@@ -428,41 +429,45 @@ def test_pending_deal_accounts_for_the_whole_squad(conn):
     assert live.isdisjoint(blocked)
 
 
-def test_start_room_fills_remaining_seats_with_cpus_that_draft_a_legal_twelve(conn):
-    """CPU seats are no longer drafted whole at `start_room` time -- a CPU's pick now
-    depends on the shared pool at the moment its own turn arrives, so it resolves turn
-    by turn like everyone else, just instantly. Drive the room to completion and check
-    every CPU seat ends up with a legal twelve."""
+def test_start_room_fills_remaining_seats_with_historical_squads(conn):
+    """A filler (`is_cpu`) seat no longer drafts a fantasy twelve at all -- it is handed
+    a real historical franchise-season's own eleven the instant the room starts drafting
+    (`game.season.historical_sides`, the same mechanism solo's own season opposition
+    uses), with ZERO recorded moves of its own. Confirmed immediately after `start_room`,
+    before the host has made a single pick. Checked against `viable` (keeper + 5
+    bowlers), the rule the opposition path is actually built to satisfy -- not
+    `order_errors`, which is A76's batting-position-eligibility rule for a DRAFTED
+    twelve and does not apply here (see `historical_sides`'s own docstring)."""
     room, host_id = _make_room(conn, "cup")   # 4 seats, host is the only human
     room = rooms.start_room(conn, room.code, host_id, DECK)
     assert room.status == "drafting"
-    cpu_ids = [pid for pid, p in room.players.items() if p.is_cpu]
-    assert len(cpu_ids) == 3
-
-    room = _play_room_to_completion(conn, room, DECK, [host_id])
-    assert room.status == "complete"
+    filler_ids = [pid for pid, p in room.players.items() if p.is_cpu]
+    assert len(filler_ids) == 3
+    assert room.moves == []
 
     replay = rooms.replay_room(room, DECK)
-    for pid in cpu_ids:
+    fs_ids = set()
+    for pid in filler_ids:
         seat = replay.seats[pid]
         assert seat.done
+        assert seat.historical_name is not None
         assert len(seat.order) == XI_SIZE and all(c is not None for c in seat.order)
-        assert seat.impact is not None
-        twelve = list(seat.order) + [seat.impact]
-        assert order_errors(seat.order, seat.impact, twelve) == []
+        assert viable(seat.order)
+        fs_ids.add(seat.order[0].fs_id)
+    # Distinct franchise-seasons -- historical_sides' own dedup, confirmed at the room
+    # level too, not just trusted from its docstring. Checked by fs_id, not the derived
+    # display name -- this fixture's synthetic cards carry no franchise/season_year, so
+    # every filler's name collapses to the same "None None" string regardless of dedup.
+    assert len(fs_ids) == len(filler_ids)
 
 
-def test_a_cpu_squad_is_reproduced_identically_across_a_reload(conn):
-    """A CPU's twelve is no longer a pure function of (deck, seed) alone under a shared
-    pool -- it depends on the live taken set at the moment its turn arrived, which is
-    why it is now RECORDED in `rooms.moves` rather than recomputed (see web/rooms.py's
-    own module docstring). Two independent loads of a room whose moves are already
-    settled must therefore agree exactly, or a "CPU squad" would be a different lie
-    each time somebody polled."""
+def test_filler_squads_are_reproduced_identically_across_a_reload(conn):
+    """A filler's eleven is a pure function of (room.seed, filler count), independent of
+    `room.moves` entirely -- unlike the old turn-based CPU design, it needs no draft at
+    all to be stable: two independent replays right after `start_room` must already
+    agree, with no picks made by anyone yet."""
     room, host_id = _make_room(conn, "cup")
     room = rooms.start_room(conn, room.code, host_id, DECK)
-    room = _play_room_to_completion(conn, room, DECK, [host_id])
-    assert room.status == "complete"
 
     replay_a = rooms.replay_room(rooms.room_state(conn, room.code, DECK), DECK)
     replay_b = rooms.replay_room(rooms.room_state(conn, room.code, DECK), DECK)
@@ -470,9 +475,54 @@ def test_a_cpu_squad_is_reproduced_identically_across_a_reload(conn):
         if not p.is_cpu:
             continue
         a, b = replay_a.seats[pid], replay_b.seats[pid]
+        assert a.historical_name == b.historical_name
         assert [c.person_id if c else None for c in a.order] == \
             [c.person_id if c else None for c in b.order]
-        assert a.impact.person_id == b.impact.person_id
+        assert (a.impact.person_id if a.impact else None) == \
+            (b.impact.person_id if b.impact else None)
+
+
+def test_a_filler_squad_is_unaffected_by_what_the_humans_draft(conn):
+    """A filler seat's historical assignment reads only `room.seed` and the filler
+    count -- never `room.moves`/the shared `taken` pool -- so drafting all the way to
+    completion must not change which franchise-seasons the fillers ended up with."""
+    room, host_id = _make_room(conn, "cup")
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    filler_ids = [pid for pid, p in room.players.items() if p.is_cpu]
+    before = rooms.replay_room(room, DECK)
+    before_names = {pid: before.seats[pid].historical_name for pid in filler_ids}
+
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
+    after = rooms.replay_room(room, DECK)
+    after_names = {pid: after.seats[pid].historical_name for pid in filler_ids}
+    assert before_names == after_names
+
+
+def test_a_human_may_draft_a_card_also_on_a_fillers_historical_squad(conn):
+    """The whole point of the redesign: a filler's squad never enters the shared `taken`
+    pool, so a human is never blocked from a card just because a filler's real
+    historical eleven happens to include the same player. Checked directly against
+    `eligible` (the exact predicate `replay_room`'s own `_deal_for` uses) rather than by
+    hoping a real draft session happens to deal the filler's own franchise-season by
+    chance -- deterministic, not a coin flip."""
+    room, host_id = _make_room(conn, "final")   # 1 filler seat
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    filler_id = next(pid for pid, p in room.players.items() if p.is_cpu)
+    replay = rooms.replay_room(room, DECK)
+    filler_card = replay.seats[filler_id].order[0]
+    assert filler_card is not None
+
+    # No human move has been made yet, so the shared `taken` set is genuinely empty --
+    # if the filler's own squad were (wrongly) added to it, this call would prove it by
+    # excluding filler_card here.
+    host_seat = replay.seats[host_id]
+    candidates = list(eligible(
+        DECK.cards_by_fs[filler_card.fs_id], set(), frozenset(host_seat.open_slots),
+        host_seat.keeper_have, host_seat.bowl_have, host_seat.overseas_taken,
+        TWELVE_SIZE,
+    ))
+    assert any(c.person_id == filler_card.person_id for c in candidates)
 
 
 # --- play again: resets a finished room back to its own lobby, in place -------------------
@@ -661,25 +711,25 @@ def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch
     )
 
 
-def test_a_cpu_turn_resolves_instantly_without_waiting_for_the_timer(conn, monkeypatch):
+def test_filler_seats_never_take_a_turn(conn, monkeypatch):
+    """Filler seats are never `pending_seat_id`, at any point in a full draft -- there is
+    no CPU-turn-resolution mechanism left to skip waiting for (retires the old
+    `test_a_cpu_turn_resolves_instantly_without_waiting_for_the_timer`, whose whole
+    premise -- a CPU fast-forwarding through its own live turn -- no longer applies)."""
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
 
     room, host_id = _make_room(conn, "cup", timer_seconds=15)
-    room = rooms.start_room(conn, room.code, host_id, DECK)   # 3 CPU seats fill in
+    room = rooms.start_room(conn, room.code, host_id, DECK)   # 3 filler seats fill in
+    filler_ids = {pid for pid, p in room.players.items() if p.is_cpu}
 
     replay = rooms.replay_room(room, DECK)
-    fs_id, candidates = replay.pending_deal
-    seat = replay.seats[host_id]
-    slot = min(candidates[0].slots & seat.open_slots)
-    # No clock advance at all -- the CPU turns after the host's own pick must resolve
-    # purely because submit_pick's own _resolve fast-forwards them, not the timeout.
-    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK)
+    assert replay.pending_seat_id == host_id   # only the human ever gets a turn
 
-    assert len(room.moves) > 1, "the CPU seats after the host must have resolved instantly"
-    assert all(mv["seat"] != host_id for mv in room.moves[1:]) or True  # sanity: no crash
-    replay2 = rooms.replay_room(room, DECK)
-    assert not replay2.stranded
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete"
+    assert all(mv["seat"] not in filler_ids for mv in room.moves)
+    assert len(room.moves) == TWELVE_SIZE   # the lone human's own twelve, nothing more
 
 
 # --- the regression: a stranded turn must fail the room, never crash it -------------------
@@ -853,13 +903,24 @@ def test_the_room_advances_per_turn_not_per_round(conn):
 
 @pytest.mark.parametrize("fmt", ["final", "cup", "league"])
 def test_room_sides_gives_every_seat_a_legal_twelve(conn, fmt):
+    """A drafting (human) seat's twelve is checked against `order_errors` -- the same
+    A76 batting-position-eligibility rule the draft itself enforces. A filler seat's
+    eleven is checked against `viable` instead -- the actual rule its OWN construction
+    (`opposition_xi`/`opposition_order`) is built to satisfy (keeper + 5 bowlers), which
+    deliberately does NOT reason about A76 bands at all (see `historical_sides`'s own
+    docstring) -- `order_errors` is the wrong predicate for a squad that was never built
+    against `card.positions` in the first place."""
     room, host_id = _make_room(conn, fmt, timer_seconds=15)
-    room = rooms.start_room(conn, room.code, host_id, DECK)   # host + CPU-filled rest
+    room = rooms.start_room(conn, room.code, host_id, DECK)   # host + filler-filled rest
     room = _play_room_to_completion(conn, room, DECK, [host_id])
     assert room.status == "complete"
     sides = rooms.room_sides(room, DECK)
     assert len(sides) == rooms.ROOM_FORMATS[fmt]
     for pid, player, order, impact in sides:
         assert len(order) == XI_SIZE
-        twelve = [c for c in order if c] + ([impact] if impact else [])
-        assert order_errors(order, impact, twelve) == [], f"seat {pid} is not a legal twelve"
+        if player.is_cpu:
+            assert viable([c for c in order if c]), f"filler seat {pid} is not viable"
+        else:
+            twelve = [c for c in order if c] + ([impact] if impact else [])
+            assert order_errors(order, impact, twelve) == [], \
+                f"seat {pid} is not a legal twelve"

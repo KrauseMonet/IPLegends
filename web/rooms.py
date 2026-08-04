@@ -60,9 +60,10 @@ from dataclasses import dataclass, field
 from psycopg.types.json import Json
 
 from etl.feasibility import (
-    ALL_SLOTS, IMPACT_SLOT, POLICIES, REDRAW_CAP, TWELVE_SIZE, XI_SIZE, Card, Deck,
+    ALL_SLOTS, IMPACT_SLOT, REDRAW_CAP, TWELVE_SIZE, XI_SIZE, Card, Deck,
     DraftState, eligible, pick_afk,
 )
+from game.season import historical_sides
 from web import session as sess
 
 ROOM_FORMATS = {"final": 2, "cup": 4, "league": 10}
@@ -120,8 +121,12 @@ class Room:
     def round(self) -> int:
         """Which snake wave we're in, for display only -- derived from the shared move
         log, never stored (A19: `len(moves) // seat_count` says the same thing a stored
-        counter would, and a stored one could drift from the log it's supposed to track)."""
-        return len(self.moves) // len(self.players) if self.players else 0
+        counter would, and a stored one could drift from the log it's supposed to track).
+        Divided by the DRAFTING seat count, not every seat -- a filler (`is_cpu`) seat
+        never takes a turn, so counting it here would understate which wave the actual
+        drafters are in."""
+        n = sum(1 for p in self.players.values() if not p.is_cpu)
+        return len(self.moves) // n if n else 0
 
 
 # A room is a short-lived social thing; nothing here schedules a sweep, it just happens
@@ -372,7 +377,11 @@ def turn_seat_index(move_no: int, n_seats: int) -> int:
 class SeatProgress:
     """One seat's own progress, rebuilt fresh on every `replay_room` call -- the per-seat
     half of what used to live entirely in a `web.session.Session`, now interleaved with
-    every other seat's against one shared `taken` set."""
+    every other seat's against one shared `taken` set.
+
+    `historical_name` is set only for a FILLER seat (see `replay_room`'s own comment) --
+    a real franchise-season's display name, assigned once the room starts drafting and
+    never touched again. `None` for every drafting seat."""
 
     order: list = field(default_factory=lambda: [None] * XI_SIZE)
     impact: Card | None = None
@@ -381,6 +390,7 @@ class SeatProgress:
     keeper_have: bool = False
     bowl_have: int = 0
     overseas_taken: int = 0
+    historical_name: str | None = None
 
     @property
     def done(self) -> bool:
@@ -424,16 +434,39 @@ def replay_room(room: Room, deck: Deck) -> RoomReplay:
     one shared `taken` person-id set, and one `SeatProgress` per seat. Replays every
     recorded move in `room.moves` in order, dealing exactly one franchise-season per
     turn (the same deal-time redraw guarantee `run_draft` uses, via `eligible` from
-    `etl.feasibility`, unmodified) against whichever seat's turn it is and the shared
-    `taken` set. After the recorded history, deals the next pending turn the same way,
-    which is what becomes visible (options included, to that seat only) or hidden
+    `etl.feasibility`, unmodified) against whichever DRAFTING seat's turn it is and the
+    shared `taken` set. After the recorded history, deals the next pending turn the same
+    way, which is what becomes visible (options included, to that seat only) or hidden
     (franchise/season only, to everyone else) at the API layer.
+
+    A filler (`is_cpu`) seat never takes a turn at all -- it is handed a real historical
+    franchise-season's algorithmic best eleven the instant the room starts drafting,
+    reusing `game.season.historical_sides` (the exact mechanism solo's own season
+    opposition is built from, A63) rather than drafting from the shared pool. That
+    assignment is a pure function of `(room.seed, how many filler seats there are)`,
+    independent of `room.moves` -- a filler's opposition is no more related to what
+    humans draft than solo's nine opponents are related to the human's own twelve, so it
+    can legally overlap a human's picks and never competes with them for a card.
     """
     seat_ids = list(room.players)
-    n = len(seat_ids)
+    drafting_ids = [pid for pid in seat_ids if not room.players[pid].is_cpu]
+    filler_ids = [pid for pid in seat_ids if room.players[pid].is_cpu]
+    n = len(drafting_ids)
     rng = random.Random(room.seed)
     taken: set[str] = set()
     seats = {pid: SeatProgress() for pid in seat_ids}
+
+    if filler_ids:
+        filler_rng = random.Random(f"{room.seed}-fillers")
+        sides = historical_sides(deck, filler_rng, len(filler_ids))
+        if len(sides) < len(filler_ids):
+            raise RoomError("not enough legal historical squads to fill this room")
+        for pid, side in zip(filler_ids, sides):
+            seat = seats[pid]
+            seat.order = list(side.xi)
+            seat.impact = side.impact
+            seat.picks = list(side.xi) + ([side.impact] if side.impact else [])
+            seat.historical_name = side.name
 
     def _deal_for(pid: str):
         seat = seats[pid]
@@ -450,7 +483,7 @@ def replay_room(room: Room, deck: Deck) -> RoomReplay:
         return None
 
     for move_no, mv in enumerate(room.moves):
-        pid = seat_ids[turn_seat_index(move_no, n)]
+        pid = drafting_ids[turn_seat_index(move_no, n)]
         if mv["seat"] != pid:
             raise sess.InvalidState(
                 f"move {move_no} recorded for {mv['seat']!r}, expected {pid!r}")
@@ -469,7 +502,7 @@ def replay_room(room: Room, deck: Deck) -> RoomReplay:
     if len(room.moves) >= n * TWELVE_SIZE:
         return RoomReplay(seats, complete=True)
 
-    pid = seat_ids[turn_seat_index(len(room.moves), n)]
+    pid = drafting_ids[turn_seat_index(len(room.moves), n)]
     dealt = _deal_for(pid)
     if dealt is None:
         return RoomReplay(seats, complete=False, stranded=True, pending_seat_id=pid)
@@ -494,24 +527,14 @@ def _draft_state(seat: SeatProgress) -> DraftState:
     )
 
 
-def _resolve_cpu_turn(replay: RoomReplay) -> dict:
-    """A CPU's pick, computed exactly once, at the moment its turn arrives -- see this
-    module's own docstring for why that is now a deliberate departure from A19 rather
-    than a recomputable derivation of (deck, seed) alone."""
-    pid = replay.pending_seat_id
-    fs_id, candidates = replay.pending_deal
-    seat = replay.seats[pid]
-    state = _draft_state(seat)
-    card, slot = POLICIES["rational"](candidates, state, random.Random())
-    index = next(i for i, c in enumerate(candidates) if c.person_id == card.person_id)
-    return {"seat": pid, "index": index, "slot": slot}
-
-
 def _resolve(room: Room, deck: Deck) -> None:
-    """Lazily catch the room up to the present: resolve every CPU turn at the front of
-    the queue instantly, and auto-pick (via `pick_afk`) for whoever's turn has actually
-    timed out, before doing anything else. Called at the top of every room route, so no
-    background scheduler is needed (A62).
+    """Lazily catch the room up to the present: auto-pick (via `pick_afk`) for whoever's
+    turn has actually timed out, before doing anything else. Called at the top of every
+    room route, so no background scheduler is needed (A62).
+
+    Filler (`is_cpu`) seats never reach this function at all -- `replay_room` only ever
+    assigns `pending_seat_id` to a drafting seat, since a filler's historical squad is
+    fixed the instant the room starts drafting rather than built turn by turn.
 
     A room can genuinely strand -- the same wildcard-optimism gap A73 documents for the
     solo draft (the forward check is an OPTIMISTIC bound: with one pick left it assumes
@@ -533,11 +556,6 @@ def _resolve(room: Room, deck: Deck) -> None:
             return
 
         pid = replay.pending_seat_id
-        if room.players[pid].is_cpu:
-            room.moves = room.moves + [_resolve_cpu_turn(replay)]
-            room.turn_started_at = time.time()
-            continue
-
         if time.time() - room.turn_started_at <= room.timer_seconds:
             return  # still within this seat's own window
 
@@ -590,9 +608,17 @@ def room_state(conn, code: str, deck: Deck) -> Room:
 
 def room_sides(room: Room, deck: Deck):
     """(player_id, RoomPlayer, order, impact) for every seat, in join order -- the raw
-    material for `game.season.Side`. CPU and human seats are indistinguishable here now
-    -- both are read uniformly off one `replay_room` call, since a CPU's progress is
-    exactly as much a product of the shared move log as a human's."""
+    material for `game.season.Side`. A drafting seat's `RoomPlayer` is returned as
+    stored; a filler seat's is returned with its `.name` overridden to the historical
+    squad's own display name (`SeatProgress.historical_name`, set by `replay_room`) --
+    the one place that override happens, so it shows up correctly everywhere downstream
+    that reads a seat's name: the draft-lobby roster AND the match-phase `Side` naming
+    used in scorecards and results alike."""
     replay = replay_room(room, deck)
-    return [(pid, p, list(replay.seats[pid].order), replay.seats[pid].impact)
-            for pid, p in room.players.items()]
+    out = []
+    for pid, p in room.players.items():
+        seat = replay.seats[pid]
+        display = RoomPlayer(p.player_id, seat.historical_name, p.is_cpu) \
+            if seat.historical_name else p
+        out.append((pid, display, list(seat.order), seat.impact))
+    return out

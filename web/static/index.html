@@ -303,6 +303,19 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
   color:var(--ink)}
 .report .margin{font-size:16.5px;font-style:italic;color:var(--ink-2);margin-top:10px}
 .ledger{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:32px}
+
+/* the room match/result screens: toss/impact/advance panels and the completed-match
+   banners all reuse .report's own centered layout -- just less top padding, since they
+   sit at the top of #roomResult rather than deep in a long page the way solo's own
+   .report usage does -- plus a handful of named layout helpers in place of one-off
+   inline styles, so a later spacing tweak is one line here instead of a hunt through
+   template strings scattered across several JS functions. */
+.report.compact{padding:0 0 20px}
+.room-actions{justify-content:center;padding-top:14px}
+.room-note-wide{margin:16px 0;max-width:none}
+.room-impact-list .fx{cursor:pointer}
+.room-gap{margin-top:16px}
+.room-banner{text-align:center;margin:16px 0}
 .ledger div{padding:18px 10px;border:1px solid var(--line);background:var(--panel);border-radius:10px}
 .ledger b{display:block;font-family:var(--mono);font-size:22px;font-variant-numeric:tabular-nums;
   color:var(--gold);font-weight:700}
@@ -310,6 +323,7 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
   color:var(--ink-3)}
 
 .cards2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:32px}
+.room-table{grid-template-columns:1fr}
 .cards2 > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
   border-radius:10px}
 table{width:100%;border-collapse:collapse;font-size:14px}
@@ -2261,12 +2275,12 @@ function roomPendingHtml(m){
   const p = m.pending;
   if (!p) return '';
   if (p.kind === 'toss'){
-    return `<div class="report" style="padding:0 0 20px">
+    return `<div class="report compact">
       <div class="over-line">${p.stage}</div>
       <div class="call">${p.side_a} v ${p.side_b}</div>
       ${p.you_decide ? `
         <div class="margin">You won the toss.</div>
-        <div class="foot-actions" style="justify-content:center;padding-top:14px">
+        <div class="foot-actions room-actions">
           <button class="act lead" onclick="roomSubmitToss('bat', this)">Bat first</button>
           <button class="act lead" onclick="roomSubmitToss('bowl', this)">Bowl first</button>
         </div>` : `<div class="margin">Waiting for ${p.winner_name} to call the toss…</div>`}
@@ -2279,29 +2293,29 @@ function roomPendingHtml(m){
     const info = `${p.home_name} posted ` +
       `${p.first_innings.runs}/${p.first_innings.wickets} (${p.first_innings.overs} ov). ` +
       `${p.side_name} ${p.discipline === 'bat' ? 'bats' : 'bowls'} next.`;
-    return `<div class="report" style="padding:0 0 20px">
+    return `<div class="report compact">
       <div class="over-line">${p.stage}</div>
       <div class="call">${p.side_name}'s Impact Player</div>
       <div class="margin">${info}</div>
       ${p.you_decide ? `
-        <p class="deck" style="margin:16px 0;max-width:none">Send ${p.side_name}'s Impact Player
-          in for one of these, or decline:</p>
-        <div id="roomImpactXiList">${p.side_xi.map((name, i) => `
-          <div class="fx" onclick="roomSubmitImpact(${i + 1}, this)" style="cursor:pointer">
+        <p class="deck room-note-wide">Send ${p.side_name}'s Impact Player in for one of
+          these, or decline:</p>
+        <div class="room-impact-list">${p.side_xi.map((name, i) => `
+          <div class="fx" onclick="roomSubmitImpact(${i + 1}, this)">
             <span>${name}</span><span class="sc">slot ${i + 1}</span>
           </div>`).join('')}</div>
-        <div class="foot-actions" style="justify-content:center;padding-top:14px">
+        <div class="foot-actions room-actions">
           <button class="act" onclick="roomSubmitImpact(null, this)">Decline -- no substitution</button>
-        </div>` : `<div class="margin" style="margin-top:10px">Waiting for the host to decide…</div>`}
+        </div>` : `<div class="margin">Waiting for the host to decide…</div>`}
       </div>`;
   }
   // 'advance'
   const versus = p.home_name && p.away_name ? `${p.home_name} v ${p.away_name}` : 'the next match';
-  return `<div class="report" style="padding:0 0 20px">
+  return `<div class="report compact">
     <div class="over-line">${p.stage}</div>
     <div class="call">Ready for ${versus}</div>
     ${p.you_decide ? `
-      <div class="foot-actions" style="justify-content:center;padding-top:14px">
+      <div class="foot-actions room-actions">
         <button class="act lead" onclick="roomAdvanceMatch(this)">Continue</button>
       </div>` : `<div class="margin">Waiting for the host to continue…</div>`}
     </div>`;
@@ -2314,7 +2328,7 @@ function showRoomMatch(m){
 
   if (!m.complete){
     el.innerHTML = roomPendingHtml(m) +
-      (resultsHtml ? `<div style="margin-top:16px">${resultsHtml}</div>` : '');
+      (resultsHtml ? `<div class="room-gap">${resultsHtml}</div>` : '');
     return;
   }
 
@@ -2323,11 +2337,11 @@ function showRoomMatch(m){
 
   if (m.format === 'final'){
     const res = m.results[0].result;
-    el.innerHTML = `<div class="report" style="padding:0 0 20px">
+    el.innerHTML = `<div class="report compact">
       <div class="call ${res.winner ? 'won' : ''}">${res.winner ? res.winner + ' win' : 'Tied'}</div>
       <div class="figures">${res.home_score} · ${res.away_score}</div>
       <div class="margin">${res.margin}</div>
-      <div style="margin-top:14px">
+      <div class="foot-actions room-actions">
         <button class="act" onclick="showRoomScorecard(0)">Scorecard</button>
         ${journeyBtn}
       </div></div>`;
@@ -2335,14 +2349,15 @@ function showRoomMatch(m){
   }
 
   if (m.format === 'cup'){
-    el.innerHTML = `<div style="padding:0 0 20px">
-      <div class="call won" style="text-align:center;margin-bottom:16px">${m.champion} win the cup</div>
+    el.innerHTML = `<div class="report compact">
+      <div class="call won room-banner">${m.champion} win the cup</div>
+      </div>
       ${resultsHtml}
-      <div style="margin-top:16px;text-align:center">${journeyBtn}</div></div>`;
+      <div class="foot-actions room-actions">${journeyBtn}</div>`;
     return;
   }
 
-  el.innerHTML = `<div class="cards2" style="grid-template-columns:1fr">
+  el.innerHTML = `<div class="cards2 room-table">
     <div><table>
       <tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
           <th class="n">Pts</th><th class="n">NRR</th></tr>
@@ -2351,9 +2366,9 @@ function showRoomMatch(m){
         <td class="n">${row.won}</td><td class="n">${row.lost}</td>
         <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
     </table></div></div>
-    <div style="margin-top:16px">${resultsHtml}</div>
-    <div class="call won" style="text-align:center;margin-top:20px">${m.champion} win the league</div>
-    <div style="margin-top:16px;text-align:center">${journeyBtn}</div>`;
+    <div class="room-gap">${resultsHtml}</div>
+    <div class="report compact"><div class="call won room-banner">${m.champion} win the league</div></div>
+    <div class="foot-actions room-actions">${journeyBtn}</div>`;
 }
 
 function showRoomJourneyCard(){

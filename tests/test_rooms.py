@@ -75,6 +75,11 @@ class FakeConn:
                 seat_order, player_id, name, is_cpu)
             return FakeCursor([])
 
+        if sql_norm.startswith("delete from room_players"):
+            code, player_id = params
+            self.players.get(code, {}).pop(player_id, None)
+            return FakeCursor([])
+
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
              turn_started_at, failure_reason, moves, match_moves, draft_mode) = params
@@ -267,6 +272,88 @@ def test_join_room_refuses_once_the_draft_has_started(conn):
     rooms.start_room(conn, room.code, host_id, DECK)
     with pytest.raises(rooms.RoomError):
         rooms.join_room(conn, room.code, "Carol", DECK)
+
+
+# --- leave: a lobby seat is actually freed, not just abandoned client-side --------------
+
+def test_leave_room_frees_the_seat_for_a_real_rejoin(conn):
+    """The bug this closes: without a real removal, a player who left and rejoined
+    under the same room code got a second, duplicate seat rather than reclaiming their
+    first one, as long as the room wasn't already full."""
+    room, host_id = _make_room(conn, "cup")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room2 = rooms.leave_room(conn, room.code, bob_id)
+    assert bob_id not in room2.players
+    assert len(room2.players) == 1
+
+    room3, bob_id_2 = rooms.join_room(conn, room.code, "Bob", DECK)
+    assert bob_id_2 != bob_id
+    assert len(room3.players) == 2
+    assert sum(1 for p in room3.players.values() if p.name == "Bob") == 1
+
+
+def test_leave_room_refuses_the_host(conn):
+    room, host_id = _make_room(conn, "final")
+    rooms.join_room(conn, room.code, "Bob", DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.leave_room(conn, room.code, host_id)
+
+
+def test_leave_room_refuses_a_seat_not_in_the_room(conn):
+    room, host_id = _make_room(conn, "final")
+    with pytest.raises(rooms.RoomError):
+        rooms.leave_room(conn, room.code, "not-a-real-seat")
+
+
+def test_leave_room_refuses_once_the_draft_has_started(conn):
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    rooms.start_room(conn, room.code, host_id, DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.leave_room(conn, room.code, bob_id)
+
+
+# --- kick: the host's mirror of leave, against someone ELSE's seat ----------------------
+
+def test_kick_player_frees_the_seat_for_a_real_rejoin(conn):
+    room, host_id = _make_room(conn, "cup")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room2 = rooms.kick_player(conn, room.code, host_id, bob_id)
+    assert bob_id not in room2.players
+    assert len(room2.players) == 1
+
+    room3, bob_id_2 = rooms.join_room(conn, room.code, "Bob", DECK)
+    assert bob_id_2 != bob_id
+    assert len(room3.players) == 2
+
+
+def test_kick_player_is_host_only(conn):
+    room, host_id = _make_room(conn, "cup")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    _, carol_id = rooms.join_room(conn, room.code, "Carol", DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.kick_player(conn, room.code, bob_id, carol_id)
+
+
+def test_kick_player_refuses_the_host_as_a_target(conn):
+    room, host_id = _make_room(conn, "final")
+    rooms.join_room(conn, room.code, "Bob", DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.kick_player(conn, room.code, host_id, host_id)
+
+
+def test_kick_player_refuses_a_seat_not_in_the_room(conn):
+    room, host_id = _make_room(conn, "final")
+    with pytest.raises(rooms.RoomError):
+        rooms.kick_player(conn, room.code, host_id, "not-a-real-seat")
+
+
+def test_kick_player_refuses_once_the_draft_has_started(conn):
+    room, host_id = _make_room(conn, "final")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    rooms.start_room(conn, room.code, host_id, DECK)
+    with pytest.raises(rooms.RoomError):
+        rooms.kick_player(conn, room.code, host_id, bob_id)
 
 
 # --- turn order: the snake, tested in isolation ------------------------------------------

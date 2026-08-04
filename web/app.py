@@ -360,6 +360,11 @@ class HostActionIn(BaseModel):
     player_id: str
 
 
+class KickPlayerIn(BaseModel):
+    player_id: str = Field(description="the HOST's own id, for authorisation")
+    target_id: str = Field(description="the seat to remove")
+
+
 class RoomPickIn(BaseModel):
     player_id: str
     index: int = Field(ge=0, description="an index into THIS seat's own current deal")
@@ -986,6 +991,32 @@ def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
         return CreatedRoomOut(
             player_id=player_id,
             room=_room_state_out(room, STATE["deck"], caller_id=player_id))
+
+
+@app.post("/api/rooms/{code}/leave", response_model=RoomStateOut)
+def leave_room(code: str, body: HostActionIn) -> RoomStateOut:
+    """A non-host seat leaving the LOBBY frees it for real -- see `rooms.leave_room`'s
+    own docstring for why this is a real seat removal, not just the caller going home.
+    Refused once drafting has started, and refused for the host (nobody to hand the
+    room off to)."""
+    with _room_db() as conn:
+        try:
+            room = rooms.leave_room(conn, code, body.player_id)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+@app.post("/api/rooms/{code}/kick", response_model=RoomStateOut)
+def kick_room_player(code: str, body: KickPlayerIn) -> RoomStateOut:
+    """The host's mirror of `/leave` -- see `rooms.kick_player`'s own docstring. Same
+    scope: lobby only, and the host itself can never be the target."""
+    with _room_db() as conn:
+        try:
+            room = rooms.kick_player(conn, code, body.player_id, body.target_id)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 @app.post("/api/rooms/{code}/start", response_model=RoomStateOut)

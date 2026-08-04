@@ -234,6 +234,55 @@ def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
     return room, player_id
 
 
+def _remove_seat(conn, room: Room, code: str, target_id: str) -> None:
+    """The one place a seat actually leaves `room_players` -- `_save_room`'s own write
+    there is insert-or-do-nothing (never an update, never a delete), so removing an
+    entry from `room.players` in memory and calling `_save_room` would never touch the
+    corresponding row. Shared by `leave_room` and `kick_player`, which differ only in
+    WHO is allowed to invoke it against WHOM, not in what removal itself does."""
+    del room.players[target_id]
+    conn.execute("delete from room_players where room_code = %s and player_id = %s",
+                 (code, target_id))
+
+
+def leave_room(conn, code: str, player_id: str) -> Room:
+    """A non-host seat leaving the LOBBY is actually freed here, not just abandoned
+    client-side. Without this, a seat lingered forever, and rejoining under the same
+    code added a brand new player_id alongside the ghost rather than reclaiming it --
+    the duplicate-seat bug this closes. Scoped to the lobby only: once drafting starts,
+    seats are a fixed count the snake turn order and move log are keyed to (A73), and an
+    inactive human's turn already times out into an auto-pick -- there is no seat to
+    free."""
+    room = _load_room(conn, code)
+    if room.status != "lobby":
+        raise RoomError("a seat can only be freed while the room is still in its lobby")
+    if player_id == room.host_id:
+        raise RoomError("the host can't leave -- there's no one to hand the room off to")
+    if player_id not in room.players:
+        raise RoomError("you are not seated in this room")
+    _remove_seat(conn, room, code, player_id)
+    return room
+
+
+def kick_player(conn, code: str, host_id: str, target_id: str) -> Room:
+    """The host's mirror of `leave_room` -- the same removal, invoked against someone
+    else's seat rather than the caller's own, for a seat that needs freeing by someone
+    ELSE's decision (AFK, wrong lobby, whatever) rather than its own occupant's. Same
+    scope as `leave_room`: lobby only, and the host itself can never be the target
+    (nobody to hand the room off to)."""
+    room = _load_room(conn, code)
+    if host_id != room.host_id:
+        raise RoomError("only the host can remove another seat")
+    if room.status != "lobby":
+        raise RoomError("a seat can only be removed while the room is still in its lobby")
+    if target_id == room.host_id:
+        raise RoomError("the host can't be removed")
+    if target_id not in room.players:
+        raise RoomError("that seat is not in this room")
+    _remove_seat(conn, room, code, target_id)
+    return room
+
+
 def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
     """Host-only. Fills every seat still empty with a CPU seat and starts the first
     turn's clock. Unlike the old per-seat-independent design, a CPU's twelve can no

@@ -956,6 +956,18 @@ function go(id){
     // own: effectiveDraftMode() keys off ROOM_CODE's truthiness, and a stale non-null
     // ROOM_CODE makes it look like a room is still active when none is.
     if (ROOM_POLL) clearInterval(ROOM_POLL);
+    // A non-host seat still sitting in a room's LOBBY is freed server-side too --
+    // there is no "same person" concept to dedupe by, only distinct player_ids, so a
+    // seat left lingering forever gets duplicated rather than reclaimed the next time
+    // its owner joins with the same room code. Fire-and-forget: the room is being
+    // abandoned regardless of whether this particular call succeeds. Mid-draft or
+    // later, leaving stays client-only -- a fixed snake turn order can't shrink a seat
+    // out from under it, and the existing per-turn timer already covers an inactive
+    // human (rooms.leave_room refuses outside the lobby anyway).
+    if (ROOM_CODE && ROOM && ROOM.status === 'lobby' && MY_PID !== ROOM.host_id){
+      api(`/api/rooms/${ROOM_CODE}/leave`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID})}).catch(() => {});
+    }
     ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
   }
   window.scrollTo(0,0);
@@ -2171,11 +2183,29 @@ function renderRoomLobby(r){
   $('#lobbyFormat').textContent = r.format.toUpperCase();
   $('#lobbyTimer').textContent = r.timer_seconds + 's per pick';
   $('#lobbyMode').textContent = r.draft_mode === 'memory' ? 'Memory' : 'Stat';
-  $('#lobbyPlayers').innerHTML = r.players.map(p => `
-    <div class="entry"><span class="nm">${p.name}${p.player_id === r.host_id
-      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}</span></div>`
-  ).join('');
-  $('#lobbyStartBtn').classList.toggle('hide', MY_PID !== r.host_id);
+  const amHost = MY_PID === r.host_id;
+  $('#lobbyPlayers').innerHTML = r.players.map(p => {
+    const isHost = p.player_id === r.host_id;
+    // Only the host sees this, and never against their own seat -- rooms.kick_player
+    // refuses both cases too, this just keeps the button from ever being offered.
+    const kickBtn = (amHost && !isHost)
+      ? `<span class="picks"><button class="act" onclick="kickRoomPlayer('${p.player_id}', this)"
+           >Kick</button></span>` : '';
+    return `<div class="entry"><span class="nm">${p.name}${isHost
+      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}</span>${kickBtn}</div>`;
+  }).join('');
+  $('#lobbyStartBtn').classList.toggle('hide', !amHost);
+}
+
+async function kickRoomPlayer(targetId, ctrl){
+  await busyClick(ctrl, 'Kicking…', async () => {
+    try {
+      ROOM = await api(`/api/rooms/${ROOM_CODE}/kick`, {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, target_id: targetId})});
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
 }
 
 let LAST_ROOM_DEAL_FS = null;   // fs_id last shown in the room's deal card -- shared by

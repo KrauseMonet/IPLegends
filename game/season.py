@@ -689,43 +689,32 @@ class _OpenMatchNeedsToss(Exception):
         self.winner = winner
 
 
-class _OpenMatchNeedsImpact(Exception):
-    """Raised from `play_open` at the break when a side's own Impact decision has no move
-    available yet. `side` is whoever the decision belongs to; `opponent` and `discipline`
-    are exactly what `decide_impact` itself would need to resolve it live."""
-
-    def __init__(self, side: Side, opponent: Side, discipline: str, first: Innings):
-        self.side = side
-        self.opponent = opponent
-        self.discipline = discipline
-        self.first = first
-
-
 def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
                stage: str = "league", moves=None,
                stats: JourneyAccumulator | None = None,
                track: Side | None = None) -> Result:
-    """One match between two PEER sides, where EITHER can win the toss and EITHER can
-    have a break-time Impact decision to make -- unlike `play()` (fully automatic, no
-    toss at all) and `_play_human_match` (one FIXED tracked human, a real toss, and a
-    break-time choice restricted to that one side's own second innings). Built for rooms,
-    where more than one seat at the table can be a real human and there is no single
-    "the human" role to special-case around.
+    """One match between two PEER sides, where EITHER can win the toss -- unlike `play()`
+    (fully automatic, no toss at all) and `_play_human_match` (one FIXED tracked human and
+    a real toss). Built for rooms, where more than one seat at the table can be a real
+    human and there is no single "the human" role to special-case around.
 
-    `moves` exposes two methods, the same shape as `_next_toss`/`_next_impact` generalised
-    to not assume a fixed side: `next_toss(winner: Side) -> str | None` (the WINNER's own
-    call, "bat" or "bowl"; `None` pauses via `_OpenMatchNeedsToss`) and
-    `next_impact(side: Side) -> ImpactPick | None` (whoever the break-time decision
-    belongs to; `None` pauses via `_OpenMatchNeedsImpact`). `moves=None` behaves exactly
-    like every other automatic move source in this module: `TOSS_DEFAULT_ELECTS` for the
-    toss, decline (falling back to `decide_impact`) for Impact.
+    `moves` exposes one method, the same shape as `_next_toss` generalised to not assume a
+    fixed side: `next_toss(winner: Side) -> str | None` (the WINNER's own call, "bat" or
+    "bowl"; `None` pauses via `_OpenMatchNeedsToss`). `moves=None` behaves exactly like
+    every other automatic move source in this module: `TOSS_DEFAULT_ELECTS` for the toss.
 
-    WHO is allowed to actually answer `next_toss`/`next_impact` -- the toss winner's own
-    seat and nobody else's for the toss, the room's host and nobody else's for every
-    Impact decision regardless of whose side it is -- is entirely the caller's concern,
-    enforced by whatever `moves` object it passes in. `play_open` itself has no concept of
-    a player_id and does not need one: it only ever asks "whose decision is this" via the
-    `Side` identity carried on each pause exception.
+    The break-time Impact decision, for EITHER side, always goes straight to
+    `decide_impact` -- A78's own algorithm, trusted rather than routed to a human as a
+    manual override (rooms used to let the host pick a slot for either side; that
+    capability is gone, not merely hidden, since it was never a meaningful choice for
+    whoever wasn't the host's own team). `play()` already worked this way; `play_open`
+    now matches it, and only the toss remains a live decision.
+
+    WHO is allowed to actually answer `next_toss` -- the toss winner's own seat and
+    nobody else's -- is entirely the caller's concern, enforced by whatever `moves`
+    object it passes in. `play_open` itself has no concept of a player_id and does not
+    need one: it only ever asks "whose decision is this" via the `Side` identity carried
+    on the pause exception.
 
     A real toss is drawn here (`rng.random() < 0.5` decides which of the two SIDES wins
     it, not which of two fixed roles) -- `toss()` above is left exactly as it is, written
@@ -760,19 +749,8 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
     def _decide(side: Side, opponent: Side, discipline: str, forced: bool) -> Card | None:
         if side.impact is None or forced:
             return None
-        if moves is None:
-            pick = ImpactPick(None)
-        else:
-            pick = moves.next_impact(side)
-            if pick is None:
-                raise _OpenMatchNeedsImpact(side, opponent, discipline, first)
-        if pick.slot is not None:
-            return side.xi[pick.slot - 1]
         return decide_impact(side, opponent, discipline, first)
 
-    # Home's "bowl" decision is asked before away's "bat" one -- arbitrary, but fixed and
-    # documented, since both draw from the same flat, positional move log and the order
-    # decides which one a caller sees pause first when both are genuinely pending.
     home_target = _decide(home, away, "bowl", forced=False)
     away_target = _decide(away, home, "bat", forced=away_forced)
 

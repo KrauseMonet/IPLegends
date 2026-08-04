@@ -4,9 +4,12 @@ directly here since the two phases share the same `rooms` table and locking cont
 second hand-copied FakeConn would just be a second place for that SQL shape to drift.
 
 Confirmed with the user, and what these tests are actually pinning: the TOSS WINNER
-calls bat/bowl for their own side and nobody else's; the HOST decides every Impact
-Player choice regardless of whose side it is; and only the HOST advances from one
-match's result to the next.
+calls bat/bowl for their own side and nobody else's; Impact Player substitutions are
+always automatic (`game.season.decide_impact`, no host choice at all any more); only
+the HOST advances a ROUND to the next; independent fixtures within one round (a cup's
+two semis, a league's Qualifier 1 + Eliminator) resolve in parallel, not one at a time;
+and a player's own journey stats are available the moment THEIR tournament ends, not
+only once the whole room finishes.
 """
 
 from __future__ import annotations
@@ -20,8 +23,8 @@ from tests.test_rooms import _make_room, _play_room_to_completion, conn, deck_of
 
 def _model() -> Model:
     """A real `Model`, `.state()` overridden to a fixed distribution -- these tests are
-    about the toss/Impact/advance bookkeeping around a room's matches, not the state
-    grid itself, mirroring `tests/test_season.py`'s own `_model()`."""
+    about the toss/advance/elimination bookkeeping around a room's matches, not the
+    state grid itself, mirroring `tests/test_season.py`'s own `_model()`."""
     m = Model(dist={}, faced={}, outs={}, grid=None, costs=None,
               wide_rate=0.0, wide_runs=1.0, extras_rate=0.0,
               unrated_bat={}, season_mean={})
@@ -47,6 +50,17 @@ def _pinned_seed(monkeypatch):
     monkeypatch.setattr(rooms.sess, "new_seed", lambda *a, **k: 1)
 
 
+def _find_pending_toss(replay):
+    """`(stage, winner_pid)` for the FIRST fixture in `current_round` still pending its
+    own toss, or `None` if nothing is -- the round-based replacement for the old
+    `pending_kind == "toss"` scalar. Several fixtures can be independently pending at
+    once; callers that need to drain a whole round call this repeatedly."""
+    for fs in (replay.current_round or []):
+        if fs.result is None:
+            return fs.stage, fs.pending_toss_winner_pid
+    return None
+
+
 def _complete_final_room(conn) -> tuple[rooms.Room, str, str]:
     """A two-seat 'final' room, both seats human, drafted to completion."""
     room, host_id = _make_room(conn, "final")
@@ -59,89 +73,72 @@ def _complete_final_room(conn) -> tuple[rooms.Room, str, str]:
 
 def _find_toss_winner(conn, room, host_id, guest_id):
     """Both seats are human, so whichever wins the toss must be asked -- returns
-    (winner_pid, loser_pid, replay) once the room actually pauses on a toss."""
+    (stage, winner_pid, loser_pid, replay) once the room actually has a toss pending."""
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert replay.pending_kind == "toss"
-    winner = replay.pending_toss_winner_pid
+    pending = _find_pending_toss(replay)
+    assert pending is not None
+    stage, winner = pending
     loser = guest_id if winner == host_id else host_id
-    return winner, loser, replay
+    return stage, winner, loser, replay
 
 
 # --- authorisation: the toss winner, and only the toss winner ---------------------------
 
 def test_only_the_toss_winner_may_call_it(conn):
     room, host_id, guest_id = _complete_final_room(conn)
-    winner, loser, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    stage, winner, loser, _ = _find_toss_winner(conn, room, host_id, guest_id)
     with pytest.raises(rooms.RoomError):
-        room_match.submit_toss(conn, room.code, loser, "bat", DECK, MODEL)
+        room_match.submit_toss(conn, room.code, loser, stage, "bat", DECK, MODEL)
 
 
 def test_the_toss_winner_can_call_it(conn):
     room, host_id, guest_id = _complete_final_room(conn)
-    winner, loser, _ = _find_toss_winner(conn, room, host_id, guest_id)
-    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
+    stage, winner, loser, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert replay.pending_kind != "toss"
+    assert _find_pending_toss(replay) is None
 
 
 def test_an_invalid_elect_is_refused(conn):
     room, host_id, guest_id = _complete_final_room(conn)
-    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
     with pytest.raises(rooms.RoomError):
-        room_match.submit_toss(conn, room.code, winner, "sideways", DECK, MODEL)
+        room_match.submit_toss(conn, room.code, winner, stage, "sideways", DECK, MODEL)
 
 
 def test_no_toss_is_pending_once_it_has_already_been_answered(conn):
     room, host_id, guest_id = _complete_final_room(conn)
-    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
-    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
     with pytest.raises(rooms.RoomError):
-        room_match.submit_toss(conn, room.code, winner, "bowl", DECK, MODEL)
+        room_match.submit_toss(conn, room.code, winner, stage, "bowl", DECK, MODEL)
 
 
-# --- authorisation: the host, and only the host, for Impact and for advancing -----------
-
-def _reach_impact_or_complete(conn, room, host_id, guest_id):
-    """Answers the toss (whoever actually wins it) and returns the replay -- either
-    paused on 'impact' or already complete, since a 'final' room's one match has
-    nothing to advance past."""
-    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
-    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
-    return room_match.room_match_state(conn, room.code, DECK, MODEL)
-
-
-def test_impact_is_refused_to_anyone_but_the_host(conn):
+def test_a_toss_move_tagged_to_a_different_stage_never_resolves_this_one(conn):
+    """Moves are looked up by their own `"stage"` tag, not by position -- a toss move
+    present for some OTHER fixture's name must never satisfy this one. This is the
+    mechanism that lets two fixtures in the same round be answered in either order."""
     room, host_id, guest_id = _complete_final_room(conn)
-    _, replay = _reach_impact_or_complete(conn, room, host_id, guest_id)
-    if replay.pending_kind != "impact":
-        pytest.skip("this seed's drafted sides had no Impact decision to make")
-    with pytest.raises(rooms.RoomError):
-        room_match.submit_impact(conn, room.code, guest_id, None, DECK, MODEL)
+    room = rooms._load_room(conn, room.code)
+    room.match_moves = [{"kind": "toss", "stage": "Not This One", "elects": "bat"}]
+    rooms._save_room(conn, room)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert not replay.complete
+    assert _find_pending_toss(replay) is not None
 
 
-def test_the_host_may_decide_impact(conn):
-    """Both sides can carry an Impact Player, so up to TWO 'impact' decisions can be
-    pending across a single match (home's, then away's) -- submitting one must always
-    make PROGRESS (the log grows), even if a second one still follows."""
+def test_impact_resolves_automatically_with_no_move_at_all(conn):
+    """Once the toss is answered there is nothing left to ask for either side -- Impact
+    Player substitutions go straight to `decide_impact`, so the match runs straight
+    through to completion in the same call."""
     room, host_id, guest_id = _complete_final_room(conn)
-    _, replay = _reach_impact_or_complete(conn, room, host_id, guest_id)
-    if replay.pending_kind != "impact":
-        pytest.skip("this seed's drafted sides had no Impact decision to make")
-    before = len(room_match.room_match_state(conn, room.code, DECK, MODEL)[0].match_moves)
-    room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-    after_room, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert len(after_room.match_moves) == before + 1
-    while replay2.pending_kind == "impact":
-        room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-        _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert replay2.pending_kind != "impact"
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete
 
 
-def test_impact_is_refused_when_none_is_pending(conn):
-    room, host_id, guest_id = _complete_final_room(conn)
-    with pytest.raises(rooms.RoomError):
-        room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-
+# --- authorisation: the host, and only the host, advances a round -----------------------
 
 def _make_room_and_complete_cup(conn):
     room, host_id = _make_room(conn, "cup")
@@ -156,21 +153,18 @@ def _make_room_and_complete_cup(conn):
 
 
 def _drain_to_advance_or_complete(conn, room, host_id):
-    """Answers whatever is pending -- toss to its winner (host or not), Impact to the
-    host -- until the room pauses on 'advance' or completes outright. Every seat in
-    `_make_room_and_complete_cup` is human, so a toss can genuinely land on any of
-    them, which is exactly the scenario `test_advance_is_refused_to_anyone_but_the_host`
-    needs: the pause this function stops on is never itself the host's own toss win,
-    it is the FIRST 'advance' gate after Semi-final 1."""
+    """Answers every toss pending in the CURRENT round -- there can be more than one
+    open at once -- until the round is fully resolved (`advance_ready`) or the room
+    completes outright."""
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     guard = 0
-    while replay.pending_kind not in ("advance", None) and guard < 50:
+    while not replay.complete and not replay.advance_ready and guard < 50:
         guard += 1
-        if replay.pending_kind == "toss":
-            room_match.submit_toss(conn, room.code, replay.pending_toss_winner_pid,
-                                    "bat", DECK, MODEL)
-        elif replay.pending_kind == "impact":
-            room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
+        pending = _find_pending_toss(replay)
+        if pending is None:
+            raise AssertionError(f"nothing pending but not advance_ready/complete: {replay}")
+        stage, winner_pid = pending
+        room_match.submit_toss(conn, room.code, winner_pid, stage, "bat", DECK, MODEL)
         _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     return replay
 
@@ -178,8 +172,8 @@ def _drain_to_advance_or_complete(conn, room, host_id):
 def test_advance_is_refused_to_anyone_but_the_host(conn):
     room, host_id, seat_ids = _make_room_and_complete_cup(conn)
     replay = _drain_to_advance_or_complete(conn, room, host_id)
-    if replay.pending_kind != "advance":
-        pytest.skip("this seed's cup finished (or paused again) before reaching a gate")
+    if not replay.advance_ready:
+        pytest.skip("this seed's cup finished before reaching a gate")
     non_host = next(pid for pid in seat_ids if pid != host_id)
     with pytest.raises(rooms.RoomError):
         room_match.advance_match(conn, room.code, non_host, DECK, MODEL)
@@ -188,11 +182,11 @@ def test_advance_is_refused_to_anyone_but_the_host(conn):
 def test_the_host_may_advance(conn):
     room, host_id, seat_ids = _make_room_and_complete_cup(conn)
     replay = _drain_to_advance_or_complete(conn, room, host_id)
-    if replay.pending_kind != "advance":
-        pytest.skip("this seed's cup finished (or paused again) before reaching a gate")
+    if not replay.advance_ready:
+        pytest.skip("this seed's cup finished before reaching a gate")
     room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
     _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert replay2.pending_kind != "advance"
+    assert not replay2.advance_ready or replay2.round_label != replay.round_label
 
 
 def test_advance_is_refused_when_none_is_pending(conn):
@@ -201,16 +195,42 @@ def test_advance_is_refused_when_none_is_pending(conn):
         room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
 
 
+# --- the defining behaviour: independent fixtures resolve in parallel -------------------
+
+def test_two_fixtures_in_the_same_round_resolve_independently_in_either_order(conn):
+    """Answering Semi-final 2's toss first must not require Semi-final 1's to already
+    be answered, and Semi-final 1 must still be independently answerable afterwards --
+    this is what "flows in parallel" actually means, mechanically."""
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.round_label == "Semi-finals"
+    semi1 = next(fs for fs in replay.current_round if fs.stage == "Semi-final 1")
+    semi2 = next(fs for fs in replay.current_round if fs.stage == "Semi-final 2")
+    assert semi1.result is None and semi2.result is None, \
+        "all four seats are human here, so both semis must open on a genuine toss"
+
+    room_match.submit_toss(conn, room.code, semi2.pending_toss_winner_pid,
+                            "Semi-final 2", "bat", DECK, MODEL)
+    _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    semi1_after = next(fs for fs in replay2.current_round if fs.stage == "Semi-final 1")
+    semi2_after = next(fs for fs in replay2.current_round if fs.stage == "Semi-final 2")
+    assert semi1_after.result is None, "Semi-final 1 must still be independently pending"
+    assert semi1_after.pending_toss_winner_pid == semi1.pending_toss_winner_pid
+    assert semi2_after.result is not None, "Semi-final 2 must have resolved on its own"
+
+    room_match.submit_toss(conn, room.code, semi1_after.pending_toss_winner_pid,
+                            "Semi-final 1", "bat", DECK, MODEL)
+    _, replay3 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert all(fs.result is not None for fs in replay3.current_round)
+
+
 # --- the replay itself: results accumulate, and completion is real --------------------
 
 def test_a_final_room_completes_once_the_toss_is_answered(conn):
     room, host_id, guest_id = _complete_final_room(conn)
-    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
-    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    while replay.pending_kind == "impact":
-        room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay.complete
     assert len(replay.results) == 1
 
@@ -219,31 +239,38 @@ def test_replaying_the_same_room_twice_reconstructs_identically(conn):
     room, host_id, guest_id = _complete_final_room(conn)
     _, a = room_match.room_match_state(conn, room.code, DECK, MODEL)
     _, b = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    assert a.pending_kind == b.pending_kind
-    assert a.pending_toss_winner_pid == b.pending_toss_winner_pid
+    assert a.round_label == b.round_label
+    assert _find_pending_toss(a) == _find_pending_toss(b)
 
 
 def _drive_room_to_completion(conn, room, host_id):
     """Answers whatever is pending, one decision at a time, until the whole match phase
-    completes -- toss to its actual winner, Impact and advance to the host. A guard
-    generous enough for a ten-seat league (70 league fixtures + up to 4 playoff ones,
-    each contributing at most a toss, up to two Impact decisions and an advance)."""
+    completes -- a toss to its actual winner, or an advance to the host once a round is
+    fully resolved. A guard generous enough for a ten-seat league (70 league fixtures +
+    up to 4 playoff ones, each contributing at most a toss)."""
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     guard = 0
     while not replay.complete and guard < 1000:
         guard += 1
-        if replay.pending_kind == "toss":
-            room_match.submit_toss(conn, room.code, replay.pending_toss_winner_pid,
-                                    "bat", DECK, MODEL)
-        elif replay.pending_kind == "impact":
-            room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-        elif replay.pending_kind == "advance":
+        pending = _find_pending_toss(replay)
+        if pending is not None:
+            stage, winner_pid = pending
+            room_match.submit_toss(conn, room.code, winner_pid, stage, "bat", DECK, MODEL)
+        elif replay.advance_ready:
             room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
         else:
-            raise AssertionError(f"not complete but nothing pending: {replay}")
+            raise AssertionError(f"not complete but nothing pending/advance_ready: {replay}")
         _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay.complete, f"did not complete within {guard} steps"
     return replay
+
+
+def _make_and_complete_league(conn):
+    room, host_id = _make_room(conn, "league")
+    room = rooms.start_room(conn, room.code, host_id, DECK)   # host + 9 CPU
+    room = _play_room_to_completion(conn, room, DECK, [host_id])
+    assert room.status == "complete", room.failure_reason
+    return room, host_id
 
 
 def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(conn):
@@ -251,9 +278,9 @@ def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(co
     round-robin plays NON-interactively (see room_match.py's own comment on why: it is
     a measured architectural ceiling, not a style choice), so this is the ONE call that
     matters for proving it -- seventy fixtures resolve in a single `replay_room_matches`
-    call, with a well-formed table and the dynamically-built Qualifier 1 already
-    pending. Finishing the four playoff matches too (each interactive, each re-
-    replaying the whole round-robin from scratch per A62) is NOT done here: it would
+    call, with a well-formed table and both playoff fixtures ready to build the instant
+    the host advances. Finishing the four playoff matches too (each interactive, each
+    re-replaying the whole round-robin from scratch per A62) is NOT done here: it would
     only re-prove what the 'cup' tests already cover in isolation, at real extra cost
     for no new coverage."""
     room, host_id = _make_room(conn, "league")
@@ -268,38 +295,104 @@ def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(co
     assert all(e.stage == "league" for e in replay.results)
     assert replay.table is not None and len(replay.table) == 10
     assert sum(row.standing.played for row in replay.table) == 70 * 2
-    # The round-robin -> playoffs transition is the one host-paced gate in this format
-    # (see room_match.py's own comment); Qualifier 1's fixture is only built AFTER the
-    # host advances past it, so what should be pending here is that gate itself.
-    assert replay.pending_kind == "advance"
-    assert replay.pending_stage == "league"
+    # The round-robin has nothing interactive in it, so current_round is empty while
+    # the one host-paced gate before the playoffs open sits waiting.
+    assert replay.round_label == "League"
+    assert replay.current_round == []
+    assert replay.advance_ready
 
     room2 = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
     _, replay2 = room_match.room_match_state(conn, room2.code, DECK, MODEL)
-    assert replay2.pending_stage == "Qualifier 1"
+    assert replay2.round_label == "Qualifiers"
+    stages = {fs.stage for fs in replay2.current_round}
+    assert stages == {"Qualifier 1", "Eliminator"}
+    q1 = next(fs for fs in replay2.current_round if fs.stage == "Qualifier 1")
     first, second = replay.table[0].pid, replay.table[1].pid
-    assert {replay2.pending_a_pid, replay2.pending_b_pid} == {first, second}
+    assert {q1.a_pid, q1.b_pid} == {first, second}
 
 
-def test_a_wrong_kind_of_move_at_the_current_position_is_rejected(conn):
+# --- elimination: who's out, and exactly when -------------------------------------------
+
+def test_the_non_top_four_are_eliminated_the_instant_the_table_settles(conn):
+    """All six non-playoff seats know their tournament is over the moment the
+    round-robin resolves -- well before the host has even advanced past it, let alone
+    before any playoff match is played."""
+    room, host_id = _make_and_complete_league(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.round_label == "League"
+    assert not replay.complete
+    bottom_six = {row.pid for row in replay.table[4:]}
+    assert replay.eliminated_pids == bottom_six
+
+
+def test_the_eliminator_loser_is_out_but_qualifier_one_loser_is_not(conn):
+    """The real IPL asymmetry: an Eliminator loss is immediate elimination, but a
+    Qualifier 1 loss earns a second life via Qualifier 2 -- reproduced here from
+    `game.season.run_playoffs`'s own adjacency, not a new bracket design."""
+    room, host_id = _make_and_complete_league(conn)
+    room = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+    replay = _drain_to_advance_or_complete(conn, room, host_id)
+    assert replay.round_label == "Qualifiers"
+    q1 = next(fs for fs in replay.current_round if fs.stage == "Qualifier 1")
+    elim = next(fs for fs in replay.current_round if fs.stage == "Eliminator")
+    assert q1.result is not None and elim.result is not None
+    assert q1.a_pid not in replay.eliminated_pids
+    assert q1.b_pid not in replay.eliminated_pids
+    elim_eliminated = {elim.a_pid, elim.b_pid} & replay.eliminated_pids
+    assert len(elim_eliminated) == 1
+
+
+def test_the_finals_loser_is_marked_eliminated_the_same_way_as_an_earlier_loss(conn):
+    """No special-casing the very last match: a losing finalist lands in
+    `eliminated_pids` exactly like anyone knocked out earlier, which is what lets
+    `room_journey` treat both cases identically (see the test below)."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    replay = _drain_final_to_completion(conn, room, host_id, guest_id)
+    assert replay.champion_pid in (host_id, guest_id)
+    loser_pid = guest_id if replay.champion_pid == host_id else host_id
+    assert loser_pid in replay.eliminated_pids
+    assert replay.champion_pid not in replay.eliminated_pids
+
+
+def test_a_wrong_kind_of_move_is_rejected(conn):
     """Corrupting the match-move log directly (never reachable through the mutators
-    above, which only ever append the kind the current pause is actually asking for)
-    -- proves the cursor validates position-implies-kind rather than trusting it."""
+    above, which only ever append the kind currently being asked for) -- proves the
+    replay validates the move's own shape rather than assuming every recorded entry
+    is well-formed."""
     room, host_id, guest_id = _complete_final_room(conn)
     room = rooms._load_room(conn, room.code)
-    room.match_moves = [{"kind": "impact", "slot": None}]   # a toss is what's expected
+    room.match_moves = [{"kind": "impact", "slot": None}]   # this kind no longer exists
     rooms._save_room(conn, room)
-    with pytest.raises(rooms.RoomError):
-        room_match.room_match_state(conn, room.code, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    # An unrecognised move is simply never matched by the stage lookup -- the toss
+    # stays pending rather than the room crashing on a move kind nothing asks for.
+    assert not replay.complete
+    assert _find_pending_toss(replay) is not None
 
 
 # --- room_journey: the journey card's own numbers, one seat at a time -------------------
 
-def test_room_journey_is_none_before_the_match_phase_completes(conn):
+def test_room_journey_is_none_while_your_own_run_is_still_alive(conn):
     room, host_id, guest_id = _complete_final_room(conn)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert not replay.complete
     assert room_match.room_journey(room, replay, host_id) is None
+
+
+def test_room_journey_is_available_for_an_eliminated_seat_before_the_room_completes(conn):
+    """A cup semi-final loser's own tournament is over the instant their semi resolves
+    -- well before the final (someone else's match) is even played, let alone the whole
+    room reaching `complete`. This is the whole point of gating `room_journey` on
+    `eliminated_pids` rather than `replay.complete`."""
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    replay = _drain_to_advance_or_complete(conn, room, host_id)
+    if replay.complete:
+        pytest.skip("this seed's cup completed in the same pass as the semis")
+    assert replay.eliminated_pids, "the semis resolved, so somebody must be out already"
+    eliminated_pid = next(iter(replay.eliminated_pids))
+    still_in = next(pid for pid in seat_ids if pid not in replay.eliminated_pids)
+    assert room_match.room_journey(room, replay, eliminated_pid) is not None
+    assert room_match.room_journey(room, replay, still_in) is None
 
 
 def test_room_journey_is_none_for_a_pid_not_seated_in_the_room(conn):
@@ -309,12 +402,9 @@ def test_room_journey_is_none_for_a_pid_not_seated_in_the_room(conn):
 
 
 def _drain_final_to_completion(conn, room, host_id, guest_id):
-    winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
-    room_match.submit_toss(conn, room.code, winner, "bat", DECK, MODEL)
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    while replay.pending_kind == "impact":
-        room_match.submit_impact(conn, room.code, host_id, None, DECK, MODEL)
-        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert replay.complete
     return replay
 

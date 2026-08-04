@@ -411,39 +411,23 @@ class RoomMatchResultOut(BaseModel):
     result: ResultOut
 
 
-class RoomPendingTossOut(BaseModel):
-    kind: Literal["toss"] = "toss"
+class RoomCurrentMatchOut(BaseModel):
+    """One fixture in the room's CURRENTLY OPEN round. Several of these can appear at
+    once -- a cup's two semis, a league's Qualifier 1 + Eliminator -- since independent
+    fixtures now resolve in parallel rather than one at a time. `result` is null until
+    this fixture's own toss is answered; everything else about it (a name, b name) is
+    known from the moment the round opens."""
     stage: str
-    side_a: str
-    side_b: str
-    winner_name: str
-    you_decide: bool = Field(
-        description="true only for the seat that actually won this toss")
-
-
-class RoomPendingImpactOut(BaseModel):
-    kind: Literal["impact"] = "impact"
-    stage: str
-    side_name: str = Field(description="whose Impact Player this decision is about")
-    opponent_name: str
-    discipline: str = Field(description="'bat' | 'bowl' -- which of side_name's own "
-                                        "innings this affects")
-    home_name: str
-    away_name: str
-    first_innings: InningsOut
-    side_xi: list[str] = Field(
-        description="side_name's own drafted batting order, in slot order (1-11) -- "
-                    "pick a slot to swap that player out for the Impact Player, or "
-                    "decline (slot: null)")
-    you_decide: bool = Field(description="true only for the room's host")
-
-
-class RoomPendingAdvanceOut(BaseModel):
-    kind: Literal["advance"] = "advance"
-    stage: str
-    home_name: str | None = None
-    away_name: str | None = None
-    you_decide: bool = Field(description="true only for the room's host")
+    a_name: str
+    b_name: str
+    a_pid: str
+    b_pid: str
+    pending_toss_winner_pid: str | None = Field(
+        default=None, description="null once this fixture's toss is answered")
+    you_decide_toss: bool = Field(
+        description="true only for the seat that actually won THIS fixture's toss, "
+                    "while it's still pending")
+    result: ResultOut | None = None
 
 
 class RoomMatchOut(BaseModel):
@@ -453,10 +437,26 @@ class RoomMatchOut(BaseModel):
     complete: bool
     champion: str | None = None                 # the room's own overall winner, any format
     you_champion: bool | None = None
-    pending: RoomPendingTossOut | RoomPendingImpactOut | RoomPendingAdvanceOut | None = None
-    # The journey card's own numbers -- null until complete, exactly SeasonProgressOut's
-    # contract for solo play. Yours alone: a room has no single "the human", so this is
-    # always the CALLING player_id's own tournament, never a second seat's.
+    round_label: str | None = Field(
+        default=None, description="e.g. 'Semi-finals', 'Qualifiers' -- null once complete")
+    current_matches: list[RoomCurrentMatchOut] = Field(
+        default_factory=list,
+        description="every fixture open in the current round, pending and resolved "
+                    "alike -- empty only for the league's own round-robin, which has "
+                    "nothing interactive in it, or once the room is complete")
+    advance_ready: bool = Field(
+        description="true once every fixture in current_matches has resolved and the "
+                    "round is not the terminal one")
+    you_decide_advance: bool = Field(
+        default=False, description="true only for the room's host, while advance_ready")
+    you_are_out: bool = Field(
+        description="true once the CALLING player's own tournament has ended -- win, "
+                    "lose, or eliminated earlier -- even if the room as a whole is not "
+                    "complete yet. This is what gates the journey fields below, not "
+                    "`complete`: an eliminated player's own stats are already final.")
+    # The journey card's own numbers -- null until you_are_out (or you_champion), not
+    # until the whole room finishes. Yours alone: a room has no single "the human", so
+    # this is always the CALLING player_id's own tournament, never a second seat's.
     runs: int | None = None
     wickets: int | None = None
     played: int | None = None
@@ -472,16 +472,10 @@ class RoomMatchOut(BaseModel):
 
 class RoomTossIn(BaseModel):
     player_id: str
+    stage: str = Field(description="which currently-open fixture this toss call is for "
+                                   "-- more than one can be open at once")
     elects: str = Field(description="'bat' | 'bowl' -- only honoured from the seat "
                                     "that actually won the toss")
-
-
-class RoomImpactIn(BaseModel):
-    player_id: str
-    slot: int | None = Field(
-        default=None, ge=1, le=XI_SIZE,
-        description="1-11: swap that member of the drafted XI out for the Impact "
-                    "Player. null = decline")
 
 
 # --- mapping ---------------------------------------------------------------------------
@@ -1053,45 +1047,42 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     )
 
 
+def _room_current_match_out(fs, room: rooms.Room, player_id: str | None) -> RoomCurrentMatchOut:
+    def name(pid: str) -> str:
+        p = room.players.get(pid)
+        return p.name if p else ""
+
+    return RoomCurrentMatchOut(
+        stage=fs.stage, a_name=name(fs.a_pid), b_name=name(fs.b_pid),
+        a_pid=fs.a_pid, b_pid=fs.b_pid,
+        pending_toss_winner_pid=fs.pending_toss_winner_pid,
+        you_decide_toss=player_id is not None and player_id == fs.pending_toss_winner_pid,
+        result=None if fs.result is None else ResultOut(
+            stage=fs.stage, home=fs.result.home.short, away=fs.result.away.short,
+            home_score=_score(fs.result.home_runs, fs.result.home_wickets),
+            away_score=_score(fs.result.away_runs, fs.result.away_wickets),
+            winner=None if fs.result.winner is None else fs.result.winner.short,
+            margin=fs.result.margin,
+            yours=player_id in (fs.a_pid, fs.b_pid),
+            home_innings=_innings_out(fs.result.home_innings) if fs.result.home_innings else None,
+            away_innings=_innings_out(fs.result.away_innings) if fs.result.away_innings else None,
+            toss_won_by_you=None, toss_elected=None,
+        ),
+    )
+
+
 def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> RoomMatchOut:
     """Maps `web.room_match.RoomMatchReplay` (pids throughout, since that module has no
-    concept of display names) to the wire format (names, plus a per-caller `you_decide`
-    telling the frontend whether IT is the seat that can act on the pending decision --
-    the toss winner's own seat for a toss, the host's for Impact or advancing)."""
+    concept of display names) to the wire format (names, plus per-caller `you_decide_*`
+    flags telling the frontend whether IT is the seat that can act -- the toss winner's
+    own seat for a fixture's toss, the host's for advancing the round)."""
 
     def name(pid: str | None) -> str:
         p = room.players.get(pid) if pid else None
         return p.name if p else ""
 
-    pending: RoomPendingTossOut | RoomPendingImpactOut | RoomPendingAdvanceOut | None = None
-    if replay.pending_kind == "toss":
-        pending = RoomPendingTossOut(
-            stage=replay.pending_stage, side_a=name(replay.pending_a_pid),
-            side_b=name(replay.pending_b_pid),
-            winner_name=name(replay.pending_toss_winner_pid),
-            you_decide=player_id == replay.pending_toss_winner_pid,
-        )
-    elif replay.pending_kind == "impact":
-        opponent_pid = (replay.pending_away_pid
-                        if replay.pending_impact_side_pid == replay.pending_home_pid
-                        else replay.pending_home_pid)
-        side_xi = next((order for pid, _, order, _ in rooms.room_sides(room, deck)
-                        if pid == replay.pending_impact_side_pid), [])
-        pending = RoomPendingImpactOut(
-            stage=replay.pending_stage, side_name=name(replay.pending_impact_side_pid),
-            opponent_name=name(opponent_pid), discipline=replay.pending_impact_discipline,
-            home_name=name(replay.pending_home_pid), away_name=name(replay.pending_away_pid),
-            first_innings=_innings_out(replay.pending_impact_first),
-            side_xi=[c.name for c in side_xi],
-            you_decide=player_id == room.host_id,
-        )
-    elif replay.pending_kind == "advance":
-        pending = RoomPendingAdvanceOut(
-            stage=replay.pending_stage,
-            home_name=name(replay.pending_home_pid) if replay.pending_home_pid else None,
-            away_name=name(replay.pending_away_pid) if replay.pending_away_pid else None,
-            you_decide=player_id == room.host_id,
-        )
+    current_matches = [_room_current_match_out(fs, room, player_id)
+                        for fs in (replay.current_round or [])]
 
     table = None
     if replay.table is not None:
@@ -1102,6 +1093,8 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
                              nrr=round(row.standing.nrr, 3))
                  for i, row in enumerate(replay.table, 1)]
 
+    you_are_out = player_id is not None and (
+        player_id == replay.champion_pid or player_id in replay.eliminated_pids)
     journey = room_match_lib.room_journey(room, replay, player_id) if player_id else None
     squad = None
     if journey is not None:
@@ -1117,7 +1110,11 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         table=table, complete=replay.complete,
         champion=name(replay.champion_pid) if replay.champion_pid else None,
         you_champion=(replay.champion_pid == player_id) if replay.complete else None,
-        pending=pending,
+        round_label=replay.round_label,
+        current_matches=current_matches,
+        advance_ready=replay.advance_ready,
+        you_decide_advance=replay.advance_ready and player_id == room.host_id,
+        you_are_out=you_are_out,
         runs=journey.runs if journey else None,
         wickets=journey.wickets if journey else None,
         played=journey.played if journey else None,
@@ -1135,11 +1132,12 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
 @app.get("/api/rooms/{code}/match", response_model=RoomMatchOut)
 def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
     """Once every seat's twelve is drafted: a real toss (called live by whichever seat
-    wins it) and break-time Impact decisions (always the host's call, for either side)
-    for a single match ('final'), a three-match knockout ('cup'), or a full
+    wins it), for a single match ('final'), a three-match knockout ('cup'), or a full
     league-plus-playoffs ('league') -- `game.season.play_open` via
     `web.room_match.replay_room_matches`, replayed from scratch on every poll exactly
-    like the draft phase (A62)."""
+    like the draft phase (A62). Independent fixtures within the same round (a cup's two
+    semis, a league's Qualifier 1 + Eliminator) are all returned in `current_matches`
+    at once, since they resolve in parallel rather than one at a time."""
     deck, model = STATE["deck"], STATE["model"]
     with _room_db() as conn:
         try:
@@ -1152,29 +1150,14 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
 
 @app.post("/api/rooms/{code}/match/toss", response_model=RoomMatchOut)
 def room_match_toss(code: str, body: RoomTossIn) -> RoomMatchOut:
-    """Only the seat that actually won this toss may call it -- `submit_toss` itself
-    enforces that; a wrong-seat or wrong-moment call is a 409, not a silent no-op."""
+    """Only the seat that actually won THIS fixture's toss may call it -- `submit_toss`
+    itself enforces that; a wrong-seat, wrong-fixture, or wrong-moment call is a 409,
+    not a silent no-op."""
     deck, model = STATE["deck"], STATE["model"]
     with _room_db() as conn:
         try:
             room = room_match_lib.submit_toss(
-                conn, code, body.player_id, body.elects, deck, model)
-            replay = room_match_lib.replay_room_matches(room, deck, model)
-        except rooms.RoomError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _room_match_out(room, replay, body.player_id, deck)
-
-
-@app.post("/api/rooms/{code}/match/impact", response_model=RoomMatchOut)
-def room_match_impact(code: str, body: RoomImpactIn) -> RoomMatchOut:
-    """Only the host may decide an Impact Player substitution, for either side, in
-    every match -- simulation decisions are the host's job (confirmed with the user),
-    not the owning player's."""
-    deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
-        try:
-            room = room_match_lib.submit_impact(
-                conn, code, body.player_id, body.slot, deck, model)
+                conn, code, body.player_id, body.stage, body.elects, deck, model)
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1183,7 +1166,8 @@ def room_match_impact(code: str, body: RoomImpactIn) -> RoomMatchOut:
 
 @app.post("/api/rooms/{code}/match/advance", response_model=RoomMatchOut)
 def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
-    """Only the host paces the room from one match's result to the next."""
+    """Only the host paces the room from one ROUND of matches to the next -- gated on
+    every fixture in the current round having resolved, not just one."""
     deck, model = STATE["deck"], STATE["model"]
     with _room_db() as conn:
         try:

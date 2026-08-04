@@ -316,8 +316,6 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
    template strings scattered across several JS functions. */
 .report.compact{padding:0 0 20px}
 .room-actions{justify-content:center;padding-top:14px}
-.room-note-wide{margin:16px 0;max-width:none}
-.room-impact-list .fx{cursor:pointer}
 .room-gap{margin-top:16px}
 .room-banner{text-align:center;margin:16px 0}
 .ledger div{padding:18px 10px;border:1px solid var(--line);background:var(--panel);border-radius:10px}
@@ -763,9 +761,9 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
         <div class="margin" id="tossOpponent"></div>
       </div>
       <div class="actions" style="justify-content:center;margin-top:24px">
-        <button class="act lead" onclick="submitToss('bat', this)">Bat first</button>
-        <button class="act lead" onclick="submitToss('bowl', this)">Bowl first</button>
-        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
+        <button class="act lead" onclick="handleTossChoice('bat', this)">Bat first</button>
+        <button class="act lead" onclick="handleTossChoice('bowl', this)">Bowl first</button>
+        <button class="act" id="tossSkipBtn" onclick="revealSkipThisMatch(this)">Skip this match</button>
       </div>
     </div>
 
@@ -786,7 +784,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <option value="150">Fast</option>
         </select>
         <button class="act" onclick="skipOverStepper()">Skip to end of this innings</button>
-        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
+        <button class="act" id="overSkipMatchBtn" onclick="revealSkipThisMatch(this)">Skip this match</button>
       </div>
     </div>
 
@@ -1448,6 +1446,10 @@ function matchLabel(stage, n, total){
 function enterRevealStage(d){
   REVEAL = d;
   SEASON_STATE = d.state;
+  // A prior ROOM reveal may have hidden these (rooms have no per-match skip) -- solo
+  // mode always wants them back.
+  $('#tossSkipBtn').classList.remove('hide');
+  $('#overSkipMatchBtn').classList.remove('hide');
   go('reveal');
   if (d.complete){ showSeason(d); return; }
   if (d.pending.kind === 'toss'){
@@ -1468,6 +1470,13 @@ function showTossScreen(pending){
   $('#tossStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
   $('#tossOpponent').textContent = `v ${pending.opponent} -- elect to bat or bowl first.`;
   $('#tossScreen').classList.remove('hide');
+}
+
+// Shared by the #tossScreen buttons -- solo and rooms drive the same DOM/stepper, so
+// whichever one is currently active decides what a toss answer actually does.
+function handleTossChoice(elects, ctrl){
+  if (ROOM_REVEAL_ACTIVE) return roomSubmitTossReveal(elects, ctrl);
+  return submitToss(elects, ctrl);
 }
 
 async function submitToss(elects, ctrl){
@@ -1983,6 +1992,14 @@ let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING
 // active player's (the default), true = my own. Resets whenever the active player changes
 // so a stale choice doesn't linger into the next person's turn.
 let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
+// Match phase: ROOM_REVEAL_ACTIVE is the current_matches entry we're animating for the
+// viewer right now (or null) -- while set, incoming polls are ignored for rendering so
+// a live over-by-over stepper is never restarted out from under the viewer; the fresh
+// data still lands in ROOM_MATCH_DATA and is read the moment the reveal finishes.
+// ROOM_REVEALED_STAGE remembers the last stage we've already animated, so a fixture is
+// never re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
+// is over" choice screen. All three reset per room in enterRoom.
+let ROOM_REVEAL_ACTIVE = null, ROOM_REVEALED_STAGE = null, ROOM_SPECTATE_SHOWN = false;
 // ROOM_MATCH_DATA (the room's own match-phase poll, kept fresh by pollRoom once status
 // is 'complete', same interval as the draft) is already declared above, shared with the
 // solo season's own scorecard popover.
@@ -2040,6 +2057,7 @@ async function joinRoom(ctrl){
 
 function enterRoom(code, playerId){
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
+  ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
   go('room');
   pollRoom();
   if (ROOM_POLL) clearInterval(ROOM_POLL);
@@ -2303,66 +2321,143 @@ function stageRow(r, onclick){
     <span class="sc">${r.home_score} · ${r.away_score}</span></div>`;
 }
 
-function roomPendingHtml(m){
-  const p = m.pending;
-  if (!p) return '';
-  if (p.kind === 'toss'){
-    return `<div class="report compact">
-      <div class="over-line">${p.stage}</div>
-      <div class="call">${p.side_a} v ${p.side_b}</div>
-      ${p.you_decide ? `
-        <div class="margin">You won the toss.</div>
-        <div class="foot-actions room-actions">
-          <button class="act lead" onclick="roomSubmitToss('bat', this)">Bat first</button>
-          <button class="act lead" onclick="roomSubmitToss('bowl', this)">Bowl first</button>
-        </div>` : `<div class="margin">Waiting for ${p.winner_name} to call the toss…</div>`}
-      </div>`;
-  }
-  if (p.kind === 'impact'){
-    // home always bats first in this engine (the toss winner's own elect decides who
-    // home/away ARE, not which of them bats first) -- so the first innings shown here
-    // is always home_name's, regardless of which side's decision this is.
-    const info = `${p.home_name} posted ` +
-      `${p.first_innings.runs}/${p.first_innings.wickets} (${p.first_innings.overs} ov). ` +
-      `${p.side_name} ${p.discipline === 'bat' ? 'bats' : 'bowls'} next.`;
-    return `<div class="report compact">
-      <div class="over-line">${p.stage}</div>
-      <div class="call">${p.side_name}'s Impact Player</div>
-      <div class="margin">${info}</div>
-      ${p.you_decide ? `
-        <p class="deck room-note-wide">Send ${p.side_name}'s Impact Player in for one of
-          these, or decline:</p>
-        <div class="room-impact-list">${p.side_xi.map((name, i) => `
-          <div class="fx" onclick="roomSubmitImpact(${i + 1}, this)">
-            <span>${name}</span><span class="sc">slot ${i + 1}</span>
-          </div>`).join('')}</div>
-        <div class="foot-actions room-actions">
-          <button class="act" onclick="roomSubmitImpact(null, this)">Decline -- no substitution</button>
-        </div>` : `<div class="margin">Waiting for the host to decide…</div>`}
-      </div>`;
-  }
-  // 'advance'
-  const versus = p.home_name && p.away_name ? `${p.home_name} v ${p.away_name}` : 'the next match';
-  return `<div class="report compact">
-    <div class="over-line">${p.stage}</div>
-    <div class="call">Ready for ${versus}</div>
-    ${p.you_decide ? `
-      <div class="foot-actions room-actions">
-        <button class="act lead" onclick="roomAdvanceMatch(this)">Continue</button>
-      </div>` : `<div class="margin">Waiting for the host to continue…</div>`}
+function roomWaitingHtml(m, myMatch){
+  // Every fixture in the current round that hasn't resolved yet -- several can be open
+  // at once (a cup's two semis, a league's Qualifier 1 + Eliminator), and a resolved
+  // one needs no placeholder here at all: it already appears in the results list below
+  // the moment it finishes, exactly like any earlier round's match.
+  const pendingRows = m.current_matches.filter(cm => cm.result === null).map(cm => {
+    const isMine = cm.a_pid === MY_PID || cm.b_pid === MY_PID;
+    const waitingOn = cm.pending_toss_winner_pid === cm.a_pid ? cm.a_name : cm.b_name;
+    return `<div class="fx">
+      <span>${cm.stage}${isMine ? ' (you)' : ''}</span>
+      <span>${cm.a_name} v ${cm.b_name}</span>
+      <span class="sc">${waitingOn} to call the toss</span>
     </div>`;
+  }).join('');
+
+  const advanceHtml = m.advance_ready
+    ? (m.you_decide_advance
+        ? `<div class="foot-actions room-actions">
+             <button class="act lead" onclick="roomAdvanceMatch(this)">Continue</button>
+           </div>`
+        : `<div class="margin">Waiting for the host to continue…</div>`)
+    : '';
+
+  return `<div class="report compact">
+    <div class="over-line">${m.round_label || ''}</div>
+    ${pendingRows || '<div class="margin">Playing…</div>'}
+    ${advanceHtml}
+  </div>`;
+}
+
+function roomSpectateChoiceHtml(){
+  return `<div class="report compact">
+    <div class="call">Your run in this tournament is over</div>
+    <div class="foot-actions room-actions">
+      <button class="act lead" onclick="roomChooseSpectateExit('card')">See your journey card</button>
+      <button class="act" onclick="roomChooseSpectateExit('follow')">Follow the tournament</button>
+    </div>
+  </div>`;
+}
+
+function roomChooseSpectateExit(choice){
+  ROOM_SPECTATE_SHOWN = true;
+  showRoomMatch(ROOM_MATCH_DATA);
+  if (choice === 'card') showRoomJourneyCard();
+}
+
+// The over-by-over stepper is the SAME engine solo play already uses (OVER_STEP,
+// startOverStepper, etc.) -- a room viewer is never in more than one currently-open
+// fixture at once, so the existing singleton is reused as-is, just fed room data and a
+// room-specific onDone.
+function roomEnterReveal(myMatch){
+  ROOM_REVEAL_ACTIVE = myMatch;
+  hideAllRevealScreens();
+  $('#tossSkipBtn').classList.add('hide');       // no per-match skip in a room
+  $('#overSkipMatchBtn').classList.add('hide');
+  go('reveal');
+  if (myMatch.result === null) showRoomTossScreen(myMatch);
+  else roomStartReveal(myMatch);
+}
+
+function showRoomTossScreen(myMatch){
+  $('#tossStage').textContent = myMatch.stage;
+  $('#tossOpponent').textContent = `${myMatch.a_name} v ${myMatch.b_name} -- elect to bat or bowl first.`;
+  $('#tossScreen').classList.remove('hide');
+}
+
+async function roomSubmitTossReveal(elects, ctrl){
+  const stage = ROOM_REVEAL_ACTIVE.stage;
+  await busyClick(ctrl, elects === 'bat' ? 'Batting…' : 'Bowling…', async () => {
+    try {
+      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/toss`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, stage, elects})});
+      const fresh = ROOM_MATCH_DATA.current_matches.find(cm => cm.stage === stage);
+      if (fresh && fresh.result) roomStartReveal(fresh);
+      else { ROOM_REVEAL_ACTIVE = null; go('room'); showRoomMatch(ROOM_MATCH_DATA); }
+    } catch(e){ slip(e.message); }
+  });
+}
+
+function roomStartReveal(myMatch){
+  ROOM_REVEAL_ACTIVE = myMatch;
+  const r = myMatch.result;
+  const steps = [];
+  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`]);
+  if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${r.away} batting`]);
+  let i = 0;
+  (function next(){
+    if (i >= steps.length){ roomFinishReveal(myMatch); return; }
+    const [innings, label] = steps[i++];
+    startOverStepper(innings, label, next);
+  })();
+}
+
+function roomFinishReveal(myMatch){
+  ROOM_REVEAL_ACTIVE = null;
+  ROOM_REVEALED_STAGE = myMatch.stage;
+  go('room');
+  showRoomMatch(ROOM_MATCH_DATA);
 }
 
 function showRoomMatch(m){
+  if (m.complete){ showRoomMatchComplete(m); return; }
+
+  // Mid-animation for the viewer's own match -- a poll landing here mid-reveal must
+  // not disturb it; ROOM_MATCH_DATA is already fresh, roomFinishReveal reads it once
+  // the stepper is actually done.
+  if (ROOM_REVEAL_ACTIVE) return;
+
+  const myMatch = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
+
+  if (myMatch && myMatch.result === null && myMatch.you_decide_toss){
+    roomEnterReveal(myMatch);
+    return;
+  }
+  if (myMatch && myMatch.result && ROOM_REVEALED_STAGE !== myMatch.stage){
+    roomEnterReveal(myMatch);
+    return;
+  }
+
   const el = $('#roomMatchBody');
   const resultsHtml = m.results.map((e, i) =>
     stageRow(e.result, `showRoomScorecard(${i})`)).join('');
+  const gap = resultsHtml ? `<div class="room-gap">${resultsHtml}</div>` : '';
 
-  if (!m.complete){
-    el.innerHTML = roomPendingHtml(m) +
-      (resultsHtml ? `<div class="room-gap">${resultsHtml}</div>` : '');
+  if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
+    el.innerHTML = roomSpectateChoiceHtml() + gap;
     return;
   }
+
+  el.innerHTML = roomWaitingHtml(m, myMatch) + gap;
+}
+
+function showRoomMatchComplete(m){
+  const el = $('#roomMatchBody');
+  const resultsHtml = m.results.map((e, i) =>
+    stageRow(e.result, `showRoomScorecard(${i})`)).join('');
 
   const journeyBtn = m.squad
     ? `<button class="act" onclick="showRoomJourneyCard()">Journey card</button>` : '';
@@ -2409,28 +2504,6 @@ function showRoomJourneyCard(){
   if (!ROOM_MATCH_DATA || !ROOM_MATCH_DATA.squad){ slip('Play the match first.'); return; }
   drawJourneyCard(ROOM_MATCH_DATA, 'ROOM ' + ROOM_CODE);
   $('#cardOverlay').classList.remove('hide');
-}
-
-async function roomSubmitToss(elects, ctrl){
-  await busyClick(ctrl, elects === 'bat' ? 'Batting…' : 'Bowling…', async () => {
-    try {
-      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/toss`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({player_id: MY_PID, elects})});
-      showRoomMatch(ROOM_MATCH_DATA);
-    } catch(e){ slip(e.message); }
-  });
-}
-
-async function roomSubmitImpact(slot, ctrl){
-  await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
-    try {
-      ROOM_MATCH_DATA = await api(`/api/rooms/${ROOM_CODE}/match/impact`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({player_id: MY_PID, slot})});
-      showRoomMatch(ROOM_MATCH_DATA);
-    } catch(e){ slip(e.message); }
-  });
 }
 
 async function roomAdvanceMatch(ctrl){

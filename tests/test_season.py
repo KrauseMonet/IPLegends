@@ -20,7 +20,7 @@ from game.season import (
     TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact, NeedToss, Result,
     Season, Side, Standing, TossElect, _MatchNeedsImpact, _MatchNeedsToss, _abbrev,
     _apply_batting_impact, _apply_bowling_impact, _bowling_depth_shortfall, _credit,
-    _insert_batting_impact, _leader, _OpenMatchNeedsImpact, _OpenMatchNeedsToss,
+    _insert_batting_impact, _leader, _OpenMatchNeedsToss,
     _play_human_match, _tailender_bowler, _weakest_bowler, _weakest_pure_batter,
     decide_impact, fixtures, journey_stats, play_open, run_league, run_playoffs, toss,
 )
@@ -647,17 +647,15 @@ def test_an_explicit_slot_overrides_decide_impact_even_when_it_would_sit_him_out
 class _OpenMoves:
     """Minimal stand-in for play_open's own move protocol -- identity-keyed, not seat-
     indexed, since play_open has no concept of a seat to index by; it only ever asks
-    "whose decision is this" via the Side identity carried on each pause exception."""
+    "whose decision is this" via the Side identity carried on the pause exception. Only
+    the toss is a live decision -- rooms no longer route Impact substitutions through a
+    move at all, they go straight to decide_impact for either side."""
 
-    def __init__(self, tosses=(), impacts=()):
+    def __init__(self, tosses=()):
         self._tosses = list(tosses)
-        self._impacts = list(impacts)
 
     def next_toss(self, winner):
         return self._tosses.pop(0) if self._tosses else None
-
-    def next_impact(self, side):
-        return self._impacts.pop(0) if self._impacts else None
 
 
 def _thin_bowling_open_xi(tag):
@@ -694,36 +692,24 @@ def test_play_open_with_moves_none_is_fully_automatic():
     assert play_open(_model(), a, b, random.Random(1), moves=None) is not None
 
 
-def test_play_open_asks_homes_impact_before_aways_when_both_have_one():
-    """Both a and b carry an Impact Player -- home's ("bowl") decision is asked before
-    away's ("bat") one, per play_open's own documented, fixed order."""
+def test_play_open_decides_impact_automatically_for_both_sides_with_no_move_needed():
+    """Both a and b carry an Impact Player, and _OpenMoves answers nothing about Impact
+    at all -- the protocol no longer has a next_impact method. play_open must still
+    resolve both sides' break-time substitution via decide_impact, unattended."""
     a = Side(name="A", short="A", xi=_xi("a"), impact=_card("a_imp", bat=0.5, bowl=0.5))
     b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
-    with pytest.raises(_OpenMatchNeedsImpact) as exc:
-        play_open(_model(), a, b, random.Random(1), moves=_OpenMoves(tosses=["bowl"]))
-    # a won and elected to bowl -> home=b (bats first), away=a (bowls first). Home's
-    # decision is asked first, so it must be b's, not a's.
-    assert exc.value.side is b
-
-
-def test_play_open_resolves_both_impact_decisions_once_both_moves_are_supplied():
-    a = Side(name="A", short="A", xi=_xi("a"), impact=_card("a_imp", bat=0.5, bowl=0.5))
-    b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
-    r = play_open(_model(), a, b, random.Random(1),
-                  moves=_OpenMoves(tosses=["bowl"], impacts=[ImpactPick(7), ImpactPick(7)]))
+    r = play_open(_model(), a, b, random.Random(1), moves=_OpenMoves(tosses=["bowl"]))
     # a won and elected to bowl -> home=b (bats first), away=a (bowls first, bats
-    # second). Home's decision (b, "bowl") lands in innings 2's bowling; away's
-    # decision (a, "bat") lands in innings 2's batting -- both inside r.away_innings.
+    # second). Both sides' own decisions land inside innings 2 either way.
     assert any(bo.player.is_impact for bo in r.away_innings.bowling)
     assert any(bt.player.is_impact for bt in r.away_innings.batting)
 
 
-def test_play_open_skips_a_sides_impact_call_entirely_when_it_has_none():
+def test_play_open_never_substitutes_for_a_side_with_no_impact_player():
     a = Side(name="A", short="A", xi=_xi("a"), impact=None)
     b = Side(name="B", short="B", xi=_xi("b"), impact=_card("b_imp", bat=0.5, bowl=0.5))
-    r = play_open(_model(), a, b, random.Random(1),
-                  moves=_OpenMoves(tosses=["bowl"], impacts=[ImpactPick(7)]))
-    assert r is not None, "only b's own decision should ever be asked for"
+    r = play_open(_model(), a, b, random.Random(1), moves=_OpenMoves(tosses=["bowl"]))
+    assert r is not None, "a side with no Impact Player must never block or crash resolution"
 
 
 def test_play_open_forces_the_bowling_impact_before_the_toss_winners_call_even_matters():

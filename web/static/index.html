@@ -2472,6 +2472,28 @@ function roomChooseSpectateExit(choice){
 // startOverStepper, etc.) -- a room viewer is never in more than one currently-open
 // fixture at once, so the existing singleton is reused as-is, just fed room data and a
 // room-specific onDone.
+
+// Finds the viewer's own fixture that still needs its reveal played, or null if there
+// isn't one. `current_matches` covers every ordinary case (toss still pending, or
+// resolved but not yet advanced past) -- but the tournament's very LAST fixture in
+// every format (`replay_room_matches`'s final branch for 'final'/'cup'/'league' alike)
+// skips the paused, advance-gated stopover every earlier round gets and jumps straight
+// to `complete`, emptying `current_matches` in the same response that resolved it. Without
+// this fallback that fixture's scoreline would appear for both sides with no reveal at
+// all -- `results` still carries it, with full innings data, so it's read from there
+// instead once it's no longer in `current_matches`. Shared by showRoomMatch (the polling
+// path, for whichever side didn't call the toss) and roomSubmitTossReveal (the side that
+// did), so both agree on where a fixture's result can still be found.
+function roomMyMatchToReveal(m){
+  const cur = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
+  if (cur && cur.result === null && cur.you_decide_toss) return cur;
+  if (cur && cur.result && ROOM_REVEALED_STAGE !== cur.stage) return cur;
+  if (cur) return null;   // it's mine but still waiting on someone else's toss
+  const mine = m.results.filter(e => e.result.yours);
+  const last = mine[mine.length - 1];
+  return (last && ROOM_REVEALED_STAGE !== last.stage) ? last : null;
+}
+
 function roomEnterReveal(myMatch){
   ROOM_REVEAL_ACTIVE = myMatch;
   hideAllRevealScreens();
@@ -2498,8 +2520,8 @@ async function roomSubmitTossReveal(elects, ctrl){
         body: JSON.stringify({player_id: MY_PID, stage, elects})});
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
-      const fresh = m.current_matches.find(cm => cm.stage === stage);
-      if (fresh && fresh.result) roomStartReveal(fresh);
+      const fresh = roomMyMatchToReveal(m);
+      if (fresh && fresh.stage === stage) roomStartReveal(fresh);
       else { ROOM_REVEAL_ACTIVE = null; go('room'); showRoomMatch(m); }
     } catch(e){ slip(e.message); }
   });
@@ -2532,24 +2554,22 @@ function showRoomMatch(m){
   // ending a still-competing or still-spectating player's session with no way back in,
   // before they ever reached the results screen they were waiting for.
   $('#roomDoneBtn').classList.toggle('hide', !m.complete);
-  if (m.complete){ showRoomMatchComplete(m); return; }
 
   // Mid-animation for the viewer's own match -- a poll landing here mid-reveal must
   // not disturb it; ROOM_MATCH_DATA is already fresh, roomFinishReveal reads it once
   // the stepper is actually done.
   if (ROOM_REVEAL_ACTIVE) return;
 
+  // Checked BEFORE `m.complete`, not after: the tournament's very last fixture can
+  // resolve and complete the whole room in the same response (roomMyMatchToReveal's own
+  // comment has the why), so a straight `if (m.complete)` check here would show that
+  // fixture's scoreline with no reveal at all, for both sides.
+  const toReveal = roomMyMatchToReveal(m);
+  if (toReveal){ roomEnterReveal(toReveal); return; }
+
+  if (m.complete){ showRoomMatchComplete(m); return; }
+
   const myMatch = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
-
-  if (myMatch && myMatch.result === null && myMatch.you_decide_toss){
-    roomEnterReveal(myMatch);
-    return;
-  }
-  if (myMatch && myMatch.result && ROOM_REVEALED_STAGE !== myMatch.stage){
-    roomEnterReveal(myMatch);
-    return;
-  }
-
   const el = $('#roomMatchBody');
   const resultsHtml = m.results.map((e, i) =>
     stageRow(e.result, `showRoomScorecard(${i})`)).join('');

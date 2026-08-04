@@ -243,6 +243,45 @@ def test_replaying_the_same_room_twice_reconstructs_identically(conn):
     assert _find_pending_toss(a) == _find_pending_toss(b)
 
 
+# --- the tournament's very last fixture: no paused stopover, unlike every earlier round -
+
+# Every round before the last one gives the frontend a paused, advance-gated stopover
+# (`current_round` still holds the just-resolved fixture, result and all, until the host
+# advances) -- that's what lets a viewer's poll catch a fresh result and play its reveal
+# animation before it moves on. The tournament's very last fixture in every format skips
+# that stopover entirely: the same call that resolves it also flips `complete` and empties
+# `current_round`, in ALL of 'final' (its only fixture), 'cup' and 'league' (their Final).
+# Confirmed live: this is why the scoreline used to appear with no reveal at all for a
+# room's last match -- the frontend had nowhere left to find it. The fix is
+# frontend-only (`roomMyMatchToReveal` in web/static/index.html falls back to `results`
+# once a fixture is no longer in `current_matches`), so what these three pin is the data
+# contract that fallback depends on: the fixture must still be reachable via `results`,
+# by name, the instant the room completes -- not just "some results exist".
+
+def test_the_final_rooms_only_fixture_is_reachable_via_results_once_it_completes(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    stage, winner, _, _ = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete
+    assert not replay.current_round
+    assert any(e.stage == "Final" for e in replay.results)
+
+
+def test_the_cup_final_is_reachable_via_results_once_it_completes(conn):
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    replay = _drive_room_to_completion(conn, room, host_id)
+    assert not replay.current_round
+    assert any(e.stage == "Final" for e in replay.results)
+
+
+def test_the_league_final_is_reachable_via_results_once_it_completes(conn):
+    room, host_id = _make_and_complete_league(conn)
+    replay = _drive_room_to_completion(conn, room, host_id)
+    assert not replay.current_round
+    assert any(e.stage == "Final" for e in replay.results)
+
+
 def _drive_room_to_completion(conn, room, host_id):
     """Answers whatever is pending, one decision at a time, until the whole match phase
     completes -- a toss to its actual winner, or an advance to the host once a round is

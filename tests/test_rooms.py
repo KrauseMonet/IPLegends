@@ -383,6 +383,25 @@ def test_start_room_is_host_only(conn):
         rooms.start_room(conn, room.code, bob_id, DECK)
 
 
+def test_pending_deal_accounts_for_the_whole_squad(conn):
+    """A64's own rule ("the deal shows the whole squad, greyed, not just the takeable
+    part"), reused verbatim via `sess._blocked` rather than a second implementation --
+    every card in the dealt franchise-season must appear as either a live candidate or
+    a `pending_blocked` entry, and never both."""
+    room, host_id = _make_room(conn, "final")
+    rooms.join_room(conn, room.code, "Guest", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    replay = rooms.replay_room(room, DECK)
+    fs_id, candidates = replay.pending_deal
+    assert replay.pending_blocked is not None
+
+    whole_squad = {c.person_id for c in DECK.cards_by_fs[fs_id]}
+    live = {c.person_id for c in candidates}
+    blocked = {c.person_id for c, _ in replay.pending_blocked}
+    assert live | blocked == whole_squad
+    assert live.isdisjoint(blocked)
+
+
 def test_start_room_fills_remaining_seats_with_cpus_that_draft_a_legal_twelve(conn):
     """CPU seats are no longer drafted whole at `start_room` time -- a CPU's pick now
     depends on the shared pool at the moment its own turn arrives, so it resolves turn

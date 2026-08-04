@@ -354,6 +354,7 @@ class RoomReplay:
     stranded: bool = False
     pending_seat_id: str | None = None
     pending_deal: tuple | None = None          # (fs_id, candidates: list[Card])
+    pending_blocked: list | None = None        # [(Card, reason)] -- the REST of the squad
 
 
 def _apply(seat: SeatProgress, taken: set[str], card: Card, slot: int) -> None:
@@ -428,7 +429,25 @@ def replay_room(room: Room, deck: Deck) -> RoomReplay:
     dealt = _deal_for(pid)
     if dealt is None:
         return RoomReplay(seats, complete=False, stranded=True, pending_seat_id=pid)
-    return RoomReplay(seats, complete=False, pending_seat_id=pid, pending_deal=dealt)
+    fs_id, _candidates = dealt
+    # The WHOLE squad, not just the pickable part -- same as solo's own deal (A64),
+    # via the identical `sess._blocked` a solo session already uses, so the reasons
+    # ("already drafted", "overseas quota full", the forward-check diagnoses) can never
+    # drift between the two modes.
+    blocked = sess._blocked(deck, fs_id, _draft_state(seats[pid]))
+    return RoomReplay(seats, complete=False, pending_seat_id=pid, pending_deal=dealt,
+                       pending_blocked=blocked)
+
+
+def _draft_state(seat: SeatProgress) -> DraftState:
+    """The one shape `etl.feasibility`'s own policies/`_blocked` need, built from a
+    room seat's own progress -- identical to what `web.session.replay` builds from a
+    solo `DraftState` at pause time, just sourced from `SeatProgress` instead."""
+    return DraftState(
+        picks=tuple(seat.picks), order=tuple(seat.order), impact=seat.impact,
+        open_slots=frozenset(seat.open_slots), keeper_have=seat.keeper_have,
+        bowl_have=seat.bowl_have, remaining=TWELVE_SIZE - len(seat.picks),
+    )
 
 
 def _resolve_cpu_turn(replay: RoomReplay) -> dict:
@@ -438,11 +457,7 @@ def _resolve_cpu_turn(replay: RoomReplay) -> dict:
     pid = replay.pending_seat_id
     fs_id, candidates = replay.pending_deal
     seat = replay.seats[pid]
-    state = DraftState(
-        picks=tuple(seat.picks), order=tuple(seat.order), impact=seat.impact,
-        open_slots=frozenset(seat.open_slots), keeper_have=seat.keeper_have,
-        bowl_have=seat.bowl_have, remaining=TWELVE_SIZE - len(seat.picks),
-    )
+    state = _draft_state(seat)
     card, slot = POLICIES["rational"](candidates, state, random.Random())
     index = next(i for i, c in enumerate(candidates) if c.person_id == card.person_id)
     return {"seat": pid, "index": index, "slot": slot}
@@ -484,11 +499,7 @@ def _resolve(room: Room, deck: Deck) -> None:
 
         fs_id, candidates = replay.pending_deal
         seat = replay.seats[pid]
-        state = DraftState(
-            picks=tuple(seat.picks), order=tuple(seat.order), impact=seat.impact,
-            open_slots=frozenset(seat.open_slots), keeper_have=seat.keeper_have,
-            bowl_have=seat.bowl_have, remaining=TWELVE_SIZE - len(seat.picks),
-        )
+        state = _draft_state(seat)
         card, slot = pick_afk(candidates, state, random.Random())
         index = next(i for i, c in enumerate(candidates) if c.person_id == card.person_id)
         room.moves = room.moves + [{"seat": pid, "index": index, "slot": slot}]

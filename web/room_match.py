@@ -149,7 +149,10 @@ def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
 
 
 def _pid_of(side: Side, pairs: list[tuple[str, Side]]) -> str:
-    return next(pid for pid, s in pairs if s is side)
+    for pid, s in pairs:
+        if s is side:
+            return pid
+    raise RoomError(f"internal error: {side.name!r} is not one of this room's own sides")
 
 
 def _loser(result: Result, side_a: Side, side_b: Side) -> Side:
@@ -175,7 +178,12 @@ class _Driver:
     seventy-fixture round-robin genuinely paced match by match was timed at multiple
     SECONDS per step by fixture 20 and climbing -- a real, measured architectural
     ceiling, not a guess. Every knockout fixture (cup's three; a league's four playoff
-    matches) stays fully interactive."""
+    matches) stays fully interactive.
+
+    `resolve_auto`'s own cost is now paid at most ONCE per room, not once per poll --
+    see `_round_robin_results`'s docstring for why replaying the whole round-robin on
+    every call was the dominant cost behind a league room feeling slow deep into a
+    tournament, and how caching it is made safe."""
 
     def __init__(self, room: Room, model: Model, pairs: list[tuple[str, Side]]):
         self.room = room
@@ -267,6 +275,44 @@ def _standings_table(pairs: list[tuple[str, Side]],
     return [RoomStandingRow(pid=pid, standing=s) for pid, s in ordered]
 
 
+# The round-robin depends on nothing but (room.seed, pairs) -- never on room.match_moves,
+# since every one of its fixtures auto-resolves -- so unlike every other fixture it is
+# cacheable for the room's whole lifetime rather than replayed on every single poll. A
+# league room's 70-fixture round-robin was the measured, dominant cost behind
+# `replay_room_matches` being slow deep into a tournament (on the order of 10 million
+# `tilt()` evaluations, per game.simulator's own bisection); every fixture AFTER it is
+# cheap by comparison (at most 4 further matches). Keyed on (code, seed) rather than seed
+# alone as a trivial extra guard against a theoretical future code reuse, at no real cost.
+#
+# The one subtlety that makes this a correctness-sensitive cache, not just a memoisation:
+# `_Driver.rng` is a SINGLE stream, and everything simulated after the round-robin needs
+# to draw from exactly where that stream would sit had the 70 matches genuinely just been
+# simulated in this call -- `random.Random` has no way to "skip ahead," only to actually
+# draw. `rng.getstate()`/`setstate()` is what lets a cache hit reproduce that exactly
+# without paying for it twice: restoring the RNG's own internal state, not just the
+# entries it produced. Verified by test, not just reasoned about: see
+# `test_round_robin_cache_does_not_change_playoff_outcomes`.
+_ROUND_ROBIN_CACHE: dict[tuple[str, int], tuple[list[RoomResultEntry], list[RoomStandingRow], tuple]] = {}
+
+
+def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
+                          ) -> list[RoomStandingRow]:
+    key = (room.code, room.seed)
+    cached = _ROUND_ROBIN_CACHE.get(key)
+    if cached is not None:
+        entries, table, rng_state = cached
+        d.entries.extend(entries)
+        d.rng.setstate(rng_state)
+        return table
+
+    side_by_index = [side for _, side in pairs]
+    for i, j in league_fixtures(len(pairs)):
+        d.resolve_auto(side_by_index[i], side_by_index[j], "league")
+    table = _standings_table(pairs, d.entries)
+    _ROUND_ROBIN_CACHE[key] = (list(d.entries), table, d.rng.getstate())
+    return table
+
+
 def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     if room.status != "complete":
         raise RoomError(f"room is not complete yet (status: {room.status})")
@@ -299,10 +345,14 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
             ("Semi-final 2", pairs[1][1], pairs[2][1]),
         ]
         semis = _resolve_round(d, semi_fixtures)
+        # Each semi's own loser is eliminated the INSTANT that semi resolves, never
+        # gated on its sibling's -- a fixture whose own result is already known must
+        # not wait on an unrelated match before its loser can move on.
+        for (_, side_a, side_b), fs in zip(semi_fixtures, semis):
+            if fs.result is not None:
+                eliminated.add(d._pid(_loser(fs.result, side_a, side_b)))
         if not _round_complete(semis):
             return _paused(d.entries, semis, "Semi-finals", eliminated)
-        for (_, side_a, side_b), fs in zip(semi_fixtures, semis):
-            eliminated.add(d._pid(_loser(fs.result, side_a, side_b)))
         if not _advance_recorded(room, "Semi-finals"):
             return _paused(d.entries, semis, "Semi-finals", eliminated, advance_ready=True)
 
@@ -320,12 +370,10 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # "league": TEAMS seats exactly (ROOM_FORMATS["league"] == game.season.TEAMS), the
     # full round-robin plus the IPL's own four-team playoff finish -- game.season.
     # run_league/run_playoffs' own fixture list and bracket, reproduced here round by
-    # round instead of called once each.
-    side_by_index = [side for _, side in pairs]
-    for i, j in league_fixtures(len(pairs)):
-        d.resolve_auto(side_by_index[i], side_by_index[j], "league")
-
-    table = _standings_table(pairs, d.entries)
+    # round instead of called once each. The round-robin itself is cached (see
+    # `_round_robin_results`'s own docstring) -- it is the dominant cost of replaying a
+    # league room and depends on nothing this room's own moves could change.
+    table = _round_robin_results(d, room, pairs)
     top4_pids = {row.pid for row in table[:4]}
     # The non-top-4 are out the INSTANT the table settles -- well before the playoffs
     # even open, let alone finish. Nothing about their own tournament changes from here.
@@ -333,15 +381,27 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     if not _advance_recorded(room, "League"):
         return _paused(d.entries, [], "League", eliminated, advance_ready=True, table=table)
 
-    first, second, third, fourth = (row.standing.side for row in table[:4])
+    # Resolved via the CURRENT call's own `pairs`, never via `row.standing.side` -- once
+    # the round-robin can be served from `_ROUND_ROBIN_CACHE`, `table`'s own Side objects
+    # belong to whichever call first populated it, not this one, and `d._pid()` below
+    # needs Side objects it can find by IDENTITY in its own `self.pairs` (the exact
+    # cross-call Side-identity trap this module's docstrings already warn about
+    # elsewhere -- found here by the test suite, not assumed safe).
+    pairs_by_pid = dict(pairs)
+    first, second, third, fourth = (pairs_by_pid[row.pid] for row in table[:4])
     qual_fixtures = [("Qualifier 1", first, second), ("Eliminator", third, fourth)]
     quals = _resolve_round(d, qual_fixtures)
+    q1_state, elim_state = quals
+    # The real IPL asymmetry, applied the instant EACH fixture's own result is known,
+    # never gated on its sibling: the Eliminator's loser is out immediately, but
+    # Qualifier 1's loser gets a second life via Qualifier 2 rather than being
+    # eliminated here -- so only the Eliminator's own result feeds `eliminated` at
+    # this point.
+    if elim_state.result is not None:
+        eliminated.add(d._pid(_loser(elim_state.result, third, fourth)))
     if not _round_complete(quals):
         return _paused(d.entries, quals, "Qualifiers", eliminated, table=table)
-    q1_r, elim_r = quals[0].result, quals[1].result
-    # The real IPL asymmetry: the Eliminator's loser is out immediately, but Qualifier
-    # 1's loser gets a second life via Qualifier 2 rather than being eliminated here.
-    eliminated.add(d._pid(_loser(elim_r, third, fourth)))
+    q1_r, elim_r = q1_state.result, elim_state.result
     if not _advance_recorded(room, "Qualifiers"):
         return _paused(d.entries, quals, "Qualifiers", eliminated, advance_ready=True, table=table)
 

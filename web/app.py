@@ -922,12 +922,18 @@ def _room_db():
 
 def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
                       is_active: bool, caller_id: str | None,
-                      pending_deal) -> RoomPlayerOut:
+                      pending_deal, pending_blocked) -> RoomPlayerOut:
     """`deal` is non-null only for the currently active seat, and even then carries
-    `options` only for the caller whose own seat this is -- see `RoomPlayerOut.deal`'s
-    own description. Everyone else sees just franchise/season_year, never the options
-    (this used to be sent to every caller for every seat; `GET /api/rooms/{code}` had
-    no caller-identity parameter at all to redact by)."""
+    `options`/`blocked` only for the caller whose own seat this is -- see
+    `RoomPlayerOut.deal`'s own description. Everyone else sees just franchise/
+    season_year, never the squad (this used to be sent to every caller for every seat;
+    `GET /api/rooms/{code}` had no caller-identity parameter at all to redact by).
+
+    `blocked` mirrors solo's own deal exactly (A64): the WHOLE squad, not just the
+    part that can be taken, so a keeper already spoken for still reads as a keeper on
+    the roster rather than the deal looking thin. Same `STATE["unrated"]` defensive
+    net appended too, for parity with solo's own (currently empty, post-A65/A71) list.
+    """
     deal = None
     if is_active and pending_deal is not None:
         fs_id, candidates = pending_deal
@@ -937,6 +943,8 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
         deal = DealOut(
             fs_id=fs_id, franchise=franchise, season_year=season_year,
             options=[_card(c) for c in candidates] if show_options else [],
+            blocked=([_card(c, why) for c, why in (pending_blocked or [])]
+                     + STATE["unrated"].get(fs_id, [])) if show_options else [],
         )
     return RoomPlayerOut(
         player_id=player.player_id, name=player.name, is_cpu=player.is_cpu,
@@ -960,6 +968,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
             _room_player_out(
                 p, replay.seats[pid], is_active=(pid == replay.pending_seat_id),
                 caller_id=caller_id, pending_deal=replay.pending_deal,
+                pending_blocked=replay.pending_blocked,
             )
             for pid, p in room.players.items()
         ],
@@ -1140,7 +1149,8 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         results=[_room_result_out(e, player_id) for e in replay.results],
         table=table, complete=replay.complete,
         champion=name(replay.champion_pid) if replay.champion_pid else None,
-        you_champion=(replay.champion_pid == player_id) if replay.complete else None,
+        you_champion=(player_id is not None and replay.champion_pid == player_id)
+                     if replay.complete else None,
         round_label=replay.round_label,
         current_matches=current_matches,
         advance_ready=replay.advance_ready,

@@ -342,6 +342,94 @@ def test_the_eliminator_loser_is_out_but_qualifier_one_loser_is_not(conn):
     assert len(elim_eliminated) == 1
 
 
+def test_a_semifinals_loser_is_eliminated_before_its_sibling_semi_resolves(conn):
+    """Elimination is applied fixture by fixture, not round by round: Semi-final 1's
+    own loser must already be out the instant SEMI-FINAL 1 resolves, with Semi-final 2
+    still genuinely pending and nothing of its own decided yet."""
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    semi1 = next(fs for fs in replay.current_round if fs.stage == "Semi-final 1")
+    semi2 = next(fs for fs in replay.current_round if fs.stage == "Semi-final 2")
+    assert semi1.result is None and semi2.result is None, \
+        "all four seats are human here, so both semis must open on a genuine toss"
+
+    room_match.submit_toss(conn, room.code, semi1.pending_toss_winner_pid,
+                            "Semi-final 1", "bat", DECK, MODEL)
+    _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    semi1_after = next(fs for fs in replay2.current_round if fs.stage == "Semi-final 1")
+    semi2_after = next(fs for fs in replay2.current_round if fs.stage == "Semi-final 2")
+    assert semi1_after.result is not None
+    assert semi2_after.result is None, "the sibling must still be independently pending"
+    assert len(replay2.eliminated_pids) == 1, \
+        "only Semi-final 1's own loser should be eliminated at this point"
+    assert replay2.eliminated_pids < {semi1_after.a_pid, semi1_after.b_pid}
+
+
+def test_a_qualifiers_fixture_that_resolves_first_updates_elimination_on_its_own(conn):
+    """The same fixture-not-round elimination timing, on the league's Qualifiers round
+    -- whichever of Qualifier 1 / the Eliminator resolves first must update
+    `eliminated_pids` by exactly the rule that fixture's own stage carries (the
+    Eliminator's loser is out immediately; Qualifier 1's is not), without waiting on
+    its still-pending sibling."""
+    room, host_id = _make_and_complete_league(conn)
+    room = room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.round_label == "Qualifiers"
+    bottom_six = frozenset(replay.eliminated_pids)
+
+    q1 = next(fs for fs in replay.current_round if fs.stage == "Qualifier 1")
+    elim = next(fs for fs in replay.current_round if fs.stage == "Eliminator")
+    if q1.result is not None and elim.result is not None:
+        pytest.skip("both Qualifiers fixtures resolved automatically under this seed")
+
+    if q1.result is None:
+        room_match.submit_toss(conn, room.code, q1.pending_toss_winner_pid,
+                                "Qualifier 1", "bat", DECK, MODEL)
+        resolved_stage, held_back_stage = "Qualifier 1", "Eliminator"
+    else:
+        room_match.submit_toss(conn, room.code, elim.pending_toss_winner_pid,
+                                "Eliminator", "bat", DECK, MODEL)
+        resolved_stage, held_back_stage = "Eliminator", "Qualifier 1"
+
+    _, replay2 = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    held_back = next(fs for fs in replay2.current_round if fs.stage == held_back_stage)
+    if held_back.result is not None:
+        pytest.skip("the held-back fixture resolved on its own (CPU v CPU) in the same pass")
+
+    new_eliminated = replay2.eliminated_pids - bottom_six
+    if resolved_stage == "Eliminator":
+        assert len(new_eliminated) == 1, "the Eliminator's own loser must be out immediately"
+    else:
+        assert len(new_eliminated) == 0, "Qualifier 1's own loser must not be out yet"
+
+
+def test_round_robin_cache_does_not_change_playoff_outcomes(conn):
+    """`_ROUND_ROBIN_CACHE` is a correctness-sensitive optimisation, not a plain
+    memoisation -- see its own docstring on why (the RNG's own state has to be
+    reproduced exactly, not just the round-robin's results). Verified directly here:
+    the SAME already-completed room, replayed once with the cache cleared (forcing a
+    genuine resimulation) and once with it warm, must reach the identical table and
+    the identical champion either way."""
+    room, host_id = _make_and_complete_league(conn)
+    replay = _drive_room_to_completion(conn, room, host_id)
+    assert replay.complete
+
+    def _fingerprint(rows):
+        return [(row.pid, row.standing.points, round(row.standing.nrr, 6)) for row in rows]
+
+    room_match._ROUND_ROBIN_CACHE.clear()
+    _, replay_fresh = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay_fresh.complete
+    assert replay_fresh.champion_pid == replay.champion_pid
+    assert _fingerprint(replay_fresh.table) == _fingerprint(replay.table)
+
+    # Cache is now warm again (populated by the call just above) -- confirm a THIRD
+    # replay, served entirely from cache, still reconstructs the same thing.
+    _, replay_cached = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay_cached.champion_pid == replay.champion_pid
+    assert _fingerprint(replay_cached.table) == _fingerprint(replay.table)
+
+
 def test_the_finals_loser_is_marked_eliminated_the_same_way_as_an_earlier_loss(conn):
     """No special-casing the very last match: a losing finalist lands in
     `eliminated_pids` exactly like anyone knocked out earlier, which is what lets

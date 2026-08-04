@@ -945,9 +945,19 @@ async function busyClick(ctrl, busyLabel, fn){
 }
 function go(id){
   for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
-  // Leaving for home abandons whatever draft/result the hash was replaying -- clear it so
-  // a reload lands back on home instead of resuming a game the drafter already left.
-  if (id === 'home') history.replaceState(null, '', location.pathname + location.search);
+  if (id === 'home'){
+    // Leaving for home abandons whatever draft/result the hash was replaying -- clear it
+    // so a reload lands back on home instead of resuming a game the drafter already left.
+    history.replaceState(null, '', location.pathname + location.search);
+    // Also abandon any room session still active -- the "Done" buttons on a finished or
+    // failed room, and the logo itself, all route home this way without going through
+    // leaveRoom() first. Left uncleared, ROOM_POLL keeps hitting the server forever in
+    // the background, and a later SOLO draft misreads the room's own draft_mode as its
+    // own: effectiveDraftMode() keys off ROOM_CODE's truthiness, and a stale non-null
+    // ROOM_CODE makes it look like a room is still active when none is.
+    if (ROOM_POLL) clearInterval(ROOM_POLL);
+    ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
+  }
   window.scrollTo(0,0);
 }
 // A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
@@ -2065,8 +2075,8 @@ function enterRoom(code, playerId){
 }
 
 function leaveRoom(){
-  if (ROOM_POLL) clearInterval(ROOM_POLL);
-  ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
+  // go('home') itself clears every room global now (ROOM_POLL included) -- see its own
+  // comment -- so there is exactly one place this cleanup lives, not two that can drift.
   go('home');
 }
 

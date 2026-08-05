@@ -149,15 +149,18 @@ def _new_code(conn) -> str:
             return code
 
 
-def _load_room(conn, code: str) -> Room:
-    """Locks the room row for the rest of the caller's transaction -- every public
-    function below pairs this with a `_save_room` before the connection commits, so two
-    requests touching the same room serialise through this lock rather than racing."""
+def _load_room(conn, code: str, *, lock: bool = True) -> Room:
+    """Locks the room row for the rest of the caller's transaction by default -- every
+    mutating function below pairs a locked call with a `_save_room` before the
+    connection commits, so two requests that both intend to WRITE serialise through
+    this lock rather than racing. `lock=False` is for a caller that only needs to
+    look, not write (`room_state`'s own fast path) -- see its docstring for why a
+    plain poll doesn't need this lock at all most of the time."""
     row = conn.execute(
-        """
+        f"""
         select code, format, timer_seconds, seed, host_id, status,
                turn_started_at, failure_reason, moves, match_moves, draft_mode
-          from rooms where code = %s for update
+          from rooms where code = %s {"for update" if lock else ""}
         """,
         (code,),
     ).fetchone()
@@ -599,8 +602,32 @@ def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: De
 
 def room_state(conn, code: str, deck: Deck) -> Room:
     """Read-only poll: resolve any expired turn first, so a client that polls slowly
-    still sees an up-to-date room rather than one waiting on a clock nobody is checking."""
-    room = _load_room(conn, code)
+    still sees an up-to-date room rather than one waiting on a clock nobody is checking.
+
+    Answered from a LOCK-FREE read whenever possible -- this used to always take
+    `_load_room`'s FOR UPDATE lock and always write back, even though the overwhelming
+    majority of polls find nothing to resolve. With every connected seat polling every
+    2 seconds (`ROOM_POLL`), that meant every poll serialised against every OTHER poll
+    AND against a real pick submission for the same room, for no reason most of the
+    time -- diagnosed as the cause of drafts intermittently freezing on a pick: a pick
+    is a write that needs the lock, and if it landed while a concurrent poll already
+    held it (or was queued behind one), the pick just waited.
+
+    Safe because every WRITE path already resolves before saving: `submit_pick` calls
+    `_resolve` before appending a move and again before `_save_room`, so the stored
+    `status`/`moves` can only go stale by time passing with nobody writing -- exactly
+    the condition `_resolve`'s own loop acts on (a pending turn's clock has run out).
+    Checking that clock here, without a lock, is therefore equivalent to asking "would
+    `_resolve` do anything at all" without needing the full replay to answer it. If the
+    clock HASN'T run out, resolving is guaranteed to be a no-op and this returns the
+    lock-free read directly. If it HAS, this escalates to a locked re-read (another
+    poll may have already caught it up in the meantime -- re-reading under the lock
+    just means `_resolve` finds nothing left to do and `_save_room` writes back the
+    same content, harmless) and does the real resolve-and-save."""
+    room = _load_room(conn, code, lock=False)
+    if room.status != "drafting" or time.time() - room.turn_started_at <= room.timer_seconds:
+        return room
+    room = _load_room(conn, code, lock=True)
     _resolve(room, deck)
     _save_room(conn, room)
     return room

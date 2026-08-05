@@ -1059,8 +1059,32 @@ function teamRatingsHtml(d){
   return tiles.map(([v, label]) => `<div><b>${v == null ? '--' : v}</b><span>${label}</span></div>`).join('');
 }
 
+// Every request that ever hung indefinitely -- diagnosed as drafts intermittently
+// freezing on a pick, the whole panel dimmed by busyClick's own busy-wait with no way
+// out -- did so because nothing here ever gave up on it. The server now fails a stuck
+// request fast on its own (web/app.py's lock_timeout/connect_timeout), but a request
+// can still stall in flight (a slow network, a cold path the server-side bound doesn't
+// cover) with nothing to time IT out from this side. API_TIMEOUT_MS bounds that: past
+// it the fetch is aborted and rejects with a clear, retryable message instead of
+// leaving the caller waiting on a promise that may never settle. Comfortably above a
+// normal round trip (every request here is at least one Neon hop) but well under
+// anything a user would sit through without assuming something broke.
+const API_TIMEOUT_MS = 15000;
+
 async function api(path, opts){
-  const r = await fetch(path, opts);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  let r;
+  try {
+    r = await fetch(path, {...opts, signal: ctrl.signal});
+  } catch(e){
+    if (e.name === 'AbortError'){
+      throw new Error('That took too long to respond -- the server may be busy. Try again.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || r.statusText);
   return body;

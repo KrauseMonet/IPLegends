@@ -21,7 +21,7 @@ from typing import Literal
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -108,6 +108,33 @@ app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+# A room request that can't get the database (a dead/very slow connect) or can't get
+# the row lock it needs (genuinely stuck behind another request against the same room,
+# past `_room_db`'s own `lock_timeout`) used to just hang until whatever the hosting
+# platform's own request timeout eventually killed it -- diagnosed as the cause of
+# drafts intermittently freezing on a pick, with no error shown and the button stuck.
+# Both bounds are real now (`_room_db`); these two handlers are what turns hitting one
+# into a fast, clean 503 the client can show and retry from, instead of a raw 500 or a
+# silent hang. `retry_after` is a plain hint, not enforced -- the client-side timeout
+# and retry are what actually act on it (web/static/index.html's `api()`).
+@app.exception_handler(psycopg.errors.LockNotAvailable)
+def _lock_not_available(_request, _exc) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "This room is busy right now -- try again in a moment."},
+        headers={"Retry-After": "2"},
+    )
+
+
+@app.exception_handler(psycopg.OperationalError)
+def _db_unavailable(_request, _exc) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Couldn't reach the database right now -- try again in a moment."},
+        headers={"Retry-After": "3"},
+    )
 
 
 @app.get("/", include_in_schema=False)
@@ -986,8 +1013,20 @@ def _room_db():
     boot-time DIRECT_URL load (one connection, once, for the process's whole life), a room
     request is exactly the many-short-transactions pattern PgBouncer transaction-mode
     pooling exists for -- this is the first thing in the app that actually uses
-    DATABASE_URL rather than DIRECT_URL."""
-    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+    DATABASE_URL rather than DIRECT_URL.
+
+    Two bounds that didn't used to exist, both diagnosed from drafts freezing on a pick
+    with no error and no way to tell why: `connect_timeout` bounds how long a request
+    waits for Neon itself (TCP/TLS plus, on the free tier, waking a suspended compute)
+    rather than hanging on a dead or very slow endpoint indefinitely; `lock_timeout`
+    bounds how long a request waits for `_load_room`'s row lock once connected, so a
+    request that's genuinely stuck behind another (rather than just slow to reach the
+    database) fails fast with a clean, retryable error instead of sitting until
+    whatever the hosting platform's own request timeout eventually kills it. Both are
+    caught by `_lock_not_available`/`_db_unavailable` below and turned into a 503
+    rather than a raw 500."""
+    with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
+        conn.execute("set lock_timeout = '5s'")
         yield conn
 
 

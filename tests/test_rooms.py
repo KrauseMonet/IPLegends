@@ -634,6 +634,35 @@ def test_play_again_gives_the_new_lobby_a_fully_working_next_draft(conn):
 
 # --- the live turn: lazy, per-turn resolution ----------------------------------------------
 
+def test_load_room_lock_false_omits_the_row_lock(conn):
+    """`room_state`'s fast path (own docstring: diagnosed as the cause of drafts
+    freezing on a pick, since every 2-second poll used to take the same write lock a
+    pick needs) depends on `_load_room(lock=False)` issuing a plain SELECT with no FOR
+    UPDATE. Checked against the actual SQL text sent, not just that the call returns
+    the right data -- a correct return value says nothing about whether the lock was
+    really skipped, and `lock=True` (the default every mutating path still uses) must
+    still take it."""
+    room, _host_id = _make_room(conn, "final")
+
+    seen: list[str] = []
+    real_execute = conn.execute
+
+    def spy(sql, params=()):
+        seen.append(sql)
+        return real_execute(sql, params)
+
+    conn.execute = spy
+
+    rooms._load_room(conn, room.code, lock=False)
+    assert not any("for update" in s.lower() for s in seen), \
+        "lock=False must not take the row lock"
+
+    seen.clear()
+    rooms._load_room(conn, room.code)
+    assert any("for update" in s.lower() for s in seen), \
+        "lock=True (the default) must still take the row lock"
+
+
 def test_the_turn_does_not_advance_before_the_timer_expires(conn, monkeypatch):
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])

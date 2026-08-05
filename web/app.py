@@ -399,6 +399,11 @@ class CreateRoomIn(BaseModel):
         description="'stat' (rating badges, clickable stats) or 'memory' (neither) -- "
                     "chosen once here by the host, binding on every seat in the room; "
                     "the join flow has no draft_mode of its own")
+    is_open: bool = Field(
+        default=False,
+        description="true lists this room publicly (GET /api/rooms/open) so anyone can "
+                    "join without the code; false (default) is code-only, same as every "
+                    "room before this field existed")
 
 
 class JoinRoomIn(BaseModel):
@@ -458,6 +463,22 @@ class RoomStateOut(BaseModel):
         description="'stat' | 'memory' -- the host's own choice at creation, binding "
                     "on every seat; every client renders this room under it, not its "
                     "own local preference")
+    is_open: bool = Field(
+        description="the host's own choice at creation -- true if this room is listed "
+                    "publicly for anyone to join without the code")
+
+
+class OpenRoomOut(BaseModel):
+    """One row of the public browse list (GET /api/rooms/open) -- just enough to show
+    and join it, never a seated player's own progress."""
+
+    code: str
+    format: str
+    seats_filled: int
+    seats_total: int
+    timer_seconds: int
+    draft_mode: str
+    host_name: str
 
 
 class CreatedRoomOut(BaseModel):
@@ -1105,6 +1126,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
         ],
         failure_reason=room.failure_reason,
         draft_mode=room.draft_mode,
+        is_open=room.is_open,
     )
 
 
@@ -1113,7 +1135,8 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
     with _room_db() as conn:
         try:
             room, player_id = rooms.create_room(
-                conn, body.format, body.timer_seconds, body.host_name, body.draft_mode)
+                conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
+                body.is_open)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -1186,6 +1209,22 @@ def play_again_room(code: str, body: HostActionIn) -> RoomStateOut:
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+@app.get("/api/rooms/open", response_model=list[OpenRoomOut])
+def list_open_rooms() -> list[OpenRoomOut]:
+    """The public browse list -- open, still-joinable rooms, newest first. Declared
+    textually BEFORE `GET /api/rooms/{code}` below: FastAPI/Starlette matches routes in
+    declaration order, so with the order reversed this path would be swallowed by
+    `{code}` as a literal (nonexistent) room code lookup instead of ever reaching here."""
+    with _room_db() as conn:
+        return [
+            OpenRoomOut(
+                code=r.code, format=r.format, seats_filled=r.seats_filled,
+                seats_total=rooms.ROOM_FORMATS[r.format], timer_seconds=r.timer_seconds,
+                draft_mode=r.draft_mode, host_name=r.host_name)
+            for r in rooms.list_open_rooms(conn)
+        ]
 
 
 @app.get("/api/rooms/{code}", response_model=RoomStateOut)

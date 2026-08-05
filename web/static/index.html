@@ -714,38 +714,60 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <label class="room-label">Your name</label>
           <input id="roomName" class="room-input" placeholder="Your name" maxlength="40">
 
-          <div class="room-label" style="margin-top:20px">Format</div>
-          <div class="room-choices" id="formatChoices">
-            <button class="room-choice sel" data-format="final" onclick="pickFormat('final')">Final · 2</button>
-            <button class="room-choice" data-format="cup" onclick="pickFormat('cup')">Cup · 4</button>
-            <button class="room-choice" data-format="league" onclick="pickFormat('league')">League · 10</button>
+          <div class="room-choices" id="setupTabs" style="margin-top:20px">
+            <button class="room-choice sel" data-tab="create" onclick="pickSetupTab('create')">Create a room</button>
+            <button class="room-choice" data-tab="join" onclick="pickSetupTab('join')">Join a room</button>
           </div>
 
-          <div class="room-label" style="margin-top:20px">Seconds per pick</div>
-          <div class="room-choices" id="timerChoices">
-            <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
-            <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
-            <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
+          <div id="roomCreatePanel">
+            <div class="room-label" style="margin-top:20px">Format</div>
+            <div class="room-choices" id="formatChoices">
+              <button class="room-choice sel" data-format="final" onclick="pickFormat('final')">Final · 2</button>
+              <button class="room-choice" data-format="cup" onclick="pickFormat('cup')">Cup · 4</button>
+              <button class="room-choice" data-format="league" onclick="pickFormat('league')">League · 10</button>
+            </div>
+
+            <div class="room-label" style="margin-top:20px">Seconds per pick</div>
+            <div class="room-choices" id="timerChoices">
+              <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
+              <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
+              <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
+            </div>
+
+            <div class="room-label" style="margin-top:20px">Draft by</div>
+            <div class="room-choices" id="roomModeChoices">
+              <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
+              <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
+            </div>
+            <p class="room-note">Your choice -- every seat in the room drafts under it, not their own.</p>
+
+            <div class="room-label" style="margin-top:20px">Visibility</div>
+            <div class="room-choices" id="visibilityChoices">
+              <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
+              <button class="room-choice" data-visibility="open" onclick="pickVisibility(true)">Open</button>
+            </div>
+            <p class="room-note">Open rooms are listed on the Join tab for anyone to join without the code. Closed (default) needs the code.</p>
+
+            <div class="actions" style="margin-top:24px">
+              <button class="act lead" onclick="createRoom(this)">Create a room</button>
+            </div>
           </div>
 
-          <div class="room-label" style="margin-top:20px">Draft by</div>
-          <div class="room-choices" id="roomModeChoices">
-            <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
-            <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
+          <div id="roomJoinPanel" class="hide">
+            <div class="room-label" style="margin-top:20px">Open rooms</div>
+            <div id="openRoomsList"></div>
+
+            <div style="margin:28px 0;border-top:1px solid var(--line)"></div>
+
+            <label class="room-label">Have a code?</label>
+            <input id="joinCode" class="room-input" placeholder="ABC123" maxlength="6"
+              style="text-transform:uppercase">
+            <div class="actions" style="margin-top:16px">
+              <button class="act" onclick="joinRoom(this)">Join a room</button>
+            </div>
           </div>
-          <p class="room-note">Your choice -- every seat in the room drafts under it, not their own.</p>
 
           <div class="actions" style="margin-top:24px">
-            <button class="act lead" onclick="createRoom(this)">Create a room</button>
-          </div>
-
-          <div style="margin:28px 0;border-top:1px solid var(--line)"></div>
-
-          <label class="room-label">Room code</label>
-          <input id="joinCode" class="room-input" placeholder="ABC123" maxlength="6"
-            style="text-transform:uppercase">
-          <div class="actions" style="margin-top:16px">
-            <button class="act" onclick="joinRoom(this)">Join a room</button>
             <button class="act" onclick="go('home')">Back</button>
           </div>
         </div>
@@ -761,7 +783,10 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <div class="col-head"><span>Lobby</span><em id="lobbySeats"></em></div>
           <div class="fixture">
             <div class="yr">ROOM CODE</div>
-            <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
+              <button class="act" style="padding:6px 12px;font-size:11px" onclick="copyRoomCode()">Copy</button>
+            </div>
             <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px">
               <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span> · <span id="lobbyMode"></span>
             </div>
@@ -1115,6 +1140,9 @@ async function busyClick(ctrl, busyLabel, fn){
   }
 }
 function go(id){
+  // Leaving roomSetup for anywhere else abandons its own open-rooms poll -- it has no
+  // other natural place to stop, since roomSetup isn't itself a "room" with a ROOM_CODE.
+  if (id !== 'roomSetup') stopRoomOpenPoll();
   for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
   if (id === 'home'){
     // Leaving for home abandons whatever draft/result the hash was replaying -- clear it
@@ -2149,6 +2177,12 @@ function copyLink(){
     .catch(() => slip(url));
 }
 
+function copyRoomCode(){
+  navigator.clipboard.writeText(ROOM_CODE)
+    .then(() => slip('Copied — share this code with friends.'))
+    .catch(() => slip(ROOM_CODE));
+}
+
 /* --- the journey card: a hand-drawn canvas, no server-side image generation --------- */
 
 const CARD_MONO = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
@@ -2383,6 +2417,8 @@ let ROOM_GEN = 0;
 // is 'complete', same interval as the draft) is already declared above, shared with the
 // solo season's own scorecard popover.
 let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
+let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
+let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab is showing
 
 function pickFormat(f){
   CHOSEN_FORMAT = f;
@@ -2398,6 +2434,65 @@ function pickRoomDraftMode(mode){
   CHOSEN_ROOM_DRAFT_MODE = mode;
   document.querySelectorAll('#roomModeChoices .room-choice')
     .forEach(b => b.classList.toggle('sel', b.dataset.mode === mode));
+}
+function pickVisibility(open){
+  CHOSEN_VISIBILITY = open;
+  document.querySelectorAll('#visibilityChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', (b.dataset.visibility === 'open') === open));
+}
+
+// Two explicit tabs on the same screen rather than one long page -- the join tab needs
+// room to show a live, polled list of open rooms, which a single combined form had no
+// good place for.
+function pickSetupTab(tab){
+  document.querySelectorAll('#setupTabs .room-choice')
+    .forEach(b => b.classList.toggle('sel', b.dataset.tab === tab));
+  $('#roomCreatePanel').classList.toggle('hide', tab !== 'create');
+  $('#roomJoinPanel').classList.toggle('hide', tab !== 'join');
+  if (tab === 'join'){
+    roomListOpenRooms();
+    if (ROOM_OPEN_POLL) clearInterval(ROOM_OPEN_POLL);
+    ROOM_OPEN_POLL = setInterval(roomListOpenRooms, 4000);
+  } else {
+    stopRoomOpenPoll();
+  }
+}
+function stopRoomOpenPoll(){
+  if (ROOM_OPEN_POLL){ clearInterval(ROOM_OPEN_POLL); ROOM_OPEN_POLL = null; }
+}
+
+const ROOM_FORMAT_LABEL = {final: 'Final · 2', cup: 'Cup · 4', league: 'League · 10'};
+
+// A public, anonymous browse list (A62 -- no accounts) -- fetched fresh each poll rather
+// than reusing ROOM's own polling machinery, since there is no room yet to poll.
+async function roomListOpenRooms(){
+  const list = $('#openRoomsList');
+  if (!list) return;
+  try {
+    const rows = await api('/api/rooms/open');
+    if (!rows.length){
+      list.innerHTML = '<p class="room-note">No open rooms right now — ask your host for a code.</p>';
+      return;
+    }
+    list.innerHTML = rows.map(r => `
+      <div class="entry">
+        <span class="nm">${ROOM_FORMAT_LABEL[r.format] || r.format}
+          <em style="font-style:normal">· ${r.seats_filled} of ${r.seats_total} · ${r.timer_seconds}s
+          · ${r.host_name}'s room</em></span>
+        <span class="picks"><button class="act" onclick="joinOpenRoom('${r.code}', this)">Join</button></span>
+      </div>`).join('');
+  } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
+}
+
+async function joinOpenRoom(code, ctrl){
+  const name = $('#roomName').value.trim() || 'Player';
+  await busyClick(ctrl, 'Joining…', async () => {
+    try {
+      const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name})});
+      enterRoom(code, r.player_id);
+    } catch(e){ slip(e.message); }
+  });
 }
 
 // The room's OWN mode, not the caller's local DRAFT_MODE preference (the whole point --
@@ -2415,7 +2510,7 @@ async function createRoom(ctrl){
     try {
       const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER,
-          host_name: name, draft_mode: CHOSEN_ROOM_DRAFT_MODE})});
+          host_name: name, draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY})});
       enterRoom(r.room.code, r.player_id);
     } catch(e){ slip(e.message); }
   });
@@ -2435,6 +2530,7 @@ async function joinRoom(ctrl){
 }
 
 function enterRoom(code, playerId){
+  stopRoomOpenPoll();
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
   ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
   ROOM_LEAGUE_REVEALED_THROUGH = 0;

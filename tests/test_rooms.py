@@ -65,6 +65,23 @@ class FakeConn:
             row = self.rooms.get(code)
             return FakeCursor([row] if row else [])
 
+        if sql_norm.startswith("select r.code, r.format"):
+            (limit,) = params
+            out = []
+            # Newest first -- self.rooms is a plain dict, insertion-ordered oldest
+            # first, mirroring the real query's `order by r.created_at desc`.
+            for row in reversed(list(self.rooms.values())):
+                (code, fmt, _timer, _seed, host_id, status, *_rest, draft_mode,
+                 is_open) = row
+                if not (is_open and status == "lobby"):
+                    continue
+                timer_seconds = row[2]
+                seats = self.players.get(code, {})
+                host_row = seats.get(host_id)
+                host_name = host_row[2] if host_row else None
+                out.append((code, fmt, timer_seconds, draft_mode, host_name, len(seats)))
+            return FakeCursor(out[:limit])
+
         if sql_norm.startswith("select player_id, name, is_cpu"):
             (code,) = params
             rows = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
@@ -83,7 +100,8 @@ class FakeConn:
 
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
-             turn_started_at, failure_reason, moves, match_moves, draft_mode) = params
+             turn_started_at, failure_reason, moves, match_moves, draft_mode,
+             is_open) = params
             # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
             # code; unwrap to the plain list each wraps, exactly what a real jsonb
             # column reads back.
@@ -93,22 +111,22 @@ class FakeConn:
             if existing is None:
                 self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, draft_mode)
+                                     match_moves_value, draft_mode, is_open)
             else:
                 # Mirrors the real `on conflict (code) do update set` clause exactly --
                 # only status/turn_started_at/failure_reason/moves/match_moves are ever
                 # written to an EXISTING row; format/timer_seconds/seed/host_id/
-                # draft_mode keep whatever the row already had, "set once at creation,
-                # never updated" per `_save_room`'s own comment. Getting this wrong here
-                # would make `test_play_again_resets_a_complete_room_to_lobby`'s own
-                # `seed != ` assertion pass for the wrong reason -- a plain `_save_room`
-                # call NOT actually changing the seed in real Postgres, silently
-                # papered over by a fake that changes it anyway.
+                # draft_mode/is_open keep whatever the row already had, "set once at
+                # creation, never updated" per `_save_room`'s own comment. Getting this
+                # wrong here would make `test_play_again_resets_a_complete_room_to_lobby`'s
+                # own `seed != ` assertion pass for the wrong reason -- a plain
+                # `_save_room` call NOT actually changing the seed in real Postgres,
+                # silently papered over by a fake that changes it anyway.
                 (ecode, efmt, etimer, eseed, ehost, _estatus,
-                 _eturn, _efail, _emoves, _ematch, edraft) = existing
+                 _eturn, _efail, _emoves, _ematch, edraft, eopen) = existing
                 self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, edraft)
+                                     match_moves_value, edraft, eopen)
             return FakeCursor([])
 
         if sql_norm.startswith("update rooms set seed"):
@@ -630,6 +648,73 @@ def test_play_again_gives_the_new_lobby_a_fully_working_next_draft(conn):
     room = rooms.start_room(conn, room.code, host_id, DECK)
     room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
     assert room.status == "complete"
+
+
+# --- open/closed rooms: the public browse list ---------------------------------------------
+
+def test_a_room_defaults_to_closed(conn):
+    room, host_id = _make_room(conn, "final")
+    assert room.is_open is False
+
+
+def test_is_open_round_trips_through_load_and_save(conn):
+    room, host_id = rooms.create_room(conn, "final", 30, "Host", is_open=True)
+    reloaded = rooms._load_room(conn, room.code)
+    assert reloaded.is_open is True
+
+
+def test_is_open_is_set_once_at_creation_never_updated(conn):
+    """Joins format/timer_seconds/seed/host_id/draft_mode: `_save_room`'s own ON
+    CONFLICT clause must never let a later write flip it."""
+    room, host_id = rooms.create_room(conn, "final", 30, "Host", is_open=True)
+    rooms.join_room(conn, room.code, "Guest", DECK)   # a second _save_room call
+    reloaded = rooms._load_room(conn, room.code)
+    assert reloaded.is_open is True
+
+
+def test_list_open_rooms_excludes_closed_full_and_started_rooms(conn):
+    open_room, open_host = rooms.create_room(conn, "final", 30, "Alice", is_open=True)
+
+    closed_room, _ = rooms.create_room(conn, "final", 30, "Bob", is_open=False)
+
+    full_room, full_host = rooms.create_room(conn, "final", 30, "Carl", is_open=True)
+    rooms.join_room(conn, full_room.code, "Dave", DECK)   # final = 2 seats, now full
+
+    started_room, started_host = rooms.create_room(conn, "final", 30, "Eve", is_open=True)
+    rooms.join_room(conn, started_room.code, "Frank", DECK)
+    rooms.start_room(conn, started_room.code, started_host, DECK)
+
+    codes = {r.code for r in rooms.list_open_rooms(conn)}
+    assert open_room.code in codes
+    assert closed_room.code not in codes
+    assert full_room.code not in codes
+    assert started_room.code not in codes
+
+
+def test_list_open_rooms_reports_the_right_shape_and_order(conn):
+    room, host_id = rooms.create_room(conn, "cup", 15, "Alice", is_open=True)
+    rooms.join_room(conn, room.code, "Bob", DECK)
+
+    rows = rooms.list_open_rooms(conn)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.code == room.code
+    assert row.format == "cup"
+    assert row.timer_seconds == 15
+    assert row.host_name == "Alice"
+    assert row.seats_filled == 2
+
+    # Newest first.
+    later_room, _ = rooms.create_room(conn, "final", 30, "Carl", is_open=True)
+    rows = rooms.list_open_rooms(conn)
+    assert rows[0].code == later_room.code
+
+
+def test_list_open_rooms_respects_the_limit(conn, monkeypatch):
+    monkeypatch.setattr(rooms, "OPEN_ROOMS_LIMIT", 2)
+    for name in ("Alice", "Bob", "Carl"):
+        rooms.create_room(conn, "final", 30, name, is_open=True)
+    assert len(rooms.list_open_rooms(conn)) == 2
 
 
 # --- the live turn: lazy, per-turn resolution ----------------------------------------------

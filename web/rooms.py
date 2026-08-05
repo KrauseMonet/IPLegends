@@ -68,6 +68,10 @@ from web import session as sess
 
 ROOM_FORMATS = {"final": 2, "cup": 4, "league": 10}
 TIMER_CHOICES = (15, 30, 45)
+# A public, anonymous browse list (this app has no accounts, A62) needs a bound so it
+# can't grow without limit -- rooms are few and short-lived (ROOM_TTL_HOURS below), so
+# this is generous rather than a real constraint in practice.
+OPEN_ROOMS_LIMIT = 30
 # A pure display choice, exactly the solo draft's own client-side DRAFT_MODE distinction
 # (web/static/index.html) -- 'stat' shows a rating badge and lets a name be clicked for
 # his season stats, 'memory' shows neither. Chosen once by the host at creation and
@@ -108,6 +112,10 @@ class Room:
     # while after: nothing here starts consuming it until the first `/match` poll.
     match_moves: list = field(default_factory=list)
     draft_mode: str = "stat"       # migration 023 -- see DRAFT_MODES above
+    # migration 025 -- true lists this room for anyone to join without the code
+    # (list_open_rooms below). Set once at creation, never updated afterward, same as
+    # format/timer_seconds/draft_mode.
+    is_open: bool = False
 
     @property
     def seats(self) -> int:
@@ -159,7 +167,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
     row = conn.execute(
         f"""
         select code, format, timer_seconds, seed, host_id, status,
-               turn_started_at, failure_reason, moves, match_moves, draft_mode
+               turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open
           from rooms where code = %s {"for update" if lock else ""}
         """,
         (code,),
@@ -167,12 +175,12 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
     if row is None:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
-     turn_started_at, failure_reason, moves, match_moves, draft_mode) = row
+     turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open) = row
     room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
                 host_id=host_id, status=status,
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
                 moves=list(moves or []), match_moves=list(match_moves or []),
-                draft_mode=draft_mode)
+                draft_mode=draft_mode, is_open=is_open)
     for player_id, name, is_cpu in conn.execute(
         "select player_id, name, is_cpu from room_players "
         "where room_code = %s order by seat_order",
@@ -183,15 +191,15 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
 
 
 def _save_room(conn, room: Room) -> None:
-    # draft_mode joins format/timer_seconds/seed/host_id as "set once at creation,
-    # never updated" -- deliberately absent from the ON CONFLICT clause below, same as
-    # those four already are.
+    # draft_mode and is_open join format/timer_seconds/seed/host_id as "set once at
+    # creation, never updated" -- deliberately absent from the ON CONFLICT clause
+    # below, same as those already are.
     conn.execute(
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            draft_mode, is_open)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
@@ -199,7 +207,7 @@ def _save_room(conn, room: Room) -> None:
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
-         Json(room.match_moves), room.draft_mode),
+         Json(room.match_moves), room.draft_mode, room.is_open),
     )
     for seat_order, (player_id, p) in enumerate(room.players.items()):
         conn.execute(
@@ -213,7 +221,7 @@ def _save_room(conn, room: Room) -> None:
 
 
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
-                 draft_mode: str = "stat") -> tuple[Room, str]:
+                 draft_mode: str = "stat", is_open: bool = False) -> tuple[Room, str]:
     if fmt not in ROOM_FORMATS:
         raise RoomError(f"unknown format {fmt!r}: choose one of {sorted(ROOM_FORMATS)}")
     if timer_seconds not in TIMER_CHOICES:
@@ -224,7 +232,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     room_seed = sess.new_seed()
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
-                seed=room_seed, host_id=host_id, draft_mode=draft_mode)
+                seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     _save_room(conn, room)
     return room, host_id
@@ -240,6 +248,46 @@ def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
     room.players[player_id] = RoomPlayer(player_id, name, is_cpu=False)
     _save_room(conn, room)
     return room, player_id
+
+
+@dataclass
+class OpenRoom:
+    """One row of the public browse list -- just enough to show and join it, never the
+    full `Room` (a joiner has no business seeing another seat's own progress before
+    they're even in)."""
+
+    code: str
+    format: str
+    timer_seconds: int
+    draft_mode: str
+    host_name: str
+    seats_filled: int
+
+
+def list_open_rooms(conn) -> list[OpenRoom]:
+    """Open, still-joinable rooms -- `is_open` and still in the lobby -- newest first,
+    capped at `OPEN_ROOMS_LIMIT`. A room already full is excluded here in Python, not
+    SQL: capacity is `ROOM_FORMATS[format]`, a constant keyed by format, not a stored
+    column, so there is nothing to compare against inside the query itself."""
+    rows = conn.execute(
+        """
+        select r.code, r.format, r.timer_seconds, r.draft_mode,
+               (select name from room_players
+                 where room_code = r.code and player_id = r.host_id) as host_name,
+               (select count(*) from room_players where room_code = r.code) as seats_filled
+          from rooms r
+         where r.is_open and r.status = 'lobby'
+         order by r.created_at desc
+         limit %s
+        """,
+        (OPEN_ROOMS_LIMIT,),
+    ).fetchall()
+    return [
+        OpenRoom(code=code, format=fmt, timer_seconds=timer_seconds, draft_mode=draft_mode,
+                 host_name=host_name or "Host", seats_filled=seats_filled)
+        for code, fmt, timer_seconds, draft_mode, host_name, seats_filled in rows
+        if seats_filled < ROOM_FORMATS[fmt]
+    ]
 
 
 def _remove_seat(conn, room: Room, code: str, target_id: str) -> None:

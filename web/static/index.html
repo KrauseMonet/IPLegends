@@ -246,6 +246,17 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
 .gauge{height:3px;background:var(--panel-3);margin:0 18px 14px;border-radius:2px}
 .gauge i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2));
   transition:width .35s;border-radius:2px}
+/* the room draft's per-pick countdown: ticks locally once a second (tickRoomTimer),
+   so the bar gets a slower, linear transition to sweep smoothly between whole seconds
+   instead of the snap the shared .gauge default is tuned for. */
+.timer-gauge{margin-top:-4px}
+#roomTimerBar{transition:width 1s linear,background .3s}
+.tally .n.urgent{color:var(--red-2);animation:timerPulse 1s ease-in-out infinite}
+.timer-gauge.urgent i{background:linear-gradient(90deg,var(--red),var(--red-2))}
+@keyframes timerPulse{
+  0%,100%{opacity:1}
+  50%{opacity:.5}
+}
 .line{display:grid;grid-template-columns:96px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
   align-items:baseline;column-gap:12px;padding:9px 18px;
   border-bottom:1px solid var(--line);font-size:14.5px}
@@ -332,6 +343,45 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
 .room-table{grid-template-columns:1fr}
 .cards2 > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
   border-radius:10px}
+
+/* the over-by-over reveal: the recap of an innings already known (#overPrior), plus
+   motion on the innings currently ticking over -- a score pop, a wicket flash, and a
+   per-over chip strip. No @keyframes existed in this file before this. Re-triggering one
+   on a REPEAT tick (two good overs back to back) needs the element reflowed between
+   removing and re-adding the class, not just toggling it -- see renderOverStep's own
+   comment on this, it's the standard first-time gotcha with CSS keyframe replay. */
+#overPrior{margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+#overPrior .call{color:var(--ink-2)}
+.over-gauge{max-width:360px;margin:16px auto 0}
+#overChips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:480px;
+  margin:16px auto 0}
+.chip{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
+  font-weight:700;padding:5px 8px;border-radius:6px;background:var(--panel-2);
+  color:var(--ink-3);border:1px solid transparent}
+.chip.good{color:var(--green)}
+.chip.great{background:rgba(245,184,61,.16);color:var(--gold-2)}
+.chip.wicket{border-color:var(--red-2)}
+.chip.chip-new{animation:chipIn .3s ease-out}
+
+@keyframes scorePop{
+  0%{transform:scale(1)}
+  35%{transform:scale(1.1);color:var(--gold-2)}
+  100%{transform:scale(1)}
+}
+@keyframes wicketFlash{
+  0%{color:var(--ink)}
+  25%{color:var(--red-2)}
+  65%{color:var(--red-2)}
+  100%{color:var(--ink)}
+}
+@keyframes chipIn{
+  0%{transform:translateY(4px) scale(.85);opacity:0}
+  100%{transform:translateY(0) scale(1);opacity:1}
+}
+#overScoreLine{display:inline-block}
+#overScoreLine.score-pop{animation:scorePop .45s ease-out}
+#overScoreLine.wicket-flash{animation:wicketFlash .6s ease-out}
+
 table{width:100%;border-collapse:collapse;font-size:14px}
 caption{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-align:left;
   padding:16px 0 8px;color:var(--ink)}
@@ -746,6 +796,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
             <div class="n" id="roomTimer">–</div>
             <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
           </div>
+          <div class="gauge timer-gauge"><i id="roomTimerBar" style="width:100%"></i></div>
           <div id="roomOrderSheet" class="col-scroll"></div>
         </div>
 
@@ -842,10 +893,21 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
     <!-- the over-by-over stepper: paces through one already-known over_log, entirely
          client-side (no network call per over) -- speed/pause/skip are all local -->
     <div id="overStepper" class="hide">
+      <!-- the innings already known, kept on screen for the whole second-innings reveal
+           so a target is never something the viewer has to remember -- hidden entirely
+           when this IS the first innings (nothing prior to recap). -->
+      <div class="report compact hide" id="overPrior">
+        <div class="over-line">First innings</div>
+        <div class="call" id="overPriorScore"></div>
+        <div class="margin" id="overPriorBest"></div>
+        <div class="margin" id="overTargetLine" style="font-style:normal;font-weight:700;color:var(--gold-2)"></div>
+      </div>
       <div class="report">
         <div class="over-line" id="overStage"></div>
         <div class="call" id="overScoreLine"></div>
         <div class="margin" id="overLastLine"></div>
+        <div class="over-gauge"><div class="gauge"><i id="overOversBar" style="width:0%"></i></div></div>
+        <div id="overChips"></div>
       </div>
       <div class="actions" style="justify-content:center;margin-top:20px">
         <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
@@ -1053,6 +1115,8 @@ function go(id){
       api(`/api/rooms/${ROOM_CODE}/leave`, {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({player_id: MY_PID})}).catch(() => {});
     }
+    if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
+    ROOM_TIMER_TICK = null; ROOM_TIMER_BASE = null;
     ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
   }
   window.scrollTo(0,0);
@@ -1263,6 +1327,28 @@ function rollDeal(yearEl, teamEl, finalYear, finalTeam){
     yearEl.textContent = 2008 + Math.floor(Math.random() * 19);
     teamEl.textContent = ROLL_FLAVOUR[Math.floor(Math.random() * ROLL_FLAVOUR.length)];
     ROLL_TIMERS.set(teamEl, setTimeout(step, ROLL_STEP_MS[i]));
+    i++;
+  };
+  step();
+}
+
+// A second use of rollDeal's own decelerating-flicker technique, reusing its timer map --
+// the match result is a genuine "not known until this instant" reveal (unlike the toss
+// screen, which only ever shows the winner a choice they already know they've earned), so
+// it's the one other place in the reveal flow this fits.
+const HEADLINE_DECOYS = ['You win', 'Tied', 'You lose'];
+function flickerHeadline(el, finalText, won){
+  clearTimeout(ROLL_TIMERS.get(el));
+  let i = 0;
+  const step = () => {
+    if (i >= ROLL_STEP_MS.length){
+      el.textContent = finalText;
+      el.classList.toggle('won', won);
+      ROLL_TIMERS.delete(el);
+      return;
+    }
+    el.textContent = HEADLINE_DECOYS[Math.floor(Math.random() * HEADLINE_DECOYS.length)];
+    ROLL_TIMERS.set(el, setTimeout(step, ROLL_STEP_MS[i]));
     i++;
   };
   step();
@@ -1577,8 +1663,11 @@ function showScorecard(list, i){
 
 let REVEAL = null;     // the latest SeasonProgressOut driving these screens, plus `.current`
                         // (the most recently completed match, for showRevealScorecard)
-let OVER_STEP = null;  // {log, i, timer, speed, paused, onDone} -- purely local pacing
-                        // over an over_log the server already computed in full
+let OVER_STEP = null;  // {log, i, timer, speed, paused, onDone, priorContext, lastRuns} --
+                        // purely local pacing over an over_log the server already computed
+                        // in full. `priorContext` (null for a match's first innings) is
+                        // {innings, battingLabel} for the innings already known -- see
+                        // startOverStepper's own comment.
 
 function hideAllRevealScreens(){
   ['tossScreen', 'overStepper', 'impactScreen', 'revealMatchResult'].forEach(id =>
@@ -1648,34 +1737,125 @@ function clearOverTimer(){
   if (OVER_STEP && OVER_STEP.timer){ clearTimeout(OVER_STEP.timer); OVER_STEP.timer = null; }
 }
 
-function startOverStepper(innings, stageText, onDone){
+// A batting-order scan for the innings' own headline names, done client-side because the
+// server already ships the complete `batting`/`bowling` for a FINISHED innings (this is
+// never used on the innings currently ticking over, only on one already fully known) --
+// `faced_any` matters here: without it a did-not-bat batter (0 runs off 0 balls) can beat
+// a real duck on the tie-break, since both compare equal on runs alone.
+function inningsTopBatter(inn){
+  const faced = inn.batting.filter(b => b.faced_any);
+  if (!faced.length) return null;
+  return faced.reduce((a, b) =>
+    (b.runs > a.runs || (b.runs === a.runs && b.strike_rate > a.strike_rate)) ? b : a);
+}
+function inningsTopBowler(inn){
+  if (!inn.bowling.length) return null;
+  return inn.bowling.reduce((a, b) =>
+    (b.wickets > a.wickets || (b.wickets === a.wickets && b.economy < a.economy)) ? b : a);
+}
+
+// `priorContext` is null for a match's first-ever innings (nothing to recap) and
+// {innings, battingLabel} for every innings after it -- built by the caller from data
+// already in hand (REVEAL.pending for solo, the match result's own home innings for a
+// room), never re-fetched. "Home always bats first" is enforced server-side (game/
+// season.py), so the prior innings is always the one already fully known.
+function startOverStepper(innings, stageText, onDone, priorContext){
   hideAllRevealScreens();
   OVER_STEP = {
     log: innings.over_log, i: 0, timer: null,
     speed: Number($('#overSpeedSelect').value) || 500,
-    paused: false, onDone, stageText, innings,
+    paused: false, onDone, stageText, innings, priorContext: priorContext || null,
+    lastRuns: null,
   };
+  renderOverPrior();
   $('#overStepper').classList.remove('hide');
   renderOverStep();
   if (OVER_STEP) scheduleNextOver();
 }
 
+// Painted once, at the start of the reveal, and left alone -- unlike renderOverStep this
+// never changes tick to tick, since the prior innings is already fully resolved.
+function renderOverPrior(){
+  const p = OVER_STEP.priorContext;
+  $('#overPrior').classList.toggle('hide', !p);
+  if (!p) return;
+  $('#overPriorScore').textContent =
+    `${p.battingLabel} posted ${p.innings.runs}/${p.innings.wickets} (${p.innings.overs} ov)`;
+  const bat = inningsTopBatter(p.innings), bowl = inningsTopBowler(p.innings);
+  $('#overPriorBest').textContent = [
+    bat ? `${bat.name} ${bat.runs}${bat.out ? '' : '*'} (${bat.balls})` : null,
+    bowl ? `${bowl.name} ${bowl.wickets}/${bowl.runs}` : null,
+  ].filter(Boolean).join(' · ');
+}
+
+// The live target line, recomputed every tick against whatever runs/balls this render
+// represents -- `isFinal` marks the moment the over_log has run out (a partial final over
+// is never logged, so this is exactly where a chase actually resolves) and is what tells
+// "still chasing, plenty of balls left on paper" apart from "innings over, fell short".
+function renderChaseLine(priorContext, runsNow, ballsNow, isFinal){
+  const el = $('#overTargetLine');
+  if (!priorContext){ el.textContent = ''; return; }
+  const target = priorContext.innings.runs + 1;
+  const remaining = target - runsNow;
+  const ballsLeft = 120 - ballsNow;
+  if (remaining <= 0){
+    el.textContent = 'Target chased down';
+  } else if (ballsLeft <= 0 || isFinal){
+    el.textContent = `Fell short by ${remaining} run${remaining === 1 ? '' : 's'}`;
+  } else {
+    const rrr = (remaining / (ballsLeft / 6)).toFixed(2);
+    el.textContent = `Need ${remaining} off ${ballsLeft} ball${ballsLeft === 1 ? '' : 's'} (RRR ${rrr})`;
+  }
+}
+
+// Re-triggering a CSS animation on a REPEAT tick (two good overs back to back) needs the
+// element reflowed between removing and re-adding its class, not just toggled -- toggling
+// alone is a no-op when the class is already present. A wicket outranks a plain score
+// bump when both are true in the same over.
+function pulseScoreLine(wicketFell, scoreChanged){
+  const el = $('#overScoreLine');
+  el.classList.remove('score-pop', 'wicket-flash');
+  void el.offsetWidth;
+  if (wicketFell) el.classList.add('wicket-flash');
+  else if (scoreChanged) el.classList.add('score-pop');
+}
+
+// One small pill per over revealed so far -- a cheap "worm chart" substitute with no
+// charting library, rebuilt from scratch each tick (cheap at <=20 overs). Only the most
+// recently added chip gets the pop-in animation.
+function renderOverChips(entries){
+  $('#overChips').innerHTML = entries.map((o, idx) => {
+    const cls = o.over_runs >= 12 ? 'great' : (o.over_runs >= 7 ? 'good' : '');
+    const wkt = o.over_wickets ? ' wicket' : '';
+    const isNew = idx === entries.length - 1;
+    return `<span class="chip ${cls}${wkt}${isNew ? ' chip-new' : ''}">${o.over_runs}</span>`;
+  }).join('');
+}
+
 function renderOverStep(){
-  const { log, i, stageText, innings } = OVER_STEP;
+  const { log, i, stageText, innings, priorContext } = OVER_STEP;
   $('#overStage').textContent = stageText;
   if (i >= log.length){
     // either a genuinely over-free innings, or the log just ran out -- either way the
     // final total is already known, so show it and hand off immediately.
     $('#overScoreLine').textContent = `${innings.runs}/${innings.wickets}`;
     $('#overLastLine').textContent = `${innings.overs} overs, ${innings.extras} extras`;
+    $('#overOversBar').style.width = (100 * Math.min(1, innings.balls / 120)) + '%';
+    renderChaseLine(priorContext, innings.runs, innings.balls, true);
     finishOverStepper();
     return;
   }
   const o = log[i];
+  const scoreChanged = OVER_STEP.lastRuns !== null && o.runs !== OVER_STEP.lastRuns;
+  OVER_STEP.lastRuns = o.runs;
   $('#overScoreLine').textContent = `${o.runs}/${o.wickets} after ${o.over + 1} overs`;
   $('#overLastLine').textContent =
     `Over ${o.over + 1}: ${o.bowler} -- ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
     (o.over_wickets ? `, ${o.over_wickets} wicket${o.over_wickets === 1 ? '' : 's'}` : '');
+  $('#overOversBar').style.width = (100 * Math.min(1, o.balls / 120)) + '%';
+  renderChaseLine(priorContext, o.runs, o.balls, false);
+  pulseScoreLine(o.over_wickets > 0, scoreChanged);
+  renderOverChips(log.slice(0, i + 1));
 }
 
 function scheduleNextOver(){
@@ -1735,6 +1915,12 @@ function showImpactScreen(pending){
 
 async function submitImpact(slot, ctrl){
   const stage = REVEAL.pending.stage;
+  // Captured before the network call, from the exact fields showImpactScreen already
+  // read one screen earlier -- REVEAL itself is about to be replaced by the response.
+  const priorContext = {
+    innings: REVEAL.pending.first_innings,
+    battingLabel: REVEAL.pending.human_bats_first ? 'Your eleven' : REVEAL.pending.opponent,
+  };
   await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
     try {
       const d = await api(`/api/season/${SEASON_STATE}/impact`, {
@@ -1748,7 +1934,7 @@ async function submitImpact(slot, ctrl){
       const match = list[list.length - 1];
       startOverStepper(match.away_innings,
         matchLabel(stage, d.your_results.length, d.matches_each),
-        () => revealCompletedMatch(match, d));
+        () => revealCompletedMatch(match, d), priorContext);
     } catch(e){ slip(e.message); }
   });
 }
@@ -1768,9 +1954,9 @@ function revealCompletedMatch(match, d){
   const them = match.home === 'YOU' ? match.away : match.home;
   const mine = match.home === 'YOU' ? match.home_score : match.away_score;
   const theirs = match.home === 'YOU' ? match.away_score : match.home_score;
-  $('#revealHeadline').textContent = match.winner === 'YOU' ? 'You win'
+  const headline = match.winner === 'YOU' ? 'You win'
     : (match.winner === null ? 'Tied' : (isLeague ? `${them} win` : `${match.winner} win`));
-  $('#revealHeadline').classList.toggle('won', match.winner === 'YOU');
+  flickerHeadline($('#revealHeadline'), headline, match.winner === 'YOU');
   $('#revealMargin').textContent = match.margin;
   $('#revealLine').innerHTML = isLeague
     ? `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
@@ -2138,6 +2324,11 @@ function drawJourneyCard(d, header){
 /* --- rooms: friends draft together, live, turn by turn ------------------------------- */
 
 let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
+// The per-pick countdown ticks locally once a second between polls, instead of only
+// updating (and visibly jumping by 2) whenever a poll response lands. ROOM_TIMER_BASE
+// is the last server-authoritative reading -- {value, max, at} -- and every poll
+// refreshes it; ROOM_TIMER_TICK renders the extrapolated value every second in between.
+let ROOM_TIMER_TICK = null, ROOM_TIMER_BASE = null;
 // Whose squad the "Batting order" column shows during someone else's turn: false = the
 // active player's (the default), true = my own. Resets whenever the active player changes
 // so a stale choice doesn't linger into the next person's turn.
@@ -2227,6 +2418,8 @@ function enterRoom(code, playerId){
   pollRoom();
   if (ROOM_POLL) clearInterval(ROOM_POLL);
   ROOM_POLL = setInterval(pollRoom, 2000);
+  if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
+  ROOM_TIMER_TICK = setInterval(tickRoomTimer, 1000);
 }
 
 function leaveRoom(){
@@ -2244,6 +2437,13 @@ async function pollRoom(){
     const room = await api('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
     if (myGen !== ROOM_GEN) return;   // a mutation started after this poll was issued
     ROOM = room;
+    // Resync the local ticker to the server's own reading here, on the poll that
+    // actually fetched it -- never inside renderRoomDraft, which also re-runs off the
+    // same cached ROOM object (toggleRoomView) and would otherwise snap the countdown
+    // back to a stale value on every such re-render instead of continuing smoothly.
+    if (room.status === 'drafting'){
+      ROOM_TIMER_BASE = {value: room.seconds_remaining, max: room.timer_seconds || CHOSEN_TIMER, at: performance.now()};
+    }
     if (ROOM.status === 'complete'){
       // The match phase keeps polling on the SAME interval as the draft -- a toss
       // winner, or the host advancing, needs every other seat's own screen to pick the
@@ -2324,6 +2524,7 @@ function renderRoom(){
 
 function renderRoomFailed(r){
   if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+  if (ROOM_TIMER_TICK){ clearInterval(ROOM_TIMER_TICK); ROOM_TIMER_TICK = null; }
   $('#roomFailedCode').textContent = r.code;
   $('#roomFailedReason').textContent = r.failure_reason || '';
 }
@@ -2379,12 +2580,34 @@ function showRoomDeal(deal, fallbackText){
   }
 }
 
+// Renders the countdown purely from ROOM_TIMER_BASE, extrapolated by wall-clock time
+// since it was last set from a real server reading -- called once a second by
+// ROOM_TIMER_TICK, and once more immediately whenever a fresh poll lands (via
+// renderRoomDraft) so a resync is never left waiting up to a second to appear.
+function tickRoomTimer(){
+  if (!ROOM_TIMER_BASE) return;
+  const el = $('#roomTimer');
+  if (!el) return;
+  const {value, max, at} = ROOM_TIMER_BASE;
+  const elapsed = (performance.now() - at) / 1000;
+  const remaining = Math.max(0, Math.round(value - elapsed));
+  el.textContent = remaining;
+  const urgent = remaining > 0 && remaining <= 5;
+  el.classList.toggle('urgent', urgent);
+  const bar = $('#roomTimerBar');
+  if (bar){
+    const pct = max > 0 ? Math.max(0, Math.min(100, remaining / max * 100)) : 0;
+    bar.style.width = pct + '%';
+    bar.parentElement.classList.toggle('urgent', urgent);
+  }
+}
+
 function renderRoomDraft(r){
   const me = r.players.find(p => p.player_id === MY_PID);
   const active = r.players.find(p => p.player_id === r.active_player_id);
   const amActive = !!me && r.active_player_id === MY_PID;
   $('#roomRoundNow').textContent = `round ${r.round + 1}/${r.rounds_total}`;
-  $('#roomTimer').textContent = r.seconds_remaining;
+  tickRoomTimer();
   $('#roomCodeStamp').textContent = 'room ' + r.code;
 
   if (amActive){
@@ -2520,6 +2743,7 @@ function renderRoomResult(r){
   // Unlike the draft phase, the match phase keeps polling (see pollRoom) -- more than
   // one seat can have something to do next (whoever wins a toss, then always the
   // host), so there is no single caller whose own action ends the wait.
+  if (ROOM_TIMER_TICK){ clearInterval(ROOM_TIMER_TICK); ROOM_TIMER_TICK = null; }
   $('#roomResultCode').textContent = r.code;
   if (ROOM_MATCH_DATA){
     showRoomMatch(ROOM_MATCH_DATA);
@@ -2742,13 +2966,17 @@ function roomStartReveal(myMatch){
   ROOM_REVEAL_ACTIVE = myMatch;
   const r = myMatch.result;
   const steps = [];
-  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`]);
-  if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${r.away} batting`]);
+  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`, null]);
+  // Built from r.home_innings/r.home directly, not steps[0] -- home always bats first in
+  // this engine, but indexing into steps would attach the wrong innings as "prior" in the
+  // (currently unreached) case where home_innings is ever absent.
+  if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${r.away} batting`,
+    r.home_innings ? { innings: r.home_innings, battingLabel: r.home } : null]);
   let i = 0;
   (function next(){
     if (i >= steps.length){ roomFinishReveal(myMatch); return; }
-    const [innings, label] = steps[i++];
-    startOverStepper(innings, label, next);
+    const [innings, label, priorContext] = steps[i++];
+    startOverStepper(innings, label, next, priorContext);
   })();
 }
 

@@ -286,11 +286,14 @@ def _league_revealed_count(room: Room) -> int:
 
 def _paused(entries: list[RoomResultEntry], states: list[RoomFixtureState], label: str,
             eliminated: set[str], *, advance_ready: bool = False,
-            table: list[RoomStandingRow] | None = None) -> RoomMatchReplay:
+            table: list[RoomStandingRow] | None = None,
+            league_progress: tuple[int, int] | None = None,
+            league_next: RoomResultEntry | None = None) -> RoomMatchReplay:
     return RoomMatchReplay(
         results=list(entries), complete=False, table=table,
         current_round=states, round_label=label,
-        advance_ready=advance_ready, eliminated_pids=frozenset(eliminated))
+        advance_ready=advance_ready, eliminated_pids=frozenset(eliminated),
+        league_progress=league_progress, league_next=league_next)
 
 
 def _standings_table(pairs: list[tuple[str, Side]],
@@ -445,10 +448,18 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
         # pacing exists to protect.
         d.entries[:] = all_entries[:revealed]
         partial_table = _standings_table(pairs, d.entries) if revealed else None
+        # `league_next` is the fixture THIS response is delivering an animation for --
+        # the one just newly included in `d.entries` by advancing to `revealed`, i.e.
+        # index `revealed - 1`, NOT `all_entries[revealed]` (the next one still
+        # waiting). `revealed` counts fixtures already shown; the one a "Continue" call
+        # just unlocked is the LAST of those, not the one after. None only at
+        # revealed == 0, before the host's first Continue -- nothing has been unlocked
+        # yet to animate.
+        league_next = all_entries[revealed - 1] if revealed > 0 else None
         return RoomMatchReplay(
             results=list(d.entries), complete=False, table=partial_table,
             current_round=[], round_label="League",
-            league_progress=(revealed, total), league_next=all_entries[revealed],
+            league_progress=(revealed, total), league_next=league_next,
             advance_ready=False, eliminated_pids=frozenset())
 
     d.entries[:] = all_entries
@@ -458,7 +469,17 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # even open, let alone finish. Nothing about their own tournament changes from here.
     eliminated.update(pid for pid, _ in pairs if pid not in top4_pids)
     if not _advance_recorded(room, "League"):
-        return _paused(d.entries, [], "League", eliminated, advance_ready=True, table=table)
+        # The round-robin's own LAST fixture never gets a paused, per-match stopover
+        # the way an ordinary in-progress one does -- the moment `revealed` reaches
+        # `total` this branch takes over, and the plain version of this return carried
+        # no `league_next` at all, so the final fixture's own animation silently never
+        # played (the same shape of gap A83 already fixed for a room's LAST knockout
+        # fixture). Still offering it here, alongside `advance_ready`, lets the
+        # existing frontend reveal-check (which always runs first) animate it before
+        # ever acting on `advance_ready` -- by the time a host can actually record the
+        # "advance" move that leaves this screen, they must already have seen it.
+        return _paused(d.entries, [], "League", eliminated, advance_ready=True, table=table,
+                       league_progress=(total, total), league_next=all_entries[-1])
 
     # Resolved via the CURRENT call's own `pairs`, never via `row.standing.side` -- once
     # the round-robin can be served from `_ROUND_ROBIN_CACHE`, `table`'s own Side objects

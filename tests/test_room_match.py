@@ -365,8 +365,11 @@ def _drive_room_to_completion(conn, room, host_id):
     guard = 0
     while not replay.complete and guard < 1000:
         guard += 1
-        if replay.league_progress is not None:
-            _, total = replay.league_progress
+        # league_progress stays (total, total) -- alongside advance_ready -- until the
+        # host's own "advance" move actually leaves the group-stage screen, so the
+        # reveal-jump only applies while there's still something left to reveal.
+        revealed, total = replay.league_progress if replay.league_progress else (None, None)
+        if replay.league_progress is not None and revealed < total:
             room_match.advance_league_reveal(conn, room.code, host_id, total, DECK, MODEL)
         else:
             pending = _find_pending_toss(replay)
@@ -640,18 +643,49 @@ def test_league_reveal_beyond_the_total_is_refused(conn):
 
 def test_league_next_always_matches_the_fixture_at_the_current_cursor(conn):
     """The exposed 'next fixture to reveal' never skips or repeats one, walking the
-    cursor one at a time from 0 all the way to the group stage's own total."""
+    cursor one at a time from 0 all the way to the group stage's own total -- AND, the
+    real bug this test is named for: `league_next` on a given response must be the
+    SAME fixture that response's own `results` just grew to include, not the one still
+    waiting after it. A version that only checked the walk was distinct-and-in-order
+    passed under both the off-by-one bug and the fix (`all_entries[revealed]` vs
+    `all_entries[revealed - 1]` both walk 70 distinct fixtures in order, just shifted)
+    -- it never caught that a host's "Continue" click revealed the fixture AFTER the
+    one it had just silently marked done, live-reproduced as a real KKR2-vs-PW2
+    mismatch: the animation shown never matched what had just appeared in the results
+    list."""
     room, host_id = _make_and_complete_league(conn)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
-    _, total = replay.league_progress
+    revealed, total = replay.league_progress
+    assert revealed == 0
+    # Nothing has been unlocked yet -- there is no "just revealed" fixture to animate
+    # before the host's own first Continue click.
+    assert replay.league_next is None
+
     seen = []
-    while replay.league_progress is not None:
-        revealed, _ = replay.league_progress
-        assert replay.league_next is not None
-        seen.append(replay.league_next)
-        room_match.advance_league_reveal(conn, room.code, host_id, revealed + 1, DECK, MODEL)
+    for target in range(1, total + 1):
+        room_match.advance_league_reveal(conn, room.code, host_id, target, DECK, MODEL)
         _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+        league_results = [e for e in replay.results if e.stage == "league"]
+        assert len(league_results) == target
+        # The ground truth: whichever fixture THIS response's own results just grew to
+        # include is the one it must be offering an animation for.
+        assert replay.league_next is league_results[-1]
+        seen.append(replay.league_next)
+
     assert len(seen) == total
+    assert len({id(e) for e in seen}) == total, "every fixture must be revealed exactly once"
+    # The round-robin's own LAST fixture (index total-1, the final loop iteration
+    # above) still needs its OWN animation, exactly like every earlier one -- so
+    # `league_progress`/`league_next` stay populated (advance_ready=True alongside
+    # them) until the host explicitly records the "advance" move that actually leaves
+    # this screen for the qualifiers, not the instant `revealed` reaches `total`.
+    assert replay.league_progress == (total, total)
+    assert replay.league_next is seen[-1]
+    assert replay.advance_ready
+
+    room_match.advance_match(conn, room.code, host_id, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.league_progress is None
     assert replay.league_next is None
 
 

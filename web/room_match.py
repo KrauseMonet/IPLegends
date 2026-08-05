@@ -230,8 +230,23 @@ class _Driver:
     def resolve_fixture(self, side_a: Side, side_b: Side, stage: str) -> RoomFixtureState:
         a_pid, b_pid = self._pid(side_a), self._pid(side_b)
         cursor = _FixtureToss(self.room.match_moves, stage, is_cpu_side=self._is_cpu)
+        # A fixture of its own -- NOT self.rng -- because self.rng is one continuous
+        # stream shared across every fixture in a round, and this one can PAUSE
+        # (_OpenMatchNeedsToss) while a sibling in the same round does not. A round-
+        # robin fixture (resolve_auto) never pauses, so it draws the same amount on
+        # every replay and sharing a stream there is safe; this one doesn't have that
+        # guarantee -- consuming 1 draw (the coin flip) while pending, then thousands
+        # more once its toss is finally answered, would shift every LATER fixture's own
+        # draws out from under it the instant that happens, silently re-simulating an
+        # already-shown result into a different one. Seeding per (room.seed, stage)
+        # instead makes each named fixture's own outcome depend only on its own moves,
+        # never on a sibling's resolution timing -- what this module's own docstring
+        # already claims ("attempted independently every replay pass") but the shared
+        # stream did not actually deliver. `str` seeds hash deterministically
+        # (unaffected by PYTHONHASHSEED), unlike a bare tuple.
+        fixture_rng = random.Random(f"{self.room.seed}:{stage}")
         try:
-            r = play_open(self.model, side_a, side_b, self.rng, stage=stage, moves=cursor)
+            r = play_open(self.model, side_a, side_b, fixture_rng, stage=stage, moves=cursor)
         except _OpenMatchNeedsToss as exc:
             return RoomFixtureState(
                 stage=stage, a_pid=a_pid, b_pid=b_pid,

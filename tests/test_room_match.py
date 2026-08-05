@@ -274,6 +274,26 @@ def test_two_fixtures_in_the_same_round_resolve_independently_in_either_order(co
                             "Semi-final 1", "bat", DECK, MODEL)
     _, replay3 = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert all(fs.result is not None for fs in replay3.current_round)
+    # The real bug this whole test exists to catch: Semi-final 2 was ALREADY resolved
+    # and shown (semi2_after, above) before Semi-final 1's own toss was ever answered.
+    # Semi-final 1 resolving afterwards must not silently re-simulate Semi-final 2 into
+    # a DIFFERENT result out from under whoever already saw the first one -- each named
+    # fixture's own outcome must depend only on its own moves, never on a sibling's
+    # resolution timing, exactly what "independently" in this test's own name promises.
+    def _winner_pid(fs):
+        # Side has no eq=False, and each replay call builds brand new Side objects --
+        # comparing `.result.winner` by identity across two different replay calls
+        # always fails even when the real winner (by pid) hasn't changed. `home_pid`/
+        # `away_pid` are this same call's own consistent pids, so map through those.
+        if fs.result.winner is None:
+            return None
+        return fs.home_pid if fs.result.winner is fs.result.home else fs.away_pid
+
+    semi2_final = next(fs for fs in replay3.current_round if fs.stage == "Semi-final 2")
+    assert semi2_final.result.home_runs == semi2_after.result.home_runs
+    assert semi2_final.result.away_runs == semi2_after.result.away_runs
+    assert _winner_pid(semi2_final) == _winner_pid(semi2_after)
+    assert semi2_final.home_pid == semi2_after.home_pid
 
 
 # --- the replay itself: results accumulate, and completion is real --------------------

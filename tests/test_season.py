@@ -23,6 +23,7 @@ from game.season import (
     _insert_batting_impact, _leader, _OpenMatchNeedsToss,
     _play_human_match, _tailender_bowler, _weakest_bowler, _weakest_pure_batter,
     decide_impact, fixtures, journey_stats, play_open, run_league, run_playoffs, toss,
+    tournament_leaders,
 )
 from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
@@ -226,6 +227,58 @@ def test_journey_stats_for_a_side_that_never_reached_the_playoffs():
     stats = journey_stats(season, you, JourneyAccumulator())
     assert stats.played == 14, "no playoff match involved this side, so none is added"
     assert stats.won == 4 and stats.lost == 10
+
+
+def test_tournament_leaders_does_not_sum_the_same_person_across_different_sides():
+    """A real person can legally appear on more than one drawn side in a single
+    tournament -- the historical opposition sides are independent per-squad draws
+    (A63), so the same person_id can turn up in two different drawn franchise-seasons'
+    squads, or in both a human's own draft and a historical side. The Purple/Orange Cap
+    must credit his BEST single side, never the sum across sides -- summing would crown
+    a combined season no one team actually got, which is exactly the bug this guards."""
+    a, b, c = side("A"), side("B"), side("C")
+    results = [
+        # Mishra takes 3 wickets while on side A...
+        Result(home=a, away=b,
+               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")]),
+               away_innings=Innings(batting=[], bowling=[])),
+        # ...and 4 MORE while on side C, a different side the same real person also
+        # appears for this tournament (7 total if wrongly summed across sides).
+        Result(home=c, away=b,
+               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 4, person_id="mishra")]),
+               away_innings=Innings(batting=[], bowling=[])),
+        # Ashwin's entire tournament is for ONE side only: a genuine 5-for-one-team.
+        Result(home=b, away=a,
+               home_innings=Innings(batting=[], bowling=[_bowler("Ashwin", 5, person_id="ashwin")]),
+               away_innings=Innings(batting=[], bowling=[])),
+    ]
+    leaders = tournament_leaders(results)
+    assert leaders.top_wicket_taker == ("Ashwin", 5), (
+        "Mishra's best SINGLE side only took 4 wickets -- Ashwin's real 5-for-one-team "
+        "must win, not a 7 stitched together from two different sides"
+    )
+
+
+def test_tournament_leaders_still_sums_the_same_person_on_the_same_side_across_matches():
+    """The fix must not overcorrect: the ORDINARY case -- one man, one side, many
+    matches across the season -- still sums, exactly as a real Purple Cap does."""
+    a, b = side("A"), side("B")
+    results = [
+        Result(home=a, away=b,
+               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 2, person_id="mishra")]),
+               away_innings=Innings(batting=[], bowling=[])),
+        Result(home=a, away=b,
+               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")]),
+               away_innings=Innings(batting=[], bowling=[])),
+    ]
+    leaders = tournament_leaders(results)
+    assert leaders.top_wicket_taker == ("Mishra", 5)
+
+
+def test_tournament_leaders_on_no_matches_at_all():
+    leaders = tournament_leaders([])
+    assert leaders.top_scorer == ("", 0)
+    assert leaders.top_wicket_taker == ("", 0)
 
 
 # --- the situational Impact Player, decided at the break (A78) -------------------------

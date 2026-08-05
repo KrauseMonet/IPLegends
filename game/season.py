@@ -392,18 +392,55 @@ class TournamentLeaders:
     top_wicket_taker: tuple[str, int]
 
 
+def _best_across(entries: list[tuple[int, str]]) -> tuple[str, int]:
+    """Same tie-break as `_leader` -- highest value, alphabetically-lowest name on a tie
+    -- but over a flat list of (value, name) pairs rather than a dict keyed by person.
+    `tournament_leaders` needs one entry PER (person, side): a dict keyed by person_id
+    alone would silently merge two different sides' totals for the same man into one
+    slot before a leader could even be picked, which is exactly the bug this function
+    exists to avoid."""
+    if not entries:
+        return "", 0
+    best_value = max(v for v, _ in entries)
+    name = min(n for v, n in entries if v == best_value)
+    return name, best_value
+
+
 def tournament_leaders(results: list[Result]) -> TournamentLeaders:
-    acc = JourneyAccumulator()
+    """A real person can legally appear on MORE THAN ONE side across a single
+    tournament -- the historical opposition sides are nine franchise-SEASONS drawn
+    independently (A63), so the same person_id can turn up in two different drawn
+    squads in the same tournament, or in both a human's own draft and a historical
+    side, if that man's real career touched more than one of the drawn years. Summing
+    his stats across every side he happened to appear for would crown him Purple Cap
+    on a combined season no single team actually got. Fixed by keeping one
+    `JourneyAccumulator` PER SIDE -- `id(side)`, the identity-comparison convention
+    this file already uses everywhere else (`journey_stats`'s own `is` lookup;
+    `Side` is a plain `@dataclass` with no `eq=False`, so it is not safely hashable or
+    comparable by value) -- and picking the single best (person, side) entry across
+    every side's own accumulator, never summed across sides."""
+    per_side: dict[int, JourneyAccumulator] = {}
+
+    def _acc_for(side: Side) -> JourneyAccumulator:
+        return per_side.setdefault(id(side), JourneyAccumulator())
+
     for r in results:
         if r.home_innings is not None:
+            acc = _acc_for(r.home)
             acc.add_batting(r.home_innings)
             acc.add_bowling(r.home_innings)
         if r.away_innings is not None:
+            acc = _acc_for(r.away)
             acc.add_batting(r.away_innings)
             acc.add_bowling(r.away_innings)
+
     return TournamentLeaders(
-        top_scorer=_leader(acc.runs, acc.names),
-        top_wicket_taker=_leader(acc.wickets, acc.names),
+        top_scorer=_best_across([
+            (v, acc.names[pid]) for acc in per_side.values() for pid, v in acc.runs.items()
+        ]),
+        top_wicket_taker=_best_across([
+            (v, acc.names[pid]) for acc in per_side.values() for pid, v in acc.wickets.items()
+        ]),
     )
 
 

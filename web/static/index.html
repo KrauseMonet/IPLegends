@@ -340,10 +340,22 @@ tr.tail td{color:var(--ink-3);font-style:italic}
 .season{display:grid;grid-template-columns:1.25fr .95fr;gap:16px}
 .season > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
   border-radius:10px}
-.ladder-row td{padding:7px 0}
 tr.you td{font-weight:700;color:var(--ink)}
 tr.you td:first-child{box-shadow:inset 3px 0 0 var(--gold);padding-left:9px}
 tr.cut td{border-bottom:1.5px solid var(--gold)}
+
+/* --- standings: the league table's own richer treatment, scoped separately from the
+   shared table/th/td rules above (which the scorecard's batting/bowling tables also
+   use -- rank, leader and points styling has no meaning there). A standings table is
+   read top-down for exactly two things: who's leading, and where the cutoff falls --
+   both get a real visual anchor instead of 10 identically-weighted rows. */
+.standings th{border-bottom:1.5px solid rgba(245,184,61,.35)}
+.standings tbody tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+.standings tbody tr:first-child td{background:linear-gradient(90deg,rgba(245,184,61,.12),transparent 65%)}
+.standings tbody tr:first-child td:first-child{color:var(--gold-2);font-weight:800}
+.standings td.pts{font-weight:700;color:var(--ink)}
+.standings td.nrr-pos{color:var(--green)}
+.standings td.nrr-neg{color:var(--red-2)}
 .fx{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;
   padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;transition:background .12s}
 .fx[onclick]:hover{background:var(--panel-2)}
@@ -737,7 +749,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
       <div>
         <div class="col-head" style="margin:26px -18px 0"><span>League table</span>
           <em id="tableNote"></em></div>
-        <table id="ladder"></table>
+        <table id="ladder" class="standings"></table>
       </div>
       <div>
         <div class="col-head" style="margin:26px -18px 0"><span>Your fourteen</span>
@@ -1371,18 +1383,27 @@ function showSeason(d){
   go('result');
 }
 
+// Shared by both standings tables (solo's own ladder and a room's) -- signed and
+// colour-coded the way a broadcast table treats net run rate, rather than a plain
+// number identical in weight to every other column.
+function nrrCell(v){
+  const n = Number(v);
+  const cls = n > 0 ? 'nrr-pos' : n < 0 ? 'nrr-neg' : '';
+  return `<td class="n ${cls}">${n > 0 ? '+' : ''}${n.toFixed(3)}</td>`;
+}
+
 function renderTableAndForm(d){
   SEASON_DATA = d;
   SEASON_STATE = d.state;
   $('#tableNote').textContent = `${d.matches_each} each`;
   $('#ladder').innerHTML =
-    `<tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
-        <th class="n">Pts</th><th class="n">NRR</th></tr>` +
+    `<thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
+        <th class="n">Pts</th><th class="n">NRR</th></tr></thead><tbody>` +
     d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
       <td class="n" style="text-align:left">${r.pos}</td><td>${r.short}</td>
       <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
-      <td class="n">${r.points}</td>
-      <td class="n">${r.nrr > 0 ? '+' : ''}${r.nrr.toFixed(3)}</td></tr>`).join('');
+      <td class="n pts">${r.points}</td>
+      ${nrrCell(r.nrr)}</tr>`).join('') + '</tbody>';
 
   const w = d.your_results.filter(r => r.winner === 'YOU').length;
   $('#formNote').textContent = `${w} won`;
@@ -2464,13 +2485,16 @@ function roomTableHtml(m){
   // playoffs (RoomMatchOut.table's own doc comment), not only once complete, so this
   // markup has to work identically in both places rather than living only in one.
   if (!m.table) return '';
-  return `<table>
-    <tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
-        <th class="n">Pts</th><th class="n">NRR</th></tr>
-    ${m.table.map(row => `<tr class="${row.you ? 'you' : ''}">
-      <td>${row.pos}</td><td>${row.name}</td><td class="n">${row.played}</td>
-      <td class="n">${row.won}</td><td class="n">${row.lost}</td>
-      <td class="n">${row.points}</td><td class="n">${row.nrr}</td></tr>`).join('')}
+  return `<table class="standings">
+    <thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
+        <th class="n">Pts</th><th class="n">NRR</th></tr></thead>
+    <tbody>
+    ${m.table.map(row => `<tr class="${row.you ? 'you' : ''} ${row.pos === 4 ? 'cut' : ''}">
+      <td class="n" style="text-align:left">${row.pos}</td><td>${row.name}</td>
+      <td class="n">${row.played}</td><td class="n">${row.won}</td><td class="n">${row.lost}</td>
+      <td class="n pts">${row.points}</td>
+      ${nrrCell(row.nrr)}</tr>`).join('')}
+    </tbody>
   </table>`;
 }
 

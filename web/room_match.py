@@ -150,6 +150,10 @@ class RoomMatchReplay:
     eliminated_pids: frozenset[str] = field(default_factory=frozenset)
     league_progress: tuple[int, int] | None = None
     league_next: RoomResultEntry | None = None
+    # True only in the window between the draft finishing and the host recording a
+    # "start" move -- every other field is left at its default (an empty `results`,
+    # `complete=False`) since nothing has been resolved yet, not even a first toss.
+    awaiting_start: bool = False
 
 
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
@@ -251,6 +255,10 @@ def _advance_recorded(room: Room, round_label: str) -> bool:
                for mv in room.match_moves)
 
 
+def _start_recorded(room: Room) -> bool:
+    return any(isinstance(mv, dict) and mv.get("kind") == "start" for mv in room.match_moves)
+
+
 def _league_revealed_count(room: Room) -> int:
     """How many of the round-robin's fixtures the host has revealed so far -- the
     highest `through` value recorded, or 0. Monotonic by construction: a write only ever
@@ -344,6 +352,14 @@ def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
 def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     if room.status != "complete":
         raise RoomError(f"room is not complete yet (status: {room.status})")
+
+    # Every seat reviews their own finished twelve -- and the three ratings that come
+    # with it -- before a single ball is bowled. Nothing below this point runs (not
+    # even a first toss) until the host records a "start" move, mirroring the
+    # "advance" move's own shape (_advance_recorded/advance_match) rather than
+    # inventing a new kind of gate.
+    if not _start_recorded(room):
+        return RoomMatchReplay(awaiting_start=True)
 
     pairs = _sides_with_pid(room, deck)
     d = _Driver(room, model, pairs)
@@ -584,6 +600,24 @@ def advance_match(conn, code: str, player_id: str, deck, model) -> Room:
     if not replay.advance_ready:
         raise RoomError("this room is not waiting to advance right now")
     room.match_moves = room.match_moves + [{"kind": "advance", "round": replay.round_label}]
+    rooms._save_room(conn, room)
+    return room
+
+
+def start_matches(conn, code: str, player_id: str, deck, model) -> Room:
+    """Host-only, mirroring `advance_match`'s own authorisation and shape exactly.
+    Idempotent rather than an error on a repeat call -- the same convergence
+    philosophy as `rooms.play_again`/`advance_league_reveal`: a double-click or a
+    network retry sending this twice is a real, expected case, not a bug."""
+    room = rooms._load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can start the matches")
+    if _start_recorded(room):
+        return room
+    replay = replay_room_matches(room, deck, model)
+    if not replay.awaiting_start:
+        raise RoomError("this room is not waiting to start right now")
+    room.match_moves = room.match_moves + [{"kind": "start"}]
     rooms._save_room(conn, room)
     return room
 

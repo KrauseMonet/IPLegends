@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card
+from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -171,6 +171,12 @@ class SessionOut(BaseModel):
     deal: DealOut | None
     squad_complete: bool
     playable: bool = Field(description="squad_complete and every legality rule satisfied")
+    # Populated only once squad_complete -- the squad-review screen's own three
+    # numbers (etl.feasibility.team_rating), null beforehand rather than a number
+    # computed over a still-partial twelve.
+    overall_rating: int | None = None
+    batting_rating: int | None = None
+    bowling_rating: int | None = None
 
 
 class PickIn(BaseModel):
@@ -346,6 +352,10 @@ class SeasonProgressOut(BaseModel):
     orange_cap_runs: int | None = None
     purple_cap: str | None = None
     purple_cap_wickets: int | None = None
+    # The squad-review screen's own overall number, carried through to the journey
+    # card (etl.feasibility.team_rating) -- batting/bowling aren't needed again here,
+    # only what the user asked the journey card to show.
+    overall_rating: int | None = None
     squad: list[JourneySquadEntryOut] | None = Field(
         default=None, description="the final twelve, in batting order then Impact, "
                      "each with this tournament's own simulated figures")
@@ -396,6 +406,11 @@ class RoomPlayerOut(BaseModel):
                      "everyone else sees franchise/season_year with options=[]")
     order: list[CardOut | None]
     impact: CardOut | None
+    # Populated only once `done` -- the squad-review screen's own three numbers
+    # (etl.feasibility.team_rating), same as solo's SessionOut fields of the same name.
+    overall_rating: int | None = None
+    batting_rating: int | None = None
+    bowling_rating: int | None = None
 
 
 class RoomStateOut(BaseModel):
@@ -505,7 +520,16 @@ class RoomMatchOut(BaseModel):
     orange_cap_runs: int | None = None
     purple_cap: str | None = None
     purple_cap_wickets: int | None = None
+    # The squad-review screen's own overall number, carried through to the journey
+    # card -- same field name and same meaning as solo's SeasonProgressOut.
+    overall_rating: int | None = None
     squad: list[JourneySquadEntryOut] | None = None
+    # Set only in the window between the draft finishing and the host starting the
+    # actual matches -- every seat reviews their own squad+ratings here first, and
+    # nothing in `replay_room_matches` resolves so much as a toss until the host does.
+    awaiting_start: bool = False
+    you_decide_start: bool = Field(
+        default=False, description="true only for the room's host, while awaiting_start")
 
 
 class RoomTossIn(BaseModel):
@@ -568,6 +592,11 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
 
 def _session_out(s: sess.Session) -> SessionOut:
     from etl.feasibility import OVERSEAS_CAP, REROLLS_ALLOWED
+    rating = None
+    if s.squad_complete:
+        all_twelve = [c for c in s.order if c is not None] + (
+            [s.impact] if s.impact is not None else [])
+        rating = team_rating(all_twelve)
     return SessionOut(
         state=s.state,
         picks_made=len(s.picks),
@@ -588,6 +617,9 @@ def _session_out(s: sess.Session) -> SessionOut:
         ),
         squad_complete=s.squad_complete,
         playable=s.playable,
+        overall_rating=rating.overall if rating else None,
+        batting_rating=rating.batting if rating else None,
+        bowling_rating=rating.bowling if rating else None,
     )
 
 
@@ -801,6 +833,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     all_twelve = list(yours.xi) + ([yours.impact] if yours.impact is not None else [])
     stats = replay.journey
     leaders = tournament_leaders(season.results + season.playoffs)
+    rating = team_rating(all_twelve)
     return SeasonProgressOut(
         state=state, your_side=yours.name, table=table,
         your_results=your_results, playoffs=playoffs, pending=None, complete=True,
@@ -813,6 +846,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
         orange_cap=leaders.top_scorer[0], orange_cap_runs=leaders.top_scorer[1],
         purple_cap=leaders.top_wicket_taker[0],
         purple_cap_wickets=leaders.top_wicket_taker[1],
+        overall_rating=rating.overall,
         squad=[_journey_entry(c, replay.stats) for c in all_twelve],
     )
 
@@ -992,14 +1026,23 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
     # for that seat. `name` prefers `seat.historical_name` for the same reason
     # `rooms.room_sides` does -- the stored `RoomPlayer.name` for a filler is just an
     # internal placeholder ("CPU 1"), never meant to be shown once a real squad exists.
+    done = True if player.is_cpu else seat.done
+    rating = None
+    if done:
+        all_twelve = [c for c in seat.order if c is not None] + (
+            [seat.impact] if seat.impact is not None else [])
+        rating = team_rating(all_twelve)
     return RoomPlayerOut(
         player_id=player.player_id, name=seat.historical_name or player.name,
         is_cpu=player.is_cpu,
         picks_made=TWELVE_SIZE if player.is_cpu else len(seat.picks),
-        done=True if player.is_cpu else seat.done,
+        done=done,
         deal=deal,
         order=[None if c is None else _card(c) for c in seat.order],
         impact=None if seat.impact is None else _card(seat.impact),
+        overall_rating=rating.overall if rating else None,
+        batting_rating=rating.batting if rating else None,
+        bowling_rating=rating.bowling if rating else None,
     )
 
 
@@ -1223,17 +1266,21 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
                if replay.results else None)
     journey = room_match_lib.room_journey(room, replay, player_id) if player_id else None
     squad = None
+    rating = None
     if journey is not None:
         your_order, your_impact = next(
             ((order, impact) for pid, _, order, impact in sides if pid == player_id),
             ([], None))
         all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
         squad = [_journey_entry(c, journey.acc) for c in all_twelve]
+        rating = team_rating(all_twelve)
 
     return RoomMatchOut(
         format=room.format,
         results=[_room_result_out(e, player_id) for e in replay.results],
         table=table, complete=replay.complete,
+        awaiting_start=replay.awaiting_start,
+        you_decide_start=replay.awaiting_start and player_id == room.host_id,
         champion=name(replay.champion_pid) if replay.champion_pid else None,
         you_champion=(player_id is not None and replay.champion_pid == player_id)
                      if replay.complete else None,
@@ -1261,6 +1308,7 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         orange_cap_runs=leaders.top_scorer[1] if leaders else None,
         purple_cap=leaders.top_wicket_taker[0] if leaders else None,
         purple_cap_wickets=leaders.top_wicket_taker[1] if leaders else None,
+        overall_rating=rating.overall if rating else None,
         squad=squad,
     )
 
@@ -1308,6 +1356,21 @@ def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
     with _room_db() as conn:
         try:
             room = room_match_lib.advance_match(conn, code, body.player_id, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id, deck)
+
+
+@app.post("/api/rooms/{code}/match/start", response_model=RoomMatchOut)
+def room_match_start(code: str, body: HostActionIn) -> RoomMatchOut:
+    """Only the host unlocks the room's first match, once every seat has reviewed their
+    own finished twelve on the squad-review screen -- mirrors `room_match_advance`
+    exactly."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _room_db() as conn:
+        try:
+            room = room_match_lib.start_matches(conn, code, body.player_id, deck, model)
             replay = room_match_lib.replay_room_matches(room, deck, model)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

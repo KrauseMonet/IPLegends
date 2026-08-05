@@ -628,6 +628,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
           <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
         </div>
         <div class="gauge"><i id="progBar" style="width:0%"></i></div>
+        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
         <div id="orderSheet" class="col-scroll"></div>
       </div>
 
@@ -978,9 +979,22 @@ function effectiveDraftMode(){
   return ROOM_CODE ? roomDraftMode() : DRAFT_MODE;
 }
 
-function ratingBadge(card){
-  return (effectiveDraftMode() === 'stat' && card.rating != null)
+// `forceReveal` bypasses the draft_mode gate entirely -- used once the squad is done,
+// on the squad-review screen, where the whole point is to finally show every rating
+// regardless of how the draft itself was played. Every other call site omits it and
+// keeps today's behaviour exactly.
+function ratingBadge(card, forceReveal){
+  return ((forceReveal || effectiveDraftMode() === 'stat') && card.rating != null)
     ? `<span class="rating-badge">${card.rating}</span>` : '';
+}
+
+// Shared by solo's finished-draft screen and a room's squad-review screen -- both sit on
+// an object exposing the same three fields (`overall_rating`/`batting_rating`/
+// `bowling_rating`), from `SessionOut` and `RoomPlayerOut` respectively. `--` for a null
+// bucket (A33/A43's own rule: no evidence is a dash, never a fabricated 0).
+function teamRatingsHtml(d){
+  const tiles = [[d.batting_rating, 'BATTING'], [d.bowling_rating, 'BOWLING'], [d.overall_rating, 'OVERALL']];
+  return tiles.map(([v, label]) => `<div><b>${v == null ? '--' : v}</b><span>${label}</span></div>`).join('');
 }
 
 async function api(path, opts){
@@ -1347,6 +1361,8 @@ function renderPanels(){
   $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
   $('#simModeLabel').classList.toggle('hide', !s.squad_complete);
   $('#simModeChoices').classList.toggle('hide', !s.squad_complete);
+  $('#teamRatings').classList.toggle('hide', !s.squad_complete);
+  if (s.squad_complete) $('#teamRatings').innerHTML = teamRatingsHtml(s);
 
   function orderRow(slot, got, label, isImpact){
     const classes = ['orderline'];
@@ -1372,7 +1388,7 @@ function renderPanels(){
     }
     const whoClick = (got && DRAFT_MODE === 'stat')
       ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
-    const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got)
+    const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got, s.squad_complete)
                        : (isImpact ? 'no impact player' : 'to be named');
     return `<div class="${classes.join(' ')}" onclick="rowClick(${slot}, this)">
       <span class="num">${label}</span>
@@ -2023,8 +2039,8 @@ function drawJourneyCard(d, header){
   ctx.fillText(`${d.won}-${d.lost}${d.tied ? '-' + d.tied : ''}`, cx, 350);
   ctx.restore();
 
-  // three stat tiles
-  const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES']];
+  // four stat tiles
+  const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES'], [d.overall_rating, 'RATING']];
   const gap = 24, tileW = (W - 120 - gap * (tiles.length - 1)) / tiles.length;
   const tileY = 420, tileH = 150;
   tiles.forEach(([val, label], i) => {
@@ -2034,7 +2050,7 @@ function drawJourneyCard(d, header){
     ctx.beginPath(); ctx.roundRect(x, tileY, tileW, tileH, 12); ctx.stroke();
     ctx.fillStyle = green;
     ctx.font = `700 52px ${CARD_MONO}`;
-    ctx.fillText(String(val), x + tileW / 2, tileY + 78);
+    ctx.fillText(val == null ? '--' : String(val), x + tileW / 2, tileY + 78);
     ctx.fillStyle = ink3;
     ctx.font = `600 18px ${CARD_MONO}`;
     ctx.fillText(label, x + tileW / 2, tileY + 118);
@@ -2465,7 +2481,7 @@ function toggleRoomView(){
   if (ROOM) renderRoomDraft(ROOM);
 }
 
-function roomOrderRow(slot, got, label, open, isImpact, readOnly){
+function roomOrderRow(slot, got, label, open, isImpact, readOnly, forceReveal){
   const classes = ['orderline'];
   if (got) classes.push('filled');
   if (isImpact) classes.push('impactrow');
@@ -2476,7 +2492,7 @@ function roomOrderRow(slot, got, label, open, isImpact, readOnly){
   }
   const whoClick = (!readOnly && got && roomDraftMode() === 'stat')
     ? ` clickable" onclick="event.stopPropagation(); showRoomOrderStat(${slot})"` : '"';
-  const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got)
+  const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got, forceReveal)
                      : (isImpact ? 'no impact player' : 'to be named');
   const rowClick = readOnly ? '' : ` onclick="roomRowClick(${slot}, this)"`;
   return `<div class="${classes.join(' ')}"${rowClick}>
@@ -2743,6 +2759,35 @@ function roomFinishReveal(myMatch){
   showRoomMatch(ROOM_MATCH_DATA);
 }
 
+// The squad-review screen every seat sees once the draft itself finishes, before a
+// single ball is bowled -- `ROOM.players` (kept fresh every poll regardless of room
+// status, unlike ROOM_MATCH_DATA which only starts existing once status is 'complete')
+// already carries this seat's own order/impact/ratings, per `_room_player_out`'s own
+// `done` gate, so nothing new needs fetching. Ratings are always shown here (`true` as
+// roomOrderRow's forceReveal) -- this is a reveal, not a leak, regardless of the room's
+// own draft_mode.
+function renderRoomStartReview(m){
+  const me = ROOM.players.find(p => p.player_id === MY_PID);
+  const el = $('#roomMatchBody');
+  if (!me){
+    el.innerHTML = '<div class="report compact"><div class="margin">Waiting for the host to continue…</div></div>';
+    return;
+  }
+  const rows = me.order.map((got, i) => roomOrderRow(i + 1, got, `${i + 1}`, new Set(), false, true, true));
+  rows.push(roomOrderRow(12, me.impact, 'IMP', new Set(), true, true, true));
+  const actions = m.you_decide_start
+    ? `<div class="foot-actions room-actions">
+         <button class="act lead" onclick="roomStartMatches(this)">Continue</button>
+       </div>`
+    : `<div class="margin">Waiting for the host to continue…</div>`;
+  el.innerHTML = `<div class="report compact">
+      <div class="over-line">Your squad</div>
+      <div class="ledger" style="grid-template-columns:repeat(3,1fr)">${teamRatingsHtml(me)}</div>
+    </div>
+    <div class="room-gap">${rows.join('')}</div>
+    ${actions}`;
+}
+
 function showRoomMatch(m){
   // "Done" only ever appears once the match itself (not just the draft) is actually
   // over -- shown throughout the whole live tournament, it was one click away from
@@ -2754,6 +2799,12 @@ function showRoomMatch(m){
   // not disturb it; ROOM_MATCH_DATA is already fresh, roomFinishReveal reads it once
   // the stepper is actually done.
   if (ROOM_REVEAL_ACTIVE) return;
+
+  // Every seat reviews its own finished twelve -- and the three ratings that come with
+  // it -- before a single ball is bowled. Nothing below this point (not even a first
+  // toss) has been resolved yet while this holds, mirroring how a league's group-stage
+  // reveal is checked ahead of the ordinary match-waiting branches below it.
+  if (m.awaiting_start){ renderRoomStartReview(m); return; }
 
   // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
   // round-robin fixture isn't participant-scoped the way a knockout fixture is -- every
@@ -2897,6 +2948,20 @@ async function roomAdvanceMatch(ctrl){
     const myGen = ++ROOM_GEN;
     try {
       const m = await api(`/api/rooms/${ROOM_CODE}/match/advance`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID})});
+      if (myGen !== ROOM_GEN) return;
+      ROOM_MATCH_DATA = m;
+      showRoomMatch(m);
+    } catch(e){ slip(e.message); }
+  });
+}
+
+async function roomStartMatches(ctrl){
+  await busyClick(ctrl, 'Starting…', async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const m = await api(`/api/rooms/${ROOM_CODE}/match/start`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({player_id: MY_PID})});
       if (myGen !== ROOM_GEN) return;

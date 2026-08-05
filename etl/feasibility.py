@@ -197,6 +197,42 @@ class Card:
         return self.positions | {IMPACT_SLOT}
 
 
+@dataclass(frozen=True)
+class TeamRating:
+    """A drafted twelve's own batting/bowling/overall rating -- shown on the
+    squad-review screen a drafter sees between finishing a draft and the season
+    starting, and (`overall` only) on the journey card afterward."""
+
+    overall: int | None
+    batting: int | None
+    bowling: int | None
+
+
+def team_rating(cards: list[Card]) -> TeamRating:
+    """Declared, not measured -- same category as REPUTATION/ALLROUNDER_RUNS. There is
+    no separated batting-only or bowling-only number per card to average: `display`
+    (A58/A60) is already batting and bowling summed into one blended value (A55), and
+    the underlying view computes that same summed number on both a player-season's
+    batting row and its bowling row -- nothing to split.
+
+    `overall` is the plain mean of all twelve cards' `display`. `batting`/`bowling` are
+    means restricted by `role`: a 'batter'/'keeper' counts only toward batting, a
+    'bowler' only toward bowling, an 'allrounder' counts toward BOTH -- its one blended
+    rating has no split to divide between the two disciplines, so this double-counts
+    him deliberately rather than guessing a split. `None`, never a fabricated 0 (this
+    file's own standing rule), when a bucket has nobody in it -- the same shape as A43's
+    empty-cohort rule.
+    """
+    rated = [c for c in cards if c.display is not None]
+
+    def _mean(cs: list[Card]) -> int | None:
+        return round(sum(c.display for c in cs) / len(cs)) if cs else None
+
+    bat = [c for c in rated if c.role in ("batter", "keeper", "allrounder")]
+    bowl = [c for c in rated if c.role in ("bowler", "allrounder")]
+    return TeamRating(overall=_mean(rated), batting=_mean(bat), bowling=_mean(bowl))
+
+
 @dataclass
 class Deck:
     cards_by_fs: dict[int, list[Card]]

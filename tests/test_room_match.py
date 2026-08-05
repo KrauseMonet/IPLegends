@@ -68,6 +68,7 @@ def _complete_final_room(conn) -> tuple[rooms.Room, str, str]:
     room = rooms.start_room(conn, room.code, host_id, DECK)
     room = _play_room_to_completion(conn, room, DECK, [host_id, guest_id])
     assert room.status == "complete", room.failure_reason
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
     return room, host_id, guest_id
 
 
@@ -80,6 +81,56 @@ def _find_toss_winner(conn, room, host_id, guest_id):
     stage, winner = pending
     loser = guest_id if winner == host_id else host_id
     return stage, winner, loser, replay
+
+
+def _drafted_but_not_started(conn) -> tuple[rooms.Room, str, str]:
+    """A two-seat 'final' room, drafted to completion but with no "start" move recorded
+    yet -- the exact window every seat's own squad-review screen occupies. Deliberately
+    NOT `_complete_final_room` (which calls `start_matches` for every other test in this
+    file, since they're about what happens once matches actually begin)."""
+    room, host_id = _make_room(conn, "final")
+    room2, guest_id = rooms.join_room(conn, room.code, "Guest", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, guest_id])
+    assert room.status == "complete", room.failure_reason
+    return room, host_id, guest_id
+
+
+# --- the squad-review gate: nothing resolves until the host starts the matches ----------
+
+def test_a_freshly_drafted_room_awaits_start_and_resolves_nothing(conn):
+    room, host_id, guest_id = _drafted_but_not_started(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.awaiting_start
+    assert replay.results == []
+    assert not replay.complete
+    assert _find_pending_toss(replay) is None
+
+
+def test_start_matches_is_refused_to_anyone_but_the_host(conn):
+    room, host_id, guest_id = _drafted_but_not_started(conn)
+    with pytest.raises(rooms.RoomError):
+        room_match.start_matches(conn, room.code, guest_id, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.awaiting_start, "a refused start must not have recorded anything"
+
+
+def test_the_host_starting_matches_unlocks_the_first_fixture(conn):
+    room, host_id, guest_id = _drafted_but_not_started(conn)
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert not replay.awaiting_start
+    assert _find_pending_toss(replay) is not None
+
+
+def test_starting_matches_twice_is_a_no_op_not_an_error(conn):
+    """Matches `rooms.play_again`/`advance_league_reveal`'s own convergence philosophy:
+    a double-click or a retried request is expected, not a bug to reject."""
+    room, host_id, guest_id = _drafted_but_not_started(conn)
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)  # must not raise
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert not replay.awaiting_start
 
 
 # --- authorisation: the toss winner, and only the toss winner ---------------------------
@@ -120,7 +171,7 @@ def test_a_toss_move_tagged_to_a_different_stage_never_resolves_this_one(conn):
     mechanism that lets two fixtures in the same round be answered in either order."""
     room, host_id, guest_id = _complete_final_room(conn)
     room = rooms._load_room(conn, room.code)
-    room.match_moves = [{"kind": "toss", "stage": "Not This One", "elects": "bat"}]
+    room.match_moves = room.match_moves + [{"kind": "toss", "stage": "Not This One", "elects": "bat"}]
     rooms._save_room(conn, room)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     assert not replay.complete
@@ -149,6 +200,7 @@ def _make_room_and_complete_cup(conn):
     room = rooms.start_room(conn, room.code, host_id, DECK)
     room = _play_room_to_completion(conn, room, DECK, seat_ids)
     assert room.status == "complete", room.failure_reason
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
     return room, host_id, seat_ids
 
 
@@ -315,6 +367,7 @@ def _make_and_complete_league(conn):
     room = rooms.start_room(conn, room.code, host_id, DECK)   # host + 9 CPU
     room = _play_room_to_completion(conn, room, DECK, [host_id])
     assert room.status == "complete", room.failure_reason
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
     return room, host_id
 
 
@@ -347,6 +400,7 @@ def test_a_league_room_plays_the_round_robin_straight_through_to_the_playoffs(co
     room = rooms.start_room(conn, room.code, host_id, DECK)
     room = _play_room_to_completion(conn, room, DECK, seat_ids)
     assert room.status == "complete", room.failure_reason
+    room_match.start_matches(conn, room.code, host_id, DECK, MODEL)
 
     replay = _settle_league_table(conn, room, host_id)
     assert len(replay.results) == 70             # game.season.fixtures(10)
@@ -600,7 +654,7 @@ def test_a_wrong_kind_of_move_is_rejected(conn):
     is well-formed."""
     room, host_id, guest_id = _complete_final_room(conn)
     room = rooms._load_room(conn, room.code)
-    room.match_moves = [{"kind": "impact", "slot": None}]   # this kind no longer exists
+    room.match_moves = room.match_moves + [{"kind": "impact", "slot": None}]   # this kind no longer exists
     rooms._save_room(conn, room)
     _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
     # An unrecognised move is simply never matched by the stage lookup -- the toss

@@ -339,10 +339,45 @@ tr.tail td{color:var(--ink-3);font-style:italic}
 
 .season{display:grid;grid-template-columns:1.25fr .95fr;gap:16px}
 .season > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
-  border-radius:10px}
+  border-radius:10px;position:relative;overflow:hidden}
 tr.you td{font-weight:700;color:var(--ink)}
 tr.you td:first-child{box-shadow:inset 3px 0 0 var(--gold);padding-left:9px}
 tr.cut td{border-bottom:1.5px solid var(--gold)}
+
+/* --- panel-head: a bolder, two-line masthead for the season/room result screens' two
+   main panels (league table, your matches) -- .col-head's own small utility-bar label
+   is reused across many unrelated screens (the deal panel, the squad panel), so this is
+   a new, scoped treatment rather than a change to it. Mirrors a broadcast graphics
+   package's own title-plus-stat-block convention: a bold section name, a number that
+   actually matters set apart in gold, and what it means underneath in small caps. */
+.panel-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;
+  padding:20px 18px 14px;margin:0 -18px 6px;border-bottom:2px solid rgba(245,184,61,.4);
+  background:linear-gradient(180deg,rgba(245,184,61,.07),transparent);position:relative;z-index:1}
+.panel-head h3{margin:0;font-family:var(--sans);font-size:15px;font-weight:800;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--ink)}
+.panel-head .stat{text-align:right;line-height:1.35}
+.panel-head .stat b{display:block;font-family:var(--mono);color:var(--gold-2);
+  font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+.panel-head .stat span{display:block;font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-top:1px}
+.panel-glow{position:absolute;top:-50px;right:-50px;width:190px;height:190px;
+  background:radial-gradient(circle,rgba(245,184,61,.15),transparent 70%);
+  pointer-events:none;z-index:0}
+
+/* A generated, colour-coded initial badge stands in for a team crest -- the archive
+   spans 19 seasons of franchise renames (Deccan Chargers, Delhi Daredevils/Capitals,
+   Kings XI Punjab/Punjab Kings...) with no owned artwork for any of them, and an actual
+   club crest is trademarked; a deterministic hash-to-hue keeps every team visually
+   distinct and stable across screens without asserting a real, and possibly wrong for
+   an older season, brand colour. */
+.team-badge{display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;border-radius:50%;font-size:8.5px;font-weight:800;
+  color:rgba(5,11,26,.82);margin-right:8px;font-family:var(--mono);
+  vertical-align:-5px;box-shadow:0 0 0 1px rgba(255,255,255,.18) inset}
+.team-badge.you-badge{background:var(--gold-2)!important;color:#2b2005}
+.you-pill{display:inline-block;font-family:var(--mono);font-size:8px;font-weight:700;
+  letter-spacing:.1em;color:#2b2005;background:var(--gold-2);border-radius:4px;
+  padding:2px 6px;margin-left:8px;vertical-align:2px}
 
 /* --- standings: the league table's own richer treatment, scoped separately from the
    shared table/th/td rules above (which the scorecard's batting/bowling tables also
@@ -747,15 +782,15 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 
     <div class="season">
       <div>
-        <div class="col-head" style="margin:26px -18px 0"><span>League table</span>
-          <em id="tableNote"></em></div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>League table</h3><div class="stat" id="tableNote"></div></div>
         <table id="ladder" class="standings"></table>
       </div>
       <div>
-        <div class="col-head" style="margin:26px -18px 0"><span>Your fourteen</span>
-          <em id="formNote"></em></div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>Your fourteen</h3><div class="stat" id="formNote"></div></div>
         <div id="yourForm"></div>
-        <div class="col-head" style="margin:26px -18px 0"><span>Playoffs</span></div>
+        <div class="col-head" style="margin:26px -18px 0"><span>🏆 Playoffs</span></div>
         <div id="bracket"></div>
       </div>
     </div>
@@ -1392,21 +1427,33 @@ function nrrCell(v){
   return `<td class="n ${cls}">${n > 0 ? '+' : ''}${n.toFixed(3)}</td>`;
 }
 
+// Also shared by both standings tables. A generated colour-coded initial stands in for
+// a team crest (`.team-badge`'s own comment has the why); the viewer's own row gets a
+// fixed gold star instead, never a hashed colour, so it reads as a status rather than
+// just another team.
+function teamBadge(short, isYou){
+  if (isYou) return `<span class="team-badge you-badge">★</span>`;
+  let h = 0;
+  for (let i = 0; i < short.length; i++) h = (h * 33 + short.charCodeAt(i)) >>> 0;
+  return `<span class="team-badge" style="background:hsl(${h % 360} 60% 52%)">${short.slice(0, 2).toUpperCase()}</span>`;
+}
+
 function renderTableAndForm(d){
   SEASON_DATA = d;
   SEASON_STATE = d.state;
-  $('#tableNote').textContent = `${d.matches_each} each`;
+  $('#tableNote').innerHTML = `<b>${d.matches_each} each</b><span>matches played</span>`;
   $('#ladder').innerHTML =
     `<thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
         <th class="n">Pts</th><th class="n">NRR</th></tr></thead><tbody>` +
     d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${r.pos}</td><td>${r.short}</td>
+      <td class="n" style="text-align:left">${r.pos}</td><td>${teamBadge(r.short, r.you)}${r.short}</td>
       <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
       <td class="n pts">${r.points}</td>
       ${nrrCell(r.nrr)}</tr>`).join('') + '</tbody>';
 
   const w = d.your_results.filter(r => r.winner === 'YOU').length;
-  $('#formNote').textContent = `${w} won`;
+  const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
+  $('#formNote').innerHTML = `<b>${w} won</b><span>${l} lost</span>`;
   $('#yourForm').innerHTML = d.your_results.map((r, i) => {
     const them = r.home === 'YOU' ? r.away : r.home;
     const mine = r.home === 'YOU' ? r.home_score : r.away_score;
@@ -2437,25 +2484,25 @@ function renderRoomResult(r){
 // to invent since solo's own side is always home-or-away-resolvable by construction.
 
 function roomYourResults(m){
-  // Returns {html, won} -- the CALLER's own group-stage matches only (`stage ===
+  // Returns {html, won, lost} -- the CALLER's own group-stage matches only (`stage ===
   // 'league'`), never the other ~56 of 70 that don't involve them. `i` is preserved as
   // the ORIGINAL index into `m.results`, since showRoomScorecard(i) indexes that array
   // directly, not whatever subset ends up rendered here.
   const mine = [];
   m.results.forEach((e, i) => { if (e.stage === 'league' && e.result.yours) mine.push([i, e.result]); });
-  let won = 0;
+  let won = 0, lost = 0;
   const html = mine.map(([i, r]) => {
     const myShort = r.you_home ? r.home : r.away;
     const them = r.you_home ? r.away : r.home;
     const mineScore = r.you_home ? r.home_score : r.away_score;
     const theirsScore = r.you_home ? r.away_score : r.home_score;
     const k = r.winner === myShort ? 'w' : (r.winner === null ? '' : 'l');
-    if (k === 'w') won++;
+    if (k === 'w') won++; else if (k === 'l') lost++;
     return `<div class="fx" onclick="showRoomScorecard(${i})">
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
       <span>v ${them}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
   }).join('');
-  return {html, won};
+  return {html, won, lost};
 }
 
 function roomPlayoffsHtml(m){
@@ -2490,7 +2537,8 @@ function roomTableHtml(m){
         <th class="n">Pts</th><th class="n">NRR</th></tr></thead>
     <tbody>
     ${m.table.map(row => `<tr class="${row.you ? 'you' : ''} ${row.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${row.pos}</td><td>${row.name}</td>
+      <td class="n" style="text-align:left">${row.pos}</td>
+      <td>${teamBadge(row.short, row.you)}${row.name}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
       <td class="n">${row.played}</td><td class="n">${row.won}</td><td class="n">${row.lost}</td>
       <td class="n pts">${row.points}</td>
       ${nrrCell(row.nrr)}</tr>`).join('')}
@@ -2691,7 +2739,7 @@ function showRoomMatch(m){
   const yourHtml = roomYourResults(m).html;
   const playoffsHtml = roomPlayoffsHtml(m);
   const gapBody = (yourHtml ? `<div class="col-head" style="margin:20px 0 0"><span>Your matches</span></div>${yourHtml}` : '')
-    + (playoffsHtml ? `<div class="col-head" style="margin:20px 0 0"><span>Playoffs</span></div>${playoffsHtml}` : '');
+    + (playoffsHtml ? `<div class="col-head" style="margin:20px 0 0"><span>🏆 Playoffs</span></div>${playoffsHtml}` : '');
   const gap = gapBody ? `<div class="room-gap">${gapBody}</div>` : '';
 
   if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
@@ -2752,14 +2800,17 @@ function showRoomMatchComplete(m){
     </div>
     <div class="season">
       <div>
-        <div class="col-head" style="margin:26px -18px 0"><span>League table</span></div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>League table</h3>
+          <div class="stat"><b>${m.table.length}</b><span>teams</span></div></div>
         ${roomTableHtml(m)}
       </div>
       <div>
-        ${your.html ? `<div class="col-head" style="margin:26px -18px 0">
-          <span>Your matches</span><em>${your.won} won</em></div>${your.html}` : ''}
+        <div class="panel-glow"></div>
+        ${your.html ? `<div class="panel-head"><h3>Your matches</h3>
+          <div class="stat"><b>${your.won} won</b><span>${your.lost} lost</span></div></div>${your.html}` : ''}
         ${playoffsHtml ? `<div class="col-head" style="margin:26px -18px 0">
-          <span>Playoffs</span></div>${playoffsHtml}` : ''}
+          <span>🏆 Playoffs</span></div>${playoffsHtml}` : ''}
       </div>
     </div>
     <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;

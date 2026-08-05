@@ -380,6 +380,34 @@ def journey_stats(season: Season, track: Side, acc: JourneyAccumulator) -> Journ
 
 
 @dataclass
+class TournamentLeaders:
+    """The Orange Cap and Purple Cap for the WHOLE field -- every side that batted or
+    bowled a ball this tournament, not one tracked team's own twelve the way
+    `JourneyAccumulator` usually scopes (`journey_stats`'s own docstring). Takes a flat
+    list of `Result` rather than a `Season`, since a room's own fixtures are never
+    wrapped in one (A79's own note in `web/room_match.py`) -- the caller passes
+    whichever `Result`s it has, `season.results + season.playoffs` for solo."""
+
+    top_scorer: tuple[str, int]
+    top_wicket_taker: tuple[str, int]
+
+
+def tournament_leaders(results: list[Result]) -> TournamentLeaders:
+    acc = JourneyAccumulator()
+    for r in results:
+        if r.home_innings is not None:
+            acc.add_batting(r.home_innings)
+            acc.add_bowling(r.home_innings)
+        if r.away_innings is not None:
+            acc.add_batting(r.away_innings)
+            acc.add_bowling(r.away_innings)
+    return TournamentLeaders(
+        top_scorer=_leader(acc.runs, acc.names),
+        top_wicket_taker=_leader(acc.wickets, acc.names),
+    )
+
+
+@dataclass
 class Season:
     sides: list[Side]
     results: list[Result] = field(default_factory=list)

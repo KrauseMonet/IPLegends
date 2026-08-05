@@ -27,7 +27,9 @@ from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card
 from game.__main__ import overseas_status
-from game.season import MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect
+from game.season import (
+    MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
+)
 from game.simulator import load_model
 from web import room_match as room_match_lib
 from web import rooms
@@ -338,6 +340,12 @@ class SeasonProgressOut(BaseModel):
     top_scorer_runs: int | None = None
     top_wicket_taker: str | None = None
     top_wicket_taker_wickets: int | None = None
+    # Orange/Purple Cap -- the WHOLE field's own leaders, every side that played a
+    # ball, not just `top_scorer`/`top_wicket_taker` above which are your own twelve's.
+    orange_cap: str | None = None
+    orange_cap_runs: int | None = None
+    purple_cap: str | None = None
+    purple_cap_wickets: int | None = None
     squad: list[JourneySquadEntryOut] | None = Field(
         default=None, description="the final twelve, in batting order then Impact, "
                      "each with this tournament's own simulated figures")
@@ -490,6 +498,13 @@ class RoomMatchOut(BaseModel):
     top_scorer_runs: int | None = None
     top_wicket_taker: str | None = None
     top_wicket_taker_wickets: int | None = None
+    # Orange/Purple Cap -- the WHOLE room's own leaders across every seat and every
+    # filler, not the calling player's own twelve above. Progressive like `table`: any
+    # match already in `results` counts, whether the room is complete or still mid-reveal.
+    orange_cap: str | None = None
+    orange_cap_runs: int | None = None
+    purple_cap: str | None = None
+    purple_cap_wickets: int | None = None
     squad: list[JourneySquadEntryOut] | None = None
 
 
@@ -785,6 +800,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
 
     all_twelve = list(yours.xi) + ([yours.impact] if yours.impact is not None else [])
     stats = replay.journey
+    leaders = tournament_leaders(season.results + season.playoffs)
     return SeasonProgressOut(
         state=state, your_side=yours.name, table=table,
         your_results=your_results, playoffs=playoffs, pending=None, complete=True,
@@ -794,6 +810,9 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
         top_scorer=stats.top_scorer[0], top_scorer_runs=stats.top_scorer[1],
         top_wicket_taker=stats.top_wicket_taker[0],
         top_wicket_taker_wickets=stats.top_wicket_taker[1],
+        orange_cap=leaders.top_scorer[0], orange_cap_runs=leaders.top_scorer[1],
+        purple_cap=leaders.top_wicket_taker[0],
+        purple_cap_wickets=leaders.top_wicket_taker[1],
         squad=[_journey_entry(c, replay.stats) for c in all_twelve],
     )
 
@@ -1200,6 +1219,8 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
 
     you_are_out = player_id is not None and (
         player_id == replay.champion_pid or player_id in replay.eliminated_pids)
+    leaders = (tournament_leaders([e.result for e in replay.results])
+               if replay.results else None)
     journey = room_match_lib.room_journey(room, replay, player_id) if player_id else None
     squad = None
     if journey is not None:
@@ -1236,6 +1257,10 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         top_scorer_runs=journey.top_scorer[1] if journey else None,
         top_wicket_taker=journey.top_wicket_taker[0] if journey else None,
         top_wicket_taker_wickets=journey.top_wicket_taker[1] if journey else None,
+        orange_cap=leaders.top_scorer[0] if leaders else None,
+        orange_cap_runs=leaders.top_scorer[1] if leaders else None,
+        purple_cap=leaders.top_wicket_taker[0] if leaders else None,
+        purple_cap_wickets=leaders.top_wicket_taker[1] if leaders else None,
         squad=squad,
     )
 

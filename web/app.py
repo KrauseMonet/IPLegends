@@ -144,6 +144,14 @@ def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/ads.txt", include_in_schema=False)
+def ads_txt() -> FileResponse:
+    """AdSense (and the IAB spec it follows) requires this at the site ROOT, never
+    under `/static` -- `/static/ads.txt` does not satisfy the crawler, hence a
+    dedicated route rather than relying on the StaticFiles mount below."""
+    return FileResponse(STATIC / "ads.txt", media_type="text/plain")
+
+
 # --- wire format ----------------------------------------------------------------------
 
 class CardOut(BaseModel):

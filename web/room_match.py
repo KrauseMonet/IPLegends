@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from itertools import zip_longest
 
 from game.season import (
     TOSS_DEFAULT_ELECTS, JourneyAccumulator, Result, Side, Standing,
@@ -367,6 +368,42 @@ def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
     return entries
 
 
+def _reveal_order(entries: list[RoomResultEntry], n_teams: int) -> list[RoomResultEntry]:
+    """Reorders ALREADY-SIMULATED round-robin entries for REVEAL ONLY -- diagnosed
+    from a real report ("only the host's own matches are shown") that turned out to be
+    literally true for the first fourteen of seventy reveals, every time.
+
+    `league_fixtures`'s own nested loop (`for i in range(n): for j in range(i+1, n)`)
+    generates one team's WHOLE season consecutively before the next team's remaining
+    fixtures even begin -- correct and necessary for the SIMULATION (`_round_robin_
+    results` draws from one sequential `d.rng` stream, so this exact order is what a
+    cached round-robin's `rng.getstate()` reproduces, and every later playoff result
+    depends on the stream sitting where it would after simulating in THIS order --
+    reordering the simulation itself would silently change downstream results for the
+    same seed). But `_sides_with_pid` always places the host at index 0 (join order,
+    host first), so team 0's fourteen fixtures are always, deterministically, the
+    host's own -- and the room's reveal cursor (`advance_league_reveal`) walks this
+    list in a straight line, one `through` at a time, so a room genuinely showed
+    nothing but host-vs-X for the first 20% of the tournament, then never again.
+
+    Fixed by bucketing the FINISHED entries by the LOWER of their two team indices
+    (recovered positionally from `league_fixtures(n_teams)`, which entries[k] always
+    corresponds to 1:1 -- this never touches `_round_robin_results`'s own output or
+    cache, only a local copy) and interleaving the buckets round-robin style, so any
+    run of `n_teams` consecutive REVEALED fixtures spans a spread of different teams
+    instead of one team's whole season. Every fixture home team's OWN bucket holds
+    ALL its games regardless of forward/reverse order, because `min(i, j)` catches a
+    DOUBLE_AT reverse fixture `(j, i)` the same as the forward `(i, j)`. Purely
+    cosmetic: the SET of 70 results, the final table, and every playoff outcome are
+    completely unaffected, since nothing here touches simulation, only which order the
+    finished results are exposed through the reveal cursor."""
+    pairs_seq = league_fixtures(n_teams)
+    buckets: list[list[RoomResultEntry]] = [[] for _ in range(n_teams)]
+    for (i, j), entry in zip(pairs_seq, entries):
+        buckets[min(i, j)].append(entry)
+    return [e for row in zip_longest(*buckets) for e in row if e is not None]
+
+
 def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     if room.status != "complete":
         raise RoomError(f"room is not complete yet (status: {room.status})")
@@ -435,7 +472,7 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # round instead of called once each. The round-robin itself is cached (see
     # `_round_robin_results`'s own docstring) -- it is the dominant cost of replaying a
     # league room and depends on nothing this room's own moves could change.
-    all_entries = _round_robin_results(d, room, pairs)
+    all_entries = _reveal_order(_round_robin_results(d, room, pairs), len(pairs))
     total = len(all_entries)
     revealed = min(_league_revealed_count(room), total)
 

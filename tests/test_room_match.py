@@ -567,6 +567,59 @@ def test_round_robin_cache_does_not_change_playoff_outcomes(conn):
     assert _fingerprint(replay_cached.table) == _fingerprint(replay.table)
 
 
+# --- the reveal order: spread across teams, never touching the simulation ---------------
+
+def test_reveal_order_is_a_pure_permutation():
+    """`_reveal_order` must return exactly the same SET of entries, just reordered --
+    nothing dropped, nothing duplicated, nothing simulated. The determinism guarantee
+    (same seed -> same playoff results) depends on `_round_robin_results`'s own output
+    staying untouched; this pins that `_reveal_order` only ever permutes its input."""
+    from game.season import fixtures as league_fixtures
+    entries = list(range(len(league_fixtures(10))))   # 70 plain sentinels, one per fixture
+    reordered = room_match._reveal_order(entries, 10)
+    assert sorted(reordered) == sorted(entries)
+    assert reordered != entries, "must actually reorder, not just pass through"
+
+
+def test_reveal_order_spreads_team_zeros_matches_across_the_sequence():
+    """The real bug, reproduced directly against the pure function: `league_fixtures`'s
+    own nested loop puts team 0's entire fourteen-match season consecutively at the
+    very front, and `_sides_with_pid` always seats the host at index 0 -- so before
+    this fix, the first fourteen of seventy reveals were ALWAYS the host's own matches,
+    every single room, every single time. `min(i, j)` bucketing must catch the DOUBLE_
+    AT reverse fixture `(j, i)` under team 0's bucket too, not just the forward `(i, j)`,
+    or a live room would still show a long, if shorter, host-only run."""
+    from game.season import fixtures as league_fixtures
+    pairs_seq = league_fixtures(10)
+    entries = list(range(len(pairs_seq)))
+    reordered = room_match._reveal_order(entries, 10)
+    involves_zero = [0 in pairs_seq[e] for e in reordered]
+    assert not all(involves_zero[:9]), (
+        "the first nine revealed fixtures must not ALL involve team 0 -- that is "
+        "exactly the reported shape: 'only the host's own matches are shown'"
+    )
+    # And the OLD behaviour really was this bad -- confirms the test would have failed
+    # against the unfixed function, not just that the new one happens to pass.
+    old_order_involves_zero = [0 in pairs_seq[k] for k in range(9)]
+    assert all(old_order_involves_zero), "sanity check: the un-reordered list WAS all team 0"
+
+
+def test_a_real_room_does_not_reveal_only_the_hosts_own_matches_first(conn):
+    """The reported bug, reproduced end to end through the real room API rather than
+    the pure function alone -- `_make_and_complete_league` seats the host at index 0
+    exactly like a real room does (join order, host first), so this is the same shape
+    a real user hit."""
+    room, host_id = _make_and_complete_league(conn)
+    for through in range(1, 10):
+        room_match.advance_league_reveal(conn, room.code, host_id, through, DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    league_results = [e for e in replay.results if e.stage == "league"]
+    assert len(league_results) == 9
+    assert any(host_id not in (e.home_pid, e.away_pid) for e in league_results), (
+        "at least one of the first nine revealed fixtures must not involve the host"
+    )
+
+
 # --- the group-stage reveal: pure presentation on an outcome already fully decided ------
 
 def test_league_reveal_pacing_does_not_change_the_final_outcome(conn):

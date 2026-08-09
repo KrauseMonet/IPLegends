@@ -88,9 +88,14 @@ class FakeConn:
             return FakeCursor([(pid, name, is_cpu) for (_seat, pid, name, is_cpu) in rows])
 
         if sql_norm.startswith("insert into room_players"):
-            code, player_id, seat_order, name, is_cpu = params
-            self.players.setdefault(code, {})[player_id] = (
-                seat_order, player_id, name, is_cpu)
+            # One multi-row insert per call now (`_save_room`'s own docstring on why),
+            # so `params` is N*5 flat values, not always exactly 5 -- chunk back into
+            # per-row tuples the same way psycopg binds them against the repeated
+            # `(%s, %s, %s, %s, %s)` VALUES clause.
+            for k in range(0, len(params), 5):
+                code, player_id, seat_order, name, is_cpu = params[k:k + 5]
+                self.players.setdefault(code, {})[player_id] = (
+                    seat_order, player_id, name, is_cpu)
             return FakeCursor([])
 
         if sql_norm.startswith("delete from room_players"):
@@ -746,6 +751,37 @@ def test_load_room_lock_false_omits_the_row_lock(conn):
     rooms._load_room(conn, room.code)
     assert any("for update" in s.lower() for s in seen), \
         "lock=True (the default) must still take the row lock"
+
+
+def test_save_room_writes_every_players_row_in_one_round_trip(conn):
+    """`_save_room` used to loop and call `conn.execute` once PER PLAYER for the
+    room_players upsert -- for a full 10-seat league room, that's up to nine wasted
+    round trips on EVERY single write (a pick, an auto-resolve, anything that touches
+    `_save_room`), since every existing player's row is a guaranteed ON CONFLICT DO
+    NOTHING no-op once created. Verified against the actual number of `conn.execute`
+    calls, not just the resulting data -- the one-round-trip and nine-round-trip
+    versions produce IDENTICAL end state, so only a call count can tell them apart."""
+    room, host_id = _make_room(conn, "league")
+    for name in ["P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"]:
+        rooms.join_room(conn, room.code, name, DECK)
+    room = rooms._load_room(conn, room.code)
+    assert len(room.players) == 9
+
+    seen: list[str] = []
+    real_execute = conn.execute
+
+    def spy(sql, params=()):
+        seen.append(sql)
+        return real_execute(sql, params)
+
+    conn.execute = spy
+
+    rooms._save_room(conn, room)
+    room_player_inserts = [s for s in seen if "insert into room_players" in s.lower()]
+    assert len(room_player_inserts) == 1, (
+        f"expected exactly one round trip for all nine players' rows, got "
+        f"{len(room_player_inserts)}"
+    )
 
 
 def test_the_turn_does_not_advance_before_the_timer_expires(conn, monkeypatch):

@@ -1113,7 +1113,14 @@ async function api(path, opts){
     clearTimeout(timer);
   }
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.detail || r.statusText);
+  if (!r.ok) {
+    // `.status` carried on the thrown Error, not just the message text -- lets a
+    // caller (room-session resume, below) tell "this is genuinely gone" (404) apart
+    // from "the server is busy" or a transient network blip, without parsing prose.
+    const err = new Error(body.detail || r.statusText);
+    err.status = r.status;
+    throw err;
+  }
   return body;
 }
 function slip(msg){
@@ -1172,6 +1179,7 @@ function go(id){
     if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
     ROOM_TIMER_TICK = null; ROOM_TIMER_BASE = null;
     ROOM_POLL = null; ROOM_CODE = null; MY_PID = null; ROOM = null; ROOM_PENDING = null;
+    clearRoomSession();
   }
   window.scrollTo(0,0);
 }
@@ -2531,8 +2539,54 @@ async function joinRoom(ctrl){
   });
 }
 
+// Reload-resilience for a room: a page reload wipes ROOM_CODE/MY_PID (plain JS
+// globals), and unlike a solo draft -- resumable from a URL hash, since its whole
+// state IS the seed+moves -- a room needs `player_id` to prove which seat is yours,
+// which must never sit in a shareable URL (anyone with the link could act as you).
+// localStorage is the right place instead: private to this browser, survives a
+// reload, gone if the user clears site data. Resuming is a convenience, not a
+// guarantee -- every failure mode here just falls back to the ordinary home screen.
+const ROOM_STORAGE_KEY = 'iplegends_room';
+
+function saveRoomSession(code, playerId){
+  try { localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify({code, playerId})); }
+  catch(e){ /* private browsing, quota, disabled storage -- resuming just won't work */ }
+}
+
+function clearRoomSession(){
+  try { localStorage.removeItem(ROOM_STORAGE_KEY); } catch(e){}
+}
+
+// Called once at boot, before anything else has decided what screen to show. Verifies
+// the saved seat still exists (the server is the only source of truth) rather than
+// trusting localStorage blindly -- a stale entry for a room that's aged out
+// (ROOM_TTL_HOURS) or a seat that got kicked must not resurrect a dead session.
+async function tryResumeRoomSession(){
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(ROOM_STORAGE_KEY) || 'null'); }
+  catch(e){ saved = null; }
+  if (!saved || !saved.code || !saved.playerId) return false;
+  let room;
+  try {
+    room = await api(`/api/rooms/${saved.code}?player_id=${encodeURIComponent(saved.playerId)}`);
+  } catch(e){
+    // A 404 means the room is genuinely gone -- give up on it for good. Any OTHER
+    // failure (busy, timed out, offline) leaves the saved session in place so the
+    // NEXT reload can still retry rather than losing the seat over one bad request.
+    if (e.status === 404) clearRoomSession();
+    return false;
+  }
+  if (!room.players.some(p => p.player_id === saved.playerId)){
+    clearRoomSession();   // the seat itself is gone (kicked, or a stale entry) -- for good
+    return false;
+  }
+  enterRoom(saved.code, saved.playerId);
+  return true;
+}
+
 function enterRoom(code, playerId){
   stopRoomOpenPoll();
+  saveRoomSession(code, playerId);
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
   ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
   ROOM_LEAGUE_REVEALED_THROUGH = 0;
@@ -3364,7 +3418,13 @@ async function roomSkipAhead(ctrl){
 boot().then(() => {
   const [h, query] = location.hash.slice(1).split('?');
   if (query === 'mode=memory') setDraftMode('memory');
-  if (h && h.includes('-')) api('/api/draft/' + h).then(s => { render(s); go('draft'); }).catch(()=>{});
+  if (h && h.includes('-')) {
+    // An explicit solo-draft URL wins over a saved room -- a link takes priority
+    // over a resume, and the two never legitimately overlap in one reload anyway.
+    api('/api/draft/' + h).then(s => { render(s); go('draft'); }).catch(()=>{});
+  } else {
+    tryResumeRoomSession();
+  }
 });
 </script>
 </body>

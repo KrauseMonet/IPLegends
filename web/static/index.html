@@ -3096,6 +3096,15 @@ function roomChooseSpectateExit(choice){
 // path, for whichever side didn't call the toss) and roomSubmitTossReveal (the side that
 // did), so both agree on where a fixture's result can still be found.
 function roomMyMatchToReveal(m){
+  // While the league group stage is still being revealed, every one of its seventy
+  // fixtures shares the literal stage string "league" (ROOM_LEAGUE_REVEALED_THROUGH's
+  // own comment has the why), so the `ROOM_REVEALED_STAGE !== last.stage` check below
+  // can only ever fire once for the viewer's OWN first league fixture and then goes
+  // permanently inert -- it cannot tell two different league fixtures apart. The
+  // dedicated league branch in showRoomMatch (ROOM_LEAGUE_REVEALED_THROUGH, a real
+  // counter) is what actually paces that phase; this function must sit out entirely
+  // while it's running rather than risk firing on a stale cached fixture.
+  if (m.league_revealed != null && m.league_revealed < m.league_total) return null;
   const cur = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
   if (cur && cur.result === null && cur.you_decide_toss) return cur;
   if (cur && cur.result && ROOM_REVEALED_STAGE !== cur.stage) return cur;
@@ -3211,16 +3220,31 @@ function showRoomMatch(m){
   if (m.awaiting_start){ renderRoomStartReview(m); return; }
 
   // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
-  // round-robin fixture isn't participant-scoped the way a knockout fixture is -- every
-  // viewer in the room watches the same reveal, whether or not their own seat played in
-  // it. ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED_STAGE) tracks how far THIS
-  // client has already watched, since every round-robin entry shares the literal stage
+  // round-robin fixture isn't participant-scoped the way a knockout fixture is -- the
+  // shared pacing cursor (host-driven Continue/Skip ahead, same mechanism and same
+  // performance profile as before) walks every viewer through the same seventy
+  // fixtures together, but the ANIMATION is personal: only a viewer who actually played
+  // in the fixture the cursor just landed on gets the ball-by-ball reveal for it.
+  // Everyone else just watches the table tick up -- previously EVERYONE got the full
+  // animated stepper for EVERY fixture regardless of whose it was, which is what made
+  // the group stage feel like one shared broadcast instead of seventy separate
+  // matches each belonging to somebody. `result.yours` already exists per-caller on
+  // every result (`_room_result_out`), so no backend change is needed for this at all.
+  // ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED_STAGE) tracks how far THIS client
+  // has already watched, since every round-robin entry shares the literal stage
   // "league" and can't be told apart by name the way "Semi-final 1" can.
   if (m.league_revealed != null && m.league_next_result &&
       m.league_revealed > ROOM_LEAGUE_REVEALED_THROUGH){
     ROOM_LEAGUE_REVEALED_THROUGH = m.league_revealed;
-    roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
-    return;
+    if (m.league_next_result.result.yours){
+      roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
+      return;
+    }
+    // Not the viewer's own fixture -- fall through to the ordinary shared waiting
+    // view (table + progress + Continue/Skip ahead) below instead of forcing them
+    // through a match they have no stake in. roomMyMatchToReveal is safely inert
+    // during this phase (its own guard, above), so falling through here cannot
+    // misfire into an unrelated animation.
   }
 
   // Checked BEFORE `m.complete`, not after: the tournament's very last fixture can

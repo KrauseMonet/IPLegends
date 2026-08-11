@@ -235,22 +235,34 @@ def test_tournament_leaders_does_not_sum_the_same_person_across_different_sides(
     (A63), so the same person_id can turn up in two different drawn franchise-seasons'
     squads, or in both a human's own draft and a historical side. The Purple/Orange Cap
     must credit his BEST single side, never the sum across sides -- summing would crown
-    a combined season no one team actually got, which is exactly the bug this guards."""
+    a combined season no one team actually got, which is exactly the bug this guards.
+
+    Bowling figures are placed in the innings where the OPPONENT batted, not the
+    bowler's own side's innings -- `home_innings.bowling` is whoever bowled while HOME
+    batted, i.e. AWAY's bowlers (the same fact `play()`'s own `stats.add_bowling`
+    and `room_journey`'s `add_bowling(away_innings)` already key off). Getting this
+    backwards is exactly the bug this test caught for real: the original version of
+    this test placed a side's own bowling in ITS OWN innings, which happened to still
+    pass against the (then-undiscovered) bug that credited bowling to the wrong side,
+    because the test made the identical mistake the code did."""
     a, b, c = side("A"), side("B"), side("C")
     results = [
-        # Mishra takes 3 wickets while on side A...
+        # Mishra takes 3 wickets bowling FOR side A -- A is home, B batted (away), so
+        # A bowled: Mishra's figures live in away_innings, the innings B batted in.
         Result(home=a, away=b,
-               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")]),
-               away_innings=Innings(batting=[], bowling=[])),
-        # ...and 4 MORE while on side C, a different side the same real person also
-        # appears for this tournament (7 total if wrongly summed across sides).
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")])),
+        # ...and 4 MORE bowling FOR side C, a different side the same real person also
+        # appears for this tournament (7 total if wrongly summed across sides). C is
+        # home, B batted (away) again, so C bowled.
         Result(home=c, away=b,
-               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 4, person_id="mishra")]),
-               away_innings=Innings(batting=[], bowling=[])),
-        # Ashwin's entire tournament is for ONE side only: a genuine 5-for-one-team.
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("Mishra", 4, person_id="mishra")])),
+        # Ashwin's entire tournament is for ONE side (B) only: a genuine 5-for-one-team.
+        # B is home, A batted (away), so B bowled.
         Result(home=b, away=a,
-               home_innings=Innings(batting=[], bowling=[_bowler("Ashwin", 5, person_id="ashwin")]),
-               away_innings=Innings(batting=[], bowling=[])),
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("Ashwin", 5, person_id="ashwin")])),
     ]
     leaders = tournament_leaders(results)
     assert leaders.top_wicket_taker == ("Ashwin", 5), (
@@ -264,15 +276,53 @@ def test_tournament_leaders_still_sums_the_same_person_on_the_same_side_across_m
     matches across the season -- still sums, exactly as a real Purple Cap does."""
     a, b = side("A"), side("B")
     results = [
+        # Mishra bowls FOR A in both matches -- A is home, B away, both times.
         Result(home=a, away=b,
-               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 2, person_id="mishra")]),
-               away_innings=Innings(batting=[], bowling=[])),
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("Mishra", 2, person_id="mishra")])),
         Result(home=a, away=b,
-               home_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")]),
-               away_innings=Innings(batting=[], bowling=[])),
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("Mishra", 3, person_id="mishra")])),
     ]
     leaders = tournament_leaders(results)
     assert leaders.top_wicket_taker == ("Mishra", 5)
+
+
+def test_tournament_leaders_attributes_bowling_to_the_side_that_actually_bowled():
+    """The live bug, pinned directly and DISCRIMINATINGLY: an earlier version of this
+    test checked only the (name, value) pair `_best_across` returns, which cannot
+    distinguish correct from swapped attribution when there is only one bowler in
+    play -- the wrong bucket still holds the same number under the same name, so the
+    winner comes out identical either way (that version passed against the reverted,
+    buggy code too, which is what caught it as vacuous rather than protective).
+
+    This version forces a genuine difference: X bowls for the SAME side (A) across
+    TWO matches against two DIFFERENT opponents, home both times, so his figures sit
+    in `away_innings.bowling` both times -- correct attribution credits both to A's
+    one bucket (3 + 4 = 7). Swapped attribution credits them to B's and C's buckets
+    instead -- two DIFFERENT wrong buckets, since A played a different opponent each
+    time -- so his contributions fragment into 3 and 4 rather than combining, and the
+    reported leader becomes 4, not 7. Caught for real on a live season: a person_id
+    belonging to a 2025/2026 Lucknow Super Giants squad member, drafted onto the
+    human's OWN side, showed up "bowling" for nine unrelated historical opposition
+    sides he never played for, exactly this fragmentation at tournament scale."""
+    a, b, c = side("A"), side("B"), side("C")
+    results = [
+        # X bowls FOR A both times -- A is home against two different opponents, so
+        # his figures live in away_innings (whoever A bowled at) on both occasions.
+        Result(home=a, away=b,
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("X", 3, person_id="x")])),
+        Result(home=a, away=c,
+               home_innings=Innings(batting=[], bowling=[]),
+               away_innings=Innings(batting=[], bowling=[_bowler("X", 4, person_id="x")])),
+    ]
+    leaders = tournament_leaders(results)
+    assert leaders.top_wicket_taker == ("X", 7), (
+        "X bowled for the same side (A) in both matches -- his figures must combine "
+        "to 7 under A's own bucket, not fragment into 3 (wrongly under B) and 4 "
+        "(wrongly under C), which would report a leader of 4"
+    )
 
 
 def test_tournament_leaders_on_no_matches_at_all():

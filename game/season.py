@@ -424,15 +424,21 @@ def tournament_leaders(results: list[Result]) -> TournamentLeaders:
     def _acc_for(side: Side) -> JourneyAccumulator:
         return per_side.setdefault(id(side), JourneyAccumulator())
 
+    # An innings' own `.bowling` list belongs to whichever side did NOT bat in it --
+    # `home_innings` is the innings HOME batted, so its bowlers are AWAY's (and
+    # vice versa), the same fact `play()`'s own stats.add_bowling(second)/`room_
+    # journey`'s add_bowling(away_innings) already key off for a single tracked side.
+    # Crediting `home_innings`'s bowling to home's own bucket (the bug this replaces)
+    # silently swapped every side's bowling figures onto its OPPONENT's bucket --
+    # harmless before A96, when everyone shared one bucket, but wrong the instant
+    # buckets became per-side.
     for r in results:
         if r.home_innings is not None:
-            acc = _acc_for(r.home)
-            acc.add_batting(r.home_innings)
-            acc.add_bowling(r.home_innings)
+            _acc_for(r.home).add_batting(r.home_innings)
+            _acc_for(r.away).add_bowling(r.home_innings)
         if r.away_innings is not None:
-            acc = _acc_for(r.away)
-            acc.add_batting(r.away_innings)
-            acc.add_bowling(r.away_innings)
+            _acc_for(r.away).add_batting(r.away_innings)
+            _acc_for(r.home).add_bowling(r.away_innings)
 
     return TournamentLeaders(
         top_scorer=_best_across([

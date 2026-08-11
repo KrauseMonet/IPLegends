@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft · The Legends Almanack</title>
+<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.png" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+  </div>
+
+  <!-- ============ DRAFT ============ -->
+  <section id="draft">
+    <div class="folio">
+      <div class="col">
+        <div class="col-head"><span>Dealt to you</span></div>
+        <div class="fixture">
+          <div class="yr" id="dealYear"></div>
+          <div class="club" id="dealTeam">—</div>
+          <div class="reroll-row hide" id="rerollRow">
+            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
+            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
+            <span id="rerollCount"></span>
+          </div>
+        </div>
+        <div class="col-head" style="margin-bottom:0">
+          <span>Available</span><em id="optCount"></em></div>
+        <div id="options" class="col-scroll"></div>
+      </div>
+
+      <div class="col">
+        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
+        <div class="tally">
+          <div class="n" id="pickBig">0</div>
+          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
+        </div>
+        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
+        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
+        <div id="orderSheet" class="col-scroll"></div>
+      </div>
+
+      <div class="col">
+        <div class="col-head"><span>Legality</span></div>
+        <div id="legality" class="legality note col-scroll">Take players straight into a batting
+          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
+          options, and eleven batting positions.</div>
+        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
+        <div class="room-choices hide" id="simModeChoices">
+          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
+            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
+          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
+            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
+          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
+            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
+        </div>
+        <div class="foot-actions">
+          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
+          <button class="act" onclick="abandonDraft()">Abandon</button>
+          <span class="stamp" id="seedPill"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
+    <div class="scorecard-shell stat-frame">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="statSub"></div>
+          <div class="call" id="statName"></div>
+        </div>
+        <div class="colophon stat-tiles" id="statBody"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideStat()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="imprint">
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/draft.js"></script>
+</body>
+</html>

@@ -139,9 +139,18 @@ def _db_unavailable(_request, _exc) -> JSONResponse:
 
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
-    """One page, served from disk. The client is a static file with no build step: it
-    reads `/api/meta` for the shape rather than embedding a copy of it (A19)."""
+    """Home only -- the draft, season and room screens are their own pages/routes
+    below, each a static file with no build step, reading `/api/meta` for the shape
+    rather than embedding a copy of it (A19)."""
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/draft", include_in_schema=False)
+def draft_page() -> FileResponse:
+    """State lives in the URL hash alone (a draft state, optionally `?mode=memory`
+    folded into the hash) -- this route always serves the same file; the client reads
+    the hash itself to resume or bounce back home if there's nothing to resume."""
+    return FileResponse(STATIC / "draft.html")
 
 
 @app.get("/ads.txt", include_in_schema=False)

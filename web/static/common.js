@@ -81,3 +81,118 @@ async function loadMeta(){
   META = await api('/api/meta');
   return META;
 }
+
+// A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
+// baseline; the ball is the only filled mark, which is what makes a bowler scannable.
+const BAT  = '<path d="M10.6 2.2 13.4 5 7.2 11.2 4.4 8.4Z"/><path d="M4.4 8.4 2.4 12.6l4.2-1.4"/>';
+const BALL = '<circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/>';
+const GLOVE= '<path d="M4.4 13.4V6.8a1.4 1.4 0 0 1 2.8 0V4.2a1.4 1.4 0 0 1 2.8 0v1.2a1.4 1.4 0 0 1 2.4 1v6a2 2 0 0 1-2 2H6.4a2 2 0 0 1-2-2Z"/>';
+function svg(inner){ return `<svg viewBox="0 0 16 16" aria-hidden="true">${inner}</svg>`; }
+const ICON = {
+  batter:     `<span class="ic bat" title="Batter">${svg(BAT)}</span>`,
+  bowler:     `<span class="ic ball" title="Bowler">${svg(BALL)}</span>`,
+  allrounder: `<span class="ic all" title="All-rounder">${svg(
+      '<path d="M9.6 1.6 12 4 7 9 4.6 6.6Z"/><path d="M4.6 6.6 2.8 10.4l3.8-1.3"/>' +
+      '<circle cx="11.4" cy="11.4" r="3.2" fill="currentColor"/>')}</span>`,
+  keeper:     `<span class="ic glove" title="Wicketkeeper">${svg(GLOVE)}</span>`,
+  unrated:    `<span class="ic none" title="Not rated"></span>`,
+};
+
+// [A77] A career keeper still counts toward the squad's keeper requirement even in a
+// season the archive says someone else kept -- invisible otherwise, so this small
+// secondary glove marks it wherever the primary icon isn't already "keeper".
+const KEEPER_BADGE =
+  `<span class="ic glove-badge" title="Also a proven keeper -- kept in another season">${svg(GLOVE)}</span>`;
+function keeperBadge(card){
+  return (card.keeper_eligible && card.kind !== 'keeper') ? KEEPER_BADGE : '';
+}
+
+// `forceReveal` bypasses the draft_mode gate entirely -- used once the squad is done,
+// on the squad-review screen, where the whole point is to finally show every rating
+// regardless of how the draft itself was played. Every other call site omits it and
+// keeps today's behaviour exactly. `effectiveDraftMode` is deliberately NOT defined
+// here -- each page that draws cards (draft/season/room) defines its own, since what
+// it reads from (a local DRAFT_MODE, or a room's shared mode) is page-specific.
+function ratingBadge(card, forceReveal){
+  return ((forceReveal || effectiveDraftMode() === 'stat') && card.rating != null)
+    ? `<span class="rating-badge">${card.rating}</span>` : '';
+}
+
+// Shared by solo's finished-draft screen and a room's squad-review screen -- both sit on
+// an object exposing the same three fields (`overall_rating`/`batting_rating`/
+// `bowling_rating`), from `SessionOut` and `RoomPlayerOut` respectively. `--` for a null
+// bucket (A33/A43's own rule: no evidence is a dash, never a fabricated 0).
+function teamRatingsHtml(d){
+  const tiles = [[d.batting_rating, 'BATTING'], [d.bowling_rating, 'BOWLING'], [d.overall_rating, 'OVERALL']];
+  return tiles.map(([v, label]) => `<div><b>${v == null ? '--' : v}</b><span>${label}</span></div>`).join('');
+}
+
+// A slot-machine flourish for the moment a franchise-season lands on screen: a quick
+// flicker through a handful of OTHER real teams before settling on the actual deal,
+// fast at first and slowing down like a wheel losing momentum, so it reads as landing
+// rather than a jump-cut. Purely cosmetic -- the flickered names are never the real
+// deal (the actual year/team are set only on the final step), so nobody can mistake a
+// mid-roll frame for the real one even on a slow connection. Shared by solo dealing and
+// a room's own deal card (showRoomDeal).
+const ROLL_FLAVOUR = [
+  'Mumbai Indians', 'Chennai Super Kings', 'Kolkata Knight Riders',
+  'Royal Challengers Bangalore', 'Delhi Capitals', 'Rajasthan Royals',
+  'Punjab Kings', 'Sunrisers Hyderabad', 'Gujarat Titans', 'Lucknow Super Giants',
+  'Deccan Chargers', 'Pune Warriors', 'Gujarat Lions', 'Rising Pune Supergiants',
+  'Kochi Tuskers Kerala',
+];
+const ROLL_STEP_MS = [55, 65, 80, 95, 120, 150, 190];   // decelerating; ~755ms total
+const ROLL_TIMERS = new Map();   // teamEl -> pending timeout, so overlapping calls on
+                                  // the same slot cancel each other rather than racing
+
+function rollDeal(yearEl, teamEl, finalYear, finalTeam){
+  clearTimeout(ROLL_TIMERS.get(teamEl));
+  let i = 0;
+  const step = () => {
+    if (i >= ROLL_STEP_MS.length){
+      yearEl.textContent = finalYear;
+      teamEl.textContent = finalTeam;
+      ROLL_TIMERS.delete(teamEl);
+      return;
+    }
+    yearEl.textContent = 2008 + Math.floor(Math.random() * 19);
+    teamEl.textContent = ROLL_FLAVOUR[Math.floor(Math.random() * ROLL_FLAVOUR.length)];
+    ROLL_TIMERS.set(teamEl, setTimeout(step, ROLL_STEP_MS[i]));
+    i++;
+  };
+  step();
+}
+
+/* --- per-player season stat popover -- shared by draft, season and room, all of
+   which include the same #statOverlay/#statName/#statSub/#statBody markup. --- */
+function oversStr(balls){ return Math.floor(balls / 6) + '.' + (balls % 6); }
+
+function statTile(n, label){
+  return `<div class="stat"><div><b>${n}</b><span>${label}</span></div></div>`;
+}
+
+function cardStatHtml(card){
+  let out = '';
+  if (card.bat_balls){
+    out += statTile(card.bat_runs, 'runs') + statTile(card.bat_balls, 'balls')
+         + statTile(card.bat_strike_rate.toFixed(1), 'strike rate');
+  }
+  if (card.bowl_balls){
+    out += statTile(card.bowl_wickets, 'wickets') + statTile(oversStr(card.bowl_balls), 'overs')
+         + statTile(card.bowl_economy.toFixed(2), 'economy');
+  }
+  return out || '<div class="note">No batting or bowling record this season.</div>';
+}
+
+function showStat(card){
+  if (!card) return;
+  $('#statName').textContent = card.name;
+  $('#statSub').textContent = [card.franchise, card.season_year].filter(Boolean).join(' · ');
+  $('#statBody').innerHTML = cardStatHtml(card);
+  $('#statOverlay').classList.remove('hide');
+}
+
+function hideStat(e){
+  if (e && e.target !== e.currentTarget) return;
+  $('#statOverlay').classList.add('hide');
+}

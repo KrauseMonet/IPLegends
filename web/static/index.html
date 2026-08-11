@@ -104,59 +104,6 @@
     </div>
   </section>
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft" class="hide">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
-        </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
-      </div>
-
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
-      </div>
-
-      <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="go('home')">Abandon</button>
-          <span class="stamp" id="seedPill"></span>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- ============ ROOMS: create/join ============ -->
   <section id="roomSetup" class="hide">
     <div class="folio" style="grid-template-columns:1fr">
@@ -492,53 +439,33 @@
 
 <script src="/static/common.js"></script>
 <script>
-let S = null;
 // 'stat' shows a rating badge on every card and lets a name be clicked for his season
 // stats; 'memory' shows neither -- name, role and where he's batted, nothing that says
 // how good he was. A pure display choice: the server always computes everything either
-// way (SPEC 11's own stance -- the client decides what to show, never what to compute),
-// so switching modes needs no new API call, only a re-render.
+// way (SPEC 11's own stance -- the client decides what to show, never what to compute).
+// Chosen here on home, then carried to /draft as a hash decoration on navigation --
+// see newDraft/openSeed below.
 let DRAFT_MODE = 'stat';
 
 function setDraftMode(mode){
   DRAFT_MODE = mode;
   document.querySelectorAll('#modeChoices .room-choice').forEach(b =>
     b.classList.toggle('sel', b.dataset.mode === mode));
-  if (S) render(S);   // a draft already in progress re-renders under the new mode
 }
 
 // Inside a room this defers to the ROOM's own mode (set once by the host at creation,
 // binding on every seat -- see migration 023) rather than the caller's own local
-// DRAFT_MODE; outside a room (ROOM_CODE null) it is exactly DRAFT_MODE, so solo play is
-// completely unaffected. `roomDraftMode()` itself is declared further down with the
-// rest of the room code, but function declarations hoist -- by the time this is ever
-// actually CALLED (a render, always after boot()), both are defined either way.
+// DRAFT_MODE; outside a room (ROOM_CODE null) it is exactly DRAFT_MODE. `ratingBadge`
+// (common.js) calls this by name -- home itself never draws a rated card, but room
+// code living in this same file still does.
 function effectiveDraftMode(){
   return ROOM_CODE ? roomDraftMode() : DRAFT_MODE;
-}
-
-// `forceReveal` bypasses the draft_mode gate entirely -- used once the squad is done,
-// on the squad-review screen, where the whole point is to finally show every rating
-// regardless of how the draft itself was played. Every other call site omits it and
-// keeps today's behaviour exactly.
-function ratingBadge(card, forceReveal){
-  return ((forceReveal || effectiveDraftMode() === 'stat') && card.rating != null)
-    ? `<span class="rating-badge">${card.rating}</span>` : '';
-}
-
-// Shared by solo's finished-draft screen and a room's squad-review screen -- both sit on
-// an object exposing the same three fields (`overall_rating`/`batting_rating`/
-// `bowling_rating`), from `SessionOut` and `RoomPlayerOut` respectively. `--` for a null
-// bucket (A33/A43's own rule: no evidence is a dash, never a fabricated 0).
-function teamRatingsHtml(d){
-  const tiles = [[d.batting_rating, 'BATTING'], [d.bowling_rating, 'BOWLING'], [d.overall_rating, 'OVERALL']];
-  return tiles.map(([v, label]) => `<div><b>${v == null ? '--' : v}</b><span>${label}</span></div>`).join('');
 }
 function go(id){
   // Leaving roomSetup for anywhere else abandons its own open-rooms poll -- it has no
   // other natural place to stop, since roomSetup isn't itself a "room" with a ROOM_CODE.
   if (id !== 'roomSetup') stopRoomOpenPoll();
-  for (const s of ['home','draft','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
+  for (const s of ['home','result','reveal','roomSetup','room']) $('#'+s).classList.toggle('hide', s !== id);
   if (id === 'home'){
     // Leaving for home abandons whatever draft/result the hash was replaying -- clear it
     // so a reload lands back on home instead of resuming a game the drafter already left.
@@ -569,31 +496,6 @@ function go(id){
   }
   window.scrollTo(0,0);
 }
-// A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one
-// baseline; the ball is the only filled mark, which is what makes a bowler scannable.
-const BAT  = '<path d="M10.6 2.2 13.4 5 7.2 11.2 4.4 8.4Z"/><path d="M4.4 8.4 2.4 12.6l4.2-1.4"/>';
-const BALL = '<circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/>';
-const GLOVE= '<path d="M4.4 13.4V6.8a1.4 1.4 0 0 1 2.8 0V4.2a1.4 1.4 0 0 1 2.8 0v1.2a1.4 1.4 0 0 1 2.4 1v6a2 2 0 0 1-2 2H6.4a2 2 0 0 1-2-2Z"/>';
-const ICON = {
-  batter:     `<span class="ic bat" title="Batter">${svg(BAT)}</span>`,
-  bowler:     `<span class="ic ball" title="Bowler">${svg(BALL)}</span>`,
-  allrounder: `<span class="ic all" title="All-rounder">${svg(
-      '<path d="M9.6 1.6 12 4 7 9 4.6 6.6Z"/><path d="M4.6 6.6 2.8 10.4l3.8-1.3"/>' +
-      '<circle cx="11.4" cy="11.4" r="3.2" fill="currentColor"/>')}</span>`,
-  keeper:     `<span class="ic glove" title="Wicketkeeper">${svg(GLOVE)}</span>`,
-  unrated:    `<span class="ic none" title="Not rated"></span>`,
-};
-function svg(inner){ return `<svg viewBox="0 0 16 16" aria-hidden="true">${inner}</svg>`; }
-
-// [A77] A career keeper still counts toward the squad's keeper requirement even in a
-// season the archive says someone else kept -- invisible otherwise, so this small
-// secondary glove marks it wherever the primary icon isn't already "keeper".
-const KEEPER_BADGE =
-  `<span class="ic glove-badge" title="Also a proven keeper -- kept in another season">${svg(GLOVE)}</span>`;
-function keeperBadge(card){
-  return (card.keeper_eligible && card.kind !== 'keeper') ? KEEPER_BADGE : '';
-}
-
 async function boot(){
   META = await api('/api/meta');
   const s = META.seasons;
@@ -632,8 +534,10 @@ function drawField(){
 /* --- draft --- */
 async function newDraft(ctrl){
   await busyClick(ctrl, 'Dealing…', async () => {
-    try { render(await api('/api/draft', {method:'POST'})); go('draft'); }
-    catch(e){ slip(e.message); }
+    try {
+      const s = await api('/api/draft', {method:'POST'});
+      location.href = '/draft#' + s.state + (DRAFT_MODE === 'memory' ? '?mode=memory' : '');
+    } catch(e){ slip(e.message); }
   });
 }
 function promptSeed(ctrl){
@@ -643,147 +547,17 @@ function promptSeed(ctrl){
 }
 async function openSeed(v, ctrl){
   await busyClick(ctrl, 'Dealing…', async () => {
-    try { render(await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'})); go('draft'); }
-    catch(e){ slip(e.message); }
-  });
-}
-// [A73] A pick names both the candidate AND the slot he bats at, in one request --
-// placement is final the instant it lands, so there is no bench and nothing to move
-// again afterward. If a candidate has exactly one open slot he's eligible for right now,
-// taking him settles it immediately; with more than one, PENDING holds him while the
-// order sheet asks which slot, and clicking an eligible row finishes the pick.
-let LAST_DEAL_FS = null;   // fs_id last shown in "Dealt to you", so render() only replays
-                            // the roll flourish when the deal actually changed
-let PENDING = null;   // {index, card} for a deal option awaiting a slot choice, or null
-let REPOSITION_PENDING = null;   // slot number of an already-placed pick awaiting a swap target, or null
-
-function eligibleForSlot(card, slot){
-  return slot === 12 || card.positions.includes(slot);
-}
-
-function openSlots(s){
-  const open = new Set(Array.from({length:11}, (_, i) => i + 1));
-  open.add(12);   // the Impact pseudo-slot, open until s.impact is chosen
-  s.order.forEach((c, i) => { if (c) open.delete(i + 1); });
-  if (s.impact) open.delete(12);
-  return open;
-}
-
-async function submitPick(i, slot, ctrl){
-  await busyClick(ctrl, 'Taking…', async () => {
     try {
-      S = await api(`/api/draft/${S.state}/pick`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({index: i, slot})});
-      PENDING = null;
-      render(S);
+      const s = await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'});
+      location.href = '/draft#' + s.state + (DRAFT_MODE === 'memory' ? '?mode=memory' : '');
     } catch(e){ slip(e.message); }
   });
 }
 
-function take(i, ctrl){
-  // Always a two-step confirm, even when only one slot is eligible -- clicking "Take"
-  // must never itself commit the pick. A single eligible row still gets highlighted
-  // (the order sheet's own eligibility check already handles that), the player just has
-  // to click it, the same as when there's a real choice among several rows.
-  REPOSITION_PENDING = null;   // a new pick and a reposition are never chosen at once
-  const card = S.deal.options[i];
-  PENDING = (PENDING && PENDING.index === i) ? null : {index: i, card};
-  render(S);   // the deal list's "pending" highlight lives here too, not just the order sheet
-}
-
-function rowClick(slot, ctrl){
-  if (PENDING){
-    submitPick(PENDING.index, slot, ctrl);
-    return;
-  }
-  repositionClick(slot, ctrl);
-}
-
-// Repositioning: click an already-placed pick to select him, click a second already-placed
-// pick to swap them (both must be legally eligible for the other's slot -- the server has
-// final say, this is just the affordance). Click the same row again to deselect. Nothing
-// here touches PENDING/take()'s new-pick flow; the two selections are mutually exclusive
-// by construction (rowClick only reaches this branch when no new pick is PENDING).
-function repositionClick(slot, ctrl){
-  const got = slot === 12 ? S.impact : S.order[slot - 1];
-  if (REPOSITION_PENDING === slot){
-    REPOSITION_PENDING = null;
-    renderPanels();
-    return;
-  }
-  if (REPOSITION_PENDING === null){
-    if (!got) return;   // an empty slot has nothing to select
-    REPOSITION_PENDING = slot;
-    renderPanels();
-    return;
-  }
-  submitReposition(REPOSITION_PENDING, slot, ctrl);
-}
-
-async function submitReposition(fromSlot, toSlot, ctrl){
-  const from = fromSlot;
-  REPOSITION_PENDING = null;
-  await busyClick(ctrl, null, async () => {
-    try {
-      S = await api(`/api/draft/${S.state}/reposition`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({from_slot: from, to_slot: toSlot})});
-      render(S);
-    } catch(e){ slip(e.message); renderPanels(); }
-  });
-}
-
-async function rerollDeal(kind, ctrl){
-  await busyClick(ctrl, 'Rerolling…', async () => {
-    try {
-      S = await api(`/api/draft/${S.state}/reroll`, {method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
-      PENDING = null;
-      render(S);
-    } catch(e){ slip(e.message); }
-  });
-}
-
-// A slot-machine flourish for the moment a franchise-season lands on screen: a quick
-// flicker through a handful of OTHER real teams before settling on the actual deal,
-// fast at first and slowing down like a wheel losing momentum, so it reads as landing
-// rather than a jump-cut. Purely cosmetic -- the flickered names are never the real
-// deal (the actual year/team are set only on the final step), so nobody can mistake a
-// mid-roll frame for the real one even on a slow connection.
-const ROLL_FLAVOUR = [
-  'Mumbai Indians', 'Chennai Super Kings', 'Kolkata Knight Riders',
-  'Royal Challengers Bangalore', 'Delhi Capitals', 'Rajasthan Royals',
-  'Punjab Kings', 'Sunrisers Hyderabad', 'Gujarat Titans', 'Lucknow Super Giants',
-  'Deccan Chargers', 'Pune Warriors', 'Gujarat Lions', 'Rising Pune Supergiants',
-  'Kochi Tuskers Kerala',
-];
-const ROLL_STEP_MS = [55, 65, 80, 95, 120, 150, 190];   // decelerating; ~755ms total
-const ROLL_TIMERS = new Map();   // teamEl -> pending timeout, so overlapping calls on
-                                  // the same slot cancel each other rather than racing
-
-function rollDeal(yearEl, teamEl, finalYear, finalTeam){
-  clearTimeout(ROLL_TIMERS.get(teamEl));
-  let i = 0;
-  const step = () => {
-    if (i >= ROLL_STEP_MS.length){
-      yearEl.textContent = finalYear;
-      teamEl.textContent = finalTeam;
-      ROLL_TIMERS.delete(teamEl);
-      return;
-    }
-    yearEl.textContent = 2008 + Math.floor(Math.random() * 19);
-    teamEl.textContent = ROLL_FLAVOUR[Math.floor(Math.random() * ROLL_FLAVOUR.length)];
-    ROLL_TIMERS.set(teamEl, setTimeout(step, ROLL_STEP_MS[i]));
-    i++;
-  };
-  step();
-}
-
-// A second use of rollDeal's own decelerating-flicker technique, reusing its timer map --
-// the match result is a genuine "not known until this instant" reveal (unlike the toss
-// screen, which only ever shows the winner a choice they already know they've earned), so
-// it's the one other place in the reveal flow this fits.
+// A second use of rollDeal's own decelerating-flicker technique (common.js), reusing
+// its timer map -- the match result is a genuine "not known until this instant" reveal
+// (unlike the toss screen, which only ever shows the winner a choice they already know
+// they've earned), so it's the one other place in the reveal flow this fits.
 const HEADLINE_DECOYS = ['You win', 'Tied', 'You lose'];
 function flickerHeadline(el, finalText, won){
   clearTimeout(ROLL_TIMERS.get(el));
@@ -802,159 +576,12 @@ function flickerHeadline(el, finalText, won){
   step();
 }
 
-function render(s){
-  S = s;
-  // '?mode=memory', never '.memory' -- '.' already separates moves inside the state
-  // string itself (and 'm' already opens a Reposition segment), so anything appended
-  // with a '.' risks being parsed as one. '?' cannot collide with that grammar. 'stat'
-  // is the default and stays unmarked, so an old shared link (no suffix at all) still
-  // opens exactly as it always did.
-  const modeSuffix = DRAFT_MODE === 'memory' ? '?mode=memory' : '';
-  history.replaceState(null, '', '#' + s.state + modeSuffix);
-  $('#seedPill').textContent = 'draft no. ' + s.state.split('-')[0];
-  $('#pickCount').textContent = `${s.picks_made}/${s.picks_total}`;
-  $('#pickBig').textContent = s.picks_made;
-  $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;
-  $('#progBar').style.width = (100 * s.picks_made / s.picks_total) + '%';
-
-  if (s.deal){
-    if (s.deal.fs_id !== LAST_DEAL_FS){
-      LAST_DEAL_FS = s.deal.fs_id;
-      rollDeal($('#dealYear'), $('#dealTeam'), s.deal.season_year, s.deal.franchise);
-    }
-    $('#rerollRow').classList.remove('hide');
-    const rerollsLeft = s.rerolls_allowed - s.rerolls_used;
-    $('#rerollTeamBtn').disabled = rerollsLeft <= 0;
-    $('#rerollSeasonBtn').disabled = rerollsLeft <= 0;
-    $('#rerollCount').textContent = `(${rerollsLeft} left)`;
-    const blocked = s.deal.blocked || [];
-    $('#optCount').textContent = `${s.deal.options.length} of ${s.deal.options.length + blocked.length}`;
-    const live = s.deal.options.map((card, i) => {
-      const pending = PENDING && PENDING.index === i ? ' pending' : '';
-      const nmClick = DRAFT_MODE === 'stat'
-        ? ` clickable" onclick="showStat(S.deal.options[${i}])"` : '"';
-      return `
-      <div class="entry${pending}">
-        <span class="nm${nmClick}>${ICON[card.kind] || ''}${keeperBadge(card)}<span class="flag ${card.overseas ? '' : 'home'}"
-          title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
-        <span class="picks"><button class="take" onclick="take(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
-      </div>`;
-    }).join('');
-    // The rest of the squad, greyed with the reason. Kept on the sheet rather than
-    // filtered away so the roster reads as a roster.
-    const dead = blocked.length ? `<div class="roster-head">Unavailable</div>` +
-      blocked.map((b, i) => {
-        const nmClick = DRAFT_MODE === 'stat'
-          ? ` clickable" onclick="showStat(S.deal.blocked[${i}])"` : '"';
-        return `
-      <div class="entry off">
-        <span class="nm${nmClick}>${ICON[b.kind] || ''}${keeperBadge(b)}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}${ratingBadge(b)}</span>
-        <span class="why">${b.blocked || ''}</span>
-      </div>`;
-      }).join('') : '';
-    $('#options').innerHTML = live + dead;
-  } else {
-    LAST_DEAL_FS = null;
-    clearTimeout(ROLL_TIMERS.get($('#dealTeam')));
-    $('#dealYear').textContent = '';
-    $('#dealTeam').textContent = 'Selection closed';
-    $('#rerollRow').classList.add('hide');
-    $('#optCount').textContent = '';
-    $('#options').innerHTML = '<div class="note">Twelve chosen. Ready to play.</div>';
-  }
-
-  renderPanels();
-}
-
-function renderPanels(){
-  const s = S;
-
-  // the order sheet: eleven numbered rows, then Impact. An open row is clickable while
-  // PENDING holds a new candidate awaiting a slot; a FILLED row is clickable to select or
-  // complete a reposition (REPOSITION_PENDING) -- a swap between two already-placed picks,
-  // never a bench (A73 stands: nothing here creates an unplaced pick).
-  const open = openSlots(s);
-  const rows = s.order.map((got, i) => orderRow(i + 1, got, `${i + 1}`));
-  rows.push(orderRow(12, s.impact, 'IMP', true));
-  $('#orderSheet').innerHTML = rows.join('');
-
-  // legality: the server's own sentences, not a client-side re-derivation of the rules
-  if (s.errors.length){
-    $('#legality').innerHTML = s.errors.map(e => `<div class="bad">${e}</div>`).join('');
-  } else if (s.squad_complete) {
-    $('#legality').innerHTML = '<div class="ok">Legal, ready to play</div>';
-  } else {
-    $('#legality').innerHTML = '<div class="note" style="padding:0">Take players straight ' +
-      'into a batting position (or Impact) until all twelve are filled. Click an already-' +
-      'placed pick, then a second slot, to swap them or move him into an open one -- any ' +
-      'time before the twelve is complete.</div>';
-  }
-
-  $('#simBtn').classList.toggle('hide', !s.squad_complete);
-  $('#simBtn').disabled = !s.playable;
-  $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
-  $('#simModeLabel').classList.toggle('hide', !s.squad_complete);
-  $('#simModeChoices').classList.toggle('hide', !s.squad_complete);
-  $('#teamRatings').classList.toggle('hide', !s.squad_complete);
-  if (s.squad_complete) $('#teamRatings').innerHTML = teamRatingsHtml(s);
-
-  function orderRow(slot, got, label, isImpact){
-    const classes = ['orderline'];
-    if (got) classes.push('filled');
-    if (isImpact) classes.push('impactrow');
-    if (PENDING){
-      const eligible = !got && open.has(slot)
-        && (slot === 12 || PENDING.card.positions.includes(slot));
-      classes.push(eligible ? 'eligible' : 'ineligible');
-    } else if (REPOSITION_PENDING !== null){
-      if (slot === REPOSITION_PENDING){
-        classes.push('reposition-selected');
-      } else {
-        // an empty target is a plain move (frees REPOSITION_PENDING's slot) and only
-        // needs the SELECTED player's own eligibility; a filled target is a swap and
-        // needs both directions.
-        const selected = REPOSITION_PENDING === 12 ? s.impact : s.order[REPOSITION_PENDING - 1];
-        const ok = got
-          ? eligibleForSlot(got, REPOSITION_PENDING) && eligibleForSlot(selected, slot)
-          : eligibleForSlot(selected, slot);
-        classes.push(ok ? 'eligible' : 'ineligible');
-      }
-    }
-    const whoClick = (got && DRAFT_MODE === 'stat')
-      ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
-    const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got, s.squad_complete)
-                       : (isImpact ? 'no impact player' : 'to be named');
-    return `<div class="${classes.join(' ')}" onclick="rowClick(${slot}, this)">
-      <span class="num">${label}</span>
-      <span class="who${whoClick}>${label2}</span>
-    </div>`;
-  }
-}
-
-function showOrderStat(slot){
-  showStat(slot === 12 ? S.impact : S.order[slot - 1]);
-}
-
 /* --- the season --- */
 
-// 'whole' and 'groupstage' resolve every remaining fixture with the declared default
-// toss/Impact answers (`POST .../skip`) and just show the outcome. 'matchbymatch' is
-// the only mode where anything is actually decided live -- every one of YOUR OWN
-// matches now pauses for a real toss and a break-time Impact choice, so the season can
-// no longer be computed in one shot the moment the draft ends; it is replayed one
-// human decision at a time, exactly like a room's shared draft pool.
-let SIM_MODE = 'whole';
-
 // The full "{draft_state}~{season moves}" identity of a season in progress -- distinct
-// from `S.state`, which only ever names the draft. Sits alongside it once the season
-// starts, and is what every season-route call below actually uses.
+// from the draft's own state, which only ever names the draft. Set from /season's own
+// URL hash once that page's own boot runs; every season-route call below uses it.
 let SEASON_STATE = null;
-
-function setSimMode(mode){
-  SIM_MODE = mode;
-  document.querySelectorAll('#simModeChoices .room-choice').forEach(b =>
-    b.classList.toggle('sel', b.dataset.simmode === mode));
-}
 
 async function seasonSkip(scope){
   const d = await api(`/api/season/${SEASON_STATE}/skip`, {
@@ -962,26 +589,6 @@ async function seasonSkip(scope){
     body: JSON.stringify({scope})});
   SEASON_STATE = d.state;
   return d;
-}
-
-async function simulate(ctrl){
-  await busyClick(ctrl, 'Playing the season…', async () => {
-    try {
-      SEASON_STATE = S.state;
-      if (SIM_MODE === 'matchbymatch'){
-        const d = await api('/api/season/' + SEASON_STATE);
-        enterRevealStage(d);
-      } else if (SIM_MODE === 'groupstage'){
-        const d = await seasonSkip('group_stage');
-        renderTableAndForm(d);
-        if (d.complete){ renderVerdictAndBracket(d); go('result'); }
-        else showGroupStageChoice(d);
-      } else {
-        showSeason(await seasonSkip('tournament'));
-      }
-    }
-    catch(e){ slip(e.message); }
-  });
 }
 
 let SEASON_DATA = null, ROOM_MATCH_DATA = null;
@@ -1503,39 +1110,8 @@ function hideScorecard(e){
   $('#scorecardOverlay').classList.add('hide');
 }
 
-/* --- per-player season stat popover --- */
-function oversStr(balls){ return Math.floor(balls / 6) + '.' + (balls % 6); }
-
-function statTile(n, label){
-  return `<div class="stat"><div><b>${n}</b><span>${label}</span></div></div>`;
-}
-
-function cardStatHtml(card){
-  let out = '';
-  if (card.bat_balls){
-    out += statTile(card.bat_runs, 'runs') + statTile(card.bat_balls, 'balls')
-         + statTile(card.bat_strike_rate.toFixed(1), 'strike rate');
-  }
-  if (card.bowl_balls){
-    out += statTile(card.bowl_wickets, 'wickets') + statTile(oversStr(card.bowl_balls), 'overs')
-         + statTile(card.bowl_economy.toFixed(2), 'economy');
-  }
-  return out || '<div class="note">No batting or bowling record this season.</div>';
-}
-
-function showStat(card){
-  if (!card) return;
-  $('#statName').textContent = card.name;
-  $('#statSub').textContent = [card.franchise, card.season_year].filter(Boolean).join(' · ');
-  $('#statBody').innerHTML = cardStatHtml(card);
-  $('#statOverlay').classList.remove('hide');
-}
-
-function hideStat(e){
-  if (e && e.target !== e.currentTarget) return;
-  $('#statOverlay').classList.add('hide');
-}
-
+/* --- per-player season stat popover: oversStr/statTile/cardStatHtml/showStat/hideStat
+   all live in common.js now, shared verbatim by draft/season/room --- */
 function impactTag(isImpact){
   return isImpact ? ' <span class="impact-tag">IMP</span>' : '';
 }
@@ -1567,7 +1143,10 @@ function scorecardInnings(short, score, inn){
 const ordinal = n => n + (['th','st','nd','rd'][(n % 100 - 20) % 10] || ['th','st','nd','rd'][n] || 'th');
 
 function copyLink(){
-  const url = location.origin + '/#' + S.state;
+  // The DRAFT half of SEASON_STATE only ('{draft_state}~{season_moves}') -- this
+  // reproduces the same deals, not the same toss/Impact decisions, which is what
+  // "copy THIS GAME" has always meant here (a link into /draft, not a season replay).
+  const url = location.origin + '/draft#' + SEASON_STATE.split('~')[0];
   navigator.clipboard.writeText(url)
     .then(() => slip('Copied. This link replays the same game.'))
     .catch(() => slip(url));
@@ -2826,12 +2405,12 @@ async function roomSkipAhead(ctrl){
 }
 
 boot().then(() => {
-  const [h, query] = location.hash.slice(1).split('?');
-  if (query === 'mode=memory') setDraftMode('memory');
+  const [h] = location.hash.slice(1).split('?');
   if (h && h.includes('-')) {
-    // An explicit solo-draft URL wins over a saved room -- a link takes priority
-    // over a resume, and the two never legitimately overlap in one reload anyway.
-    api('/api/draft/' + h).then(s => { render(s); go('draft'); }).catch(()=>{});
+    // A pre-split shared link (`/#seed-moves`, from before /draft existed as its own
+    // page) still lands on home -- forward it to the page that now owns drafting,
+    // hash and all, rather than trying to render a draft section that isn't here.
+    location.replace('/draft#' + location.hash.slice(1));
   } else {
     tryResumeRoomSession();
   }

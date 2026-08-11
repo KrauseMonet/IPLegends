@@ -153,6 +153,14 @@ def draft_page() -> FileResponse:
     return FileResponse(STATIC / "draft.html")
 
 
+@app.get("/season", include_in_schema=False)
+def season_page() -> FileResponse:
+    """`?enter=` (whole/groupstage/reveal) is a one-time navigation instruction read
+    once at boot and then stripped from the URL; the season's own state lives in the
+    hash alone from then on, exactly like /draft."""
+    return FileResponse(STATIC / "season.html")
+
+
 @app.get("/ads.txt", include_in_schema=False)
 def ads_txt() -> FileResponse:
     """AdSense (and the IAB spec it follows) requires this at the site ROOT, never

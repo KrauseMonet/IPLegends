@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Season · The Legends Almanack</title>
+<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.png" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+  </div>
+
+  <!-- ============ THE SEASON ============ -->
+  <section id="result">
+    <div class="report">
+      <div class="over-line" id="resSeed"></div>
+      <div class="call" id="resVerdict"></div>
+      <div class="figures" id="resScore"></div>
+      <div class="margin" id="resMargin"></div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <div class="actions">
+          <button class="act lead" onclick="newDraft(this)">Draft again</button>
+          <button class="act" onclick="copyLink()">Copy this game</button>
+          <button class="act" onclick="showJourneyCard()">Journey card</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="season">
+      <div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>League table</h3><div class="stat" id="tableNote"></div></div>
+        <table id="ladder" class="standings"></table>
+        <div id="capRow"></div>
+      </div>
+      <div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>Your fourteen</h3><div class="stat" id="formNote"></div></div>
+        <div id="yourForm"></div>
+        <div class="col-head" style="margin:26px -18px 0"><span>🏆 Playoffs</span></div>
+        <div id="bracket"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MATCH-BY-MATCH REVEAL ============ -->
+  <section id="reveal" class="hide">
+
+    <!-- the toss: only ever shown when you actually won it -- otherwise the very next
+         thing shown is the first innings, with a line noting what the opponent chose -->
+    <div id="tossScreen" class="hide">
+      <div class="report">
+        <div class="over-line" id="tossStage"></div>
+        <div class="call">You won the toss</div>
+        <div class="margin" id="tossOpponent"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:24px">
+        <button class="act lead" onclick="handleTossChoice('bat', this)">Bat first</button>
+        <button class="act lead" onclick="handleTossChoice('bowl', this)">Bowl first</button>
+        <button class="act" id="tossSkipBtn" onclick="revealSkipThisMatch(this)">Skip this match</button>
+      </div>
+    </div>
+
+    <!-- the over-by-over stepper: paces through one already-known over_log, entirely
+         client-side (no network call per over) -- speed/pause/skip are all local -->
+    <div id="overStepper" class="hide">
+      <!-- the innings already known, kept on screen for the whole second-innings reveal
+           so a target is never something the viewer has to remember -- hidden entirely
+           when this IS the first innings (nothing prior to recap). -->
+      <div class="report compact hide" id="overPrior">
+        <div class="over-line">First innings</div>
+        <div class="call" id="overPriorScore"></div>
+        <div class="margin" id="overPriorBest"></div>
+        <div class="margin" id="overTargetLine" style="font-style:normal;font-weight:700;color:var(--gold-2)"></div>
+      </div>
+      <div class="report">
+        <div class="over-line" id="overStage"></div>
+        <div class="call" id="overScoreLine"></div>
+        <div class="margin" id="overLastLine"></div>
+        <div class="over-gauge"><div class="gauge"><i id="overOversBar" style="width:0%"></i></div></div>
+        <div id="overChips"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip to end of this innings</button>
+        <button class="act" id="overSkipMatchBtn" onclick="revealSkipThisMatch(this)">Skip this match</button>
+      </div>
+    </div>
+
+    <!-- the innings break: your own Impact Player decision, or decline and let the
+         algorithm decide the same way it always has -->
+    <div id="impactScreen" class="hide">
+      <div class="report">
+        <div class="over-line" id="impactStage"></div>
+        <div class="call">Innings break</div>
+        <div class="margin" id="impactFirstInnings"></div>
+      </div>
+      <p class="deck" style="margin:16px 0;max-width:none">Send your Impact Player in for
+        any of your eleven, or leave it to the algorithm.</p>
+      <div id="impactXiList" class="col-scroll"></div>
+      <div class="actions" style="justify-content:center;margin-top:16px">
+        <button class="act" onclick="submitImpact(null, this)">Decline -- no substitution</button>
+        <button class="act" onclick="revealSkipThisMatch(this)">Skip this match</button>
+      </div>
+    </div>
+
+    <!-- a completed match's result, live-played or skipped alike -->
+    <div id="revealMatchResult" class="hide">
+      <div class="report">
+        <div class="over-line" id="revealStage"></div>
+        <div class="call" id="revealHeadline"></div>
+        <div class="margin" id="revealMargin"></div>
+      </div>
+      <div class="spread" style="margin-top:6px">
+        <div>
+          <div class="fx" id="revealLine" onclick="showRevealScorecard()" style="cursor:pointer"></div>
+          <p class="deck" id="revealRecord" style="margin-top:20px;max-width:none"></p>
+          <div class="actions" style="margin-top:24px">
+            <button class="act lead" onclick="revealNext()" id="revealNextBtn">Next match</button>
+            <button class="act" onclick="revealSkipThisMatch(this)" id="revealSkipThisBtn"
+              >Skip this match</button>
+            <button class="act hide" onclick="revealSkipGroupStage(this)" id="revealSkipGroupBtn"
+              >Rest of the group stage</button>
+            <button class="act" onclick="revealSkipToEnd(this)">Simulate rest of the tournament</button>
+            <button class="act" onclick="showRevealScorecard()">View scorecard</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
+    <div class="card-frame">
+      <div class="card-scroll">
+        <canvas id="journeyCanvas" width="1080" height="2470"></canvas>
+      </div>
+      <div class="card-actions">
+        <a id="cardDownload" class="act lead" download="legends-almanack-card.png">Download</a>
+        <button class="act" onclick="hideJourneyCard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="imprint">
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/reveal.js"></script>
+<script src="/static/season.js"></script>
+</body>
+</html>

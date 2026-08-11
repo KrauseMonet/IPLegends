@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room · The Legends Almanack</title>
+<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" onclick="leaveRoomAndGoHome(); return false;" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.png" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+  </div>
+
+  <!-- ============ ROOM: lobby / live draft / result ============ -->
+  <section id="room">
+    <div id="roomLobby" class="hide">
+      <div class="folio" style="grid-template-columns:1fr">
+        <div class="col" style="max-width:560px;margin:40px auto;width:100%">
+          <div class="col-head"><span>Lobby</span><em id="lobbySeats"></em></div>
+          <div class="fixture">
+            <div class="yr">ROOM CODE</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
+              <button class="act" style="padding:6px 12px;font-size:11px" onclick="copyRoomCode()">Copy</button>
+            </div>
+            <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px">
+              <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span> · <span id="lobbyMode"></span>
+            </div>
+          </div>
+          <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
+          <div id="lobbyPlayers" class="col-scroll"></div>
+          <div class="foot-actions">
+            <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
+            <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomDraft" class="hide">
+      <div class="folio">
+        <div class="col">
+          <div class="col-head"><span id="roomDealLabel">Dealt to you</span></div>
+          <div class="fixture">
+            <div class="yr" id="roomDealYear"></div>
+            <div class="club" id="roomDealTeam">—</div>
+          </div>
+          <div class="col-head" style="margin-bottom:0"><span id="roomOptionsLabel">Available</span></div>
+          <div id="roomOptions" class="col-scroll"></div>
+        </div>
+
+        <div class="col">
+          <div class="col-head"><span id="roomOrderLabel">Batting order</span>
+            <button id="roomViewToggle" class="col-head-toggle hide" onclick="toggleRoomView()"></button>
+          </div>
+          <div class="tally">
+            <div class="n" id="roomTimer">–</div>
+            <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
+          </div>
+          <div class="gauge timer-gauge"><i id="roomTimerBar" style="width:100%"></i></div>
+          <div id="roomOrderSheet" class="col-scroll"></div>
+        </div>
+
+        <div class="col">
+          <div class="col-head"><span>Other players</span></div>
+          <div id="roomOthers" class="col-scroll"></div>
+          <div class="foot-actions">
+            <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
+            <span class="stamp" id="roomCodeStamp"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="roomResult" class="hide">
+      <div class="report">
+        <div class="over-line">ROOM <span id="roomResultCode"></span></div>
+      </div>
+      <div id="roomMatchBody"></div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <button class="act lead hide" id="roomDoneBtn" onclick="leaveRoomAndGoHome()">Done</button>
+      </div>
+    </div>
+
+    <div id="roomFailed" class="hide">
+      <div class="report">
+        <div class="over-line">ROOM <span id="roomFailedCode"></span></div>
+        <div class="call">Draft stranded</div>
+        <p style="max-width:520px;margin:14px auto 0;color:var(--ink-3);font-size:14px;line-height:1.5">
+          One seat's earlier picks left no legal candidate for a slot that still needed filling.
+          This is a rare, genuine dead end in the archive rather than a bug in your play. The
+          room cannot recover from here.
+        </p>
+        <p style="max-width:520px;margin:10px auto 0;font-family:var(--mono);font-size:12px;color:var(--ink-4)"
+           id="roomFailedReason"></p>
+      </div>
+      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+        <button class="act lead" onclick="leaveRoomAndGoHome()">Done</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROOM MATCH REVEAL (toss + over-stepper only) ============ -->
+  <!-- No per-match skip button in a room (unlike solo's own copy on season.html) --
+       A81 removed a room's Impact choice entirely, and a room shows its match result
+       through `#roomResult`/`showRoomMatch`, never through this section. -->
+  <section id="reveal" class="hide">
+
+    <!-- the toss: only ever shown when you actually won it -- otherwise the very next
+         thing shown is the first innings, with a line noting what the opponent chose -->
+    <div id="tossScreen" class="hide">
+      <div class="report">
+        <div class="over-line" id="tossStage"></div>
+        <div class="call">You won the toss</div>
+        <div class="margin" id="tossOpponent"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:24px">
+        <button class="act lead" onclick="roomSubmitTossReveal('bat', this)">Bat first</button>
+        <button class="act lead" onclick="roomSubmitTossReveal('bowl', this)">Bowl first</button>
+      </div>
+    </div>
+
+    <!-- the over-by-over stepper: paces through one already-known over_log, entirely
+         client-side (no network call per over) -- speed/pause/skip are all local -->
+    <div id="overStepper" class="hide">
+      <!-- the innings already known, kept on screen for the whole second-innings reveal
+           so a target is never something the viewer has to remember -- hidden entirely
+           when this IS the first innings (nothing prior to recap). -->
+      <div class="report compact hide" id="overPrior">
+        <div class="over-line">First innings</div>
+        <div class="call" id="overPriorScore"></div>
+        <div class="margin" id="overPriorBest"></div>
+        <div class="margin" id="overTargetLine" style="font-style:normal;font-weight:700;color:var(--gold-2)"></div>
+      </div>
+      <div class="report">
+        <div class="over-line" id="overStage"></div>
+        <div class="call" id="overScoreLine"></div>
+        <div class="margin" id="overLastLine"></div>
+        <div class="over-gauge"><div class="gauge"><i id="overOversBar" style="width:0%"></i></div></div>
+        <div id="overChips"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip to end of this innings</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="cardOverlay" class="card-overlay hide" onclick="hideJourneyCard(event)">
+    <div class="card-frame">
+      <div class="card-scroll">
+        <canvas id="journeyCanvas" width="1080" height="2470"></canvas>
+      </div>
+      <div class="card-actions">
+        <a id="cardDownload" class="act lead" download="legends-almanack-card.png">Download</a>
+        <button class="act" onclick="hideJourneyCard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
+    <div class="scorecard-shell stat-frame">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="statSub"></div>
+          <div class="call" id="statName"></div>
+        </div>
+        <div class="colophon stat-tiles" id="statBody"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideStat()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="imprint">
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/reveal.js"></script>
+<script src="/static/room.js"></script>
+</body>
+</html>

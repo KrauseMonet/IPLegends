@@ -161,6 +161,26 @@ def season_page() -> FileResponse:
     return FileResponse(STATIC / "season.html")
 
 
+@app.get("/rooms", include_in_schema=False)
+def rooms_page() -> FileResponse:
+    """Create/join only -- a successful create or join saves {code, player_id} to
+    localStorage and navigates to /rooms/{code}, which is the live room itself. An
+    optional `?code=` (room.html's own redirect target when a session can't be
+    resumed) pre-fills the join tab client-side."""
+    return FileResponse(STATIC / "rooms.html")
+
+
+@app.get("/rooms/{code}", include_in_schema=False)
+def room_page(code: str) -> FileResponse:
+    """`code` is accepted only so the route matches at all -- exactly the /ads.txt
+    pattern's own bare-FileResponse convention. All real state is read client-side:
+    the URL's own code, a localStorage session, and the room's live poll. No overlap
+    with /rooms above -- the two never share a segment count, unlike the existing
+    /api/rooms/open vs /api/rooms/{code} pair, which needs declaration order for
+    exactly that reason."""
+    return FileResponse(STATIC / "room.html")
+
+
 @app.get("/ads.txt", include_in_schema=False)
 def ads_txt() -> FileResponse:
     """AdSense (and the IAB spec it follows) requires this at the site ROOT, never

@@ -12,9 +12,16 @@ let OVER_STEP = null;  // {log, i, timer, speed, paused, onDone, stageText, inni
                         // for the innings already known -- see startOverStepper's own
                         // comment below.
 
+// Not every page carries all four -- room.html's own #reveal only ever has
+// tossScreen/overStepper (A81 removed a room's Impact choice, and a room shows its
+// match result through #roomResult, never through revealMatchResult), while season.html
+// has all four. Each id is checked for existence rather than assumed present, so this
+// one shared function serves both markups without a page-specific branch.
 function hideAllRevealScreens(){
-  ['tossScreen', 'overStepper', 'impactScreen', 'revealMatchResult'].forEach(id =>
-    $('#' + id).classList.add('hide'));
+  ['tossScreen', 'overStepper', 'impactScreen', 'revealMatchResult'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hide');
+  });
 }
 
 function matchLabel(stage, n, total){

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play with friends · The Legends Almanack</title>
+<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.png" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+  </div>
+
+  <!-- ============ ROOMS: create/join ============ -->
+  <section id="roomSetup">
+    <div class="folio" style="grid-template-columns:1fr">
+      <div class="col" style="max-width:560px;margin:40px auto;width:100%">
+        <div class="col-head"><span>Play with friends</span></div>
+        <div class="col-scroll" style="padding:22px">
+          <label class="room-label">Your name</label>
+          <input id="roomName" class="room-input" placeholder="Your name" maxlength="40">
+
+          <div class="room-choices" id="setupTabs" style="margin-top:20px">
+            <button class="room-choice sel" data-tab="create" onclick="pickSetupTab('create')">Create a room</button>
+            <button class="room-choice" data-tab="join" onclick="pickSetupTab('join')">Join a room</button>
+          </div>
+
+          <div id="roomCreatePanel">
+            <div class="room-label" style="margin-top:20px">Format</div>
+            <div class="room-choices" id="formatChoices">
+              <button class="room-choice sel" data-format="final" onclick="pickFormat('final')">Final · 2</button>
+              <button class="room-choice" data-format="cup" onclick="pickFormat('cup')">Cup · 4</button>
+              <button class="room-choice" data-format="league" onclick="pickFormat('league')">League · 10</button>
+            </div>
+
+            <div class="room-label" style="margin-top:20px">Seconds per pick</div>
+            <div class="room-choices" id="timerChoices">
+              <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
+              <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
+              <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
+            </div>
+
+            <div class="room-label" style="margin-top:20px">Draft by</div>
+            <div class="room-choices" id="roomModeChoices">
+              <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
+              <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
+            </div>
+            <p class="room-note">Your choice -- every seat in the room drafts under it, not their own.</p>
+
+            <div class="room-label" style="margin-top:20px">Visibility</div>
+            <div class="room-choices" id="visibilityChoices">
+              <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
+              <button class="room-choice" data-visibility="open" onclick="pickVisibility(true)">Open</button>
+            </div>
+            <p class="room-note">Open rooms are listed on the Join tab for anyone to join without the code. Closed (default) needs the code.</p>
+
+            <div class="actions" style="margin-top:24px">
+              <button class="act lead" onclick="createRoom(this)">Create a room</button>
+            </div>
+          </div>
+
+          <div id="roomJoinPanel" class="hide">
+            <div class="room-label" style="margin-top:20px">Open rooms</div>
+            <div id="openRoomsList"></div>
+
+            <div style="margin:28px 0;border-top:1px solid var(--line)"></div>
+
+            <label class="room-label">Have a code?</label>
+            <input id="joinCode" class="room-input" placeholder="ABC123" maxlength="6"
+              style="text-transform:uppercase">
+            <div class="actions" style="margin-top:16px">
+              <button class="act" onclick="joinRoom(this)">Join a room</button>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:24px">
+            <a class="act" href="/">Back</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="imprint">
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/rooms-setup.js"></script>
+</body>
+</html>

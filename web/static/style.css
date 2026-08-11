@@ -1,0 +1,549 @@
+/* ---------------------------------------------------------------------------------------
+   THE LEGENDS ALMANACK, under the lights.
+
+   IPL's own brand language: a deep floodlit blue, a trophy gold, a flame-orange-red for
+   emphasis. Heavy condensed uppercase for headlines, a circular crest, a rig of floodlights
+   in the corner, and a stat/step footer read in mono figures -- broadcast graphics rather
+   than a printed page.
+--------------------------------------------------------------------------------------- */
+:root{
+  --bg:#050b1a; --bg-2:#0a1730;
+  --panel:#0d1c3a; --panel-2:#12274a; --panel-3:#17305a;
+  --line:rgba(255,255,255,.11); --line-strong:rgba(255,255,255,.24);
+  --ink:#f3f6fb; --ink-2:#aebedb; --ink-3:#6c7fa3;
+  --gold:#f5b83d; --gold-2:#ffd873;
+  --red:#e2472e; --red-2:#ff6a4d;
+  --green:#33d19a;
+  /* Named for what they are, not decorative -- the Orange Cap and Purple Cap are the
+     IPL's own real season-long individual awards, and cricket fans read those colours
+     as those awards on sight. */
+  --cap-orange:#e8823a; --cap-purple:#a06bdb;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background-color:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  /* Floodlit stadium photo, scrimmed dark so the same white/gold text stays readable
+     over it wherever it isn't sitting on an opaque panel. */
+  background-image:
+    linear-gradient(180deg, rgba(3,7,17,.90) 0%, rgba(3,7,17,.74) 32%, rgba(3,7,17,.82) 68%, rgba(3,7,17,.94) 100%),
+    radial-gradient(1100px 560px at 82% -8%, rgba(245,184,61,.14), transparent 58%),
+    radial-gradient(900px 480px at 4% 8%, rgba(51,160,209,.09), transparent 60%),
+    radial-gradient(1400px 700px at 50% 118%, rgba(226,71,46,.06), transparent 60%),
+    url('/static/stadium-bg.jpg');
+  background-size:auto,auto,auto,auto,cover;
+  background-position:0 0,0 0,0 0,0 0,center top;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+  position:relative;
+}
+.sheet{max-width:1180px;margin:0 auto;padding:0 26px 100px;position:relative}
+
+/* --- floodlight rig, purely decorative --- */
+.rig{position:absolute;top:0;right:0;width:min(46vw,560px);height:420px;pointer-events:none;
+  opacity:.55;z-index:0}
+.rig svg{width:100%;height:100%}
+
+/* --- masthead --- */
+.masthead{display:flex;align-items:center;gap:16px;padding:26px 0 22px;
+  border-bottom:1px solid var(--line);flex-wrap:wrap;position:relative;z-index:1}
+.wordmark{display:flex;align-items:center;gap:11px;cursor:pointer}
+.crest{width:50px;height:53px;flex:none;display:flex;align-items:center;justify-content:center}
+.crest img{width:100%;height:100%;object-fit:contain;
+  filter:drop-shadow(0 4px 14px rgba(245,184,61,.35))}
+.wordmark .the{font-family:var(--mono);font-size:10px;letter-spacing:.36em;text-transform:uppercase;
+  color:var(--ink-3);display:block;margin-bottom:1px}
+.wordmark h1{font-size:24px;margin:0;font-weight:800;letter-spacing:.5px;line-height:1;
+  text-transform:uppercase;color:var(--ink)}
+.wordmark h1 .leg{color:var(--gold)}
+.masthead .edition{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3);text-align:right;line-height:1.8}
+.masthead .edition b{color:var(--gold);font-weight:600}
+
+/* --- opening spread --- */
+.spread{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;padding:52px 0 34px;
+  align-items:center;position:relative;z-index:1}
+.standfirst{font-family:var(--mono);font-size:11px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:18px;font-weight:600}
+.headline{font-size:clamp(34px,4.6vw,54px);line-height:1.05;margin:0 0 22px;font-weight:800;
+  letter-spacing:-.5px;text-transform:uppercase}
+.headline i{font-style:normal;color:var(--gold)}
+.deck{font-size:17px;line-height:1.65;color:var(--ink-2);margin:0 0 30px;max-width:48ch}
+.deck .drop{color:var(--gold);font-weight:700}
+
+.actions{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.act{font-family:var(--sans);font-size:13.5px;font-weight:750;letter-spacing:.05em;
+  text-transform:uppercase;padding:15px 26px;border-radius:8px;background:var(--panel-2);
+  border:1px solid var(--line-strong);color:var(--ink);transition:border-color .15s,background .15s}
+.act:hover{border-color:var(--gold);background:var(--panel-3)}
+.act.lead{background:linear-gradient(180deg,var(--gold-2),var(--gold));color:#1a1204;
+  border:1px solid var(--gold);box-shadow:0 10px 26px -12px rgba(245,184,61,.55)}
+.act.lead:hover{filter:brightness(1.06)}
+.act:disabled{opacity:.4;cursor:not-allowed}
+/* a screen mid network/engine call: the whole thing stops responding to clicks and dims
+   slightly, so a multi-second wait (a full-tournament skip is ~3s, A63) reads as "working"
+   rather than as the click having done nothing */
+section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
+
+.colophon{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px}
+.stat{display:flex;align-items:center;gap:9px}
+.stat .ico{width:20px;height:20px;flex:none;color:var(--gold)}
+.stat .ico svg{width:100%;height:100%}
+.stat .ico path,.stat .ico circle,.stat .ico rect{stroke:currentColor;stroke-width:1.6;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.stat b{font-family:var(--mono);font-size:18px;color:var(--ink);font-weight:700;display:block;line-height:1}
+.stat span{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3)}
+
+/* the field: a floodlit ground, glowing rather than engraved */
+.field{position:relative;aspect-ratio:1/1;border-radius:50%;
+  background:radial-gradient(circle at 50% 42%, rgba(51,160,209,.14), rgba(5,11,26,.4) 72%);
+  border:1px solid var(--line-strong);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 8px rgba(245,184,61,.05), inset 0 0 60px rgba(245,184,61,.05)}
+.field::before{content:"";position:absolute;inset:9%;border:1px dashed var(--line-strong);border-radius:50%}
+.wicket{width:9%;height:30%;border-radius:2px;position:relative;
+  background:linear-gradient(180deg,rgba(245,184,61,.30),rgba(245,184,61,.12));
+  border:1px solid rgba(245,184,61,.4)}
+.wicket::before,.wicket::after{content:"";position:absolute;left:20%;right:20%;height:2px;
+  background:rgba(243,246,251,.55)}
+.wicket::before{top:10%} .wicket::after{bottom:10%}
+.pos{position:absolute;transform:translate(-50%,-50%);font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+.pos::before{content:"";display:block;width:5px;height:5px;background:var(--gold);border-radius:50%;
+  margin:0 auto 5px;box-shadow:0 0 8px rgba(245,184,61,.7)}
+.field-cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;margin-top:16px}
+
+/* --- how it works: numbered, iconed steps --- */
+.method{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:8px 0 0;
+  position:relative;z-index:1}
+.method section{border:1px solid var(--line);background:var(--panel);border-radius:10px;
+  padding:20px 20px 22px;display:flex;flex-direction:column;gap:10px}
+.method h3{font-family:var(--sans);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+  margin:0;color:var(--ink);display:flex;align-items:center;gap:10px;font-weight:750}
+.method h3 span{font-family:var(--mono);color:var(--gold);font-size:14px}
+.method .mico{width:22px;height:22px;flex:none;color:var(--gold)}
+.method .mico svg{width:100%;height:100%}
+.method .mico path,.method .mico circle{stroke:currentColor;stroke-width:1.5;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.method .mico.ball circle{fill:currentColor}
+.method .mico.ball path{stroke:var(--panel)}
+.method .mico.bat path{fill:currentColor;stroke:none}
+.method p{margin:0;font-size:14px;line-height:1.6;color:var(--ink-2)}
+
+/* --- the draft: three panels --- */
+.folio{display:grid;grid-template-columns:1fr 1.2fr .8fr;gap:16px;padding-top:30px;
+  position:relative;z-index:1}
+/* Each panel is capped to a viewport-relative height and scrolls its own list
+   internally, rather than growing to fit a squad of twenty-odd names (most of them
+   blocked and greyed, but still shown per A64) and pushing the whole page down past
+   several screens. The header above a list and the footer below it (Play the season,
+   Leave room) stay in view; only the list in between scrolls -- and on a small phone
+   screen this is what keeps the draft usable at all without constant scrolling. */
+.col{padding:0;border:1px solid var(--line);background:var(--panel);border-radius:10px;
+  overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 200px)}
+/* -webkit-overflow-scrolling:touch matters more than the max-height rule above on an
+   actual phone: without it, an overflow-y:auto div can simply refuse to respond to a
+   touch-drag at all in iOS Safari and many in-app browsers (a shared link opened from
+   Messages/WhatsApp/Instagram), rather than merely scrolling without momentum -- and a
+   desktop-driven or CDP-automated check (mouse wheel, synthetic scroll events) never
+   exercises the touch path, so this class of bug hides from every test that isn't a
+   real touch gesture on a real phone. Applied to every genuinely-scrolling container
+   in the sheet, not just this one. */
+.col-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.col-head{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);padding:14px 18px;border-bottom:1px solid var(--line);margin-bottom:2px;
+  display:flex;justify-content:space-between;align-items:baseline;background:var(--panel-2)}
+.col-head em{font-style:normal;color:var(--gold);font-family:var(--mono);letter-spacing:0;font-weight:600}
+.col-head-toggle{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:none;
+  padding:4px 10px;border-radius:5px;border:1px solid var(--line-strong);background:var(--panel-3);
+  color:var(--ink-2);cursor:pointer}
+.col-head-toggle:hover{border-color:var(--gold);color:var(--gold)}
+
+.fixture{padding:18px 18px 16px}
+.fixture .yr{font-family:var(--mono);font-size:12px;color:var(--gold);letter-spacing:.12em;font-weight:600}
+.fixture .club{font-size:24px;line-height:1.15;font-weight:800;letter-spacing:-.3px;margin-top:3px}
+.reroll-row{margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.act.reroll{font-size:11px;padding:8px 14px;display:inline-flex;align-items:center;gap:6px}
+#rerollCount{font-family:var(--mono);color:var(--ink-3);font-weight:600;font-size:11px}
+
+.entry{display:grid;grid-template-columns:1fr auto 2.6em;align-items:baseline;column-gap:10px;
+  padding:11px 18px;border-bottom:1px solid var(--line);transition:background .12s}
+.entry:hover{background:var(--panel-2)}
+.entry .nm{font-size:15px;min-width:0;display:flex;align-items:center}
+.ic{display:inline-flex;width:16px;height:16px;vertical-align:-3px;margin-right:8px;flex:none}
+.ic svg{width:100%;height:100%;display:block}
+.ic path,.ic circle,.ic line,.ic rect{stroke:var(--ink-2);stroke-width:1.6;fill:none;
+  stroke-linecap:round;stroke-linejoin:round}
+.ic.ball circle{fill:var(--red);stroke:var(--red)}
+.ic.ball path{stroke:var(--panel);stroke-width:1.2}
+.ic.all circle{fill:var(--gold)}
+.ic.glove path{stroke:var(--gold-2)}
+/* [A77] The secondary "also a proven keeper" badge -- smaller and dimmer than the
+   primary icon it sits beside, so it reads as a footnote rather than a second role. */
+.ic.glove-badge{width:11px;height:11px;margin-right:6px;margin-left:-3px;opacity:.7}
+.ic.glove-badge path{stroke:var(--gold-2)}
+.entry.off .ic path,.entry.off .ic circle{stroke:var(--ink-3)}
+.entry.off .ic.ball circle{fill:var(--ink-3);stroke:var(--ink-3)}
+.entry .nm .flag{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);
+  margin-right:8px;vertical-align:middle;box-shadow:0 0 6px rgba(245,184,61,.7)}
+.entry .nm .flag.home{background:transparent;border:1px solid var(--ink-3);box-shadow:none}
+.entry .fig{font-family:var(--mono);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--green);min-width:2.4em;text-align:right}
+.picks{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.pk{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--line-strong);border-radius:5px;padding:4px 9px;color:var(--ink-2);
+  background:var(--panel-3)}
+.pk:hover{border-color:var(--gold);color:var(--gold);background:rgba(245,184,61,.1)}
+/* [A73] one "take" button per entry -- taking him already IS placing him, straight into
+   a batting position (or Impact). If he is only eligible for one open slot right now the
+   pick settles immediately; otherwise the order sheet below asks which one. */
+.take{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  border:1px solid var(--gold);border-radius:5px;padding:5px 11px;color:var(--gold);
+  background:rgba(245,184,61,.08)}
+.take:hover{background:var(--gold);color:#1a1204}
+/* a candidate with more than one open eligible slot: waiting on a row click above */
+.entry.pending{background:rgba(245,184,61,.09);box-shadow:inset 3px 0 0 var(--gold)}
+.entry.pending .take{background:var(--gold);color:#1a1204}
+.entry.off{display:block;color:var(--ink-3);padding:9px 18px}
+.entry.off .nm{color:var(--ink-3)}
+.entry.off .fig{display:none}
+.entry.off .nm{display:block}
+.why{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;
+  color:var(--ink-3);font-style:italic;padding-left:24px;margin-top:2px}
+.roster-head{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);padding:14px 18px 6px;border-bottom:1px solid var(--line)}
+
+/* the squad sheet */
+.tally{display:flex;align-items:baseline;gap:12px;padding:18px 18px 10px}
+.tally .n{font-family:var(--mono);font-size:36px;font-variant-numeric:tabular-nums;line-height:1;
+  color:var(--gold);font-weight:700}
+.tally .of{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);line-height:1.7}
+.gauge{height:3px;background:var(--panel-3);margin:0 18px 14px;border-radius:2px}
+.gauge i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2));
+  transition:width .35s;border-radius:2px}
+/* the room draft's per-pick countdown: ticks locally once a second (tickRoomTimer),
+   so the bar gets a slower, linear transition to sweep smoothly between whole seconds
+   instead of the snap the shared .gauge default is tuned for. */
+.timer-gauge{margin-top:-4px}
+#roomTimerBar{transition:width 1s linear,background .3s}
+.tally .n.urgent{color:var(--red-2);animation:timerPulse 1s ease-in-out infinite}
+.timer-gauge.urgent i{background:linear-gradient(90deg,var(--red),var(--red-2))}
+@keyframes timerPulse{
+  0%,100%{opacity:1}
+  50%{opacity:.5}
+}
+.line{display:grid;grid-template-columns:96px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
+  align-items:baseline;column-gap:12px;padding:9px 18px;
+  border-bottom:1px solid var(--line);font-size:14.5px}
+.line .role{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3)}
+.line .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-3);font-style:italic}
+.line.set .who{color:var(--ink);font-style:normal;font-weight:600}
+.line .fig{font-family:var(--mono);font-size:13.5px;font-variant-numeric:tabular-nums;
+  color:var(--green);text-align:right;font-weight:600}
+.line .club{font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:.02em;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.line.active-turn{background:rgba(245,184,61,.09);box-shadow:inset 3px 0 0 var(--gold)}
+.line.active-turn .role{color:var(--gold);font-weight:700}
+
+.verdict-note{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;padding:14px 18px;
+  border-top:1px solid var(--line);color:var(--green);font-weight:600}
+.verdict-note.no{color:var(--red-2)}
+.note{font-size:14px;color:var(--ink-3);font-style:italic;padding:16px 18px}
+
+/* [A72] the order sheet: eleven numbered batting positions plus one Impact row. Filled
+   rows show who bats there; an empty row is a target while a squad member is selected. */
+.orderline{display:grid;grid-template-columns:28px minmax(0,1fr) 2.4em;align-items:center;
+  column-gap:10px;padding:8px 18px;border-bottom:1px solid var(--line);font-size:14px;
+  cursor:pointer;transition:background .12s,opacity .12s}
+.orderline:hover{background:var(--panel-2)}
+.orderline .num{font-family:var(--mono);font-size:11px;color:var(--ink-3);text-align:center}
+.orderline.impactrow .num{color:var(--gold);font-size:9px;letter-spacing:.05em}
+.orderline .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-3);font-style:italic}
+.orderline.filled .who{color:var(--ink);font-style:normal;font-weight:600}
+.orderline .fig{font-family:var(--mono);font-size:13px;color:var(--green);text-align:right;
+  font-weight:600}
+/* while a squad member is selected: his eligible rows glow gold and invite a click;
+   everything else dims, so the choice reads as a choice rather than a guess */
+.orderline.eligible{border-color:var(--gold);box-shadow:inset 0 0 0 1px rgba(245,184,61,.35)}
+.orderline.ineligible{opacity:.35;cursor:not-allowed}
+.orderline.ineligible:hover{background:none}
+.orderline.reposition-selected{background:rgba(245,184,61,.09);box-shadow:inset 3px 0 0 var(--gold)}
+
+/* the legality checklist -- one line per rule, a plain sentence from the server rather
+   than a client-side re-derivation of what "legal" means */
+.legality{padding:6px 18px 16px}
+.legality .ok{font-family:var(--mono);font-size:12px;color:var(--green);padding:10px 0;
+  font-weight:600}
+.legality .bad{font-family:var(--mono);font-size:11.5px;color:var(--red-2);padding:5px 0;
+  line-height:1.5}
+.legality .bad::before{content:"· "}
+
+.foot-actions{display:flex;gap:12px;align-items:center;padding:18px;flex-wrap:wrap}
+.stamp{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+  border:1px solid var(--line-strong);padding:7px 12px;border-radius:6px}
+
+/* --- the report --- */
+.report{padding:50px 0 14px;text-align:center;position:relative;z-index:1}
+.report .over-line{font-family:var(--mono);font-size:10px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-3)}
+.report .call{font-size:16px;letter-spacing:.24em;text-transform:uppercase;font-family:var(--sans);
+  font-weight:800;margin:16px 0 8px;color:var(--red-2)}
+.report .call.won{color:var(--gold)}
+.report .figures{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:800;
+  font-size:clamp(32px,6.8vw,64px);letter-spacing:-1px;line-height:1.1;white-space:nowrap;
+  color:var(--ink)}
+.report .margin{font-size:16.5px;font-style:italic;color:var(--ink-2);margin-top:10px}
+.ledger{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:32px}
+
+/* the room match/result screens: toss/impact/advance panels and the completed-match
+   banners all reuse .report's own centered layout -- just less top padding, since they
+   sit at the top of #roomResult rather than deep in a long page the way solo's own
+   .report usage does -- plus a handful of named layout helpers in place of one-off
+   inline styles, so a later spacing tweak is one line here instead of a hunt through
+   template strings scattered across several JS functions. */
+.report.compact{padding:0 0 20px}
+.room-actions{justify-content:center;padding-top:14px}
+.room-gap{margin-top:16px}
+.room-banner{text-align:center;margin:16px 0}
+.ledger div{padding:18px 10px;border:1px solid var(--line);background:var(--panel);border-radius:10px}
+.ledger b{display:block;font-family:var(--mono);font-size:22px;font-variant-numeric:tabular-nums;
+  color:var(--gold);font-weight:700}
+.ledger span{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3)}
+
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:32px}
+.room-table{grid-template-columns:1fr}
+.cards2 > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
+  border-radius:10px}
+
+/* the over-by-over reveal: the recap of an innings already known (#overPrior), plus
+   motion on the innings currently ticking over -- a score pop, a wicket flash, and a
+   per-over chip strip. No @keyframes existed in this file before this. Re-triggering one
+   on a REPEAT tick (two good overs back to back) needs the element reflowed between
+   removing and re-adding the class, not just toggling it -- see renderOverStep's own
+   comment on this, it's the standard first-time gotcha with CSS keyframe replay. */
+#overPrior{margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+#overPrior .call{color:var(--ink-2)}
+.over-gauge{max-width:360px;margin:16px auto 0}
+#overChips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:480px;
+  margin:16px auto 0}
+.chip{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
+  font-weight:700;padding:5px 8px;border-radius:6px;background:var(--panel-2);
+  color:var(--ink-3);border:1px solid transparent}
+.chip.good{color:var(--green)}
+.chip.great{background:rgba(245,184,61,.16);color:var(--gold-2)}
+.chip.wicket{border-color:var(--red-2)}
+.chip.chip-new{animation:chipIn .3s ease-out}
+
+@keyframes scorePop{
+  0%{transform:scale(1)}
+  35%{transform:scale(1.1);color:var(--gold-2)}
+  100%{transform:scale(1)}
+}
+@keyframes wicketFlash{
+  0%{color:var(--ink)}
+  25%{color:var(--red-2)}
+  65%{color:var(--red-2)}
+  100%{color:var(--ink)}
+}
+@keyframes chipIn{
+  0%{transform:translateY(4px) scale(.85);opacity:0}
+  100%{transform:translateY(0) scale(1);opacity:1}
+}
+#overScoreLine{display:inline-block}
+#overScoreLine.score-pop{animation:scorePop .45s ease-out}
+#overScoreLine.wicket-flash{animation:wicketFlash .6s ease-out}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+caption{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-align:left;
+  padding:16px 0 8px;color:var(--ink)}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;padding:9px 0 6px;font-weight:600;border-bottom:1px solid var(--line)}
+th.n,td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td{padding:6px 0;border-bottom:1px solid var(--line)}
+tr.tail td{color:var(--ink-3);font-style:italic}
+
+.season{display:grid;grid-template-columns:1.25fr .95fr;gap:16px}
+.season > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
+  border-radius:10px;position:relative;overflow:hidden}
+tr.you td{font-weight:700;color:var(--ink)}
+tr.you td:first-child{box-shadow:inset 3px 0 0 var(--gold);padding-left:9px}
+tr.cut td{border-bottom:1.5px solid var(--gold)}
+
+/* --- panel-head: a bolder, two-line masthead for the season/room result screens' two
+   main panels (league table, your matches) -- .col-head's own small utility-bar label
+   is reused across many unrelated screens (the deal panel, the squad panel), so this is
+   a new, scoped treatment rather than a change to it. Mirrors a broadcast graphics
+   package's own title-plus-stat-block convention: a bold section name, a number that
+   actually matters set apart in gold, and what it means underneath in small caps. */
+.panel-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;
+  padding:20px 18px 14px;margin:0 -18px 6px;border-bottom:2px solid rgba(245,184,61,.4);
+  background:linear-gradient(180deg,rgba(245,184,61,.07),transparent);position:relative;z-index:1}
+.panel-head h3{margin:0;font-family:var(--sans);font-size:15px;font-weight:800;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--ink)}
+.panel-head .stat{text-align:right;line-height:1.35}
+.panel-head .stat b{display:block;font-family:var(--mono);color:var(--gold-2);
+  font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+.panel-head .stat span{display:block;font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-top:1px}
+.panel-glow{position:absolute;top:-50px;right:-50px;width:190px;height:190px;
+  background:radial-gradient(circle,rgba(245,184,61,.15),transparent 70%);
+  pointer-events:none;z-index:0}
+
+/* A generated, colour-coded initial badge stands in for a team crest -- the archive
+   spans 19 seasons of franchise renames (Deccan Chargers, Delhi Daredevils/Capitals,
+   Kings XI Punjab/Punjab Kings...) with no owned artwork for any of them, and an actual
+   club crest is trademarked; a deterministic hash-to-hue keeps every team visually
+   distinct and stable across screens without asserting a real, and possibly wrong for
+   an older season, brand colour. */
+.team-badge{display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;border-radius:50%;font-size:8.5px;font-weight:800;
+  color:rgba(5,11,26,.82);margin-right:8px;font-family:var(--mono);
+  vertical-align:-5px;box-shadow:0 0 0 1px rgba(255,255,255,.18) inset}
+.team-badge.you-badge{background:var(--gold-2)!important;color:#2b2005}
+.you-pill{display:inline-block;font-family:var(--mono);font-size:8px;font-weight:700;
+  letter-spacing:.1em;color:#2b2005;background:var(--gold-2);border-radius:4px;
+  padding:2px 6px;margin-left:8px;vertical-align:2px}
+
+/* --- standings: the league table's own richer treatment, scoped separately from the
+   shared table/th/td rules above (which the scorecard's batting/bowling tables also
+   use -- rank, leader and points styling has no meaning there). A standings table is
+   read top-down for exactly two things: who's leading, and where the cutoff falls --
+   both get a real visual anchor instead of 10 identically-weighted rows. */
+.standings th{border-bottom:1.5px solid rgba(245,184,61,.35)}
+.standings tbody tr:nth-child(even) td{background:rgba(255,255,255,.025)}
+.standings tbody tr:first-child td{background:linear-gradient(90deg,rgba(245,184,61,.12),transparent 65%)}
+.standings tbody tr:first-child td:first-child{color:var(--gold-2);font-weight:800}
+.standings td.pts{font-weight:700;color:var(--ink)}
+.standings td.nrr-pos{color:var(--green)}
+.standings td.nrr-neg{color:var(--red-2)}
+
+/* --- cap-row: the tournament's Orange Cap (top scorer) and Purple Cap (top wicket
+   taker), sitting in the league table's own card below the ten rows -- a ten-row
+   standings table leaves real empty space under a fourteen-row "your matches" card
+   beside it, and these are the two individual honours a real IPL table's own space
+   would carry rather than leaving it blank. */
+.cap-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0 4px}
+.cap-card{position:relative;padding:12px 14px 12px 17px;border-radius:8px;
+  background:var(--panel-2);border:1px solid var(--line);overflow:hidden}
+.cap-card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:3px}
+.cap-card.cap-orange::before{background:var(--cap-orange)}
+.cap-card.cap-purple::before{background:var(--cap-purple)}
+.cap-label{font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;
+  margin-bottom:5px}
+.cap-orange .cap-label{color:var(--cap-orange)}
+.cap-purple .cap-label{color:var(--cap-purple)}
+.cap-name{font-family:var(--sans);font-weight:700;font-size:13.5px;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap-value{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:2px}
+.fx{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;column-gap:10px;
+  padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;transition:background .12s}
+.fx[onclick]:hover{background:var(--panel-2)}
+.fx .wl{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;width:1.8em;text-align:center;
+  padding:3px 0;border-radius:4px;border:1px solid var(--line-strong);color:var(--ink-3)}
+.fx .wl.w{background:var(--green);border-color:var(--green);color:#04231a;font-weight:700}
+.fx .wl.l{background:var(--red);border-color:var(--red);color:#2b0705;font-weight:700}
+.fx .sc{font-family:var(--mono);font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.tie-stage{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold);padding-top:16px;font-weight:600}
+.hide{display:none!important}
+.slip{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel-3);
+  color:var(--ink);padding:13px 22px;font-family:var(--sans);font-size:13px;z-index:60;
+  border:1px solid var(--gold);border-radius:8px}
+
+/* the shareable journey card: a hand-drawn canvas, previewed full height and downloadable
+   as a real PNG -- no server-side image generation, no new dependency.
+   The canvas is drawn portrait, phone-screen shaped (1080x2470) -- capping its PREVIEW
+   by height (the original rule: max-height:80vh;width:auto) forces that whole tall
+   image into 80% of the viewport regardless of width, which on an ordinary desktop
+   window scales it down to roughly 30% of native size and every font on it along with
+   it. `.scorecard-frame` right below solves the same "content taller than the screen"
+   problem the other way -- cap by width, scroll for height -- and that is the
+   correct direction for a portrait image; only the canvas itself scrolls, so Download/
+   Close stay pinned and reachable without hunting for them at the bottom. */
+.card-overlay{position:fixed;inset:0;background:rgba(3,7,17,.92);z-index:70;
+  display:flex;align-items:center;justify-content:center;padding:24px}
+.card-frame{display:flex;flex-direction:column;align-items:center;gap:16px;max-height:100%}
+.card-scroll{max-height:calc(100vh - 140px);overflow-y:auto;-webkit-overflow-scrolling:touch;border-radius:14px}
+.card-frame canvas{display:block;width:min(92vw,640px);height:auto;border-radius:14px;
+  box-shadow:0 20px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line-strong)}
+.card-actions{display:flex;gap:12px;flex:none}
+.card-actions a.act{text-decoration:none;display:inline-flex;align-items:center}
+
+/* the scorecard overlay: reuses .card-overlay's backdrop, a scrolling frame of its own
+   since two full elevens' worth of batting and bowling can run taller than the screen.
+   Close is a SIBLING of the scrolling frame, not its last child -- the journey card's
+   own .card-actions already got this right (pinned, always visible); the scorecard/stat
+   overlays originally buried Close at the very bottom of the scrollable content itself,
+   so reaching it meant scrolling past two full innings' worth of batting and bowling
+   first, which on a phone reads as "stuck" long before it reads as "just needs a scroll". */
+.scorecard-shell{display:flex;flex-direction:column;align-items:stretch;gap:10px;
+  max-height:100%;width:100%;max-width:960px}
+.scorecard-frame{background:var(--bg-2);border:1px solid var(--line-strong);border-radius:14px;
+  width:100%;max-height:calc(88vh - 64px);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:6px 26px 26px}
+.scorecard-frame .report{padding:22px 0 4px}
+.scorecard-close{display:flex;justify-content:center;flex:none}
+.stat-frame{max-width:340px}
+.stat-tiles{justify-content:center;gap:28px;margin:20px 0 6px}
+.entry .nm.clickable,.who.clickable{cursor:pointer}
+.entry .nm.clickable:hover,.who.clickable:hover{text-decoration:underline;text-decoration-color:var(--gold)}
+.impact-tag{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:#1a1204;
+  background:var(--gold);border-radius:3px;padding:1px 4px;vertical-align:middle;font-weight:700}
+.rating-badge{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--green);
+  border:1px solid rgba(51,209,154,.4);border-radius:3px;padding:1px 5px;
+  vertical-align:middle;margin-left:6px}
+.fow{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.8;
+  padding:12px 0 4px;white-space:pre-line}
+
+/* room setup: create/join */
+.room-label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.room-input{width:100%;font:inherit;font-family:var(--sans);font-size:16px;color:var(--ink);
+  background:var(--panel-2);border:1px solid var(--line-strong);border-radius:8px;
+  padding:12px 14px}
+.room-input:focus{outline:none;border-color:var(--gold)}
+.room-choices{display:flex;gap:10px;flex-wrap:wrap}
+.room-choice{font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;padding:10px 16px;
+  border-radius:7px;border:1px solid var(--line-strong);background:var(--panel-2);
+  color:var(--ink-2)}
+.room-choice.sel{border-color:var(--gold);color:var(--gold);background:rgba(245,184,61,.08)}
+.room-note{margin:8px 0 0;font-family:var(--mono);font-size:11.5px;color:var(--ink-4);
+  line-height:1.5}
+.imprint{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center;line-height:2.2;position:relative;z-index:1}
+
+@media (max-width:900px){
+  .spread{grid-template-columns:1fr;gap:34px}
+  .field{max-width:360px;margin:0 auto;width:100%}
+  .method{grid-template-columns:1fr;gap:12px}
+  .folio,.cards2,.season{grid-template-columns:1fr}
+  .line .club{display:none}
+  .actions{width:100%;flex-direction:column;flex-wrap:nowrap}
+  .act{text-align:center}
+  .ledger{grid-template-columns:1fr 1fr}
+  /* The desktop .col height cap (max-height:calc(100vh - 200px)) exists so three
+     side-by-side columns of different lengths don't grow to different heights --
+     once .folio stacks them to one column above, that reason is gone, and keeping the
+     cap just means three separate nearly-full-screen scrolling boxes in a row instead
+     of one page that scrolls naturally. */
+  .col{max-height:none}
+  /* Tap targets: the highest-frequency interaction in the app (Take, an order-sheet
+     slot) measured 27px/39px tall on a real phone viewport, both under the ~44px
+     minimum every mobile HIG recommends. Desktop density is untouched. */
+  .take{min-height:44px;padding:0 16px;display:inline-flex;align-items:center;
+    justify-content:center;font-size:11px}
+  .orderline{min-height:44px}
+}

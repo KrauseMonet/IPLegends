@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
+<title>About · The Legends Almanack</title>
 <meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
@@ -49,73 +49,59 @@
     </div>
   </div>
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
-        </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
-      </div>
+  <!-- ============ ABOUT ============ -->
+  <section id="about">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">About</div>
+    </div>
 
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
-      </div>
+    <nav class="legal-nav">
+      <a href="/about" class="sel">About</a>
+      <a href="/faq">FAQ</a>
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
 
-      <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
-          <span class="stamp" id="seedPill"></span>
-        </div>
-      </div>
+    <div class="prose">
+      <h2>What this is</h2>
+      <p>The Legends Almanack lets you draft an all-time IPL eleven from nineteen real
+      seasons of the archive — 2008 through 2026, 3,337 player-seasons across 166
+      franchise-seasons — and play out a full season with it: fourteen league matches,
+      a table, then the playoffs, against nine other sides each drawn from a real
+      historical squad. Play alone, or open a room and draft against friends live.</p>
+
+      <p>Every card's rating is computed from the same ball-by-ball data every match in
+      the archive is built from — runs, wickets, the situation a player faced them in —
+      not a guess and not an official figure. The method is described in full, including
+      every correction made along the way, in the project's own public
+      <a href="https://github.com/KrauseMonet/IPLegends" target="_blank" rel="noopener">source and notes</a>.</p>
+
+      <h2>Where the data comes from</h2>
+      <p>Every ball, every dismissal, every scorecard comes from
+      <a href="https://cricsheet.org" target="_blank" rel="noopener">Cricsheet</a>, an
+      open, contributor-driven archive of professional cricket data. The Almanack owes
+      it a real debt: without a public record this detailed, none of the ratings or the
+      season simulation would exist.</p>
+
+      <h2>What it isn't</h2>
+      <p>This is an independent, unofficial project built for fun by one person. It is
+      <strong>not affiliated with, endorsed by, or connected to the BCCI, the Indian
+      Premier League, or any of the franchises it depicts.</strong> Team and player
+      names appear only because they are the real historical record — the same reason
+      a scorecard or an almanac from any other era would carry them.</p>
+
+      <h2>Accounts are optional</h2>
+      <p>Nothing here requires signing in. Draft, play a season, or open a room with
+      friends exactly as before. Creating an account is only useful if you want your
+      name to show when you play with others and your completed games saved to a
+      career profile — see the <a href="/faq">FAQ</a> for what that actually stores.</p>
+    </div>
+
+    <div class="foot-actions" style="justify-content:center;padding:10px 0 30px">
+      <a class="act" href="/">Home</a>
     </div>
   </section>
-
-  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-shell stat-frame">
-      <div class="scorecard-frame">
-        <div class="report">
-          <div class="over-line" id="statSub"></div>
-          <div class="call" id="statName"></div>
-        </div>
-        <div class="colophon stat-tiles" id="statBody"></div>
-      </div>
-      <div class="scorecard-close">
-        <button class="act" onclick="hideStat()">Close</button>
-      </div>
-    </div>
-  </div>
 
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
     <div class="scorecard-shell auth-frame">
@@ -162,6 +148,6 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/auth.js"></script>
-<script src="/static/draft.js"></script>
+<script src="/static/info.js"></script>
 </body>
 </html>

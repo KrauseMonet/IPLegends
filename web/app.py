@@ -194,6 +194,26 @@ def profile_page() -> FileResponse:
     return FileResponse(STATIC / "profile.html")
 
 
+@app.get("/about", include_in_schema=False)
+def about_page() -> FileResponse:
+    return FileResponse(STATIC / "about.html")
+
+
+@app.get("/faq", include_in_schema=False)
+def faq_page() -> FileResponse:
+    return FileResponse(STATIC / "faq.html")
+
+
+@app.get("/terms", include_in_schema=False)
+def terms_page() -> FileResponse:
+    return FileResponse(STATIC / "terms.html")
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy_page() -> FileResponse:
+    return FileResponse(STATIC / "privacy.html")
+
+
 @app.get("/ads.txt", include_in_schema=False)
 def ads_txt() -> FileResponse:
     """AdSense (and the IAB spec it follows) requires this at the site ROOT, never

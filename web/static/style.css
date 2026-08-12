@@ -533,6 +533,28 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .imprint{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
   font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--ink-3);text-align:center;line-height:2.2;position:relative;z-index:1}
+.imprint a{color:var(--ink-3);text-decoration:none}
+.imprint a:hover{color:var(--gold)}
+
+/* --- about/faq/terms/privacy: a plain readable column, not a dashboard screen --- */
+.prose{max-width:660px;margin:0 auto;padding:6px 0 20px;position:relative;z-index:1}
+.prose h2{font-family:var(--sans);font-size:14.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--gold);margin:38px 0 12px;font-weight:800}
+.prose h2:first-child{margin-top:0}
+.prose p{font-size:15.5px;line-height:1.75;color:var(--ink-2);margin:0 0 16px}
+.prose ul{margin:0 0 16px;padding-left:22px;color:var(--ink-2);font-size:15.5px;line-height:1.75}
+.prose li{margin-bottom:7px}
+.prose a{color:var(--gold);text-decoration:none}
+.prose a:hover{text-decoration:underline}
+.prose strong{color:var(--ink)}
+.prose .stamp{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:30px}
+.legal-nav{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:0 0 8px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase}
+.legal-nav a{color:var(--ink-3);text-decoration:none}
+.legal-nav a:hover,.legal-nav a.sel{color:var(--gold)}
+.faq-q{font-family:var(--sans);font-size:15.5px;font-weight:750;color:var(--ink);margin:26px 0 6px}
+.faq-q:first-of-type{margin-top:0}
 
 @media (max-width:900px){
   .spread{grid-template-columns:1fr;gap:34px}

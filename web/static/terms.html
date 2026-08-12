@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
+<title>Terms · The Legends Almanack</title>
 <meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
@@ -49,73 +49,72 @@
     </div>
   </div>
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
-        </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
-      </div>
+  <!-- ============ TERMS ============ -->
+  <section id="terms">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">Terms of use</div>
+    </div>
 
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
-      </div>
+    <nav class="legal-nav">
+      <a href="/about">About</a>
+      <a href="/faq">FAQ</a>
+      <a href="/terms" class="sel">Terms</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
 
-      <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
-          <span class="stamp" id="seedPill"></span>
-        </div>
-      </div>
+    <div class="prose">
+      <div class="stamp">Last updated 12 August 2026</div>
+
+      <p>The Legends Almanack ("the site", "we", "it") is a free, independently-run
+      fan project. Using it means you agree to the terms below. There's no fee to play
+      and no account is required for most of it — see <a href="/faq">FAQ</a> for what
+      an account changes.</p>
+
+      <h2>An unofficial project</h2>
+      <p>The Legends Almanack is <strong>not affiliated with, endorsed by, sponsored
+      by, or in any way officially connected to the BCCI, the Indian Premier League, or
+      any franchise, player, or team it depicts.</strong> All team and player names,
+      logos referenced, and statistics are used descriptively, as the real historical
+      record of professional matches already played — the same basis on which any
+      almanac, scorecard, or sports-statistics reference has always used them. Any
+      trademarks or registered names remain the property of their respective owners.</p>
+
+      <h2>The service is provided as is</h2>
+      <p>Everything here — the ratings, the draft, the simulated matches, the season —
+      is a game built on statistical modelling, not a source of predictions, advice, or
+      official record. It is provided free of charge and "as is," with no warranty of
+      accuracy, availability, or fitness for any particular purpose. The archive it's
+      built from is periodically revised as its source is (see <a href="/about">About</a>),
+      so a rating or a figure can change between visits.</p>
+
+      <h2>Accounts</h2>
+      <p>If you register, you're responsible for keeping your password secure and for
+      anything done through your account. Don't impersonate another person, register
+      on someone else's behalf without permission, or share an account. We may suspend
+      or remove an account used to abuse the site — including automated scraping,
+      attempts to disrupt the service, or attempts to bypass its normal limits.</p>
+
+      <h2>Availability and changes</h2>
+      <p>This is a small, independently-run project. It may change, be interrupted, or
+      be discontinued at any time, without notice, and features (including saved
+      account data) may be added, changed, or removed as it evolves. These terms may
+      change too; the date above will move when they do.</p>
+
+      <h2>Liability</h2>
+      <p>To the extent the law allows, the site and its operator aren't liable for any
+      loss or damage arising from your use of it. It's a hobby project offered for
+      free, not a commercial service with guarantees behind it.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about these terms:
+      <a href="mailto:mishrakoustav01@gmail.com">mishrakoustav01@gmail.com</a>.</p>
+    </div>
+
+    <div class="foot-actions" style="justify-content:center;padding:10px 0 30px">
+      <a class="act" href="/">Home</a>
     </div>
   </section>
-
-  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-shell stat-frame">
-      <div class="scorecard-frame">
-        <div class="report">
-          <div class="over-line" id="statSub"></div>
-          <div class="call" id="statName"></div>
-        </div>
-        <div class="colophon stat-tiles" id="statBody"></div>
-      </div>
-      <div class="scorecard-close">
-        <button class="act" onclick="hideStat()">Close</button>
-      </div>
-    </div>
-  </div>
 
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
     <div class="scorecard-shell auth-frame">
@@ -162,6 +161,6 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/auth.js"></script>
-<script src="/static/draft.js"></script>
+<script src="/static/info.js"></script>
 </body>
 </html>

@@ -1624,6 +1624,40 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
     return _room_match_out(room, replay, player_id, deck)
 
 
+@app.post("/api/rooms/{code}/save", response_model=SaveResultOut)
+def room_save(code: str, body: SaveResultIn, request: Request) -> SaveResultOut:
+    """Mirrors `season_save` for a single seat's own result -- not the room as a whole,
+    since every seat's tournament ends at a different point (A82) and each saves
+    separately. Keyed by `f"{code}:{room.seed}:{player_id}"`, not `code` alone: A84's
+    `play_again` mints a fresh `seed` on the same code, so a room replayed in place is a
+    genuinely distinct game and must be saveable again. `room_journey` returns `None`
+    for a seat still alive and not yet champion -- there is nothing final to save yet,
+    so that's a 409 rather than a wrong/empty save."""
+    account_id = _current_account_id(request)
+    if account_id is None:
+        raise HTTPException(status_code=401, detail="sign in to save your result")
+    deck, model = STATE["deck"], STATE["model"]
+    with _db() as conn:
+        try:
+            room, replay = room_match_lib.room_match_state(conn, code, deck, model)
+        except rooms.RoomError as exc:
+            status = 404 if "no room" in str(exc) else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        journey = room_match_lib.room_journey(room, replay, body.player_id)
+        if journey is None:
+            raise HTTPException(status_code=409, detail="your result isn't final yet")
+        sides = rooms.room_sides(room, deck)
+        your_order, your_impact = next(
+            ((order, impact) for pid, _, order, impact in sides if pid == body.player_id),
+            ([], None))
+        all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
+        squad = [_journey_entry(c, journey.acc) for c in all_twelve]
+        natural_key = f"{code}:{room.seed}:{body.player_id}"
+        saved = accounts.save_game_result(
+            conn, account_id, "room", natural_key, journey.champion, squad)
+    return SaveResultOut(saved=saved, already_saved=not saved)
+
+
 @app.post("/api/rooms/{code}/match/toss", response_model=RoomMatchOut)
 def room_match_toss(code: str, body: RoomTossIn) -> RoomMatchOut:
     """Only the seat that actually won THIS fixture's toss may call it -- `submit_toss`

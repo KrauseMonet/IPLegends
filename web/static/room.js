@@ -774,7 +774,25 @@ function showRoomMatch(m){
   el.innerHTML = roomWaitingHtml(m, myMatch) + gap;
 }
 
+// Guards the save call against firing on every 2s poll once the room is complete --
+// `showRoomMatchComplete` re-runs on every one of those. Reset to false only by
+// `roomPlayAgain` succeeding (A84: a fresh seed on the same code is a genuinely new
+// game), never by a plain poll, so a replayed room can be saved again as the distinct
+// game it is.
+let ROOM_SAVE_ATTEMPTED = false;
+
+async function maybeSaveRoomResult(){
+  if (!ME || !ME.account_id) return;
+  if (ROOM_SAVE_ATTEMPTED) return;
+  ROOM_SAVE_ATTEMPTED = true;
+  try {
+    await api(`/api/rooms/${ROOM_CODE}/save`, {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({player_id: MY_PID})});
+  } catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
+}
+
 function showRoomMatchComplete(m){
+  maybeSaveRoomResult();
   const el = $('#roomMatchBody');
 
   const journeyBtn = m.squad
@@ -855,6 +873,7 @@ async function roomPlayAgain(ctrl){
       ROOM_MATCH_DATA = null;
       ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null;
       ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
+      ROOM_SAVE_ATTEMPTED = false;
       renderRoom();
     } catch(e){ slip(e.message); }
   });

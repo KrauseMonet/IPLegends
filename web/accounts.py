@@ -89,3 +89,124 @@ def get_account(conn, account_id: int) -> Account | None:
         (account_id,),
     ).fetchone()
     return None if row is None else Account(*row)
+
+
+@dataclass(frozen=True)
+class LeaderRow:
+    person_id: str
+    name: str
+    total: int
+
+
+@dataclass(frozen=True)
+class ProfileStats:
+    username: str
+    games_played: int
+    titles_won: int
+    top_batters: list[LeaderRow]
+    top_bowlers: list[LeaderRow]
+
+
+def profile_stats(conn, account_id: int) -> ProfileStats:
+    """Games played, titles won, and the top 5 batters / top 4 bowlers by total runs/
+    wickets across every game this account has saved. Reads only `game_results`/
+    `game_result_players` (migration 027) -- nothing here re-simulates anything.
+
+    The `is not null` filters matter: a pure bowler who never batted in any saved game
+    must never appear in `top_batters` with a manufactured 0 (A23/A71's rule, carried
+    into this table by migration 027's own comment)."""
+    account = get_account(conn, account_id)
+    if account is None:
+        raise AccountError(f"no account {account_id!r}")
+
+    games_played, titles_won = conn.execute(
+        "select count(*), count(*) filter (where champion) "
+        "from game_results where account_id = %s",
+        (account_id,),
+    ).fetchone()
+
+    top_batters = [
+        LeaderRow(person_id=pid, name=name, total=total)
+        for pid, name, total in conn.execute(
+            """
+            select p.person_id, p.primary_name, sum(grp.sim_bat_runs) as total_runs
+              from game_result_players grp
+              join game_results gr on gr.game_result_id = grp.game_result_id
+              join people p on p.person_id = grp.person_id
+             where gr.account_id = %s and grp.sim_bat_runs is not null
+             group by p.person_id, p.primary_name
+             order by total_runs desc, p.primary_name
+             limit 5
+            """,
+            (account_id,),
+        )
+    ]
+
+    top_bowlers = [
+        LeaderRow(person_id=pid, name=name, total=total)
+        for pid, name, total in conn.execute(
+            """
+            select p.person_id, p.primary_name, sum(grp.sim_bowl_wickets) as total_wickets
+              from game_result_players grp
+              join game_results gr on gr.game_result_id = grp.game_result_id
+              join people p on p.person_id = grp.person_id
+             where gr.account_id = %s and grp.sim_bowl_wickets is not null
+             group by p.person_id, p.primary_name
+             order by total_wickets desc, p.primary_name
+             limit 4
+            """,
+            (account_id,),
+        )
+    ]
+
+    return ProfileStats(
+        username=account.username, games_played=games_played, titles_won=titles_won,
+        top_batters=top_batters, top_bowlers=top_bowlers,
+    )
+
+
+def save_game_result(conn, account_id: int, source: str, natural_key: str,
+                      champion: bool, squad) -> bool:
+    """True if this call newly saved the game; False if `(account_id, source,
+    natural_key)` already existed (idempotent no-op, not an error -- see migration 027's
+    own header for why each source's natural_key is what it is).
+
+    One `insert ... on conflict do nothing returning` for the parent row; only if that
+    returns a row (i.e. this really is new), ONE multi-row insert for the child rows --
+    mirrors `web/rooms.py`'s own `_save_room` batched-insert fix, never one round trip
+    per squad member. `squad` is a list of `JourneySquadEntryOut`-shaped objects (solo
+    and room both already build these at completion time -- see web/app.py's two save
+    routes); a member who neither batted nor bowled contributes no row at all."""
+    row = conn.execute(
+        """
+        insert into game_results (account_id, source, natural_key, champion)
+        values (%s, %s, %s, %s)
+        on conflict (account_id, source, natural_key) do nothing
+        returning game_result_id
+        """,
+        (account_id, source, natural_key, champion),
+    ).fetchone()
+    if row is None:
+        return False
+    (game_result_id,) = row
+
+    rows = [
+        (game_result_id, c.person_id, c.sim_bat_runs, c.sim_bat_balls,
+         c.sim_bowl_wickets, c.sim_bowl_runs, c.sim_bowl_balls)
+        for c in squad
+        if c.sim_bat_runs is not None or c.sim_bowl_wickets is not None
+    ]
+    if rows:
+        values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s, %s)"] * len(rows))
+        params = [v for row in rows for v in row]
+        conn.execute(
+            f"""
+            insert into game_result_players
+                (game_result_id, person_id, sim_bat_runs, sim_bat_balls,
+                 sim_bowl_wickets, sim_bowl_runs, sim_bowl_balls)
+            values {values_sql}
+            on conflict (game_result_id, person_id) do nothing
+            """,
+            params,
+        )
+    return True

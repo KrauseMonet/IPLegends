@@ -184,6 +184,16 @@ def room_page(code: str) -> FileResponse:
     return FileResponse(STATIC / "room.html")
 
 
+@app.get("/profile", include_in_schema=False)
+def profile_page() -> FileResponse:
+    """Bare `FileResponse`, same pattern as every other page route -- the account check
+    is entirely client-side (profile.js's own boot reads GET /api/auth/me and redirects
+    home if logged out), not enforced here. This route itself needs no `code`-style path
+    parameter, unlike /rooms/{code}, since a profile is always "mine", read from the
+    cookie, never named in the URL."""
+    return FileResponse(STATIC / "profile.html")
+
+
 @app.get("/ads.txt", include_in_schema=False)
 def ads_txt() -> FileResponse:
     """AdSense (and the IAB spec it follows) requires this at the site ROOT, never
@@ -1212,6 +1222,23 @@ def me(request: Request) -> MeOut:
         # treated the same as no cookie at all rather than assumed unreachable.
         return MeOut(account_id=None, username=None)
     return MeOut(account_id=account.account_id, username=account.username)
+
+
+@app.get("/api/profile", response_model=ProfileOut)
+def profile(request: Request) -> ProfileOut:
+    account_id = _current_account_id(request)
+    if account_id is None:
+        raise HTTPException(status_code=401, detail="sign in to see your profile")
+    with _db() as conn:
+        stats = accounts.profile_stats(conn, account_id)
+    return ProfileOut(
+        username=stats.username, games_played=stats.games_played,
+        titles_won=stats.titles_won,
+        top_batters=[LeaderOut(person_id=r.person_id, name=r.name, total=r.total)
+                     for r in stats.top_batters],
+        top_bowlers=[LeaderOut(person_id=r.person_id, name=r.name, total=r.total)
+                     for r in stats.top_bowlers],
+    )
 
 
 def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,

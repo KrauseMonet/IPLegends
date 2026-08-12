@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
+<title>Profile · The Legends Almanack</title>
 <meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
@@ -49,73 +49,39 @@
     </div>
   </div>
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
+  <!-- ============ PROFILE ============ -->
+  <section id="profile">
+    <div class="report">
+      <div class="over-line">PLAYER CARD</div>
+      <div class="call" id="profileUsername"></div>
+    </div>
+
+    <div class="folio" style="grid-template-columns:1fr 1fr">
       <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
+        <div class="col-head"><span>Career</span></div>
+        <div class="ledger" style="grid-template-columns:repeat(2,1fr);padding:22px">
+          <div><b id="profileGames">–</b><span>GAMES PLAYED</span></div>
+          <div><b id="profileTitles">–</b><span>TITLES WON</span></div>
         </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
       </div>
 
       <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
+        <div class="col-head"><span>Top scorers</span></div>
+        <div id="profileBatters" class="col-scroll"></div>
       </div>
+    </div>
 
+    <div class="folio" style="grid-template-columns:1fr;margin-top:20px">
       <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
-          <span class="stamp" id="seedPill"></span>
-        </div>
+        <div class="col-head"><span>Top wicket-takers</span></div>
+        <div id="profileBowlers" class="col-scroll"></div>
       </div>
+    </div>
+
+    <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+      <a class="act" href="/">Home</a>
     </div>
   </section>
-
-  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-shell stat-frame">
-      <div class="scorecard-frame">
-        <div class="report">
-          <div class="over-line" id="statSub"></div>
-          <div class="call" id="statName"></div>
-        </div>
-        <div class="colophon stat-tiles" id="statBody"></div>
-      </div>
-      <div class="scorecard-close">
-        <button class="act" onclick="hideStat()">Close</button>
-      </div>
-    </div>
-  </div>
 
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
     <div class="scorecard-shell auth-frame">
@@ -161,6 +127,6 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/auth.js"></script>
-<script src="/static/draft.js"></script>
+<script src="/static/profile.js"></script>
 </body>
 </html>

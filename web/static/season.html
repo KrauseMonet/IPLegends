@@ -45,6 +45,7 @@
     <div class="edition">
       <b>Indian Premier League</b><br>
       <span id="deckPill">…</span>
+      <span id="authArea"></span>
     </div>
   </div>
 
@@ -201,6 +202,42 @@
     </div>
   </div>
 
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div class="imprint">
     <div>The Legends Almanack · squads · selection · season</div>
     <div id="footStats"></div>
@@ -208,6 +245,7 @@
 </div>
 
 <script src="/static/common.js"></script>
+<script src="/static/auth.js"></script>
 <script src="/static/reveal.js"></script>
 <script src="/static/season.js"></script>
 </body>

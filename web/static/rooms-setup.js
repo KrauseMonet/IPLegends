@@ -122,7 +122,13 @@ function enterRoom(code, playerId){
 }
 
 async function boot(){
-  loadMe();   // fire-and-forget -- the auth control fills in whenever it resolves
+  // Still fire-and-forget for the auth control itself, but chained here too: a signed-in
+  // visitor's own name field starts filled with their username rather than blank, since
+  // that's who they almost always want to play as. Only when the field is still empty --
+  // never overwrites something already typed -- and left editable either way.
+  loadMe().then(() => {
+    if (ME && ME.username && !$('#roomName').value.trim()) $('#roomName').value = ME.username;
+  });
   const m = await loadMeta();
   const s = m.seasons;
   $('#deckPill').textContent = `${s[0]}–${s[s.length-1]} · ${m.franchise_seasons} squads`;

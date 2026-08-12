@@ -1999,6 +1999,14 @@ than a rewrite: a daily challenge is one shared seed per date instead of a rando
 accounts only become necessary when a result has to outlive the request that produced it. A
 `results` table arrives with the leaderboard and not before.
 
+**[A102] Login CLOSED 2026-08-12.** `accounts` and `game_results`/`game_result_players`
+(migrations 026-027) are exactly that `results` table, arriving ahead of a full leaderboard
+rather than with one — see A102 in the decisions log for the full shape: email+password,
+stdlib-only hashing and cookie signing, no login wall, and a save that is an explicit
+client action gated on a unique `(account_id, source, natural_key)` constraint, never a
+side effect of a poll or reload (A62 stands for every anonymous route unchanged). The
+leaderboard itself, and the daily-challenge question below, remain open.
+
 **The one thing to settle before the leaderboard, not after:** whether a deal is random per
 player or shared per day. Random-per-player is played once; shared-per-day is compared and
 returned to. It costs nothing now and is awkward to retrofit once URLs are in circulation.

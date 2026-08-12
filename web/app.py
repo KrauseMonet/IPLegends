@@ -20,7 +20,7 @@ from typing import Literal
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -31,6 +31,8 @@ from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
 )
 from game.simulator import load_model
+from web import accounts
+from web import auth
 from web import room_match as room_match_lib
 from web import rooms
 from web import season_session
@@ -110,15 +112,16 @@ STATIC = pathlib.Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
-# A room request that can't get the database (a dead/very slow connect) or can't get
-# the row lock it needs (genuinely stuck behind another request against the same room,
-# past `_room_db`'s own `lock_timeout`) used to just hang until whatever the hosting
-# platform's own request timeout eventually killed it -- diagnosed as the cause of
-# drafts intermittently freezing on a pick, with no error shown and the button stuck.
-# Both bounds are real now (`_room_db`); these two handlers are what turns hitting one
-# into a fast, clean 503 the client can show and retry from, instead of a raw 500 or a
-# silent hang. `retry_after` is a plain hint, not enforced -- the client-side timeout
-# and retry are what actually act on it (web/static/index.html's `api()`).
+# A request that can't get the database (a dead/very slow connect) or can't get a row
+# lock it needs (genuinely stuck behind another request against the same room, past
+# `_db`'s own `lock_timeout`) used to just hang until whatever the hosting platform's
+# own request timeout eventually killed it -- diagnosed as the cause of drafts
+# intermittently freezing on a pick, with no error shown and the button stuck. Both
+# bounds are real now (`_db`, originally room-only, now also used by the accounts/auth
+# routes); these two handlers are what turns hitting one into a fast, clean 503 the
+# client can show and retry from, instead of a raw 500 or a silent hang. `retry_after`
+# is a plain hint, not enforced -- the client-side timeout and retry are what actually
+# act on it (web/static/common.js's `api()`).
 @app.exception_handler(psycopg.errors.LockNotAvailable)
 def _lock_not_available(_request, _exc) -> JSONResponse:
     return JSONResponse(
@@ -633,6 +636,63 @@ class RoomTossIn(BaseModel):
                                     "that actually won the toss")
 
 
+# --- accounts / auth ---------------------------------------------------------------------
+#
+# Email+password only (confirmed with the user directly -- no OAuth, no magic link).
+# Never a login wall: every route below is reached only when a player actively chose to
+# sign in or register. Being logged in is purely additive elsewhere in this file -- a
+# room seat's name pre-fills with the account's own username, and a completed game is
+# saved to the account's history, both only if the player was signed in.
+
+class RegisterIn(BaseModel):
+    username: str = Field(min_length=3, max_length=24)
+    email: str
+    password: str = Field(min_length=8)
+
+
+class LoginIn(BaseModel):
+    identifier: str = Field(description="a username or an email -- the form doesn't ask which")
+    password: str
+
+
+class AccountOut(BaseModel):
+    account_id: int
+    username: str
+
+
+class MeOut(BaseModel):
+    account_id: int | None = Field(
+        description="null for a missing/invalid/expired cookie -- this route never "
+                    "401s, since every page calls it unconditionally on boot and a "
+                    "no-login-wall app can't need special-case handling for that")
+    username: str | None = None
+
+
+class LeaderOut(BaseModel):
+    person_id: str
+    name: str
+    total: int = Field(description="total runs (batters) or wickets (bowlers), summed "
+                                   "across every game this account has saved")
+
+
+class ProfileOut(BaseModel):
+    username: str
+    games_played: int
+    titles_won: int
+    top_batters: list[LeaderOut] = Field(description="up to 5, by total runs desc")
+    top_bowlers: list[LeaderOut] = Field(description="up to 4, by total wickets desc")
+
+
+class SaveResultIn(BaseModel):
+    player_id: str = Field(description="which seat's own result to save -- room saves only")
+
+
+class SaveResultOut(BaseModel):
+    saved: bool = Field(description="true if this call newly saved the game")
+    already_saved: bool = Field(description="true if this exact game was already saved "
+                                            "(idempotent no-op, not an error)")
+
+
 # --- mapping ---------------------------------------------------------------------------
 
 def _kind(card: Card) -> str:
@@ -1064,36 +1124,94 @@ def twelve(state: str) -> dict:
     }
 
 
-# --- rooms ---------------------------------------------------------------------------
+# --- short-lived, per-request database access ----------------------------------------
 #
-# Friends draft together, live, turn by turn, from one shared competitive pool -- Neon-
-# backed (migrations 019/020), see `web.rooms`'s own docstring for why and for the
-# shared-pool/snake-turn mechanic itself. Nothing here decides anything about cricket
-# either: `web.rooms.replay_room` calls `etl.feasibility.eligible`/`could_still_complete`/
-# `choose_slot` directly, so a room's picks are validated exactly the way a solo draft's
-# are -- this module only shapes the response and redacts what a given caller may see.
+# Everything below (rooms, and now accounts/auth) shares one connection helper. The
+# solo draft/season routes never touch this at all -- their whole deck/model is loaded
+# once at boot (`lifespan`, DIRECT_URL) and held in `STATE` for the process's life.
 
 @contextmanager
-def _room_db():
-    """A short-lived connection per room request, against the POOLED endpoint. Unlike the
-    boot-time DIRECT_URL load (one connection, once, for the process's whole life), a room
-    request is exactly the many-short-transactions pattern PgBouncer transaction-mode
-    pooling exists for -- this is the first thing in the app that actually uses
-    DATABASE_URL rather than DIRECT_URL.
+def _db():
+    """A short-lived connection per request, against the POOLED endpoint. Unlike the
+    boot-time DIRECT_URL load (one connection, once, for the process's whole life), this
+    is exactly the many-short-transactions pattern PgBouncer transaction-mode pooling
+    exists for. Originally room-only (hence every caller's own variable name, `conn`,
+    rather than anything room-specific) -- the accounts/auth routes reuse it unchanged
+    now that they're the second thing in the app to need a per-request connection.
 
     Two bounds that didn't used to exist, both diagnosed from drafts freezing on a pick
     with no error and no way to tell why: `connect_timeout` bounds how long a request
     waits for Neon itself (TCP/TLS plus, on the free tier, waking a suspended compute)
     rather than hanging on a dead or very slow endpoint indefinitely; `lock_timeout`
-    bounds how long a request waits for `_load_room`'s row lock once connected, so a
-    request that's genuinely stuck behind another (rather than just slow to reach the
-    database) fails fast with a clean, retryable error instead of sitting until
-    whatever the hosting platform's own request timeout eventually kills it. Both are
-    caught by `_lock_not_available`/`_db_unavailable` below and turned into a 503
+    bounds how long a request waits for a row lock (`_load_room`'s, today) once
+    connected, so a request that's genuinely stuck behind another (rather than just slow
+    to reach the database) fails fast with a clean, retryable error instead of sitting
+    until whatever the hosting platform's own request timeout eventually kills it. Both
+    are caught by `_lock_not_available`/`_db_unavailable` below and turned into a 503
     rather than a raw 500."""
     with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
         conn.execute("set lock_timeout = '5s'")
         yield conn
+
+
+def _current_account_id(request: Request) -> int | None:
+    token = request.cookies.get(auth.COOKIE_NAME)
+    if token is None:
+        return None
+    return auth.verify_session_cookie(token)
+
+
+def _set_session_cookie(request: Request, response: Response, account_id: int) -> None:
+    # `secure` from the REQUEST's own scheme, not hardcoded -- local `uvicorn` over
+    # plain HTTP still gets a cookie the browser will send back; Vercel (always HTTPS)
+    # gets a secure one automatically, no separate env flag needed.
+    response.set_cookie(
+        auth.COOKIE_NAME, auth.make_session_cookie(account_id),
+        max_age=auth.SESSION_MAX_AGE_S, httponly=True, samesite="lax",
+        secure=(request.url.scheme == "https"), path="/",
+    )
+
+
+@app.post("/api/auth/register", response_model=AccountOut)
+def register(body: RegisterIn, request: Request, response: Response) -> AccountOut:
+    with _db() as conn:
+        try:
+            account = accounts.create_account(conn, body.username, body.email, body.password)
+        except accounts.AccountError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _set_session_cookie(request, response, account.account_id)
+        return AccountOut(account_id=account.account_id, username=account.username)
+
+
+@app.post("/api/auth/login", response_model=AccountOut)
+def login(body: LoginIn, request: Request, response: Response) -> AccountOut:
+    with _db() as conn:
+        account = accounts.authenticate(conn, body.identifier, body.password)
+        if account is None:
+            raise HTTPException(status_code=401, detail="wrong username/email or password")
+        _set_session_cookie(request, response, account.account_id)
+        return AccountOut(account_id=account.account_id, username=account.username)
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response) -> dict:
+    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me", response_model=MeOut)
+def me(request: Request) -> MeOut:
+    account_id = _current_account_id(request)
+    if account_id is None:
+        return MeOut(account_id=None, username=None)
+    with _db() as conn:
+        account = accounts.get_account(conn, account_id)
+    if account is None:
+        # A cookie that verifies (signature/expiry both fine) for an account that no
+        # longer exists -- not possible today (nothing ever deletes an account), but
+        # treated the same as no cookie at all rather than assumed unreachable.
+        return MeOut(account_id=None, username=None)
+    return MeOut(account_id=account.account_id, username=account.username)
 
 
 def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
@@ -1177,7 +1295,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
 
 @app.post("/api/rooms", response_model=CreatedRoomOut)
 def create_room(body: CreateRoomIn) -> CreatedRoomOut:
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
@@ -1191,7 +1309,7 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
 
 @app.post("/api/rooms/{code}/join", response_model=CreatedRoomOut)
 def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"])
         except rooms.RoomError as exc:
@@ -1207,7 +1325,7 @@ def leave_room(code: str, body: HostActionIn) -> RoomStateOut:
     own docstring for why this is a real seat removal, not just the caller going home.
     Refused once drafting has started, and refused for the host (nobody to hand the
     room off to)."""
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.leave_room(conn, code, body.player_id)
         except rooms.RoomError as exc:
@@ -1219,7 +1337,7 @@ def leave_room(code: str, body: HostActionIn) -> RoomStateOut:
 def kick_room_player(code: str, body: KickPlayerIn) -> RoomStateOut:
     """The host's mirror of `/leave` -- see `rooms.kick_player`'s own docstring. Same
     scope: lobby only, and the host itself can never be the target."""
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.kick_player(conn, code, body.player_id, body.target_id)
         except rooms.RoomError as exc:
@@ -1233,7 +1351,7 @@ def start_room(code: str, body: HostActionIn) -> RoomStateOut:
     turn's clock -- a CPU's own twelve is no longer drafted up front (see web.rooms'
     own docstring): it depends on what humans take at their own turns, so it resolves
     turn by turn like everyone else, instantly whenever its turn comes up."""
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.start_room(conn, code, body.player_id, STATE["deck"])
         except rooms.RoomError as exc:
@@ -1248,7 +1366,7 @@ def play_again_room(code: str, body: HostActionIn) -> RoomStateOut:
     draft_mode, but a fresh seed and both move logs cleared, ready for the host to
     start a new draft. Idempotent (see `rooms.play_again`'s own docstring), so it's
     safe for more than one player to click "play again" without coordinating."""
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.play_again(conn, code, body.player_id)
         except rooms.RoomError as exc:
@@ -1262,7 +1380,7 @@ def list_open_rooms() -> list[OpenRoomOut]:
     textually BEFORE `GET /api/rooms/{code}` below: FastAPI/Starlette matches routes in
     declaration order, so with the order reversed this path would be swallowed by
     `{code}` as a literal (nonexistent) room code lookup instead of ever reaching here."""
-    with _room_db() as conn:
+    with _db() as conn:
         return [
             OpenRoomOut(
                 code=r.code, format=r.format, seats_filled=r.seats_filled,
@@ -1279,7 +1397,7 @@ def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
     sees an up-to-date room. `player_id` identifies the caller so only the currently
     active seat's own options are ever sent back to them -- everyone else sees that
     seat's franchise/season and every seat's team-so-far, never anyone's options."""
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.room_state(conn, code, STATE["deck"])
         except rooms.RoomError as exc:
@@ -1289,7 +1407,7 @@ def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
 
 @app.post("/api/rooms/{code}/pick", response_model=RoomStateOut)
 def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = rooms.submit_pick(
                 conn, code, body.player_id, body.index, body.slot, STATE["deck"])
@@ -1446,7 +1564,7 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
     semis, a league's Qualifier 1 + Eliminator) are all returned in `current_matches`
     at once, since they resolve in parallel rather than one at a time."""
     deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room, replay = room_match_lib.room_match_state(conn, code, deck, model)
         except rooms.RoomError as exc:
@@ -1461,7 +1579,7 @@ def room_match_toss(code: str, body: RoomTossIn) -> RoomMatchOut:
     itself enforces that; a wrong-seat, wrong-fixture, or wrong-moment call is a 409,
     not a silent no-op."""
     deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = room_match_lib.submit_toss(
                 conn, code, body.player_id, body.stage, body.elects, deck, model)
@@ -1476,7 +1594,7 @@ def room_match_advance(code: str, body: HostActionIn) -> RoomMatchOut:
     """Only the host paces the room from one ROUND of matches to the next -- gated on
     every fixture in the current round having resolved, not just one."""
     deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = room_match_lib.advance_match(conn, code, body.player_id, deck, model)
             replay = room_match_lib.replay_room_matches(room, deck, model)
@@ -1491,7 +1609,7 @@ def room_match_start(code: str, body: HostActionIn) -> RoomMatchOut:
     own finished twelve on the squad-review screen -- mirrors `room_match_advance`
     exactly."""
     deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = room_match_lib.start_matches(conn, code, body.player_id, deck, model)
             replay = room_match_lib.replay_room_matches(room, deck, model)
@@ -1513,7 +1631,7 @@ def room_league_advance(code: str, body: RoomLeagueRevealIn) -> RoomMatchOut:
     (cached) the instant it's first simulated; this only controls how much of it has
     been shown."""
     deck, model = STATE["deck"], STATE["model"]
-    with _room_db() as conn:
+    with _db() as conn:
         try:
             room = room_match_lib.advance_league_reveal(
                 conn, code, body.player_id, body.through, deck, model)

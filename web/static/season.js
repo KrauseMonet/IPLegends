@@ -49,11 +49,26 @@ function syncHash(){
 
 let SEASON_DATA = null;
 
+// One save attempt per completed season `state` -- the server's own unique constraint is
+// the real idempotency guarantee (A62: saving is a deliberate act, never a side effect of
+// a poll/reload), this set just avoids firing the request again on every re-render of an
+// already-saved season (e.g. reloading the result screen).
+const SAVED_SEASON_STATES = new Set();
+
+async function maybeSaveSeason(d){
+  if (!ME || !ME.account_id) return;
+  if (SAVED_SEASON_STATES.has(d.state)) return;
+  SAVED_SEASON_STATES.add(d.state);
+  try { await api(`/api/season/${d.state}/save`, {method: 'POST'}); }
+  catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
+}
+
 function showSeason(d){
   renderTableAndForm(d);
   renderVerdictAndBracket(d);
   go('result');
   syncHash();
+  maybeSaveSeason(d);
 }
 
 function renderTableAndForm(d){

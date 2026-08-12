@@ -1114,6 +1114,30 @@ def season_skip(state: str, body: SkipIn) -> SeasonProgressOut:
     return _season_progress_out(new_state, replay)
 
 
+@app.post("/api/season/{state}/save", response_model=SaveResultOut)
+def season_save(state: str, request: Request) -> SaveResultOut:
+    """Explicit, client-triggered save -- never a side effect of a GET/replay, per A62.
+    `state` is already the season's own natural key (unique per completed season, since
+    it's the draft state plus every recorded move), so it doubles as the idempotency key
+    with no signing needed: a forged state either fails `_replay_season_or_400` with the
+    existing 400/409, or replays to a real, legal, completed season -- there is nothing
+    to gain by forging one."""
+    account_id = _current_account_id(request)
+    if account_id is None:
+        raise HTTPException(status_code=401, detail="sign in to save your season")
+    draft_state, season_moves = season_session.decode_full(state)
+    replay = _replay_season_or_400(state, season_session.recorded_moves(season_moves))
+    if not replay.complete:
+        raise HTTPException(status_code=409, detail="season not complete")
+    yours = replay.yours
+    all_twelve = list(yours.xi) + ([yours.impact] if yours.impact is not None else [])
+    squad = [_journey_entry(c, replay.stats) for c in all_twelve]
+    champion = replay.season.champion is yours
+    with _db() as conn:
+        saved = accounts.save_game_result(conn, account_id, "solo", state, champion, squad)
+    return SaveResultOut(saved=saved, already_saved=not saved)
+
+
 @app.get("/api/twelve/{state}")
 def twelve(state: str) -> dict:
     """The final twelve as the DRAFTER arranged it -- not an algorithmic pick. [A72]

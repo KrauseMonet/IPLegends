@@ -6,10 +6,39 @@ let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
 let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab is showing
 
+// The format list is `.pick` rows now, not `.room-choice` buttons -- it is the screen's
+// one real decision, so it gets the numerals and descriptions while the preference
+// toggles below stay small.
 function pickFormat(f){
   CHOSEN_FORMAT = f;
-  document.querySelectorAll('#formatChoices .room-choice')
+  document.querySelectorAll('#formatChoices .pick')
     .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
+  drawFormatWheel();
+}
+
+// One filled marker -- the host is the first fielder set. The rest of the ring is what
+// they still have to fill, which is the actual question this screen answers.
+const WHEEL_NOTE = {
+  final: 'seats · you and one more',
+  cup: 'seats · you and three more',
+  league: 'seats · a full field, you and nine',
+};
+
+function drawFormatWheel(){
+  const wrap = $('#formatWheel');
+  if (!wrap) return;
+  const seats = FORMAT_SEATS[CHOSEN_FORMAT];
+  wrap.innerHTML = fieldWheel(seats, 1);
+  $('#wheelSeats').textContent = seats;
+  $('#wheelNote').textContent = WHEEL_NOTE[CHOSEN_FORMAT];
+}
+
+// Create and join each have their own name field (they are separate panels), so every
+// caller reads whichever one belongs to the visible panel rather than a single shared id.
+function currentName(){
+  const joining = !$('#roomJoinPanel').classList.contains('hide');
+  const el = joining ? $('#roomNameJoin') : $('#roomName');
+  return (el && el.value.trim()) || 'Player';
 }
 function pickTimer(t){
   CHOSEN_TIMER = t;
@@ -35,6 +64,9 @@ function pickSetupTab(tab){
     .forEach(b => b.classList.toggle('sel', b.dataset.tab === tab));
   $('#roomCreatePanel').classList.toggle('hide', tab !== 'create');
   $('#roomJoinPanel').classList.toggle('hide', tab !== 'join');
+  // The strip under the title says what THIS tab is for -- it read "pick your format"
+  // on the join tab, where there is no format to pick.
+  $('#setupStripLeft').textContent = tab === 'join' ? 'Join a game' : 'Pick your format';
   if (tab === 'join'){
     roomListOpenRooms();
     if (ROOM_OPEN_POLL) clearInterval(ROOM_OPEN_POLL);
@@ -56,22 +88,34 @@ async function roomListOpenRooms(){
   if (!list) return;
   try {
     const rows = await api('/api/rooms/open');
+    const count = $('#openRoomsCount');
+    // A live count with a pulsing dot, the same signal a lobby anywhere else gives -- it
+    // is the one genuinely changing number on this screen, so it earns the accent.
+    if (count) count.innerHTML = rows.length
+      ? `<span class="live">${rows.length} live</span>` : 'None right now';
     if (!rows.length){
       list.innerHTML = '<p class="room-note">No open rooms right now — ask your host for a code.</p>';
       return;
     }
+    // The mini wheel IS the seat count -- how full a room is reads faster as a part-set
+    // field than as "3 of 4", and it ties the list to the picker above it.
     list.innerHTML = rows.map(r => `
-      <div class="entry">
-        <span class="nm">${ROOM_FORMAT_LABEL[r.format] || r.format}
-          <em style="font-style:normal">· ${r.seats_filled} of ${r.seats_total} · ${r.timer_seconds}s
-          · ${r.host_name}'s room</em></span>
-        <span class="picks"><button class="act" onclick="joinOpenRoom('${r.code}', this)">Join</button></span>
+      <div class="room-row">
+        <span style="display:flex;align-items:center;gap:14px">
+          ${fieldWheel(r.seats_total, r.seats_filled, {mini: true})}
+          <span>
+            <span class="rr-name">${ROOM_FORMAT_LABEL[r.format] || r.format}</span>
+            <span class="rr-meta">${r.seats_filled} of ${r.seats_total} seats · ${r.timer_seconds}s
+              · ${r.host_name}'s room</span>
+          </span>
+        </span>
+        <button class="act" onclick="joinOpenRoom('${r.code}', this)">Enter →</button>
       </div>`).join('');
   } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
 }
 
 async function joinOpenRoom(code, ctrl){
-  const name = $('#roomName').value.trim() || 'Player';
+  const name = currentName();
   await busyClick(ctrl, 'Joining…', async () => {
     try {
       const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
@@ -82,7 +126,7 @@ async function joinOpenRoom(code, ctrl){
 }
 
 async function createRoom(ctrl){
-  const name = $('#roomName').value.trim() || 'Player';
+  const name = currentName();
   await busyClick(ctrl, 'Creating…', async () => {
     try {
       const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -95,7 +139,7 @@ async function createRoom(ctrl){
 
 async function joinRoom(ctrl){
   const code = $('#joinCode').value.trim().toUpperCase();
-  const name = $('#roomName').value.trim() || 'Player';
+  const name = currentName();
   if (!code){ slip('Enter a room code.'); return; }
   await busyClick(ctrl, 'Joining…', async () => {
     try {
@@ -127,7 +171,12 @@ async function boot(){
   // that's who they almost always want to play as. Only when the field is still empty --
   // never overwrites something already typed -- and left editable either way.
   loadMe().then(() => {
-    if (ME && ME.username && !$('#roomName').value.trim()) $('#roomName').value = ME.username;
+    if (!ME || !ME.username) return;
+    // Both panels' name fields, since either could be the one the visitor lands on.
+    for (const id of ['#roomName', '#roomNameJoin']){
+      const el = $(id);
+      if (el && !el.value.trim()) el.value = ME.username;
+    }
   });
   const m = await loadMeta();
   const s = m.seasons;
@@ -137,6 +186,7 @@ async function boot(){
 }
 
 boot().then(() => {
+  drawFormatWheel();
   // A room.html redirect here (no matching localStorage session, or a verify failure)
   // carries the code it couldn't resolve so the join tab can be pre-filled instead of
   // making the visitor retype it.

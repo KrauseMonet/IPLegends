@@ -196,3 +196,44 @@ function hideStat(e){
   if (e && e.target !== e.currentTarget) return;
   $('#statOverlay').classList.add('hide');
 }
+
+/* --- the field wheel: this site's signature device (see style.css for the why) ---------
+   A cricket field drawn as a fielding map / wagon wheel, used as real UI rather than
+   decoration: one marker per SEAT, set evenly around the boundary the way a captain sets
+   a field, filled when the seat is taken. Lives here rather than in rooms-setup.js because
+   the same object serves the lobby at 300px and a room list row at 34px. */
+
+const FORMAT_SEATS = {final: 2, cup: 4, league: 10};
+
+function fieldWheel(seats, filled, opts){
+  const o = opts || {};
+  const cx = 100, cy = 100, R = 88;
+  let spokes = '', dots = '';
+  for (let i = 0; i < seats; i++){
+    // Start at the top and go clockwise, so seat 1 is always at 12 o'clock however many
+    // seats there are -- a field that re-centres itself as the format changes reads as a
+    // different diagram rather than the same one gaining fielders.
+    const a = (-90 + i * 360 / seats) * Math.PI / 180;
+    const x = cx + R * Math.cos(a), y = cy + R * Math.sin(a);
+    const on = i < filled;
+    spokes += `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(2)}" y2="${y.toFixed(2)}"
+      class="wheel-spoke${on ? ' on' : ''}"/>`;
+    // Staggered entry: the field "sets" one fielder at a time instead of all at once.
+    dots += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${on ? 6.5 : 5}"
+      class="wheel-dot${on ? ' on' : ''}" style="animation-delay:${(i * 45)}ms"/>`;
+  }
+  const chrome = o.mini ? '' : `
+    <circle cx="100" cy="100" r="52" class="wheel-inner"/>
+    <line x1="88" y1="78" x2="112" y2="78" class="wheel-crease"/>
+    <line x1="88" y1="122" x2="112" y2="122" class="wheel-crease"/>
+    <rect x="95" y="76" width="10" height="48" rx="1" class="wheel-pitch"/>`;
+  return `<svg viewBox="0 0 200 200" class="wheel${o.mini ? ' wheel-mini' : ''}" aria-hidden="true">
+    <defs><radialGradient id="wheelGrass" cx="50%" cy="42%">
+      <stop offset="0%" stop-color="rgba(51,160,209,.10)"/>
+      <stop offset="100%" stop-color="rgba(5,11,26,0)"/>
+    </radialGradient></defs>
+    <circle cx="100" cy="100" r="88" class="wheel-grass"/>
+    <circle cx="100" cy="100" r="88" class="wheel-rope"/>
+    ${spokes}${chrome}${dots}
+  </svg>`;
+}

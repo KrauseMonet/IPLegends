@@ -746,3 +746,33 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
   .field-split{grid-template-columns:1fr;gap:34px}
   .field-split .wheel-wrap{max-width:280px;margin:0 auto}
 }
+
+/* --- lobby controls: out of the terminal, into the type system ---------------------------
+   The settings block kept the old language after the rest of the screen moved on -- mono
+   at 10.5-12.5px with wide tracking, which is config-screen grammar, not something you
+   want to click. Same controls, same behaviour, stated in the page's own voice: Archivo
+   with real weight, bigger, and a SELECTED state that is a solid fill rather than a tinted
+   outline, so which option is live is legible at a glance instead of on inspection.
+
+   Scoped to .lobby on purpose: .room-choice/.room-label/.room-input are also the auth
+   modal's and the older screens' controls, and half-restyling those while they still sit
+   in the old scale would look worse than leaving them alone until they are converted. */
+
+.lobby .room-label{font-family:var(--sans);font-size:11.5px;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);margin-bottom:9px}
+
+.lobby .room-input{font-family:var(--sans);font-size:17px;font-weight:600;
+  letter-spacing:.2px;background:var(--panel);border:1px solid var(--line-strong);
+  border-radius:3px;padding:15px 16px;transition:border-color .14s,background .14s}
+.lobby .room-input::placeholder{color:var(--ink-3);font-weight:500}
+.lobby .room-input:focus{border-color:var(--gold);background:var(--panel-2)}
+
+.lobby .room-choice{font-family:var(--sans);font-size:13.5px;font-weight:750;
+  letter-spacing:.06em;text-transform:uppercase;padding:12px 20px;border-radius:3px;
+  border:1px solid var(--line-strong);background:var(--panel);color:var(--ink-2);
+  transition:border-color .14s,background .14s,color .14s}
+.lobby .room-choice:hover{border-color:var(--gold);color:var(--ink)}
+/* Solid, not tinted: a filled chip reads as ON from across the room, a 8%-alpha wash
+   reads as "possibly hovered". */
+.lobby .room-choice.sel{background:var(--gold);border-color:var(--gold);color:#17120a}
+.lobby .room-choice.sel:hover{background:var(--gold-2);color:#17120a}

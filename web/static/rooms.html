@@ -78,7 +78,7 @@
              diagram instead of a number. -->
         <div class="field-split">
           <div class="picks" id="formatChoices">
-            <button class="pick sel" data-format="final" aria-label="Final — 2 seats" onclick="pickFormat('final')">
+            <button class="pick" data-format="final" aria-label="Final — 2 seats" onclick="pickFormat('final')">
               <span class="pick-num">01</span>
               <span class="pick-name">Final</span>
               <span class="pick-seats">2 seats</span>
@@ -96,44 +96,52 @@
               <span class="pick-seats">10 seats</span>
               <span class="pick-desc">Fourteen matches each, a table, then the playoffs.</span>
             </button>
+            <div class="pick-prompt">Choose one to continue</div>
           </div>
 
           <div class="wheel-wrap">
             <div id="formatWheel"></div>
             <div class="wheel-read">
-              <b id="wheelSeats">2</b>
-              <span id="wheelNote">seats · you and one more</span>
+              <b id="wheelSeats"></b>
+              <span id="wheelNote">Pick a format to set the field</span>
             </div>
           </div>
         </div>
 
-        <div class="rule-head"><span>Your name</span></div>
-        <input id="roomName" class="room-input" placeholder="Your name" maxlength="40"
-          style="margin-top:14px">
+        <!-- Everything past the format choice stays shut until that choice is made: with
+             nothing picked there is no room to name and no field to set, so showing the
+             controls first is asking three questions before the one that governs them. -->
+        <div class="reveal-panel" id="roomConfig">
+          <div class="reveal-inner">
+            <div class="rule-head"><span>Your name</span></div>
+            <input id="roomName" class="room-input" placeholder="Your name" maxlength="40"
+              style="margin-top:14px">
 
-        <div class="rule-head"><span>Settings</span><span>Defaults are fine</span></div>
-        <div class="settings">
-          <div class="room-label">Seconds per pick</div>
-          <div class="room-choices" id="timerChoices">
-            <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
-            <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
-            <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
-          </div>
+            <div class="rule-head"><span>Settings</span><span>Defaults are fine</span></div>
+            <div class="settings">
+              <div class="room-label">Seconds per pick</div>
+              <div class="room-choices" id="timerChoices">
+                <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
+                <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
+                <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
+              </div>
 
-          <div class="room-label">Draft by</div>
-          <div class="room-choices" id="roomModeChoices">
-            <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
-            <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
-          </div>
+              <div class="room-label">Draft by</div>
+              <div class="room-choices" id="roomModeChoices">
+                <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
+                <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
+              </div>
 
-          <div class="room-label">Visibility</div>
-          <div class="room-choices" id="visibilityChoices">
-            <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
-            <button class="room-choice" data-visibility="open" onclick="pickVisibility(true)">Open</button>
+              <div class="room-label">Visibility</div>
+              <div class="room-choices" id="visibilityChoices">
+                <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
+                <button class="room-choice" data-visibility="open" onclick="pickVisibility(true)">Open</button>
+              </div>
+            </div>
+
+            <button class="go" onclick="createRoom(this)">Create the room →</button>
           </div>
         </div>
-
-        <button class="go" onclick="createRoom(this)">Create the room →</button>
       </div>
 
       <div id="roomJoinPanel" class="hide">

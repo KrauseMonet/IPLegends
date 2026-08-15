@@ -2,7 +2,10 @@
 // localStorage and navigates to /rooms/{code}, which does the actual live session --
 // this page never shows a lobby or a draft itself.
 
-let CHOSEN_FORMAT = 'final', CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
+// Null until the visitor picks one -- the format gates everything after it, so there is
+// no defensible default: a pre-selected "Final" would silently decide the shape of the
+// game for anyone who skimmed past the list.
+let CHOSEN_FORMAT = null, CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
 let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab is showing
 
@@ -10,10 +13,27 @@ let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab
 // one real decision, so it gets the numerals and descriptions while the preference
 // toggles below stay small.
 function pickFormat(f){
+  const first = CHOSEN_FORMAT === null;
   CHOSEN_FORMAT = f;
   document.querySelectorAll('#formatChoices .pick')
     .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
+  $('#formatChoices').classList.add('picked');   // retires the "choose one" prompt
+  $('#roomConfig').classList.add('open');
   drawFormatWheel();
+  // Only on the FIRST pick, and only if the newly-revealed panel would open below the
+  // fold: switching format afterwards must not yank a reader around the page.
+  if (first) revealIntoView();
+}
+
+function revealIntoView(){
+  const panel = $('#roomConfig');
+  // After the transition, so the measurement is of the opened height rather than zero.
+  setTimeout(() => {
+    const bottom = panel.getBoundingClientRect().bottom;
+    if (bottom > window.innerHeight){
+      panel.scrollIntoView({behavior: 'smooth', block: 'end'});
+    }
+  }, 440);
 }
 
 // One filled marker -- the host is the first fielder set. The rest of the ring is what
@@ -27,10 +47,13 @@ const WHEEL_NOTE = {
 function drawFormatWheel(){
   const wrap = $('#formatWheel');
   if (!wrap) return;
-  const seats = FORMAT_SEATS[CHOSEN_FORMAT];
-  wrap.innerHTML = fieldWheel(seats, 1);
-  $('#wheelSeats').textContent = seats;
-  $('#wheelNote').textContent = WHEEL_NOTE[CHOSEN_FORMAT];
+  // No format yet: an empty ground, no markers, no figure -- there is no room to count
+  // the seats of. `fieldWheel(0, 0)` draws the rope, circle and pitch and nothing else.
+  const seats = CHOSEN_FORMAT ? FORMAT_SEATS[CHOSEN_FORMAT] : 0;
+  wrap.innerHTML = fieldWheel(seats, CHOSEN_FORMAT ? 1 : 0);
+  $('#wheelSeats').textContent = CHOSEN_FORMAT ? seats : '';
+  $('#wheelNote').textContent = CHOSEN_FORMAT
+    ? WHEEL_NOTE[CHOSEN_FORMAT] : 'Pick a format to set the field';
 }
 
 // Create and join each have their own name field (they are separate panels), so every
@@ -126,6 +149,10 @@ async function joinOpenRoom(code, ctrl){
 }
 
 async function createRoom(ctrl){
+  // The button lives inside the panel the format choice opens, so this is unreachable in
+  // practice -- checked anyway rather than trusting a UI state to hold an invariant the
+  // request depends on.
+  if (!CHOSEN_FORMAT){ slip('Pick a format first.'); return; }
   const name = currentName();
   await busyClick(ctrl, 'Creating…', async () => {
     try {

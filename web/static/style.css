@@ -776,3 +776,30 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
    reads as "possibly hovered". */
 .lobby .room-choice.sel{background:var(--gold);border-color:var(--gold);color:#17120a}
 .lobby .room-choice.sel:hover{background:var(--gold-2);color:#17120a}
+
+/* --- the format choice as a gate ---------------------------------------------------------
+   Animating to a content height nobody knows in advance is the usual reason these panels
+   are done with a guessed `max-height`, which either clips tall content or coasts through
+   dead space on short content. `grid-template-rows: 0fr -> 1fr` interpolates to the row's
+   OWN height, so it is exact at any content length and needs no magic number. The inner
+   element carries the overflow clip; `min-height:0` is what lets a grid row actually go
+   to zero. */
+.reveal-panel{display:grid;grid-template-rows:0fr;
+  transition:grid-template-rows .42s cubic-bezier(.4,0,.2,1),opacity .3s ease,
+             margin-top .42s cubic-bezier(.4,0,.2,1);
+  opacity:0;margin-top:0}
+.reveal-panel > .reveal-inner{overflow:hidden;min-height:0}
+.reveal-panel.open{grid-template-rows:1fr;opacity:1}
+
+/* Until a format is chosen the ground is empty and says so, rather than showing a figure
+   for a room that does not exist yet. */
+.wheel-read b:empty{display:none}
+
+/* A prompt sitting under the list while nothing is picked -- it disappears the moment the
+   choice it is asking for has been made. */
+.pick-prompt{font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold);margin-top:18px;
+  display:flex;align-items:center;gap:9px}
+.pick-prompt::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--gold);
+  animation:livePulse 2s infinite;box-shadow:0 0 0 0 rgba(245,184,61,.6)}
+.picked .pick-prompt{display:none}

@@ -76,8 +76,7 @@
         <!-- The format list and the field are one control: picking a format sets the
              field, and the wheel is the answer to "how big is this game" stated as a
              diagram instead of a number. -->
-        <div class="field-split">
-          <div class="picks" id="formatChoices">
+        <div class="picks" id="formatChoices">
             <button class="pick" data-format="final" aria-label="Final — 2 seats" onclick="pickFormat('final')">
               <span class="pick-num">01</span>
               <span class="pick-name">Final</span>
@@ -97,23 +96,25 @@
               <span class="pick-desc">Fourteen matches each, a table, then the playoffs.</span>
             </button>
             <div class="pick-prompt">Choose one to continue</div>
-          </div>
-
-          <div class="wheel-wrap">
-            <div id="formatWheel"></div>
-            <div class="wheel-read">
-              <b id="wheelSeats"></b>
-              <span id="wheelNote">Pick a format to set the field</span>
-            </div>
-          </div>
         </div>
 
-        <!-- Everything past the format choice stays shut until that choice is made: with
-             nothing picked there is no room to name and no field to set, so showing the
-             controls first is asking three questions before the one that governs them. -->
+        <!-- Everything past the format choice stays shut until that choice is made, and
+             opens IN PLACE directly beneath the chosen row rather than below the whole
+             list -- so the answer sits with its question instead of at the far end of the
+             page. JS moves this node between picks; it is authored here once. -->
         <div class="reveal-panel" id="roomConfig">
           <div class="reveal-inner">
-            <div class="rule-head"><span>Your name</span></div>
+           <div class="config-body">
+            <div class="wheel-wrap">
+              <div id="formatWheel"></div>
+              <div class="wheel-read">
+                <b id="wheelSeats"></b>
+                <span id="wheelNote"></span>
+              </div>
+            </div>
+
+            <div class="config-main">
+            <div class="rule-head" style="margin-top:0"><span>Your name</span></div>
             <input id="roomName" class="room-input" placeholder="Your name" maxlength="40"
               style="margin-top:14px">
 
@@ -140,9 +141,11 @@
             </div>
 
             <button class="go" onclick="createRoom(this)">Create the room →</button>
-          </div>
-        </div>
-      </div>
+            </div><!-- /.config-main -->
+           </div><!-- /.config-body -->
+          </div><!-- /.reveal-inner -->
+        </div><!-- /#roomConfig -->
+      </div><!-- /#roomCreatePanel -->
 
       <div id="roomJoinPanel" class="hide">
         <div class="rule-head">

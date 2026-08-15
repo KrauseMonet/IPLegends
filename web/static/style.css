@@ -855,3 +855,27 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
    the wheel's a 1.2px rope, which read as two different diagrams. */
 .field{box-shadow:none;border-color:var(--line-strong);border-width:1.2px}
 .field::before{border-color:var(--line)}
+
+/* --- about / faq / terms / privacy --------------------------------------------------------
+   These four are the one place on the site where reading is the whole job, so they get a
+   real page title rather than a 16px tracked chip, and body copy sized to be read rather
+   than scanned. Everything else about them was already right -- one column, generous
+   measure, hairline rules. */
+
+.prose-page .report{padding:44px 0 6px;text-align:left}
+.prose-page .report .over-line{color:var(--gold)}
+/* The shared `.call` is 16px uppercase with .24em tracking -- correct as a verdict line on
+   a match result, far too small as the name of a page you are about to read. */
+.prose-page .report .call{font-family:var(--display);font-size:clamp(38px,5.4vw,58px);
+  font-weight:400;letter-spacing:.5px;line-height:.96;color:var(--ink);margin:12px 0 0;
+  text-transform:uppercase}
+.prose-page .legal-nav{justify-content:flex-start;margin:26px 0 0;padding-bottom:22px;
+  border-bottom:1px solid var(--line)}
+.prose-page .prose{margin:0;padding-top:30px}
+.prose{max-width:68ch}
+.prose h2{font-family:var(--sans);font-size:13px;font-weight:800;letter-spacing:.16em}
+.prose p,.prose ul{font-size:16.5px;line-height:1.72;color:var(--ink-2)}
+/* `.prose p` is (0,1,1) and would otherwise win over a bare `.faq-q` (0,1,0), leaving
+   every question set at body size -- which is exactly what it did. */
+.prose p.faq-q{font-size:19px;font-weight:800;letter-spacing:.1px;margin:34px 0 8px;
+  color:var(--ink)}

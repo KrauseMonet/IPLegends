@@ -824,3 +824,34 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
   .config-body{grid-template-columns:1fr;gap:22px;padding:22px 14px 26px}
   .config-body .wheel-wrap{max-width:190px;margin:0 auto}
 }
+
+/* --- home, brought onto the same scale ---------------------------------------------------
+   The front door was the last screen still setting its headline in bold body-sans and its
+   three steps as soft rounded cards. Both now speak the lobby's language: the headline in
+   the display face at real size, and the steps as rule-topped columns led by their numeral
+   rather than boxes led by a small icon. */
+
+.headline{font-family:var(--display);font-size:clamp(42px,6.2vw,72px);line-height:.94;
+  font-weight:400;letter-spacing:.5px;margin:0 0 24px}
+.headline i{font-style:normal;color:var(--gold)}
+
+.method{gap:26px}
+/* No card: a gold rule across the top and air underneath. Three boxes on a dark ground
+   read as three buttons; three ruled columns read as a contents page, which is what they
+   are -- nothing here is clickable. */
+.method section{background:none;border:0;border-top:2px solid var(--gold);border-radius:0;
+  padding:18px 0 0;gap:9px}
+.method h3{font-family:var(--sans);font-size:16.5px;font-weight:800;letter-spacing:.4px;
+  text-transform:uppercase;align-items:baseline;gap:12px}
+/* The little 22px glyph was doing less than the numeral beside it and competing with it
+   for the same eye -- the numeral is the thing that says "step one of three". */
+.method h3 .mico{display:none}
+.method h3 span:not(.mico){font-family:var(--mono);font-size:29px;font-weight:700;
+  color:var(--ink-3);line-height:1}
+.method p{font-size:14.5px;color:var(--ink-3);line-height:1.62}
+
+/* The ground on home and the wheel in the lobby are the same object seen twice, so they
+   share stroke weights -- previously home's was a 1px hairline with an 8px gold halo and
+   the wheel's a 1.2px rope, which read as two different diagrams. */
+.field{box-shadow:none;border-color:var(--line-strong);border-width:1.2px}
+.field::before{border-color:var(--line)}

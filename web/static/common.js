@@ -325,14 +325,24 @@ function copyUpiId(ctrl){
     .catch(() => slip(UPI_ID));   // same fallback shape copyLink/copyRoomCode already use
 }
 
-// The footer link is written by JS rather than sitting in ten copies of the markup, so an
-// unset UPI_ID means it simply never appears.
+// Written by JS rather than sitting in ten copies of the markup, so an unset UPI_ID means
+// it simply never appears. Deliberately NOT joined into the About/FAQ/Terms/Privacy row
+// with a separator -- those are legal boilerplate you scan past, and sharing their row made
+// this read as a fifth one. It is the only thing in the footer that DOES something, so it
+// gets its own line and looks like a button.
 function mountTipFooterLink(){
   if (!tipsEnabled()) return;
-  document.querySelectorAll('.imprint > div:first-child').forEach(row => {
-    if (row.querySelector('.tip-foot')) return;
-    row.insertAdjacentHTML('beforeend',
-      ' · <a href="#" class="tip-foot" onclick="openTipModal(); return false;">Support</a>');
+  document.querySelectorAll('.imprint').forEach(imp => {
+    if (imp.querySelector('.tip-foot')) return;
+    const row = document.createElement('div');
+    row.className = 'tip-foot-row';
+    row.innerHTML = `
+      <button type="button" class="tip-foot" onclick="openTipModal()">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.4"/>
+          <path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/></svg>
+        Support this project
+      </button>`;
+    imp.insertBefore(row, imp.firstChild);
   });
 }
 

@@ -1239,7 +1239,25 @@ body.has-ground{
 .tip-open{display:block;margin-top:16px;text-align:center;text-decoration:none}
 .tip-note{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--ink-3);
   margin:14px 0 0;line-height:1.6}
-.imprint a.tip-foot{color:var(--gold)}
+/* Its own line above the legal links, and shaped like a control rather than text. It used
+   to sit inside that row behind a separator, which made the one actionable thing in the
+   footer read as a fifth piece of boilerplate. */
+.tip-foot-row{padding:4px 0 18px}
+.tip-foot{display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+  font-family:var(--sans);font-size:12px;font-weight:800;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--gold);
+  padding:11px 22px;border-radius:999px;border:1px solid var(--gold);
+  background:rgba(245,184,61,.08);
+  transition:background .16s,color .16s,box-shadow .16s,transform .08s}
+.tip-foot:hover{background:var(--gold);color:#17120a;
+  box-shadow:0 10px 26px -12px rgba(245,184,61,.85)}
+.tip-foot:active{transform:translateY(1px)}
+.tip-foot svg{width:15px;height:15px;flex:none}
+/* Seam lines stroked, ball filled -- the same construction `.ic.ball` uses elsewhere, so
+   the mark reads as the site's own ball rather than a generic circle. */
+.tip-foot svg circle{fill:currentColor;stroke:currentColor;stroke-width:1.4}
+.tip-foot svg path{fill:none;stroke:rgba(10,15,28,.55);stroke-width:1.4;stroke-linecap:round}
+.tip-foot:hover svg path{stroke:rgba(23,18,10,.5)}
 
 /* The post-season ask, kept visually quieter than the save-career prompt beside it -- one is
    the thing we want people to do, the other is a favour. */

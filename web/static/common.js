@@ -113,9 +113,21 @@ function keeperBadge(card){
 // keeps today's behaviour exactly. `effectiveDraftMode` is deliberately NOT defined
 // here -- each page that draws cards (draft/season/room) defines its own, since what
 // it reads from (a local DRAFT_MODE, or a room's shared mode) is page-specific.
+// A103-era scale runs 70-99 (A58/A60), so every card's badge sat in a 30-point band and
+// they all rendered identically -- a 99 and a 74 were the same small green chip, which
+// threw away the one number the draft is actually played on. Four tiers, because the
+// interesting question a drafter asks is "is this one special", not "what exactly is it":
+// the figure itself is still there for anyone who wants it.
+function ratingTier(v){
+  if (v >= 95) return ' elite';    // top ~1% of the deck; four seasons ever reach 99
+  if (v >= 88) return ' strong';
+  if (v >= 80) return ' good';
+  return '';
+}
+
 function ratingBadge(card, forceReveal){
   return ((forceReveal || effectiveDraftMode() === 'stat') && card.rating != null)
-    ? `<span class="rating-badge">${card.rating}</span>` : '';
+    ? `<span class="rating-badge${ratingTier(card.rating)}">${card.rating}</span>` : '';
 }
 
 // Shared by solo's finished-draft screen and a room's squad-review screen -- both sit on

@@ -217,12 +217,21 @@ function impactTag(isImpact){
 }
 
 function scorecardInnings(short, score, inn){
-  const batting = inn.batting.map(b => b.faced_any
-    ? `<tr><td>${b.name}${b.out ? '' : ' *'}${impactTag(b.is_impact)}</td><td class="n">${b.runs}</td>
+  // The innings' best contribution, so a scorecard has a subject rather than being a wall
+  // of equally-weighted rows. Ties resolve to whoever appears first, which is batting
+  // order -- the earlier man faced his runs under more of the innings.
+  const faced = inn.batting.filter(b => b.faced_any);
+  const topRuns = faced.length ? Math.max(...faced.map(b => b.runs)) : null;
+  let topDone = false;
+  const batting = inn.batting.map(b => {
+    const isTop = b.faced_any && !topDone && topRuns !== null && b.runs === topRuns && topRuns > 0;
+    if (isTop) topDone = true;
+    return b.faced_any
+    ? `<tr class="${isTop ? 'top-bat' : ''}"><td>${b.name}${b.out ? '' : ' *'}${impactTag(b.is_impact)}</td><td class="n">${b.runs}</td>
         <td class="n">${b.balls}</td><td class="n">${b.strike_rate}</td></tr>`
     : `<tr class="tail"><td>${b.name}${impactTag(b.is_impact)}</td>
-        <td class="n" colspan="3" style="font-style:italic">did not bat</td></tr>`
-  ).join('');
+        <td class="n" colspan="3" style="font-style:italic">did not bat</td></tr>`;
+  }).join('');
   const bowling = inn.bowling.map(bo => `<tr><td>${bo.name}${impactTag(bo.is_impact)}</td>
     <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
     <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');

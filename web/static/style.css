@@ -518,9 +518,19 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .entry .nm.clickable:hover,.who.clickable:hover{text-decoration:underline;text-decoration-color:var(--gold)}
 .impact-tag{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:#1a1204;
   background:var(--gold);border-radius:3px;padding:1px 4px;vertical-align:middle;font-weight:700}
-.rating-badge{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--green);
-  border:1px solid rgba(51,209,154,.4);border-radius:3px;padding:1px 5px;
-  vertical-align:middle;margin-left:6px}
+/* Tiered rather than uniform: the scale is 70-99, so an untiered badge put every card in
+   one 30-point band and a 99 looked exactly like a 74. Weight climbs with the number so a
+   great card is visible while skimming, without the figure itself ever being hidden. */
+.rating-badge{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink-3);
+  border:1px solid var(--line);border-radius:3px;padding:2px 6px;
+  vertical-align:middle;margin-left:7px;letter-spacing:.02em}
+.rating-badge.good{color:var(--green);border-color:rgba(51,209,154,.38)}
+.rating-badge.strong{color:var(--mint);border-color:rgba(61,220,151,.55);
+  background:rgba(61,220,151,.10);font-size:11.5px}
+/* Only the top of the deck gets a solid fill -- if several tiers did, none would read as
+   exceptional and the tiering would be decoration again. */
+.rating-badge.elite{color:#17120a;background:var(--gold);border-color:var(--gold);
+  font-size:12px;font-weight:800;box-shadow:0 0 12px -2px rgba(245,184,61,.6)}
 .fow{font-family:var(--mono);font-size:11px;color:var(--ink-3);line-height:1.8;
   padding:12px 0 4px;white-space:pre-line}
 
@@ -921,3 +931,67 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
 
 .fx .sc .mine{color:var(--ink);font-weight:700}
 .fx .sc .theirs{color:var(--ink-3)}
+
+/* --- the toss ------------------------------------------------------------------------------
+   The biggest single moment in a match was set at 16px with .24em tracking and left the
+   bottom half of the screen empty. It is a coin landing your way -- it should feel like it.
+   Scoped to #tossScreen so `.call` keeps its ordinary size everywhere else it is used. */
+
+#tossScreen .report{padding:64px 0 10px}
+#tossScreen .call{font-family:var(--display);font-size:clamp(40px,6.6vw,72px);
+  font-weight:400;letter-spacing:.5px;line-height:.96;color:var(--gold);
+  text-transform:uppercase;margin:18px 0 6px}
+#tossScreen .margin{font-size:17px;color:var(--ink-2);font-style:normal}
+#tossScreen .actions .act{font-size:15px;padding:19px 40px}
+/* The coin: struck once on arrival rather than looping, because it is announcing a result
+   that has already happened, not waiting on one. */
+.toss-coin{width:74px;height:74px;margin:0 auto 6px;border-radius:50%;
+  background:linear-gradient(145deg,var(--gold-2),var(--gold) 55%,#a97615);
+  box-shadow:0 10px 30px -10px rgba(245,184,61,.75), inset 0 -3px 8px rgba(0,0,0,.28);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--display);font-size:30px;color:#17120a;
+  animation:tossFlip 1.05s cubic-bezier(.3,.7,.3,1) 1}
+@keyframes tossFlip{
+  0%{transform:rotateY(0) translateY(-26px) scale(.7);opacity:0}
+  60%{transform:rotateY(1080deg) translateY(0) scale(1.06);opacity:1}
+  100%{transform:rotateY(1080deg) translateY(0) scale(1)}
+}
+
+/* --- the scorecard --------------------------------------------------------------------------
+   The result was smaller than the tables under it: you read two innings of numbers before
+   learning who won. Verdict first, at size, then the detail. */
+
+.scorecard-frame .report .call{font-family:var(--display);
+  font-size:clamp(30px,4.4vw,46px);font-weight:400;letter-spacing:.4px;
+  text-transform:uppercase;line-height:1;margin:10px 0 6px}
+.scorecard-frame .report .margin{font-size:15.5px;color:var(--ink-2)}
+/* Each innings' best contribution, so a scorecard has a subject rather than being a wall
+   of equally-weighted rows. */
+.scorecard-frame tr.top-bat td{background:rgba(245,184,61,.08)}
+.scorecard-frame tr.top-bat td:first-child{color:var(--gold-2);font-weight:750;
+  box-shadow:inset 2px 0 0 var(--gold)}
+
+/* --- legality: a list of what is LEFT, not a list of what is WRONG --------------------------
+   The panel showed red failure lines throughout a draft that is going perfectly well --
+   twelve picks in, having filled none of them yet is not an error, it is the start. Same
+   sentences (still the server's own, never re-derived here), read as outstanding work. */
+
+#legality .bad{color:var(--ink-2);font-size:13.5px;line-height:1.5;padding:9px 0 9px 22px;
+  position:relative;border-bottom:1px dashed var(--line)}
+#legality .bad::before{content:"";position:absolute;left:2px;top:14px;width:9px;height:9px;
+  border:1.5px solid var(--gold);border-radius:2px}
+#legality .bad:last-child{border-bottom:0}
+#legality .ok{color:var(--mint);font-style:normal;font-weight:700;font-size:14px;
+  display:flex;align-items:center;gap:9px}
+#legality .ok::before{content:"";width:9px;height:9px;border-radius:2px;
+  background:var(--mint);box-shadow:0 0 10px rgba(61,220,151,.8)}
+
+/* --- panels: rules, not boxes ---------------------------------------------------------------
+   The last screens still wrapping every column in a rounded translucent card. Home, the
+   lobby and the content pages all dropped that chrome; these kept it, which is why the
+   game screens read as a different app from the pages around them. */
+
+.col{background:none;border:0;border-top:2px solid var(--line-strong);border-radius:0}
+.col-head{padding:14px 4px;border-bottom:1px solid var(--line)}
+.col-head:first-child{padding-top:12px}
+.folio{gap:30px}

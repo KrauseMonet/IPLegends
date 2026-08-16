@@ -1,9 +1,43 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
+    { "src": "api/index.py", "use": "@vercel/python" },
+    { "src": "web/static/**", "use": "@vercel/static" }
   ],
   "routes": [
+    {
+      "src": "/static/fonts/(.*)",
+      "dest": "/web/static/fonts/$1",
+      "headers": { "cache-control": "public, max-age=31536000, immutable" }
+    },
+    {
+      "src": "/static/(.*\\.(?:woff2?|ttf|png|jpe?g|webp|svg|ico))",
+      "dest": "/web/static/$1",
+      "headers": { "cache-control": "public, max-age=2592000, stale-while-revalidate=604800" }
+    },
+    {
+      "src": "/static/(.*\\.(?:css|js))",
+      "dest": "/web/static/$1",
+      "headers": { "cache-control": "public, max-age=600, stale-while-revalidate=604800" }
+    },
+    { "src": "/static/(.*)", "dest": "/web/static/$1" },
+
+    { "src": "/api/(.*)", "dest": "api/index.py" },
+    { "src": "/docs", "dest": "api/index.py" },
+    { "src": "/openapi.json", "dest": "api/index.py" },
+
+    { "src": "/", "dest": "/web/static/index.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/draft", "dest": "/web/static/draft.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/season", "dest": "/web/static/season.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/rooms", "dest": "/web/static/rooms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/rooms/[^/]+", "dest": "/web/static/room.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/profile", "dest": "/web/static/profile.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/about", "dest": "/web/static/about.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/faq", "dest": "/web/static/faq.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/terms", "dest": "/web/static/terms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/privacy", "dest": "/web/static/privacy.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+
     { "src": "/(.*)", "dest": "api/index.py" }
   ]
 }

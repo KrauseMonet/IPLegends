@@ -77,9 +77,62 @@ async function busyClick(ctrl, busyLabel, fn){
 // (home's own stat row, draft's deck size references, etc.) -- loadMeta() does only the
 // fetch; each page's own boot does its own page-specific rendering with the result.
 let META = null;
+// `/api/meta` is the deck's SHAPE -- season range, squad count, twelve size, overseas cap.
+// It changes only when the ETL chain re-runs and the site is redeployed, yet this is a
+// multi-page app, so every Home -> Draft -> Season -> Rooms navigation is a full page load
+// that was paying a serverless round trip for it. Worse, the four content pages
+// (about/faq/terms/privacy) are otherwise pure static and were waking the function purely
+// to fill a masthead pill.
+//
+// Cache-first with background revalidation, NOT a plain TTL cache: the cached copy renders
+// immediately and a fresh copy is fetched anyway, so a stale value can survive at most the
+// one page view that displayed it, and the next navigation is already correct. That
+// matters because `meta` carries board constants, not just decoration -- the point of
+// serving them (A19: no second copy of the rules in JavaScript) would be lost if a cache
+// could pin an old shape indefinitely.
+const META_CACHE_KEY = 'iplegends_meta_v1';
+const META_TTL_MS = 6 * 60 * 60 * 1000;
+
+function readMetaCache(){
+  try {
+    const raw = localStorage.getItem(META_CACHE_KEY);
+    if (!raw) return null;
+    const {at, meta} = JSON.parse(raw);
+    return (Date.now() - at) < META_TTL_MS ? meta : null;
+  } catch(e){ return null; }   // private browsing, disabled storage, corrupt entry
+}
+
+function writeMetaCache(meta){
+  try { localStorage.setItem(META_CACHE_KEY, JSON.stringify({at: Date.now(), meta})); }
+  catch(e){ /* caching is an optimisation; failing to cache must never fail a page */ }
+}
+
 async function loadMeta(){
+  const cached = readMetaCache();
+  if (cached){
+    META = cached;
+    // Revalidate anyway. Deliberately not awaited: the caller renders off the cached copy
+    // now, and this corrects the stored copy for the next navigation.
+    api('/api/meta').then(fresh => {
+      writeMetaCache(fresh);
+      if (JSON.stringify(fresh) !== JSON.stringify(cached)){ META = fresh; renderDeckStats(fresh); }
+    }).catch(() => { /* offline or cold: the cached copy is still serviceable */ });
+    return META;
+  }
   META = await api('/api/meta');
+  writeMetaCache(META);
   return META;
+}
+
+// The two masthead/footer elements every page shares. Pulled out of the four callers so a
+// background revalidation can repaint them without knowing which page it is on; a page
+// that lacks either element simply skips it.
+function renderDeckStats(m){
+  const s = m.seasons;
+  const pill = $('#deckPill'), foot = $('#footStats');
+  if (pill) pill.textContent = `${s[0]}–${s[s.length-1]} · ${m.franchise_seasons} squads`;
+  if (foot) foot.textContent =
+    `${m.cards.toLocaleString()} player-seasons · ${m.franchise_seasons} squads · ${s.length} seasons`;
 }
 
 // A bat, a ball, both, a glove. Drawn at 16x16 on a shared grid so they sit on one

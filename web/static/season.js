@@ -421,10 +421,7 @@ function showJourneyCard(){
 async function boot(){
   loadMe();   // fire-and-forget -- the auth control fills in whenever it resolves
   const m = await loadMeta();
-  const s = m.seasons;
-  $('#deckPill').textContent = `${s[0]}–${s[s.length-1]} · ${m.franchise_seasons} squads`;
-  $('#footStats').textContent =
-    `${m.cards.toLocaleString()} player-seasons · ${m.franchise_seasons} squads · ${s.length} seasons`;
+  renderDeckStats(m);
 }
 
 boot().then(async () => {

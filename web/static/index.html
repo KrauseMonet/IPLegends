@@ -175,12 +175,11 @@ function setDraftMode(mode){
 async function boot(){
   loadMe();   // fire-and-forget -- the auth control fills in whenever it resolves,
               // nothing else on this page waits on login state
-  META = await api('/api/meta');
-  const s = META.seasons;
-  $('#deckPill').textContent = `${s[0]}–${s[s.length-1]} · ${META.franchise_seasons} squads`;
+  // loadMeta, not a bare api() call: it serves a cached copy instantly and revalidates in
+  // the background, so a repeat visit paints the deck figures with no round trip at all.
+  await loadMeta();
+  renderDeckStats(META);
   $('#homeStats').innerHTML = statRow();
-  $('#footStats').textContent =
-    `${META.cards.toLocaleString()} player-seasons · ${META.franchise_seasons} squads · ${s.length} seasons`;
   drawField();
 }
 

@@ -879,3 +879,45 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
    every question set at body size -- which is exactly what it did. */
 .prose p.faq-q{font-size:19px;font-weight:800;letter-spacing:.1px;margin:34px 0 8px;
   color:var(--ink)}
+
+/* --- the draft's completed state ---------------------------------------------------------
+   While drafting, the left column is the deal: a franchise-season and its available men.
+   The moment the twelfth pick lands that column has nothing left to say, and it used to
+   sit there as an empty box captioned "Selection closed" -- a third of the screen going
+   blank at the exact moment the screen should feel best.
+
+   It now shows the thing that was actually just built: a full field, every position set,
+   with the squad's three ratings under it. Same wheel as the lobby's, so "a side" looks
+   like the same object everywhere in the app. */
+
+.squad-done{padding:22px 18px 26px;text-align:center}
+.squad-done .wheel-wrap{max-width:210px;margin:0 auto}
+.squad-done .done-line{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--mint);margin-top:18px;
+  display:flex;align-items:center;justify-content:center;gap:8px}
+.squad-done .done-line::before{content:"";width:6px;height:6px;border-radius:50%;
+  background:var(--mint);box-shadow:0 0 8px rgba(61,220,151,.7)}
+.squad-done .ledger{grid-template-columns:repeat(3,1fr);margin-top:22px;gap:8px}
+.squad-done .ledger div{padding:14px 6px}
+.squad-done .ledger b{font-family:var(--display);font-size:30px;color:var(--gold);
+  font-weight:400;line-height:1}
+
+/* --- your own season, made readable --------------------------------------------------------
+   Two fixes to the same panel. A result read "130/10 · 157/7" with nothing marking which
+   half was YOURS -- the data was right (season.js works out `mine`/`theirs` correctly), it
+   just went to screen as two identical numbers. Your score is now the bright one.
+
+   And the header counted "9 won, 5 lost" while throwing away the ORDER, which is the part
+   a season actually has a shape in -- four straight losses to finish reads nothing like
+   four spread out. The strip restores the sequence in the space one line of text took. */
+
+.form-strip{display:flex;gap:4px;flex-wrap:wrap;padding:14px 0 4px}
+.form-strip i{width:22px;height:22px;border-radius:3px;font-style:normal;
+  font-family:var(--mono);font-size:10px;font-weight:700;display:flex;
+  align-items:center;justify-content:center;color:var(--bg);background:var(--ink-3)}
+.form-strip i.w{background:var(--mint)}
+.form-strip i.l{background:var(--red)}
+.form-strip i.t{background:var(--ink-3)}
+
+.fx .sc .mine{color:var(--ink);font-weight:700}
+.fx .sc .theirs{color:var(--ink-3)}

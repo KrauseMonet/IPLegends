@@ -640,9 +640,21 @@ def test_play_again_refuses_a_room_still_in_progress(conn):
         rooms.play_again(conn, room.code, host_id)
 
 
-def test_play_again_gives_the_new_lobby_a_fully_working_next_draft(conn):
+def test_play_again_gives_the_new_lobby_a_fully_working_next_draft(conn, monkeypatch):
     """Not just a status flip -- the reset room must actually be playable end to end,
-    same as any other fresh lobby."""
+    same as any other fresh lobby.
+
+    Pinned to a fixed seed, because otherwise this asserts something luck controls. Both
+    `create_room` and `play_again` mint a random seed, and a room drafted by a
+    non-strategic policy strands outright some of the time -- measured at 4 of 60 fresh
+    rooms here, which is A73's own documented wildcard-optimism gap (the forward check is
+    an OPTIMISTIC bound, and under a shared pool one seat can strand another). That is a
+    real property of the archive, not a defect to engineer away, so the fix is to stop
+    this test depending on it rather than to soften the assertion: a stranded draft says
+    nothing about whether `play_again` produced a working lobby, which is what is on
+    trial here.
+    """
+    monkeypatch.setattr(rooms.sess, "new_seed", lambda: 3)
     room, host_id = _make_room(conn, "final")
     _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
     room = rooms.start_room(conn, room.code, host_id, DECK)

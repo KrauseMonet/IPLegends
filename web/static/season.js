@@ -87,14 +87,23 @@ function renderTableAndForm(d){
   const w = d.your_results.filter(r => r.winner === 'YOU').length;
   const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
   $('#formNote').innerHTML = `<b>${w} won</b><span>${l} lost</span>`;
-  $('#yourForm').innerHTML = d.your_results.map((r, i) => {
+  // The sequence, not just the count -- a season's shape lives in the run of results.
+  const strip = d.your_results.map(r => {
+    const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? 't' : 'l');
+    return `<i class="${k}">${k.toUpperCase()}</i>`;
+  }).join('');
+  $('#yourForm').innerHTML = `<div class="form-strip">${strip}</div>` +
+    d.your_results.map((r, i) => {
     const them = r.home === 'YOU' ? r.away : r.home;
     const mine = r.home === 'YOU' ? r.home_score : r.away_score;
     const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
     const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l');
+    // Yours bright, theirs dim -- the two used to render identically, so a row gave no
+    // way to tell which of "130/10 · 157/7" you had scored.
     return `<div class="fx" onclick="showScorecard('league', ${i})">
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
-      <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span></div>`;
+      <span>v ${them}</span><span class="sc"><span class="mine">${mine}</span>
+        <span class="theirs">· ${theirs}</span></span></div>`;
   }).join('');
 }
 

@@ -165,10 +165,18 @@ function render(s){
     LAST_DEAL_FS = null;
     clearTimeout(ROLL_TIMERS.get($('#dealTeam')));
     $('#dealYear').textContent = '';
-    $('#dealTeam').textContent = 'Selection closed';
+    $('#dealTeam').textContent = 'Your twelve';
     $('#rerollRow').classList.add('hide');
     $('#optCount').textContent = '';
-    $('#options').innerHTML = '<div class="note">Twelve chosen. Ready to play.</div>';
+    // The deal column has nothing left to deal, so rather than leaving a third of the
+    // screen blank at the moment the squad is finished, it shows what was just built: a
+    // full field, every position set, with the squad's own three numbers under it.
+    $('#options').innerHTML = `
+      <div class="squad-done">
+        ${fieldWheel(s.order.length, s.order.length)}
+        <div class="done-line">Field set</div>
+        <div class="ledger">${teamRatingsHtml(s)}</div>
+      </div>`;
   }
 
   renderPanels();
@@ -203,8 +211,9 @@ function renderPanels(){
   $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
   $('#simModeLabel').classList.toggle('hide', !s.squad_complete);
   $('#simModeChoices').classList.toggle('hide', !s.squad_complete);
-  $('#teamRatings').classList.toggle('hide', !s.squad_complete);
-  if (s.squad_complete) $('#teamRatings').innerHTML = teamRatingsHtml(s);
+  // The ratings live in the (otherwise finished) deal column now, under the field --
+  // rendering them here too would put the same three numbers on screen twice.
+  $('#teamRatings').classList.add('hide');
 
   function orderRow(slot, got, label, isImpact){
     const classes = ['orderline'];

@@ -55,7 +55,27 @@ let SEASON_DATA = null;
 // already-saved season (e.g. reloading the result screen).
 const SAVED_SEASON_STATES = new Set();
 
+// A season just ended and its numbers exist -- runs, wickets, a title or not. That is when
+// "save your career" is a concrete offer rather than an abstract one, so a signed-OUT
+// visitor gets asked here instead of only from the masthead.
+function renderSavePrompt(d){
+  const host = $('#savePrompt');
+  if (!host) return;
+  const signedIn = !!(ME && ME.account_id);
+  host.innerHTML = signedIn ? '' : `
+    <div class="save-prompt">
+      <span class="sp-text">
+        <b>Keep this season</b>
+        <span>${d.runs != null ? d.runs.toLocaleString() + ' runs, ' : ''}${
+          d.wickets != null ? d.wickets + ' wickets' : 'Your record'} — saved to a career
+          card you can come back to.</span>
+      </span>
+      <button class="act lead" onclick="openAuthModal('register')">Save my career</button>
+    </div>`;
+}
+
 async function maybeSaveSeason(d){
+  renderSavePrompt(d);
   if (!ME || !ME.account_id) return;
   if (SAVED_SEASON_STATES.has(d.state)) return;
   SAVED_SEASON_STATES.add(d.state);

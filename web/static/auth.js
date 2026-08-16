@@ -45,7 +45,48 @@ function renderAuthArea(){
   }
 }
 
-function openAuthModal(){
+// The modal's chrome is built here rather than added to ten copies of the markup -- the
+// same "duplicate small markup, share the logic" split the page split already uses, except
+// here the markup is big enough that duplicating it would guarantee drift.
+const AUTH_COPY = {
+  login: ['Welcome back', 'Your card, your caps and every game you have saved.'],
+  register: ['Save your career', 'Runs, wickets, titles and both caps -- kept across every game you play.'],
+};
+
+function ensureAuthChrome(){
+  const frame = document.querySelector('#authOverlay .scorecard-frame');
+  if (!frame || frame.querySelector('.auth-hero')) return;
+  const hero = document.createElement('div');
+  hero.className = 'auth-hero';
+  hero.innerHTML = `<div class="auth-hero-eyebrow">The Legends Almanack</div>
+    <div class="auth-hero-title" id="authHeroTitle"></div>
+    <div class="auth-hero-sub" id="authHeroSub"></div>`;
+  frame.insertBefore(hero, frame.firstChild);
+  // Everything that was already in the frame becomes the body, so the hero can sit flush
+  // against the top edge while the form keeps its own padding.
+  const body = document.createElement('div');
+  body.className = 'auth-body';
+  while (hero.nextSibling) body.appendChild(hero.nextSibling);
+  frame.appendChild(body);
+  const perks = document.createElement('ul');
+  perks.className = 'auth-perks';
+  perks.innerHTML = ['Every completed game saved to your card',
+                     'Your Orange Cap and Purple Cap, all-time',
+                     'Your name filled in automatically in rooms']
+                     .map(t => `<li>${t}</li>`).join('');
+  body.appendChild(perks);
+}
+
+function setAuthCopy(tab){
+  const [title, sub] = AUTH_COPY[tab] || AUTH_COPY.register;
+  const t = $('#authHeroTitle'), u = $('#authHeroSub');
+  if (t) t.textContent = title;
+  if (u) u.textContent = sub;
+}
+
+function openAuthModal(tab){
+  ensureAuthChrome();
+  pickAuthTab(tab || 'register');   // registering is the point of the prompt, so lead with it
   $('#authError').textContent = '';
   $('#authOverlay').classList.remove('hide');
 }
@@ -61,6 +102,7 @@ function pickAuthTab(tab){
   $('#authLoginPanel').classList.toggle('hide', tab !== 'login');
   $('#authRegisterPanel').classList.toggle('hide', tab !== 'register');
   $('#authError').textContent = '';
+  setAuthCopy(tab);
 }
 
 async function submitLogin(ctrl){

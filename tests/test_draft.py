@@ -19,7 +19,7 @@ import random
 
 from etl.feasibility import (
     ALL_SLOTS, BOWLERS_IN_TWELVE, OVERSEAS_CAP, TWELVE_SIZE, XI_SIZE,
-    Card, Deck, POLICIES, eligible, order_errors, run_draft,
+    Card, Deck, DraftState, POLICIES, eligible, order_errors, run_draft,
 )
 
 
@@ -268,3 +268,64 @@ def test_a_reposition_swap_never_changes_open_slots():
     )
     assert result.player_repositions == 1
     assert len(result.picks) == TWELVE_SIZE
+
+
+# --- the timeout fallback ----------------------------------------------------------------
+# `pick_afk` had no coverage at all until the rule changed from "lowest-rated" to "random",
+# which is exactly the shape this repo's own standing rule warns about: a rule that lives in
+# behaviour rather than in a schema constraint is protected by nothing unless a test points
+# at it. Each assertion below was checked to fail against the rule it guards being broken.
+
+def _afk_deck() -> tuple[list[Card], DraftState]:
+    """Ten candidates with distinct ratings, every one legal for the same open slots, so
+    the only thing separating them is which one the policy chooses."""
+    from etl.feasibility import DraftState
+    cards = [Card(fs_id=1, person_id=f"a{i}", name=f"a{i}", bat=0.10 * (i + 1), bowl=None,
+                  role="batter", overseas=False, positions=frozenset({2, 3, 4}),
+                  keeper_eligible=False)
+             for i in range(10)]
+    state = DraftState(picks=(), order=(None,) * XI_SIZE, impact=None,
+                       open_slots=frozenset({2, 3, 4}), keeper_have=False,
+                       bowl_have=0, remaining=TWELVE_SIZE)
+    return cards, state
+
+
+def test_afk_does_not_always_take_the_lowest_rated():
+    """The rule that changed. The old policy was `min(candidates, key=rating)`, so over
+    many seeds it returned the same worst card every time; a random draw must not."""
+    from etl.feasibility import pick_afk
+    cards, state = _afk_deck()
+    worst = min(cards, key=lambda c: c.rating).person_id
+    chosen = {pick_afk(cards, state, random.Random(s))[0].person_id for s in range(60)}
+    assert len(chosen) > 1, f"afk still deterministic, always picked {chosen}"
+    assert chosen - {worst}, "afk never picked anything but the lowest-rated card"
+
+
+def test_afk_spreads_across_the_candidates():
+    """Uniform-ish rather than merely non-constant -- a draw biased onto two or three
+    cards would pass the test above while still not being a random eligible player."""
+    from etl.feasibility import pick_afk
+    cards, state = _afk_deck()
+    seen = {pick_afk(cards, state, random.Random(s))[0].person_id for s in range(400)}
+    assert len(seen) == len(cards), f"only {len(seen)} of {len(cards)} cards ever chosen"
+
+
+def test_afk_is_reproducible_for_a_given_seed():
+    """A62's determinism guarantee: the same rng state must yield the same pick, which is
+    what lets `web.rooms._resolve` seed from room state and get a reproducible timeout."""
+    from etl.feasibility import pick_afk
+    cards, state = _afk_deck()
+    first = pick_afk(cards, state, random.Random("room-7:afk:3"))
+    again = pick_afk(cards, state, random.Random("room-7:afk:3"))
+    assert first[0].person_id == again[0].person_id and first[1] == again[1]
+
+
+def test_afk_only_ever_returns_a_slot_the_card_is_eligible_for():
+    """The player is drawn, the slot is not -- `choose_slot` still returns the lowest open
+    position, so a random pick can never be placed somewhere illegal."""
+    from etl.feasibility import pick_afk
+    cards, state = _afk_deck()
+    for s in range(50):
+        chosen, slot = pick_afk(cards, state, random.Random(s))
+        assert slot in (chosen.slots & state.open_slots)
+        assert slot == min(chosen.positions & state.open_slots)

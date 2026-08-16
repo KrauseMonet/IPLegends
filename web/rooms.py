@@ -29,7 +29,7 @@ Every human seat's turn has its own deadline (`rooms.turn_started_at`, reset eac
 new turn becomes pending), resolved LAZILY: whichever request next touches the room first
 resolves any CPU turn at the front of the queue (instantly -- there is no round-by-round
 experience to give a CPU, and nobody is watching it deliberate) and any human turn whose
-clock has actually expired (auto-picking the lowest-rated eligible candidate via
+clock has actually expired (auto-picking a RANDOM eligible candidate via
 `etl.feasibility.pick_afk`, reused directly rather than reimplemented) before doing
 anything else. Nothing runs in the background (A62).
 
@@ -637,7 +637,14 @@ def _resolve(room: Room, deck: Deck) -> None:
         fs_id, candidates = replay.pending_deal
         seat = replay.seats[pid]
         state = _draft_state(seat)
-        card, slot = pick_afk(candidates, state, random.Random())
+        # Seeded from the room's own state rather than left to ambient entropy. The pick
+        # is recorded into `room.moves` immediately below, so replay determinism (A62)
+        # holds either way -- but an unseeded draw made the choice unreproducible for
+        # anyone debugging a room after the fact, and this codebase has already been bitten
+        # once by a policy drawing from global `random` (A73). Keyed on the move count so
+        # successive timeouts in one room do not all draw from the same stream position.
+        rng = random.Random(f"{room.seed}:afk:{len(room.moves)}")
+        card, slot = pick_afk(candidates, state, rng)
         index = next(i for i, c in enumerate(candidates) if c.person_id == card.person_id)
         room.moves = room.moves + [{"seat": pid, "index": index, "slot": slot}]
         room.turn_started_at = time.time()

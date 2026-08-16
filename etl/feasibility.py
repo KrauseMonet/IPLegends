@@ -517,10 +517,25 @@ def pick_naive(candidates: list[Card], state: DraftState,
 
 def pick_afk(candidates: list[Card], state: DraftState,
              rng: random.Random) -> tuple[Card, int]:
-    """The room draft's timeout fallback: the LOWEST-rated eligible candidate, not the
-    best -- a player who let the clock run out gets a pick made FOR them, not a gift.
-    Symmetric to `pick_naive` (which takes `max`), never used as a real drafter policy."""
-    card = min(candidates, key=lambda c: c.rating)
+    """The room draft's timeout fallback: a RANDOM eligible candidate.
+
+    This used to take the lowest-rated card on the reasoning that a missed turn should
+    not be rewarded. That made the timeout a penalty rather than a stand-in, and it
+    compounded: every clock a seat ran out handed them the worst card on offer, so one
+    slow turn early could sink a squad well past what missing a single pick is worth.
+    Random is neutral -- it fills the slot without judging why the clock ran out.
+
+    Every candidate here is already legality-checked (`eligible` applies the overseas
+    cap, slot eligibility and the forward check before this is ever called), so drawing
+    uniformly is exactly as safe as taking the minimum was.
+
+    Draws from the PASSED rng, never the global `random` module -- the same rule
+    `pick_random` documents, and for the same reason: a policy reaching into ambient
+    global state has behaviour that depends on whatever else in the process touched
+    `random` first. The slot is still `choose_slot`'s lowest-numbered open position; it
+    is the PLAYER that is drawn, not where he bats.
+    """
+    card = rng.choice(candidates)
     return card, choose_slot(card, state.open_slots)
 
 

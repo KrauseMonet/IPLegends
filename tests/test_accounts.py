@@ -425,3 +425,36 @@ def test_a_game_saved_before_the_match_record_existed_counts_zero_not_null(conn)
     assert st.total_runs == 50
     assert st.solo_titles == 1, "an old row still knows it won the title"
     assert st.matches_won == 0, "a null match record must sum to 0, not None"
+
+
+def test_leader_rows_map_onto_the_profile_response_model():
+    """The `/api/profile` route builds `web.app.LeaderOut` from a `LeaderRow`, and NOTHING
+    checked that the two agreed until it broke in production.
+
+    `web/app.py` declared TWO classes named `LeaderOut` -- the profile's
+    (`person_id`/`name`/`total`) and, 60 lines later, the Season Analysis screen's
+    (`name`/`value`/`detail`). Python rebinds a name, so the profile route silently
+    resolved to the analysis model and raised a pydantic ValidationError for missing
+    `value`/`detail`. Every existing test passed: they exercise `profile_stats`, not the
+    route's own mapping.
+
+    **It also needs an account that has actually saved a game.** An empty account has no
+    leader rows, so the list comprehension never runs and the page renders perfectly --
+    which is precisely how it was verified as working and shipped broken anyway.
+    """
+    from web.app import LeaderOut
+
+    row = accounts.LeaderRow(person_id="db584dad", name="CH Gayle", total=1164)
+    out = LeaderOut(person_id=row.person_id, name=row.name, total=row.total)
+    assert (out.person_id, out.name, out.total) == ("db584dad", "CH Gayle", 1164)
+
+
+def test_the_two_leader_models_stay_distinct():
+    """A regression guard on the shadowing itself, not just on one of its symptoms: the
+    profile's row is keyed by person and totals an integer; the analysis screen's is a
+    named value with a detail string. If a future edit gives them the same name again,
+    one of these two assertions fails whichever way round the rebinding lands."""
+    from web.app import AnalysisLeaderOut, LeaderOut
+
+    assert set(LeaderOut.model_fields) == {"person_id", "name", "total"}
+    assert set(AnalysisLeaderOut.model_fields) == {"name", "value", "detail"}

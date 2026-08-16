@@ -817,7 +817,17 @@ class OverBarOut(BaseModel):
     average_runs: float
 
 
-class LeaderOut(BaseModel):
+class AnalysisLeaderOut(BaseModel):
+    """The analysis screen's leader row -- NOT `LeaderOut`, the profile page's, which is a
+    different shape (`person_id`/`name`/`total`) declared 60 lines above.
+
+    Named apart because it was originally called `LeaderOut` too, and Python simply
+    rebound the name: every later reference, including the PROFILE route's own, resolved
+    to whichever class was defined last. `/api/profile` then built this model with the
+    profile's arguments and 500'd on `value`/`detail` missing -- silently shipped, because
+    the failure needs an account that has actually saved a game. An empty account has no
+    leader rows, so the list comprehension never runs and the page renders perfectly."""
+
     name: str
     value: float
     detail: str
@@ -831,10 +841,10 @@ class AnalysisOut(BaseModel):
     your_phases: list[PhaseSplitOut]
     manhattan: list[OverBarOut]
     your_manhattan: list[OverBarOut]
-    top_scorers: list[LeaderOut]
-    top_wickets: list[LeaderOut]
-    best_economy: list[LeaderOut]
-    best_strike: list[LeaderOut]
+    top_scorers: list[AnalysisLeaderOut]
+    top_wickets: list[AnalysisLeaderOut]
+    best_economy: list[AnalysisLeaderOut]
+    best_strike: list[AnalysisLeaderOut]
     best_over: dict | None
     highest_innings: dict | None
 
@@ -1294,7 +1304,7 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
     bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
                                   innings=b.innings, average_runs=b.average_runs)
                        for b in ms]
-    lead = lambda ls: [LeaderOut(name=x.name, value=x.value, detail=x.detail) for x in ls]
+    lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value, detail=x.detail) for x in ls]
     return AnalysisOut(
         fixtures=a.fixtures, innings=a.innings, overs_logged=a.overs_logged,
         phases=_phase_out(a.phases), your_phases=_phase_out(a.your_phases),

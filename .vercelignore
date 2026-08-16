@@ -3,7 +3,12 @@
 .pytest_cache/
 __pycache__/
 .git/
-data/
+# `data/*`, NOT `data/` -- .vercelignore uses .gitignore semantics, so an excluded
+# DIRECTORY is never descended into and a negation inside it is never evaluated. This was
+# got right in .gitignore and left wrong here, and the deploy fell back to the database
+# silently: /api/health reported source="database" on production while every local check
+# said "snapshot". That `source` field is the only reason it was visible at all.
+data/*
 # [A107] The one file in data/ the deployment needs: without it the function silently falls
 # back to querying the database on every cold start, which is the exact 7.5s this replaced
 # -- and it would LOOK fine, because the fallback works. `vercel.json`'s own `includeFiles`

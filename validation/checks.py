@@ -1701,6 +1701,49 @@ def check_25_order_errors_agrees_with_the_forward_check(conn) -> Result:
     )
 
 
+def check_26_deck_snapshot_matches_the_database(conn) -> Result:
+    """The committed deck snapshot still says what the database says. [A107]
+
+    Boot reads `data/deck_snapshot.json.gz` instead of querying, which took cold start
+    from 7.5s to 0.02s -- but it means the site can serve a deck that the archive no
+    longer agrees with, and it would do so SILENTLY. Nothing else can catch that: the
+    loader's own guards catch a corrupt or schema-mismatched file, and a stale one is
+    neither. It loads perfectly. It is just wrong.
+
+    So this is the same guard check 20 is for the state model ("recounts the fitting set
+    and fails if the stored totals have gone stale, so a forgotten refit is caught rather
+    than silently believed"), pointed at the snapshot instead. The comparison itself lives
+    in `tools.snapshot_deck.compare` and is shared verbatim with that module's own
+    `--check`, so the deploy gate and this check cannot reach different conclusions about
+    the same file -- two implementations of one rule is a mistake this project has already
+    made and written down.
+
+    A MISSING snapshot is a pass, not a failure: the app falls back to the database and is
+    correct, just slower. What must never pass is a snapshot that exists and disagrees.
+    """
+    from tools import snapshot_deck
+
+    title = "the committed deck snapshot matches the database"
+    doc = snapshot_deck.read_document()
+    if doc is None:
+        return verdict(26, title,
+                       "no readable snapshot committed; the app boots from the database "
+                       "(correct, and about 7.5s slower per cold start)", [])
+
+    problems = snapshot_deck.compare(conn, doc)
+    cards = sum(len(v) for v in doc["deck"]["cards_by_fs"].values())
+    return verdict(
+        26, title,
+        (f"{cards} cards over {len(doc['deck']['fs_ids'])} franchise-seasons, "
+         f"{len(doc['model_inputs']['state_ball_outcomes'])} model states and "
+         f"{len(doc['model_inputs']['season_mean'])} season means all reproduce exactly "
+         f"from the database")
+        if not problems else
+        "the snapshot disagrees with the database -- regenerate it with "
+        "`uv run python -m tools.snapshot_deck`",
+        problems)
+
+
 CHECKS = (
     check_01_runs_total,
     check_02_participants_are_recorded,
@@ -1723,4 +1766,5 @@ CHECKS = (
     check_23_career_positions_match_an_independent_aggregate,
     check_24_batting_role_cascade_is_correctly_wired,
     check_25_order_errors_agrees_with_the_forward_check,
+    check_26_deck_snapshot_matches_the_database,
 )

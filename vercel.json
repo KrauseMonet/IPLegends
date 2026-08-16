@@ -2,7 +2,13 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" },
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": "data/deck_snapshot.json.gz"
+      }
+    },
     { "src": "web/static/**", "use": "@vercel/static" }
   ],
   "routes": [

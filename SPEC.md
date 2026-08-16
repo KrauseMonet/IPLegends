@@ -2121,3 +2121,43 @@ and **wagon wheels** (nothing models shot direction).
 A `final` is one match and a `cup` is three. A Manhattan over three innings is a scorecard
 drawn sideways, and the phase splits would read as a claim about form when they would
 actually be a coin toss. The route refuses both formats rather than drawing them.
+
+## 14. Booting without the database
+
+**[A107, added 2026-08-16.]** The application reads the deck and the fitted model from
+`data/deck_snapshot.json.gz`, a committed build artefact, rather than querying at startup.
+
+**Why it could not be optimised in place.** The `deliveries` aggregate inside `load_deck`
+**executes in 106 ms server-side** and takes **620-1510 ms wall clock**. The cost is
+round-trip latency to a remote Neon, not the query, so an index or a materialised aggregate
+would buy almost nothing. Cold boot measured **7.51s** (connect 1.7 + deck 4.4 + model 1.4);
+from the snapshot it is **0.02s**.
+
+**A consequence, not just a speed-up.** The whole solo path — draft, season, analysis,
+twelve, meta, health — now touches no database at all. Only rooms and accounts connect, per
+request, as live state requires. §11's stateless design stops being a description of the
+session model and becomes a property of the process.
+
+### 14.1 What is frozen
+
+The model is stored as its **query results** and rebuilt through
+`game.simulator.build_model`. `Grid` and `Costs` are constructed objects carrying their own
+§7.1 fallback caches; freezing those would freeze a derived thing, and a later change to the
+A37 walk would be silently ignored by every reader of the file. Cards are stored directly,
+being flat and already carrying the final `positions`.
+
+### 14.2 Two ways it goes stale
+
+- **Against the database** — somebody re-runs `etl.impact --write` and forgets the snapshot.
+  The dangerous one: the file still loads perfectly and the site serves **old ratings**.
+  Guarded by validation **check 26**, and identically by `tools.snapshot_deck --check`;
+  both call one shared comparison rather than two that can drift.
+- **Against the code** — a `Card` field is added. Guarded by construction: `Card(**fields)`
+  raises, and the loader falls back to the database.
+
+### 14.3 The fallback
+
+A missing, corrupt, wrong-version or schema-mismatched snapshot degrades to the database
+path. The worst case is therefore slow, never wrong, which is what makes the whole thing
+safe to ship. `/api/health` reports `source` so the two are distinguishable from outside —
+the fallback is silent by design and would otherwise be invisible.

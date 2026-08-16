@@ -36,6 +36,7 @@ from web import accounts
 from web import auth
 from web import room_match as room_match_lib
 from web import rooms
+from tools import snapshot_deck
 from web import season_session
 from web import session as sess
 
@@ -46,7 +47,37 @@ STATE: dict = {}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Boot from the committed snapshot if there is one, from the database if not. [A107]
+
+    The database path cost a measured 7.3s (connect 1.7 + deck 4.4 + model 1.4) and every
+    cold serverless start paid it before answering anything. The snapshot takes ~21ms, and
+    with it the whole solo path -- draft, season, analysis, twelve, meta, health -- touches
+    no database at all; only rooms and accounts still connect, per request, as they must.
+
+    **The fallback is what makes this safe to ship.** A missing, corrupt, stale-format or
+    schema-mismatched snapshot degrades to exactly the old behaviour rather than to a
+    broken site, so the worst case here is slow, never wrong. What the fallback CANNOT
+    catch is a snapshot that loads perfectly and disagrees with the archive -- that is
+    validation check 26's job, and it is the reason the check exists.
+    """
     load_dotenv()
+    doc = snapshot_deck.read_document()
+    if doc is not None:
+        try:
+            STATE["deck"] = snapshot_deck.deck_from(doc)
+            STATE["model"] = snapshot_deck.model_from(doc)
+            STATE["unrated"] = snapshot_deck.unrated_from(doc)
+            STATE["source"] = "snapshot"
+            yield
+            STATE.clear()
+            return
+        except (TypeError, KeyError, ValueError) as exc:
+            # A `Card` field added since the snapshot was written lands here, by design:
+            # `Card(**fields)` raises rather than building an object quietly missing it.
+            print(f"deck snapshot unusable ({exc.__class__.__name__}: {exc}); "
+                  "falling back to the database")
+            STATE.clear()
+
     # DIRECT_URL, not DATABASE_URL: this runs once at startup, not per request, so the
     # pooler buys nothing and the unpooled endpoint is the one guaranteed to serve DDL-free
     # reads without PgBouncer in the way.
@@ -55,6 +86,7 @@ async def lifespan(_: FastAPI):
         STATE["deck"] = load_deck(conn)
         STATE["model"] = load_model(conn)
         STATE["unrated"] = _load_unrated(conn)
+        STATE["source"] = "database"
     yield
     STATE.clear()
 
@@ -907,6 +939,10 @@ def health() -> dict:
         "ok": deck is not None,
         "cards": sum(len(v) for v in deck.cards_by_fs.values()) if deck else 0,
         "franchise_seasons": len(deck.fs_ids) if deck else 0,
+        # [A107] Which path booted. Reported because the fallback is SILENT by design --
+        # a snapshot the deployment forgot degrades to a working, slower site, and without
+        # this there would be nothing to tell the two apart from outside.
+        "source": STATE.get("source"),
     }
 
 

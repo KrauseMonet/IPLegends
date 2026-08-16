@@ -110,22 +110,109 @@ class Model:
         return probs, (-cost,) + tuple(float(r) for r in OFF_THE_BAT)
 
 
-def load_model(conn) -> Model:
-    """Read the fitted model. Nothing here is refitted and nothing is hardcoded.
+def model_inputs(conn) -> dict:
+    """Every row `build_model` needs, as plain lists and numbers and nothing else.
 
-    The two state tables are read as stored rather than recomputed from `deliveries`, which
-    is what makes check 20 the guard it is: it recounts the fitting set and fails if the
-    stored totals have gone stale, so a simulator reading them cannot quietly diverge from
-    the ratings that were scored against the same grids.
+    Split out from `load_model` for the snapshot (A107): what gets serialised is the
+    QUERY RESULT, never the built `Model`. `Grid` and `Costs` are constructed objects
+    carrying their own fallback caches, so freezing them would freeze a derived thing and
+    a later change to the A37 walk would be silently ignored by anything reading the file.
+    Storing the inputs and re-running the same construction means the snapshot path and
+    the database path cannot build different models from the same numbers -- there is only
+    one construction, and both go through it.
+    """
+    return {
+        "state_ball_outcomes": [
+            list(r) for r in conn.execute(
+                """
+                select over_no, wicket_bucket, faced, runs_off_bat, dismissals,
+                       runs_0, runs_1, runs_2, runs_3, runs_4, runs_5, runs_6
+                from state_ball_outcomes
+                """
+            )
+        ],
+        "state_runs_remaining": [
+            list(r) for r in conn.execute(
+                """
+                select over_no, wickets, observations, runs_so_far_total, runs_remaining_total
+                from state_runs_remaining
+                """
+            )
+        ],
+        # A22's two denominators, kept apart. A wide is not a ball faced, so its rate is
+        # expressed per ball faced and converted at the point of use.
+        "wide_extras": [
+            float(x) for x in conn.execute(
+                f"""
+                select sum(case when extra_wides > 0 then 1 else 0 end),
+                       sum(extra_wides),
+                       sum(case when extra_wides = 0 then 1 else 0 end),
+                       sum(case when extra_wides = 0 then runs_extras else 0 end)
+                from deliveries where {FITTING_SET}
+                """
+            ).fetchone()
+        ],
+        # [A33/A43] The below-floor population, pooled by band. No individual season here
+        # is rateable and none is being rated: this is the level of a band's unrated
+        # seasons taken together, which 7,144 tail balls estimate perfectly well even
+        # though no single 40-ball season does. Derived, so a revised archive moves it.
+        "unrated_bat": [
+            [band, float(raw)] for band, raw in conn.execute(
+                """
+                select s.batting_band, sum(i.impact_total) / sum(i.balls)
+                  from player_season_impact i
+                  join squad_members s using (franchise_season_id, person_id)
+                 where i.discipline = 'batting' and i.not_rateable_reason is not null
+                   and s.batting_band is not null
+                 group by 1
+                """
+            )
+        ],
+        # Read back out of the view rather than recomputed from it: the centring constant
+        # is `shrunk - centred` for any row of that season, so this is the view's own
+        # answer to its own arithmetic and cannot drift from it (A35's rule about k,
+        # applied to A42's mean).
+        #
+        # [A71] `where shrunk_per_ball is not null` excludes the reputation-only branch,
+        # whose rows carry no per-ball evidence and so no `shrunk`/`centred` values at all
+        # (NULL, not zero -- there is nothing to compute them from). Without this filter,
+        # `distinct` mints a second (discipline, season_year, NULL) row for any season
+        # holding one of those four players, and dict-comprehension iteration order decides
+        # whether the real mean or the NULL one survives -- caught by running the app
+        # rather than by any check, because no validation check reads this query.
+        # `min(...) group by`, not `distinct`. The constant is the same for every row of a
+        # season by construction, but `distinct` cannot collapse float representations that
+        # differ in the last bit, so it returned **163 rows for 38 (discipline, season)
+        # pairs** and a dict comprehension then took whichever happened to arrive last.
+        # Measured, the within-group spread is at most **8.3e-17** -- unobservable in any
+        # rating -- but the CHOICE was arbitrary and depended on Postgres's row order, so
+        # two boots of the same code could build models differing in the last bit. Found by
+        # snapshotting: the file and the database agreed on everything else and disagreed
+        # here on 22 of 38 seasons, purely because the rows arrived in a different order.
+        "season_mean": [
+            [discipline, int(year), float(mean)] for discipline, year, mean in conn.execute(
+                """
+                select discipline, season_year, min(shrunk_per_ball - centred_per_ball)
+                from player_season_rating
+                where shrunk_per_ball is not null
+                group by discipline, season_year
+                """
+            )
+        ],
+    }
+
+
+def build_model(inputs: dict) -> Model:
+    """The one place a `Model` is constructed, from `model_inputs`' plain rows.
+
+    Nothing here is refitted and nothing is hardcoded. The two state tables are read as
+    stored rather than recomputed from `deliveries`, which is what makes check 20 the
+    guard it is: it recounts the fitting set and fails if the stored totals have gone
+    stale, so a simulator reading them cannot quietly diverge from the ratings that were
+    scored against the same grids.
     """
     dist, faced, outs, cells = {}, {}, {}, {}
-    for row in conn.execute(
-        """
-        select over_no, wicket_bucket, faced, runs_off_bat, dismissals,
-               runs_0, runs_1, runs_2, runs_3, runs_4, runs_5, runs_6
-        from state_ball_outcomes
-        """
-    ):
+    for row in inputs["state_ball_outcomes"]:
         over, bucket, n, runs, dismissals = row[0], row[1], row[2], row[3], row[4]
         counts = tuple(row[5:])
         # The mutual-exclusivity assumption, checked rather than asserted in a comment: if a
@@ -144,65 +231,12 @@ def load_model(conn) -> Model:
 
     expected = {
         (over, wickets): Remaining(obs, so_far, remaining)
-        for over, wickets, obs, so_far, remaining in conn.execute(
-            """
-            select over_no, wickets, observations, runs_so_far_total, runs_remaining_total
-            from state_runs_remaining
-            """
-        )
+        for over, wickets, obs, so_far, remaining in inputs["state_runs_remaining"]
     }
-
-    # A22's two denominators, kept apart. A wide is not a ball faced, so its rate is
-    # expressed per ball faced and converted at the point of use.
-    wide_balls, wide_runs, balls_faced, extras_on_faced = conn.execute(
-        f"""
-        select sum(case when extra_wides > 0 then 1 else 0 end),
-               sum(extra_wides),
-               sum(case when extra_wides = 0 then 1 else 0 end),
-               sum(case when extra_wides = 0 then runs_extras else 0 end)
-        from deliveries where {FITTING_SET}
-        """
-    ).fetchone()
-
-    # [A33/A43] The below-floor population, pooled by band. No individual season here is
-    # rateable and none is being rated: this is the level of a band's unrated seasons taken
-    # together, which 7,144 tail balls estimate perfectly well even though no single 40-ball
-    # season does. Derived, so a revised archive moves it.
-    unrated_bat = {
-        band: float(raw)
-        for band, raw in conn.execute(
-            """
-            select s.batting_band, sum(i.impact_total) / sum(i.balls)
-              from player_season_impact i
-              join squad_members s using (franchise_season_id, person_id)
-             where i.discipline = 'batting' and i.not_rateable_reason is not null
-               and s.batting_band is not null
-             group by 1
-            """
-        )
-    }
-
-    # Read back out of the view rather than recomputed from it: the centring constant is
-    # `shrunk - centred` for any row of that season, so this is the view's own answer to
-    # its own arithmetic and cannot drift from it (A35's rule about k, applied to A42's mean).
-    #
-    # [A71] `where shrunk_per_ball is not null` excludes the reputation-only branch, whose
-    # rows carry no per-ball evidence and so no `shrunk`/`centred` values at all (NULL, not
-    # zero - there is nothing to compute them from). Without this filter, `distinct` mints
-    # a second (discipline, season_year, NULL) row for any season holding one of those four
-    # players, and dict-comprehension iteration order decides whether the real mean or the
-    # NULL one survives - caught by running the app rather than by any check, because no
-    # validation check reads this query.
-    season_mean = {
-        (discipline, year): float(mean)
-        for discipline, year, mean in conn.execute(
-            """
-            select distinct discipline, season_year, shrunk_per_ball - centred_per_ball
-            from player_season_rating
-            where shrunk_per_ball is not null
-            """
-        )
-    }
+    wide_balls, wide_runs, balls_faced, extras_on_faced = inputs["wide_extras"]
+    unrated_bat = {band: raw for band, raw in inputs["unrated_bat"]}
+    season_mean = {(discipline, year): mean
+                   for discipline, year, mean in inputs["season_mean"]}
 
     return Model(
         dist=dist, faced=faced, outs=outs,
@@ -212,6 +246,11 @@ def load_model(conn) -> Model:
         extras_rate=extras_on_faced / balls_faced,
         unrated_bat=unrated_bat, season_mean=season_mean,
     )
+
+
+def load_model(conn) -> Model:
+    """Fetch and build in one call -- every existing caller's own entry point, unchanged."""
+    return build_model(model_inputs(conn))
 
 
 def tilt(probs: tuple[float, ...], values: tuple[float, ...],

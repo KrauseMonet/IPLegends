@@ -4,6 +4,11 @@
 __pycache__/
 .git/
 data/
+# [A107] The one file in data/ the deployment needs: without it the function silently falls
+# back to querying the database on every cold start, which is the exact 7.5s this replaced
+# -- and it would LOOK fine, because the fallback works. `vercel.json`'s own `includeFiles`
+# names it too; this exception is what stops it being stripped before that can matter.
+!data/deck_snapshot.json.gz
 tests/
 validation/
 migrations/

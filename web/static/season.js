@@ -62,7 +62,13 @@ function renderSavePrompt(d){
   const host = $('#savePrompt');
   if (!host) return;
   const signedIn = !!(ME && ME.account_id);
-  host.innerHTML = signedIn ? '' : `
+  // The tip line shows to EVERYONE who finished a season, signed in or not -- it is a
+  // separate ask from the account one, and someone who already has an account is if
+  // anything the likelier person to chip in.
+  const tip = tipsEnabled()
+    ? `<p class="tip-inline">Enjoying this? It is free and stays free —
+         <button onclick="openTipModal()">leave a tip</button> if you feel like it.</p>` : '';
+  host.innerHTML = (signedIn ? '' : `
     <div class="save-prompt">
       <span class="sp-text">
         <b>Keep this season</b>
@@ -71,7 +77,7 @@ function renderSavePrompt(d){
           card you can come back to.</span>
       </span>
       <button class="act lead" onclick="openAuthModal('register')">Save my career</button>
-    </div>`;
+    </div>`) + tip;
 }
 
 async function maybeSaveSeason(d){

@@ -1212,3 +1212,39 @@ body.has-ground{
   font-weight:800;color:var(--ink);letter-spacing:.01em}
 .save-prompt .sp-text span{display:block;font-size:13.5px;color:var(--ink-3);margin-top:3px}
 .save-prompt .act{flex:none}
+
+/* --- tips ---------------------------------------------------------------------------------
+   Deliberately warmer and softer than the sign-in window: that one is asking for a commitment
+   and leans on the gold CTA language, this one is asking for a favour and should read as an
+   invitation you can decline without noticing. */
+.tip-frame{max-width:420px;padding:0;overflow:hidden}
+.tip-hero{padding:28px 30px 22px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(245,184,61,.09),transparent)}
+.tip-eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:.32em;text-transform:uppercase;
+  color:var(--gold);font-weight:600}
+.tip-title{font-family:var(--display);font-size:34px;font-weight:400;line-height:1;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--ink);margin:12px 0 12px}
+.tip-sub{font-size:13.5px;line-height:1.6;color:var(--ink-3);margin:0}
+.tip-body{padding:24px 30px 28px;text-align:center}
+/* White plate behind the code on purpose: a UPI QR is often photographed off this screen by
+   a second phone, and inverting it for the dark theme trades scan reliability for styling. */
+.tip-qr{display:block;margin:0 auto 20px;border-radius:6px;background:#fff;padding:10px;
+  width:188px;height:188px}
+.tip-id{display:flex;align-items:center;gap:10px;justify-content:center;flex-wrap:wrap;
+  padding:12px 14px;border:1px dashed var(--line-strong);border-radius:4px}
+.tip-id-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3)}
+.tip-id code{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--gold-2)}
+.tip-id .act{padding:7px 14px;font-size:11px}
+.tip-open{display:block;margin-top:16px;text-align:center;text-decoration:none}
+.tip-note{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--ink-3);
+  margin:14px 0 0;line-height:1.6}
+.imprint a.tip-foot{color:var(--gold)}
+
+/* The post-season ask, kept visually quieter than the save-career prompt beside it -- one is
+   the thing we want people to do, the other is a favour. */
+.tip-inline{margin:14px auto 0;max-width:640px;text-align:center;font-size:13.5px;
+  color:var(--ink-3)}
+.tip-inline button{font:inherit;color:var(--gold);background:none;border:0;padding:0;
+  cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.tip-inline button:hover{color:var(--gold-2)}

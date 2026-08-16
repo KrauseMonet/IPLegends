@@ -53,35 +53,34 @@
   </div>
 
   <!-- ============ PROFILE ============ -->
-  <section id="profile">
+  <!-- The two lists here ARE the Orange Cap and the Purple Cap -- the IPL's own real
+       season-long awards -- so they are named and coloured as such rather than as two
+       generic "top N" tables. --cap-orange/--cap-purple already existed as tokens for
+       exactly this reason; nothing new was invented to make this page louder. -->
+  <section id="profile" class="prose-page">
     <div class="report">
-      <div class="over-line">PLAYER CARD</div>
+      <div class="over-line">Player card</div>
       <div class="call" id="profileUsername"></div>
     </div>
 
-    <div class="folio" style="grid-template-columns:1fr 1fr">
-      <div class="col">
-        <div class="col-head"><span>Career</span></div>
-        <div class="ledger" style="grid-template-columns:repeat(2,1fr);padding:22px">
-          <div><b id="profileGames">–</b><span>GAMES PLAYED</span></div>
-          <div><b id="profileTitles">–</b><span>TITLES WON</span></div>
-        </div>
-      </div>
+    <div class="career-band">
+      <div><b id="profileGames">–</b><span>Games played</span></div>
+      <div><b id="profileTitles">–</b><span>Titles won</span></div>
+      <div><b id="profileRate">–</b><span>Title rate</span></div>
+    </div>
 
-      <div class="col">
-        <div class="col-head"><span>Top scorers</span></div>
-        <div id="profileBatters" class="col-scroll"></div>
+    <div class="caps">
+      <div class="cap-col orange">
+        <div class="cap-head"><span class="dot"></span>Orange Cap<em>most runs</em></div>
+        <div id="profileBatters"></div>
+      </div>
+      <div class="cap-col purple">
+        <div class="cap-head"><span class="dot"></span>Purple Cap<em>most wickets</em></div>
+        <div id="profileBowlers"></div>
       </div>
     </div>
 
-    <div class="folio" style="grid-template-columns:1fr;margin-top:20px">
-      <div class="col">
-        <div class="col-head"><span>Top wicket-takers</span></div>
-        <div id="profileBowlers" class="col-scroll"></div>
-      </div>
-    </div>
-
-    <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
+    <div class="foot-actions" style="justify-content:center;padding:34px 0 30px">
       <a class="act" href="/">Home</a>
     </div>
   </section>

@@ -1036,3 +1036,56 @@ body.has-ground{
 #roomDealLabel.mine{color:var(--ink-2);font-size:12px;letter-spacing:.14em;
   text-transform:uppercase}
 #roomDealLabel.mine::before{display:none}
+
+/* --- the player card -----------------------------------------------------------------------
+   Two problems, one cause. The Career panel held two small tiles inside a box sized for far
+   more, so the top third of the page was empty; and both leaderboards rendered 710 runs and
+   378 runs at identical weight, so the ranking was carried entirely by row order.
+
+   The lists are named for what they ARE -- the Orange Cap and the Purple Cap, the IPL's own
+   season-long awards, whose colours already existed as --cap-orange/--cap-purple. A bar
+   behind each name makes the gaps legible at a glance; the figure stays for anyone reading
+   properly. Nothing was invented to make this louder, it just stopped hiding what it had. */
+
+.career-band{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:34px 0 0;
+  background:var(--line);border-top:2px solid var(--gold);border-bottom:1px solid var(--line)}
+.career-band div{background:var(--bg);padding:26px 20px;text-align:center}
+.career-band b{display:block;font-family:var(--display);font-size:clamp(44px,6vw,68px);
+  font-weight:400;line-height:.9;color:var(--gold)}
+.career-band span{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:12px}
+
+.caps{display:grid;grid-template-columns:1fr 1fr;gap:44px;margin-top:44px}
+@media (max-width:760px){.caps{grid-template-columns:1fr;gap:34px}}
+.cap-head{display:flex;align-items:center;gap:10px;font-family:var(--sans);font-size:15px;
+  font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);
+  padding-bottom:12px;border-bottom:1px solid var(--line)}
+.cap-head em{font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+  color:var(--ink-3);font-weight:400;margin-left:auto}
+.cap-head .dot{width:11px;height:11px;border-radius:50%;flex:none}
+.cap-col.orange .dot{background:var(--cap-orange);box-shadow:0 0 10px rgba(201,122,53,.8)}
+.cap-col.purple .dot{background:var(--cap-purple);box-shadow:0 0 10px rgba(143,102,184,.8)}
+
+/* Each row is its own bar: the fill sits behind the text rather than beside it, so a name
+   is never pushed around by how many runs it has. */
+.cap-row{position:relative;display:flex;align-items:center;gap:12px;padding:13px 12px;
+  border-bottom:1px dashed var(--line);overflow:hidden}
+.cap-row .bar{position:absolute;inset:0 auto 0 0;z-index:0;border-radius:0 3px 3px 0;
+  transition:width .5s cubic-bezier(.3,1,.4,1)}
+.cap-col.orange .bar{background:linear-gradient(90deg,rgba(201,122,53,.30),rgba(201,122,53,.07))}
+.cap-col.purple .bar{background:linear-gradient(90deg,rgba(143,102,184,.30),rgba(143,102,184,.07))}
+.cap-row .rk{position:relative;z-index:1;font-family:var(--mono);font-size:11px;
+  font-weight:700;color:var(--ink-3);width:16px;flex:none}
+.cap-row .nm{position:relative;z-index:1;font-size:15.5px;font-weight:650;color:var(--ink-2)}
+.cap-row .val{position:relative;z-index:1;margin-left:auto;font-family:var(--mono);
+  font-size:13px;font-weight:700;color:var(--ink-2);white-space:nowrap}
+
+/* Only the leader is dressed up -- a cap has one holder, and if every row were gold the
+   ranking would read as a list again. */
+.cap-row.lead{padding:17px 12px}
+.cap-row.lead .nm{font-size:19px;font-weight:800;color:var(--ink)}
+.cap-row.lead .val{font-size:15px}
+.cap-col.orange .cap-row.lead .nm,.cap-col.orange .cap-row.lead .val{color:var(--cap-orange)}
+.cap-col.purple .cap-row.lead .nm,.cap-col.purple .cap-row.lead .val{color:var(--cap-purple)}
+.cap-row.lead .rk{color:var(--ink)}
+.cap-empty{padding:22px 12px;font-size:14.5px;color:var(--ink-3);line-height:1.6}

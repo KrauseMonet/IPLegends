@@ -3,26 +3,33 @@
 // room, migration 027). Read-only -- nothing here writes anything; the save hooks live
 // in season.js/room.js instead, right where a game actually completes.
 
-function leaderRowHtml(rank, r, unit){
-  return `<div class="fx">
-    <span class="wl">${rank}</span>
-    <span>${r.name}</span>
-    <span class="sc">${r.total} ${unit}</span>
-  </div>`;
+// A row is a bar: width is this player's share of the LEADER's total, so the gap between
+// first and fifth is visible without reading a single number. Guarded against a zero max
+// (a saved game where nobody scored) rather than dividing by it.
+function capRows(rows, unit){
+  if (!rows.length){
+    return '<div class="cap-empty">Play and save a game to start filling this.</div>';
+  }
+  const max = Math.max(...rows.map(r => r.total)) || 1;
+  return rows.map((r, i) => `
+    <div class="cap-row${i === 0 ? ' lead' : ''}">
+      <span class="bar" style="width:${Math.max(4, Math.round(100 * r.total / max))}%"></span>
+      <span class="rk">${i + 1}</span>
+      <span class="nm">${r.name}</span>
+      <span class="val">${r.total} ${unit}</span>
+    </div>`).join('');
 }
 
 function render(p){
   $('#profileUsername').textContent = '@' + p.username;
   $('#profileGames').textContent = p.games_played;
   $('#profileTitles').textContent = p.titles_won;
-
-  $('#profileBatters').innerHTML = p.top_batters.length
-    ? p.top_batters.map((r, i) => leaderRowHtml(i + 1, r, 'runs')).join('')
-    : '<div class="note">Play and save a game to see your top scorers here.</div>';
-
-  $('#profileBowlers').innerHTML = p.top_bowlers.length
-    ? p.top_bowlers.map((r, i) => leaderRowHtml(i + 1, r, 'wkts')).join('')
-    : '<div class="note">Play and save a game to see your top wicket-takers here.</div>';
+  // Derived, not stored -- and a dash rather than a fabricated 0% before any game exists,
+  // the same "no evidence is a dash" convention the ratings use (A33/A43).
+  $('#profileRate').textContent = p.games_played
+    ? Math.round(100 * p.titles_won / p.games_played) + '%' : '–';
+  $('#profileBatters').innerHTML = capRows(p.top_batters, 'runs');
+  $('#profileBowlers').innerHTML = capRows(p.top_bowlers, 'wkts');
 }
 
 async function boot(){

@@ -109,7 +109,35 @@ def _load_unrated(conn) -> dict[int, list]:
 app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
 
 STATIC = pathlib.Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+class _CachedStatic(StaticFiles):
+    """StaticFiles with a Cache-Control, which it does not set on its own.
+
+    Without one every asset revalidates on EVERY page load. The 304s are cheap in bytes and
+    not at all cheap in time: this is a multi-page app, so each navigation re-requests the
+    whole set -- stylesheet, four or five scripts, the fonts, the ground -- and each one
+    costs a round trip before the page can paint. Diagnosed from exactly that, not guessed.
+
+    Two tiers, split on how the file changes. Fonts and images are content that only ever
+    changes by being replaced under a new name, so they get a year and `immutable` (which
+    also tells the browser not to revalidate even on a manual reload). CSS and JS change on
+    every deploy and are NOT content-hashed here, so a year would strand people on old code;
+    five minutes removes the per-navigation round trip while keeping a deploy visible about
+    as fast as anyone notices.
+    """
+
+    IMMUTABLE = (".woff2", ".woff", ".ttf", ".jpg", ".jpeg", ".png", ".webp", ".svg", ".ico")
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        lowered = path.lower()
+        if lowered.endswith(self.IMMUTABLE):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif lowered.endswith((".css", ".js")):
+            response.headers["Cache-Control"] = "public, max-age=300"
+        return response
+
+
+app.mount("/static", _CachedStatic(directory=STATIC), name="static")
 
 
 # A request that can't get the database (a dead/very slow connect) or can't get a row

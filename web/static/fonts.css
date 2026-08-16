@@ -1,0 +1,27 @@
+/* --- self-hosted faces ---------------------------------------------------------------------
+   These were loaded from fonts.googleapis.com on all ten pages, which put TWO extra origins
+   in the critical path of every render: a blocking stylesheet on googleapis, then the files
+   themselves on gstatic, each needing its own DNS lookup and TLS handshake before a glyph
+   could paint. Served from here they are same-origin, multiplexed over the connection the
+   page already has, and cached under our own headers.
+
+   ONE VARIABLE FILE PER FAMILY. Google's css2 API hands a modern browser a separate @font-face
+   per weight, but every one of those URLs points at the same variable font -- the four
+   "Archivo weights" first pulled here were byte-identical (md5-checked), i.e. one file
+   fetched four times. Declaring a weight RANGE instead means Archivo 400/600/700/800 and the
+   in-between values this stylesheet actually uses (500, 650, 750) all come from a single
+   34 KB download, and are genuinely interpolated rather than synthesised.
+
+   Also trimmed: Archivo 900, requested but used nowhere; and every subset except latin --
+   Google's CSS declared 36 source URLs across a dozen scripts this site never sets. All
+   three families are OFL, so self-hosting is permitted.
+--------------------------------------------------------------------------------------- */
+@font-face{font-family:'Archivo';font-style:normal;font-weight:400 800;
+  font-display:swap;src:url('/static/fonts/Archivo.woff2') format('woff2-variations');
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400 700;
+  font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2-variations');
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Anton';font-style:normal;font-weight:400;
+  font-display:swap;src:url('/static/fonts/Anton.woff2') format('woff2-variations');
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}

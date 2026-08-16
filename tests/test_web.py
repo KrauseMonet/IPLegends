@@ -120,6 +120,18 @@ def walk(seed: int, chooser=_spread) -> sess.Session:
     return s
 
 
+def walk_partial(seed: int, picks: int, chooser=_spread) -> sess.Session:
+    """`walk` but stopping after `picks` picks, so tests that need a draft IN PROGRESS
+    (a live deal still on offer) have one."""
+    s = sess.replay(DECK, seed, ())
+    while len(s.picks) < picks:
+        i = chooser(s.deal.options, len(s.picks))
+        chosen = s.deal.options[i]
+        slot = min(chosen.slots & _open_slots(s))
+        s = sess.replay(DECK, seed, s.moves + (sess.Pick(i, slot),))
+    return s
+
+
 # --- the state string -------------------------------------------------------------------
 
 @pytest.mark.parametrize("moves", [
@@ -530,3 +542,35 @@ def test_reposition_state_round_trips():
     moves = (sess.Pick(0, 3), sess.Reposition(3, 12), sess.Reposition(1, 2))
     state = sess.encode(2, moves)
     assert sess.decode(state) == (2, moves)
+
+
+def test_repositioning_does_not_reroll_the_deal():
+    """Reported live: rearranging your batting order silently dealt a brand-new team, so
+    the squad you were mid-way through choosing from vanished.
+
+    `RepositionRequested` was caught inside the deal loop and ended in `continue`, which
+    fell straight into `rng.choice(pool)` and drew a fresh franchise-season. A REROLL is
+    a request for a different deal; a reposition is not, and `REPOSITIONS_ALLOWED`'s own
+    comment already said so ("a reposition touches no RNG")."""
+    s = walk_partial(7, picks=3)
+    before = s.deal.fs_id
+    # A MOVE into an open slot rather than a swap -- a swap additionally requires both
+    # cards to be eligible for each other's position, which is a rule about repositioning
+    # and not what is on trial here.
+    open_now = _open_slots(s)
+    move = next(((i + 1, to) for i, c in enumerate(s.order) if c is not None
+                 for to in sorted(c.slots & open_now)), None)
+    assert move is not None, "need a placed pick with an open slot to move into"
+    moved = sess.replay(DECK, 7, s.moves + (sess.Reposition(*move),))
+    assert moved.deal.fs_id == before, (
+        f"reposition re-dealt: was fs {before}, now fs {moved.deal.fs_id}"
+    )
+
+
+def test_a_reroll_still_does_change_the_deal():
+    """The other side of the same fix -- making a reposition keep its deal must not make
+    a reroll keep its own, which is the whole point of a reroll."""
+    s = walk_partial(7, picks=2)
+    before = s.deal.fs_id
+    rerolled = sess.replay(DECK, 7, s.moves + (sess.Reroll("team"),))
+    assert rerolled.deal.fs_id != before, "reroll no longer deals a different team"

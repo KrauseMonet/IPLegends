@@ -119,7 +119,6 @@ function render(s){
   // opens exactly as it always did.
   const modeSuffix = DRAFT_MODE === 'memory' ? '?mode=memory' : '';
   history.replaceState(null, '', '#' + s.state + modeSuffix);
-  $('#seedPill').textContent = 'draft no. ' + s.state.split('-')[0];
   $('#pickCount').textContent = `${s.picks_made}/${s.picks_total}`;
   $('#pickBig').textContent = s.picks_made;
   $('#oversLine').textContent = `${s.overseas_taken} of ${s.overseas_cap} overseas`;

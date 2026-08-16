@@ -622,8 +622,17 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         served = None
         empty_attempts = 0
         pool = deck.fs_ids
+        # `fs_id is None` means "this attempt needs a fresh deal". A REROLL clears it, so
+        # the next attempt draws again; a REPOSITION deliberately leaves it set, so the
+        # same franchise-season is re-offered with its candidates recomputed against the
+        # order the reposition just changed. Without this the reposition's own `continue`
+        # fell into `rng.choice(pool)` and dealt a brand-new team -- rearranging your
+        # batting order silently threw away the squad you were looking at, and broke the
+        # invariant stated on REPOSITIONS_ALLOWED above ("a reposition touches no RNG").
+        fs_id = None
         for attempt in range(REDRAW_CAP if guarantee else 1):
-            fs_id = rng.choice(pool)
+            if fs_id is None:
+                fs_id = rng.choice(pool)
             pool = deck.fs_ids
             cards = deck.cards_by_fs.get(fs_id, ())
             if require_legal:
@@ -639,6 +648,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
                 ]
             if not candidates:
                 empty_attempts += 1
+                fs_id = None      # this squad has nothing to offer -- deal a different one
                 continue
             state = DraftState(
                 picks=tuple(picks), order=tuple(order), impact=impact,
@@ -657,6 +667,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
                     narrowed = [f for f in deck.fs_ids if f != fs_id]
                 if narrowed:
                     pool = narrowed
+                fs_id = None      # a reroll is a request for a DIFFERENT deal
                 continue
             except RepositionRequested as reposition:
                 result.player_repositions += 1

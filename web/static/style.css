@@ -995,3 +995,44 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
 .col-head{padding:14px 4px;border-bottom:1px solid var(--line)}
 .col-head:first-child{padding-top:12px}
 .folio{gap:30px}
+
+
+/* --- home keeps the ground behind it -------------------------------------------------------
+   The photo was pulled globally during the redesign because on a WORKING screen (a draft, a
+   scorecard) it was mud: scrimmed hard enough to keep text legible, it added no readable
+   detail while dragging every panel toward one mid-tone. On HOME it is doing a different
+   job -- atmosphere behind a headline, with almost no dense UI over it -- so it comes back
+   here and stays off everywhere else. `body.has-ground` is set by index.html alone. */
+body.has-ground{
+  background-image:
+    linear-gradient(180deg, rgba(5,11,26,.86) 0%, rgba(5,11,26,.66) 34%, rgba(5,11,26,.80) 68%, rgba(5,11,26,.95) 100%),
+    radial-gradient(1200px 620px at 78% -12%, rgba(245,184,61,.12), transparent 62%),
+    url('/static/stadium-bg.jpg');
+  background-size:auto,auto,cover;
+  background-position:0 0,0 0,center top;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+}
+
+/* --- column titles, and whose turn it is ----------------------------------------------------
+   `.col-head` was 10px mono at .2em tracking in --ink-3, the dimmest ink on the palette --
+   a caption whispering the name of the thing under it. These are the labels that tell you
+   what each third of the screen IS, so they get the body face with real weight and enough
+   contrast to be read rather than deciphered. */
+.col-head{font-family:var(--sans);font-size:12px;font-weight:800;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-2)}
+.col-head em{color:var(--gold);font-family:var(--mono);font-size:11px;font-weight:700}
+
+/* Whose turn it is, in a room. This is the single most time-sensitive fact on the screen --
+   everyone is waiting on it -- and it rendered at the same 10px as every other caption.
+   The gold and the pulse mark it as live rather than as a heading that happens to change. */
+#roomDealLabel{font-family:var(--sans);font-size:15px;font-weight:800;letter-spacing:.04em;
+  text-transform:none;color:var(--gold);display:flex;align-items:center;gap:9px}
+#roomDealLabel::before{content:"";width:7px;height:7px;border-radius:50%;
+  background:var(--gold);flex:none;
+  box-shadow:0 0 0 0 rgba(245,184,61,.65);animation:livePulse 2s infinite}
+/* On your OWN turn the label reads "Dealt to you" and the urgency belongs to the timer
+   instead, so the marker stands down. */
+#roomDealLabel.mine{color:var(--ink-2);font-size:12px;letter-spacing:.14em;
+  text-transform:uppercase}
+#roomDealLabel.mine::before{display:none}

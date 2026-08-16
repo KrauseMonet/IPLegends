@@ -292,6 +292,7 @@ function renderRoomDraft(r){
     // My turn: the deal (with options) is mine, and my own order sheet is what's
     // useful to see while I decide -- unchanged from before the turn-based redesign.
     $('#roomDealLabel').textContent = 'Dealt to you';
+    $('#roomDealLabel').classList.add('mine');   // your own turn: the timer carries the urgency
     $('#roomOrderLabel').textContent = 'Batting order';
     showRoomDeal(me.deal, me.done ? 'Your twelve is set' : '—');
     const blocked = (me.deal && me.deal.blocked) || [];
@@ -338,7 +339,8 @@ function renderRoomDraft(r){
     const showMine = ROOM_VIEW_MINE && !!me;
     const shown = showMine ? me : active;
 
-    $('#roomDealLabel').textContent = active ? `${active.name}'s turn` : 'Waiting…';
+    $('#roomDealLabel').textContent = active ? `${active.name} is picking` : 'Waiting…';
+    $('#roomDealLabel').classList.remove('mine');
     $('#roomOptionsLabel').textContent = '';
     $('#roomOrderLabel').textContent = showMine ? 'Your team so far'
       : (active ? `${active.name}'s team so far` : 'Batting order');

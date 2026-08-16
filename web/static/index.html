@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="has-ground">
 <div class="sheet">
   <div class="rig" aria-hidden="true">
     <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
@@ -75,7 +75,6 @@
         </div>
         <div class="actions">
           <button class="act lead" onclick="newDraft(this)">Begin a draft</button>
-          <button class="act" onclick="promptSeed(this)">Draft number</button>
           <button class="act" onclick="location.href='/rooms'">Play with friends</button>
         </div>
         <div class="colophon" id="homeStats"></div>
@@ -159,7 +158,7 @@
 // how good he was. A pure display choice: the server always computes everything either
 // way (SPEC 11's own stance -- the client decides what to show, never what to compute).
 // Chosen here on home, then carried to /draft as a hash decoration on navigation --
-// see newDraft/openSeed below.
+// see newDraft below.
 let DRAFT_MODE = 'stat';
 
 function setDraftMode(mode){
@@ -213,19 +212,10 @@ async function newDraft(ctrl){
     } catch(e){ slip(e.message); }
   });
 }
-function promptSeed(ctrl){
-  const v = prompt('Enter a draft number. The same number always deals the same squads in '
-    + 'the same order, so share it and a friend faces exactly your draft.');
-  if (v !== null && v.trim() !== '') openSeed(v.trim(), ctrl);
-}
-async function openSeed(v, ctrl){
-  await busyClick(ctrl, 'Dealing…', async () => {
-    try {
-      const s = await api('/api/draft?seed=' + encodeURIComponent(v), {method:'POST'});
-      location.href = '/draft#' + s.state + (DRAFT_MODE === 'memory' ? '?mode=memory' : '');
-    } catch(e){ slip(e.message); }
-  });
-}
+// The "Draft number" button and its `openSeed` helper are both gone -- the feature served
+// no purpose while there is nothing to compare a shared draft against. `openSeed` was the
+// button's only caller: the pre-split `/#seed-moves` link path below forwards with
+// `location.replace` and never went through it. `POST /api/draft?seed=` is untouched.
 
 boot().then(() => {
   const [h] = location.hash.slice(1).split('?');

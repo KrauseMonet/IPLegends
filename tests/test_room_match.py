@@ -854,3 +854,46 @@ def test_room_journey_accumulates_across_every_match_a_seat_actually_played(conn
     assert len(champion_journeys) == 1
     assert champion_journeys[0].played == 2
     assert all(j.played in (1, 2) for j in journeys)
+
+
+# --- scoreboard abbreviations -------------------------------------------------------------
+
+def test_short_name_does_not_mangle_a_historical_squad_or_a_one_word_player():
+    """Both symptoms of one bug, seen live on a room scorecard: "Chennai Super Kings 2010"
+    printed as CSK2 (the season's leading digit taken as a word initial, then truncated at
+    four) and "Krause" printed as K. Solo's own `game.season._abbrev` already renders a
+    historical squad as "CSK 2010"; a room printing the same squad differently was the
+    defect, so these assert the room now agrees with it."""
+    from web.room_match import _short_name
+    assert _short_name("Chennai Super Kings 2010", "pid") == "CSK 2010"
+    assert _short_name("Rajasthan Royals 2011", "pid") == "RR 2011"
+    assert _short_name("Krause", "pid") == "KRA"
+    # A normal two-word name still abbreviates to initials, which was never broken.
+    assert _short_name("Bob Smith", "pid") == "BS"
+
+
+def test_short_name_agrees_with_solos_own_abbreviation():
+    """The two paths must not drift: whatever solo prints for a historical side, a room
+    printing the same side has to print too."""
+    from game.season import _abbrev
+    from web.room_match import _short_name
+    for franchise, year in [("Chennai Super Kings", 2010), ("Mumbai Indians", 2018),
+                            ("Rajasthan Royals", 2011)]:
+        solo = _abbrev(franchise, year)
+        assert _short_name(f"{franchise} {year}", "pid") == solo, franchise
+
+
+def test_sides_actually_use_the_fixed_abbreviation(monkeypatch):
+    """Guards the CALL SITE, not just the helper. The two tests above pass against a
+    `_sides_with_pid` that still builds its own initials inline -- checked, and they did --
+    so on their own they protect a function nothing has to call. This one asserts the
+    `Side` that reaches the scorecard carries the fixed short name."""
+    from web import room_match, rooms as rooms_mod
+
+    def fake_room_sides(room, deck):
+        return [("p1", rooms_mod.RoomPlayer("p1", "Krause", False), [], None),
+                ("p2", rooms_mod.RoomPlayer("p2", "Chennai Super Kings 2010", True), [], None)]
+
+    monkeypatch.setattr(rooms_mod, "room_sides", fake_room_sides)
+    shorts = {pid: side.short for pid, side in room_match._sides_with_pid(None, None)}
+    assert shorts == {"p1": "KRA", "p2": "CSK 2010"}, shorts

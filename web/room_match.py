@@ -157,11 +157,34 @@ class RoomMatchReplay:
     awaiting_start: bool = False
 
 
+def _short_name(name: str, pid: str) -> str:
+    """The scoreboard abbreviation for a seat.
+
+    The old rule was initials-of-every-word capped at four, which produced two visibly
+    wrong things on the live scorecard. A filler seat's name ends in its season, so
+    "Chennai Super Kings 2010" took the YEAR's leading digit as a word initial and came
+    out "CSK2"; and a one-word player name came out as a single letter, so "Krause"
+    batted as "K". Solo's own `game.season._abbrev` already formats a historical squad
+    correctly ("CSK 2010") -- a room printing the same squad differently was the bug.
+
+    So: hold a trailing four-digit season aside, take initials from the words that are
+    actually words, and fall back to the first three characters when there is only one
+    of them.
+    """
+    words = name.split()
+    year = words.pop() if words and words[-1].isdigit() and len(words[-1]) == 4 else None
+    letters = "".join(w[0] for w in words if w[:1].isalpha())
+    if len(letters) < 2 and words:
+        letters = words[0][:3]        # "Krause" -> "Kra", never "K"
+    short = letters.upper()[:4] or pid[:4].upper()
+    return f"{short} {year}" if year else short
+
+
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
     out = []
     for pid, p, order, impact in rooms.room_sides(room, deck):
-        short = "".join(w[0] for w in p.name.split())[:4].upper() or pid[:4].upper()
-        out.append((pid, Side(name=p.name, short=short, xi=order, impact=impact)))
+        out.append((pid, Side(name=p.name, short=_short_name(p.name, pid),
+                              xi=order, impact=impact)))
     return out
 
 

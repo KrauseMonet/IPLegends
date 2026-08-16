@@ -801,9 +801,13 @@ def test_the_turn_does_not_advance_before_the_timer_expires(conn, monkeypatch):
     assert replay.pending_seat_id == host_id, "the host picks first (join order, round 0)"
 
 
-def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_the_active_seat(
+def test_the_timer_auto_picks_a_random_eligible_candidate_for_the_active_seat(
     conn, monkeypatch,
 ):
+    """A103: the timeout used to take the LOWEST-rated candidate, and this test asserted
+    exactly that. The rule is now a random eligible one, so what is left to pin is that the
+    pick is LEGAL and that the turn advances -- which is the part that actually has to hold
+    however the card is chosen."""
     clock = {"t": 1000.0}
     monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
 
@@ -814,7 +818,6 @@ def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_the_active
     replay = rooms.replay_room(room, DECK)
     assert replay.pending_seat_id == host_id
     fs_id, candidates = replay.pending_deal
-    worst = min(candidates, key=lambda c: c.rating)
 
     clock["t"] += 16   # past the 15s window; nobody has picked
     room = rooms.room_state(conn, room.code, DECK)
@@ -822,14 +825,39 @@ def test_the_timer_auto_picks_the_lowest_rated_eligible_candidate_for_the_active
     assert len(room.moves) == 1, "only the one active (host's) turn should auto-resolve"
     picked_move = room.moves[0]
     assert picked_move["seat"] == host_id
+    assert 0 <= picked_move["index"] < len(candidates), "auto-pick was not one of the deal"
     picked_card = candidates[picked_move["index"]]
-    assert picked_card.person_id == worst.person_id, (
-        "the auto-pick must take the LOWEST-rated eligible candidate, not the best"
-    )
-    assert picked_move["slot"] in picked_card.slots
+    assert picked_move["slot"] in picked_card.slots, "auto-pick placed somewhere illegal"
 
     replay2 = rooms.replay_room(room, DECK)
     assert replay2.pending_seat_id == bob_id, "the turn must advance to the next seat"
+
+
+def test_the_timer_does_not_always_hand_out_the_worst_card(conn, monkeypatch):
+    """The behavioural half of A103, at the level a player actually experiences it. Run the
+    same timeout across several rooms: under the old `min(candidates, key=rating)` rule the
+    worst card came back EVERY time, so this fails outright against it rather than merely
+    becoming unlikely."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
+
+    was_worst = []
+    for _ in range(12):
+        room, host_id = _make_room(conn, "final", timer_seconds=15)
+        rooms.join_room(conn, room.code, "Bob", DECK)
+        room = rooms.start_room(conn, room.code, host_id, DECK)
+
+        replay = rooms.replay_room(room, DECK)
+        _, candidates = replay.pending_deal
+        worst = min(candidates, key=lambda c: c.rating).person_id
+
+        clock["t"] += 16
+        room = rooms.room_state(conn, room.code, DECK)
+        picked = candidates[room.moves[0]["index"]].person_id
+        was_worst.append(picked == worst)
+        clock["t"] += 1   # fresh window for the next room
+
+    assert not all(was_worst), "every timeout still handed out the lowest-rated card"
 
 
 def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch):

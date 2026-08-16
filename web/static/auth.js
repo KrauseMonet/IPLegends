@@ -21,10 +21,27 @@ function renderAuthArea(){
   const el = $('#authArea');
   if (!el) return;
   if (ME && ME.account_id){
-    el.innerHTML = `<a href="/profile" class="auth-link">Hi, ${ME.username}</a>
-      <button class="auth-link" onclick="submitLogout(this)">Sign out</button>`;
+    // Signed in: an identity chip that says where it GOES. "Hi, name" was a greeting, not
+    // a destination -- nothing about it suggested a career page sat behind it.
+    const initial = (ME.username[0] || '?').toUpperCase();
+    el.innerHTML = `
+      <a href="/profile" class="auth-me" title="Your player card">
+        <span class="auth-avatar">${initial}</span>
+        <span class="auth-me-text">
+          <b>${ME.username}</b>
+          <em>Player card →</em>
+        </span>
+      </a>
+      <button class="auth-out" onclick="submitLogout(this)">Sign out</button>`;
   } else {
-    el.innerHTML = `<button class="auth-link" onclick="openAuthModal()">Sign in</button>`;
+    // Signed out: a real button carrying its own reason. "Sign in" alone states a
+    // mechanism and no benefit, which is a poor trade to ask of someone who can already
+    // play the entire game without an account.
+    el.innerHTML = `
+      <button class="auth-cta" onclick="openAuthModal()">
+        <span class="auth-cta-main">Sign in</span>
+        <span class="auth-cta-sub">Save your career</span>
+      </button>`;
   }
 }
 

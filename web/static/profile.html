@@ -48,8 +48,11 @@
     <div class="edition">
       <b>Indian Premier League</b><br>
       <span id="deckPill">…</span>
-      <span id="authArea"></span>
     </div>
+    <!-- Its own masthead slot, not a third line inside `.edition`. Sitting in that block
+         it inherited caption styling and read as more metadata rather than as the one
+         control up here. -->
+    <div id="authArea"></div>
   </div>
 
   <!-- ============ PROFILE ============ -->

@@ -125,15 +125,46 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
     The `is not null` filters matter: a pure bowler who never batted in any saved game
     must never appear in `top_batters` with a manufactured 0 (A23/A71's rule, carried
     into this table by migration 027's own comment)."""
-    account = get_account(conn, account_id)
-    if account is None:
-        raise AccountError(f"no account {account_id!r}")
-
-    games_played, titles_won = conn.execute(
-        "select count(*), count(*) filter (where champion) "
-        "from game_results where account_id = %s",
-        (account_id,),
+    # ONE round trip for the username and every scalar tally, where this used to take
+    # four: `get_account`, a games/titles count, a `totals` aggregate and a `tallies`
+    # aggregate -- all filtered by the same `account_id` over the same two tables. Each
+    # was a separate query and therefore a separate round trip, and a round trip is what
+    # this costs: measured against the real database, one trivial query is 0.52s from here
+    # and the whole of `profile_stats` was 1.56s, so the shape was almost entirely
+    # latency rather than work.
+    #
+    # The child-table sums stay a SCALAR SUBQUERY rather than a join, for the reason the
+    # old `tallies` comment already gave: joining `game_result_players` would multiply the
+    # parent rows and inflate every count beside it. A subquery is evaluated independently,
+    # so the two grains cannot contaminate each other.
+    row = conn.execute(
+        """
+        select
+            (select username from accounts where account_id = %(id)s),
+            count(*),
+            count(*) filter (where gr.champion),
+            coalesce(sum(gr.matches_won), 0),
+            coalesce(sum(gr.matches_won) filter (where gr.source = 'room'), 0),
+            count(*) filter (where gr.champion and gr.source = 'solo'),
+            count(*) filter (where gr.champion and gr.source = 'room'),
+            (select coalesce(sum(sim_bat_runs), 0) from game_result_players grp
+              join game_results g2 on g2.game_result_id = grp.game_result_id
+             where g2.account_id = %(id)s),
+            (select coalesce(sum(sim_bowl_wickets), 0) from game_result_players grp
+              join game_results g2 on g2.game_result_id = grp.game_result_id
+             where g2.account_id = %(id)s)
+        from game_results gr
+        where gr.account_id = %(id)s
+        """,
+        {"id": account_id},
     ).fetchone()
+
+    # `count(*)` over an empty set is 0, not no-row, so `row` is always present -- but the
+    # username subquery is NULL when the account does not exist, which is the real test.
+    if row is None or row[0] is None:
+        raise AccountError(f"no account {account_id!r}")
+    username, games_played, titles_won = row[0], row[1], row[2]
+    totals, tallies = row[3:7], row[7:9]
 
     top_batters = [
         LeaderRow(person_id=pid, name=name, total=total)
@@ -173,33 +204,8 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
     # solo alike; `friend_matches_won` narrows to rooms. The two title counts split on
     # `source` rather than on a stored format, because "friend titles" is defined as every
     # room title -- final, cup and league alike -- which is exactly what source='room' says.
-    totals = conn.execute(
-        """
-        select
-            coalesce(sum(gr.matches_won), 0),
-            coalesce(sum(gr.matches_won) filter (where gr.source = 'room'), 0),
-            count(*) filter (where gr.champion and gr.source = 'solo'),
-            count(*) filter (where gr.champion and gr.source = 'room')
-        from game_results gr
-        where gr.account_id = %s
-        """,
-        (account_id,),
-    ).fetchone() or (0, 0, 0, 0)
-
-    # Runs and wickets live on the child rows, so they are their own aggregate rather than
-    # a join that would multiply the parent counts above.
-    tallies = conn.execute(
-        """
-        select coalesce(sum(grp.sim_bat_runs), 0), coalesce(sum(grp.sim_bowl_wickets), 0)
-        from game_result_players grp
-        join game_results gr on gr.game_result_id = grp.game_result_id
-        where gr.account_id = %s
-        """,
-        (account_id,),
-    ).fetchone() or (0, 0)
-
     return ProfileStats(
-        username=account.username, games_played=games_played, titles_won=titles_won,
+        username=username, games_played=games_played, titles_won=titles_won,
         total_runs=int(tallies[0]), total_wickets=int(tallies[1]),
         matches_won=int(totals[0]), friend_matches_won=int(totals[1]),
         solo_titles=int(totals[2]), friend_titles=int(totals[3]),

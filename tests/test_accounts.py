@@ -89,12 +89,39 @@ class FakeConn:
             return FakeCursor([(sum(pr[2] or 0 for pr in rows),
                                 sum(pr[4] or 0 for pr in rows))])
 
-        if sql_norm.startswith("select count(*), count(*) filter"):
-            (account_id,) = params
+        if sql_norm.startswith("select (select username from accounts"):
+            # profile_stats' merged scalar query: username plus every tally, in one round
+            # trip where there used to be four.
+            #
+            # WHAT THIS CANNOT CHECK, stated because the first version of this comment
+            # claimed the opposite. It said the ordering was mirrored "so a reordering of
+            # one and not the other fails loudly" -- that was asserted, then TESTED by
+            # swapping the solo/room columns in the real query, and all 28 tests still
+            # passed. They would: this fake is a second, independent implementation keyed
+            # on the SQL prefix, so it never reads the real column list and cannot notice
+            # it move. A comment claiming behaviour the code does not have is worse than
+            # no comment (A70), so the claim is deleted rather than softened.
+            #
+            # The real query's own correctness was verified where it can be -- against the
+            # live database, recomputing every field with the four original queries and
+            # comparing (A108). That is the check; this fake only exercises the caller.
+            account_id = params["id"]
+            row = self.rows.get(account_id)
+            username = row[1] if row else None
             mine = [r for r in self.game_results.values() if r[1] == account_id]
-            games_played = len(mine)
-            titles_won = sum(1 for r in mine if r[4])
-            return FakeCursor([(games_played, titles_won)])
+            ids = {r[0] for r in mine}
+            child = [pr for pr in self.game_result_players if pr[0] in ids]
+            return FakeCursor([(
+                username,
+                len(mine),
+                sum(1 for r in mine if r[4]),
+                sum(r[6] or 0 for r in mine),
+                sum(r[6] or 0 for r in mine if r[2] == "room"),
+                sum(1 for r in mine if r[4] and r[2] == "solo"),
+                sum(1 for r in mine if r[4] and r[2] == "room"),
+                sum(pr[2] or 0 for pr in child),
+                sum(pr[4] or 0 for pr in child),
+            )])
 
         if sql_norm.startswith("insert into game_results"):
             # 028 widened this insert; the fake mirrors the real column list so a row

@@ -40,20 +40,31 @@ function render(p){
   $('#profileBowlers').innerHTML = capRows(p.top_bowlers, 'wkts');
 }
 
+// All three requests go out AT ONCE. They used to run strictly in series -- loadMeta,
+// then loadMe, then /api/profile -- which put three full round trips on the critical path
+// before anything rendered, and this page is the only one that did it (every other page
+// fires loadMe fire-and-forget alongside loadMeta).
+//
+// The serial version's own reasoning was that the content "depends entirely on being
+// logged in, so there's nothing useful to show before this resolves." True of the
+// RENDER, and it does not follow that the REQUEST has to wait: `/api/profile` already
+// answers 401 for a signed-out caller, so its own response carries the same fact
+// `loadMe()` was being awaited for. Firing it immediately costs a wasted request in the
+// signed-out case -- who is redirected away anyway -- and saves two round trips in the
+// case that matters.
 async function boot(){
-  const m = await loadMeta();
-  renderDeckStats(m);
-}
+  const meta = loadMeta().then(m => { renderDeckStats(m); });
+  const me = loadMe();
+  const profile = api('/api/profile').catch(err => err);   // 401 handled below, not thrown
 
-boot().then(async () => {
-  await loadMe();   // awaited here, unlike every other page -- this page's own content
-                     // depends entirely on being logged in, so there's nothing useful
-                     // to show before this resolves.
+  await Promise.all([meta, me]);
   if (!ME || !ME.account_id){
     location.href = '/';
     return;
   }
-  try {
-    render(await api('/api/profile'));
-  } catch(e){ slip(e.message); }
-});
+  const p = await profile;
+  if (p instanceof Error){ slip(p.message); return; }
+  render(p);
+}
+
+boot();

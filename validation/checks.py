@@ -71,7 +71,21 @@ STATE_TABLES = {
 # FROM `deliveries`; a room holds seat assignments and move lists, nothing aggregated from
 # a ball bowled. Excluded from `derived` entirely (same treatment as BASE_TABLES) rather
 # than added to STATE_TABLES, which would misstate that check 6 examines them.
-OPERATIONAL_TABLES = {"rooms", "room_players"}
+#
+# [Migrations 026/027, classified 2026-08-16] The accounts feature is the same category and
+# was NOT classified when it landed, so check 6 failed on all three tables -- the trap
+# working, several commits after the fact, and CLAUDE.md's "21 pass, 0 fail" was stale for
+# that whole stretch. `accounts` is an identity; `game_results`/`game_result_players` hold
+# what a PLAYER's own simulated game produced, which comes out of the match engine and
+# never out of `deliveries`. No archive delivery, super over or otherwise, can reach them.
+#
+# Excluding is right HERE and writing an assertion was right for `player_season_impact`,
+# and the difference is not a matter of convenience: check 6 asks "did super over
+# deliveries leak into this aggregate", which is a real question of a table built FROM the
+# archive and a meaningless one of a table that never reads it. Answering a meaningless
+# question would be the vacuous check this project has already had to delete twice.
+OPERATIONAL_TABLES = {"rooms", "room_players",
+                      "accounts", "game_results", "game_result_players"}
 
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
 # for every kind in the archive, so a kind added later cannot fall silently between them.

@@ -471,7 +471,20 @@ uv run python -m validation --match 598027   # one scorecard
 uv run python -m validation --leaderboards   # check 8's lists, for reading by hand
 ```
 
-**21 checks: 21 pass, 0 fail, 0 skip.** Checks 6 and 13 were rewritten for A65/A68 — 6 now asserts the view offers every season that faced or bowled a ball (reverting it to A33's gate fails it), and 13 measures drift on the seasons the offsets are estimated from. The suite went fully green for the first time on
+**21 checks: 21 pass, 0 fail, 0 skip** — restored 2026-08-16, and it had been **20 pass /
+1 fail** for an unknown stretch before that without anyone noticing. **Check 6's trap fired
+for the fourth time**, on `accounts`, `game_results` and `game_result_players`: A102's
+migrations 026/027 added three tables and nobody classified them, so check 6 correctly
+refused to call them verified. They are `OPERATIONAL_TABLES`, the same category migration
+019's `rooms`/`room_players` already established — an account is an identity and a saved
+game result comes out of the match engine, so no archive delivery can reach either, and
+asking "were super overs excluded" of a table that never reads `deliveries` is a question
+with no answer rather than one worth asserting. **The lesson is not the two-line fix.** The
+line above this one said "21 pass, 0 fail" throughout, because it was written when that was
+true and never re-run against a schema that had moved. A recorded result is a claim with a
+date on it, and this one had quietly stopped being about the current database. **Re-run the
+suite when a migration lands, not when a rating changes** — the trap only helps if somebody
+is watching it fire. Checks 6 and 13 were rewritten for A65/A68 — 6 now asserts the view offers every season that faced or bowled a ball (reverting it to A33's gate fails it), and 13 measures drift on the seasons the offsets are estimated from. The suite went fully green for the first time on
 2026-07-31: check 19 came right when the last 26 keepers were filled (A52) and check 21
 when the last 13 nationalities were (A51). Nothing skips: check 6 came off SKIP when
 migration 007 gave it a derived table. **Checks 12, 24 and 25 were rewritten again on

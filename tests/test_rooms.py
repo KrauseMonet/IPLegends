@@ -22,7 +22,11 @@ from __future__ import annotations
 
 import pytest
 
-from etl.feasibility import TWELVE_SIZE, XI_SIZE, Card, Deck, eligible, order_errors
+import random
+
+from etl.feasibility import (
+    TWELVE_SIZE, XI_SIZE, Card, Deck, eligible, order_errors, pick_rational,
+)
 from game.__main__ import viable
 from web import rooms
 
@@ -260,10 +264,16 @@ def _play_room_to_completion(conn, room: rooms.Room, deck: Deck,
         pid = replay.pending_seat_id
         if pid in human_ids:
             fs_id, candidates = replay.pending_deal
-            i = _spread_index(candidates, made[pid])
-            chosen = candidates[i]
             seat = replay.seats[pid]
-            slot = min(chosen.slots & seat.open_slots)
+            # `pick_rational` rather than a spread/naive index. The naive one strands
+            # roughly 7% of rooms (measured, 4 of 60) -- not a bug, but A73's documented
+            # wildcard-optimism gap: the forward check is an OPTIMISTIC bound, and under a
+            # shared pool one seat's picks can strand another. That made every test
+            # asserting `status == "complete"` intermittently red for reasons having
+            # nothing to do with what it was testing. A73 measures `rational` at 0 of
+            # 2,000, and a helper standing in for a player should draft like one anyway.
+            chosen, slot = pick_rational(candidates, rooms._draft_state(seat), random.Random(0))
+            i = next(k for k, c in enumerate(candidates) if c.person_id == chosen.person_id)
             room = rooms.submit_pick(conn, room.code, pid, i, slot, deck)
             made[pid] += 1
         else:

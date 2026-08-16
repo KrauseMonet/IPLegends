@@ -47,6 +47,14 @@ Rerolls and repositions are still deliberately NOT part of a room draft -- uncha
 the prior design, and what keeps `replay_room`'s dealing loop simple (no exception-driven
 pool-narrowing to replicate): every recorded move is a plain index into whatever was
 dealt for that turn, nothing more.
+
+Raised again on 2026-08-16 ("you aren't able to change the batting order in play with
+friends") and confirmed to stay out, so it is a standing choice rather than an oversight
+nobody got to. What it would cost, for whoever weighs it next: a room move would stop
+being a plain index and gain a KIND, and `turn_seat_index` derives whose turn it is from
+the raw `len(room.moves)` -- so a non-pick move in that log silently shifts the snake
+order for every seat, not just the one repositioning. That is the change to plan for, and
+it is why this cannot be a small patch.
 """
 
 from __future__ import annotations

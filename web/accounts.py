@@ -103,6 +103,16 @@ class ProfileStats:
     username: str
     games_played: int
     titles_won: int
+    # Career totals across every saved game. `runs`/`wickets` sum the per-player figures
+    # 027 already stored; the four below need 028's match record. Each is a plain int with
+    # nulls skipped, so a game saved before 028 contributes to the totals it CAN answer
+    # (runs, wickets, titles) and silently sits out the ones it cannot.
+    total_runs: int
+    total_wickets: int
+    matches_won: int
+    friend_matches_won: int
+    solo_titles: int
+    friend_titles: int
     top_batters: list[LeaderRow]
     top_bowlers: list[LeaderRow]
 
@@ -159,14 +169,46 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
         )
     ]
 
+    # One pass for the six career figures. `matches_won` counts EVERY saved game, room and
+    # solo alike; `friend_matches_won` narrows to rooms. The two title counts split on
+    # `source` rather than on a stored format, because "friend titles" is defined as every
+    # room title -- final, cup and league alike -- which is exactly what source='room' says.
+    totals = conn.execute(
+        """
+        select
+            coalesce(sum(gr.matches_won), 0),
+            coalesce(sum(gr.matches_won) filter (where gr.source = 'room'), 0),
+            count(*) filter (where gr.champion and gr.source = 'solo'),
+            count(*) filter (where gr.champion and gr.source = 'room')
+        from game_results gr
+        where gr.account_id = %s
+        """,
+        (account_id,),
+    ).fetchone() or (0, 0, 0, 0)
+
+    # Runs and wickets live on the child rows, so they are their own aggregate rather than
+    # a join that would multiply the parent counts above.
+    tallies = conn.execute(
+        """
+        select coalesce(sum(grp.sim_bat_runs), 0), coalesce(sum(grp.sim_bowl_wickets), 0)
+        from game_result_players grp
+        join game_results gr on gr.game_result_id = grp.game_result_id
+        where gr.account_id = %s
+        """,
+        (account_id,),
+    ).fetchone() or (0, 0)
+
     return ProfileStats(
         username=account.username, games_played=games_played, titles_won=titles_won,
+        total_runs=int(tallies[0]), total_wickets=int(tallies[1]),
+        matches_won=int(totals[0]), friend_matches_won=int(totals[1]),
+        solo_titles=int(totals[2]), friend_titles=int(totals[3]),
         top_batters=top_batters, top_bowlers=top_bowlers,
     )
 
 
 def save_game_result(conn, account_id: int, source: str, natural_key: str,
-                      champion: bool, squad) -> bool:
+                      champion: bool, squad, matches_played=None, matches_won=None) -> bool:
     """True if this call newly saved the game; False if `(account_id, source,
     natural_key)` already existed (idempotent no-op, not an error -- see migration 027's
     own header for why each source's natural_key is what it is).
@@ -179,12 +221,13 @@ def save_game_result(conn, account_id: int, source: str, natural_key: str,
     routes); a member who neither batted nor bowled contributes no row at all."""
     row = conn.execute(
         """
-        insert into game_results (account_id, source, natural_key, champion)
-        values (%s, %s, %s, %s)
+        insert into game_results
+            (account_id, source, natural_key, champion, matches_played, matches_won)
+        values (%s, %s, %s, %s, %s, %s)
         on conflict (account_id, source, natural_key) do nothing
         returning game_result_id
         """,
-        (account_id, source, natural_key, champion),
+        (account_id, source, natural_key, champion, matches_played, matches_won),
     ).fetchone()
     if row is None:
         return False

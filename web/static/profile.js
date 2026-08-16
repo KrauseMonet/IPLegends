@@ -28,6 +28,14 @@ function render(p){
   // the same "no evidence is a dash" convention the ratings use (A33/A43).
   $('#profileRate').textContent = p.games_played
     ? Math.round(100 * p.titles_won / p.games_played) + '%' : '–';
+  const n = v => (v == null ? '–' : v.toLocaleString());
+  $('#totRuns').textContent = n(p.total_runs);
+  $('#totWickets').textContent = n(p.total_wickets);
+  $('#totMatches').textContent = n(p.matches_won);
+  $('#totFriendMatches').textContent = n(p.friend_matches_won);
+  $('#totLeagues').textContent = n(p.solo_titles);
+  $('#totFriendLeagues').textContent = n(p.friend_titles);
+
   $('#profileBatters').innerHTML = capRows(p.top_batters, 'runs');
   $('#profileBowlers').innerHTML = capRows(p.top_bowlers, 'wkts');
 }

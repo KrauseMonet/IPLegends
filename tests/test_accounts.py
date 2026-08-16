@@ -69,6 +69,26 @@ class FakeConn:
             row = self.rows.get(account_id)
             return FakeCursor([(row[0], row[1], row[2])] if row else [])
 
+        if sql_norm.startswith("select coalesce(sum(gr.matches_won), 0)"):
+            (account_id,) = params
+            mine = [r for r in self.game_results.values() if r[1] == account_id]
+            # `or 0` per row, not a default on the column: this is exactly what SQL's
+            # SUM-skips-NULL does, and the point of the pre-028 test is that a null row
+            # contributes nothing rather than a confident zero.
+            return FakeCursor([(
+                sum(r[6] or 0 for r in mine),
+                sum(r[6] or 0 for r in mine if r[2] == "room"),
+                sum(1 for r in mine if r[4] and r[2] == "solo"),
+                sum(1 for r in mine if r[4] and r[2] == "room"),
+            )])
+
+        if sql_norm.startswith("select coalesce(sum(grp.sim_bat_runs), 0)"):
+            (account_id,) = params
+            ids = {r[0] for r in self.game_results.values() if r[1] == account_id}
+            rows = [pr for pr in self.game_result_players if pr[0] in ids]
+            return FakeCursor([(sum(pr[2] or 0 for pr in rows),
+                                sum(pr[4] or 0 for pr in rows))])
+
         if sql_norm.startswith("select count(*), count(*) filter"):
             (account_id,) = params
             mine = [r for r in self.game_results.values() if r[1] == account_id]
@@ -77,7 +97,9 @@ class FakeConn:
             return FakeCursor([(games_played, titles_won)])
 
         if sql_norm.startswith("insert into game_results"):
-            account_id, source, natural_key, champion = params
+            # 028 widened this insert; the fake mirrors the real column list so a row
+            # carries its match record and the aggregate below has something to sum.
+            account_id, source, natural_key, champion, m_played, m_won = params
             conflict = any(
                 r[1] == account_id and r[2] == source and r[3] == natural_key
                 for r in self.game_results.values()
@@ -87,7 +109,8 @@ class FakeConn:
             game_result_id = self._next_game_result_id
             self._next_game_result_id += 1
             self.game_results[game_result_id] = (
-                game_result_id, account_id, source, natural_key, champion)
+                game_result_id, account_id, source, natural_key, champion,
+                m_played, m_won)
             return FakeCursor([(game_result_id,)])
 
         if sql_norm.startswith("insert into game_result_players"):
@@ -331,3 +354,47 @@ def test_profile_stats_never_shows_a_pure_bowler_as_a_batter(conn):
 def test_profile_stats_raises_for_an_unknown_account(conn):
     with pytest.raises(accounts.AccountError):
         accounts.profile_stats(conn, 999)
+
+
+def test_career_totals_split_solo_from_friend_games(conn):
+    """The six career figures. `matches_won` counts every saved game; `friend_matches_won`
+    narrows to rooms; the two title counts split on `source`, since "friend titles" means
+    every ROOM title -- final, cup and league alike -- not a stored format."""
+    acct = accounts.create_account(conn, "tally", "t@example.com", "password123")
+    accounts.seed_person = getattr(conn, "seed_person", None)
+    conn.seed_person("p1", "A Batter")
+    conn.seed_person("p2", "A Bowler")
+    squad = [_SquadEntry("p1", sim_bat_runs=100), _SquadEntry("p2", sim_bowl_wickets=7)]
+
+    # a solo season: won the title, 9 matches won
+    accounts.save_game_result(conn, acct.account_id, "solo", "s1", True, squad,
+                              matches_played=14, matches_won=9)
+    # a room: title too, 2 matches won
+    accounts.save_game_result(conn, acct.account_id, "room", "r1", True, squad,
+                              matches_played=3, matches_won=2)
+    # a room that was lost
+    accounts.save_game_result(conn, acct.account_id, "room", "r2", False, squad,
+                              matches_played=3, matches_won=1)
+
+    st = accounts.profile_stats(conn, acct.account_id)
+    assert st.total_runs == 300, st.total_runs          # 100 per game, three games
+    assert st.total_wickets == 21, st.total_wickets
+    assert st.matches_won == 12, st.matches_won         # 9 + 2 + 1, solo and room together
+    assert st.friend_matches_won == 3, st.friend_matches_won   # rooms only: 2 + 1
+    assert st.solo_titles == 1, st.solo_titles
+    assert st.friend_titles == 1, st.friend_titles      # the won room, not the lost one
+
+
+def test_a_game_saved_before_the_match_record_existed_counts_zero_not_null(conn):
+    """Pre-028 rows have NULL matches_won -- never captured. They must still contribute to
+    the totals they CAN answer (runs, wickets, titles) and sit out the ones they cannot,
+    rather than poisoning the sum or being counted as a confident zero win."""
+    acct = accounts.create_account(conn, "legacy", "l@example.com", "password123")
+    conn.seed_person("p1", "A Batter")
+    squad = [_SquadEntry("p1", sim_bat_runs=50)]
+    accounts.save_game_result(conn, acct.account_id, "solo", "old", True, squad)  # no record
+
+    st = accounts.profile_stats(conn, acct.account_id)
+    assert st.total_runs == 50
+    assert st.solo_titles == 1, "an old row still knows it won the title"
+    assert st.matches_won == 0, "a null match record must sum to 0, not None"

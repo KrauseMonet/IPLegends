@@ -709,6 +709,12 @@ class ProfileOut(BaseModel):
     username: str
     games_played: int
     titles_won: int
+    total_runs: int = 0
+    total_wickets: int = 0
+    matches_won: int = 0
+    friend_matches_won: int = 0
+    solo_titles: int = 0
+    friend_titles: int = 0
     top_batters: list[LeaderOut] = Field(description="up to 5, by total runs desc")
     top_bowlers: list[LeaderOut] = Field(description="up to 4, by total wickets desc")
 
@@ -1153,8 +1159,12 @@ def season_save(state: str, request: Request) -> SaveResultOut:
     all_twelve = list(yours.xi) + ([yours.impact] if yours.impact is not None else [])
     squad = [_journey_entry(c, replay.stats) for c in all_twelve]
     champion = replay.season.champion is yours
+    # Already computed for the journey card -- 028 just stops us throwing it away.
+    j = replay.journey
     with _db() as conn:
-        saved = accounts.save_game_result(conn, account_id, "solo", state, champion, squad)
+        saved = accounts.save_game_result(
+            conn, account_id, "solo", state, champion, squad,
+            matches_played=j.played, matches_won=j.won)
     return SaveResultOut(saved=saved, already_saved=not saved)
 
 
@@ -1278,6 +1288,9 @@ def profile(request: Request) -> ProfileOut:
     return ProfileOut(
         username=stats.username, games_played=stats.games_played,
         titles_won=stats.titles_won,
+        total_runs=stats.total_runs, total_wickets=stats.total_wickets,
+        matches_won=stats.matches_won, friend_matches_won=stats.friend_matches_won,
+        solo_titles=stats.solo_titles, friend_titles=stats.friend_titles,
         top_batters=[LeaderOut(person_id=r.person_id, name=r.name, total=r.total)
                      for r in stats.top_batters],
         top_bowlers=[LeaderOut(person_id=r.person_id, name=r.name, total=r.total)
@@ -1674,7 +1687,8 @@ def room_save(code: str, body: SaveResultIn, request: Request) -> SaveResultOut:
         squad = [_journey_entry(c, journey.acc) for c in all_twelve]
         natural_key = f"{code}:{room.seed}:{body.player_id}"
         saved = accounts.save_game_result(
-            conn, account_id, "room", natural_key, journey.champion, squad)
+            conn, account_id, "room", natural_key, journey.champion, squad,
+            matches_played=journey.played, matches_won=journey.won)
     return SaveResultOut(saved=saved, already_saved=not saved)
 
 

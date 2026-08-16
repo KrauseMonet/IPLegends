@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
+from game import analysis
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -757,6 +758,55 @@ class SaveResultOut(BaseModel):
                                             "(idempotent no-op, not an error)")
 
 
+# --- Season Analysis ---------------------------------------------------------------------
+#
+# Its own route rather than more fields on `SeasonProgressOut`/`RoomMatchOut`. Both of those
+# are POLLED -- a room's every two seconds -- and this payload is ~8 kB, so folding it in
+# would multiply the cost of every poll by a screen almost nobody has opened yet. It is also
+# only ever meaningful once, at the end, where the season response has to be correct at
+# every intermediate step.
+
+class PhaseSplitOut(BaseModel):
+    phase: str
+    label: str
+    overs_range: str = Field(description="1-6 / 7-15 / 16-20, for the axis label")
+    runs: int
+    wickets: int
+    overs: int
+    run_rate: float
+    balls_per_wicket: float = Field(description="0.0 when no wicket fell -- not a rate of 0")
+
+
+class OverBarOut(BaseModel):
+    over: int = Field(description="1-based, as a scorecard writes it")
+    runs: int
+    wickets: int
+    innings: int = Field(description="how many innings reached this over; the divisor")
+    average_runs: float
+
+
+class LeaderOut(BaseModel):
+    name: str
+    value: float
+    detail: str
+
+
+class AnalysisOut(BaseModel):
+    fixtures: int
+    innings: int
+    overs_logged: int
+    phases: list[PhaseSplitOut]
+    your_phases: list[PhaseSplitOut]
+    manhattan: list[OverBarOut]
+    your_manhattan: list[OverBarOut]
+    top_scorers: list[LeaderOut]
+    top_wickets: list[LeaderOut]
+    best_economy: list[LeaderOut]
+    best_strike: list[LeaderOut]
+    best_over: dict | None
+    highest_innings: dict | None
+
+
 # --- mapping ---------------------------------------------------------------------------
 
 def _kind(card: Card) -> str:
@@ -1194,6 +1244,41 @@ def season_save(state: str, request: Request) -> SaveResultOut:
             conn, account_id, "solo", state, champion, squad,
             matches_played=j.played, matches_won=j.won)
     return SaveResultOut(saved=saved, already_saved=not saved)
+
+
+def _phase_out(phases: dict) -> list[PhaseSplitOut]:
+    return [PhaseSplitOut(phase=p, label=analysis.PHASE_LABEL[p],
+                          overs_range=analysis.PHASE_OVERS[p], runs=s.runs,
+                          wickets=s.wickets, overs=s.overs, run_rate=s.run_rate,
+                          balls_per_wicket=s.balls_per_wicket)
+            for p, s in ((p, phases[p]) for p in analysis.PHASES)]
+
+
+def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
+    bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
+                                  innings=b.innings, average_runs=b.average_runs)
+                       for b in ms]
+    lead = lambda ls: [LeaderOut(name=x.name, value=x.value, detail=x.detail) for x in ls]
+    return AnalysisOut(
+        fixtures=a.fixtures, innings=a.innings, overs_logged=a.overs_logged,
+        phases=_phase_out(a.phases), your_phases=_phase_out(a.your_phases),
+        manhattan=bars(a.manhattan), your_manhattan=bars(a.your_manhattan),
+        top_scorers=lead(a.top_scorers), top_wickets=lead(a.top_wickets),
+        best_economy=lead(a.best_economy), best_strike=lead(a.best_strike),
+        best_over=a.best_over, highest_innings=a.highest_innings)
+
+
+@app.get("/api/season/{state}/analysis", response_model=AnalysisOut)
+def season_analysis_route(state: str) -> AnalysisOut:
+    """Read-only and stateless like every other season route -- the same replay, read a
+    second way. Available only once the season is complete: a Manhattan built from four
+    played fixtures would be a chart of who happened to bat first, not of a season."""
+    _, season_moves = season_session.decode_full(state)
+    replay = _replay_season_or_400(state, season_session.recorded_moves(season_moves))
+    if not replay.complete:
+        raise HTTPException(status_code=409, detail="season not complete")
+    s = replay.season
+    return _analysis_out(analysis.season_analysis(s.results + s.playoffs, track=replay.yours))
 
 
 @app.get("/api/twelve/{state}")
@@ -1683,6 +1768,42 @@ def room_match(code: str, player_id: str | None = None) -> RoomMatchOut:
             status = 404 if "no room" in str(exc) else 409
             raise HTTPException(status_code=status, detail=str(exc)) from exc
     return _room_match_out(room, replay, player_id, deck)
+
+
+@app.get("/api/rooms/{code}/analysis", response_model=AnalysisOut)
+def room_analysis(code: str, player_id: str | None = None) -> AnalysisOut:
+    """League rooms only. A `final` is one match and a `cup` is three -- a Manhattan over
+    three innings is a scorecard drawn sideways, not an analysis, and the phase splits
+    would be read as a claim about form rather than the coin-toss they'd actually be.
+
+    The tracked side is resolved from the entries' OWN `home_pid`/`away_pid` rather than
+    from a fresh `_sides_with_pid` call, because that call rebuilds brand-new `Side`
+    objects every time and `Side` has no `eq=False` -- the identity trap A80 hit and
+    `game.analysis` compares by. One replay holds one consistent set of `Side`s, so
+    reading the track out of the results themselves is the only safe source."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _db() as conn:
+        try:
+            room, replay = room_match_lib.room_match_state(conn, code, deck, model)
+        except rooms.RoomError as exc:
+            status = 404 if "no room" in str(exc) else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+    if room.format != "league":
+        raise HTTPException(status_code=409, detail="analysis is for league rooms only")
+    if not replay.complete:
+        raise HTTPException(status_code=409, detail="room not complete")
+    track = None
+    for e in replay.results:
+        if e.result is None:
+            continue
+        if e.home_pid == player_id:
+            track = e.result.home
+        elif e.away_pid == player_id:
+            track = e.result.away
+        if track is not None:
+            break
+    return _analysis_out(analysis.season_analysis(
+        [e.result for e in replay.results], track=track))
 
 
 @app.post("/api/rooms/{code}/save", response_model=SaveResultOut)

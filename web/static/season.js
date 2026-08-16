@@ -22,7 +22,8 @@ async function newDraft(ctrl){
 // A minimal two-screen version of the old all-page `go()` -- this page only ever shows
 // its own #result or #reveal, never home/draft/room.
 function go(id){
-  for (const s of ['result', 'reveal']) $('#' + s).classList.toggle('hide', s !== id);
+  for (const s of ['result', 'reveal', 'analysis'])
+    $('#' + s).classList.toggle('hide', s !== id);
   window.scrollTo(0, 0);
 }
 
@@ -456,3 +457,17 @@ boot().then(async () => {
     }
   } catch(e){ slip(e.message); location.href = '/'; }
 });
+
+
+// --- Season analysis -------------------------------------------------------------------
+// Fetched on demand rather than folded into the season response: the payload is only ever
+// meaningful once, at the end, and the season route is polled all the way through.
+
+async function openAnalysis(ctrl){
+  await busyClick(ctrl, 'Reading the season…', async () => {
+    try {
+      renderAnalysis(await api(`/api/season/${SEASON_STATE}/analysis`), $('#anHost'));
+      go('analysis');
+    } catch(e){ slip(e.message || 'Could not read the season.'); }
+  });
+}

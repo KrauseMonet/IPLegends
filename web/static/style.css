@@ -1266,3 +1266,99 @@ body.has-ground{
 .tip-inline button{font:inherit;color:var(--gold);background:none;border:0;padding:0;
   cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .tip-inline button:hover{color:var(--gold-2)}
+
+/* ============ SEASON ANALYSIS ============
+   Broadcast-graphic register: a dark plate, a display-face headline, and phase colour used
+   consistently everywhere (powerplay gold, middle steel, death red) so a viewer learns the
+   key once on the Manhattan and reads every other chart for free. */
+.an-wrap{max-width:1120px;margin:0 auto;padding:0 4px 40px}
+.an-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;
+  flex-wrap:wrap;padding:6px 0 22px;border-bottom:1px solid var(--line-strong);margin-bottom:24px}
+.an-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:6px}
+.an-title{font-family:var(--display);font-size:clamp(30px,5vw,52px);line-height:.95;
+  text-transform:uppercase;letter-spacing:.01em;color:var(--ink)}
+.an-stats{display:flex;gap:26px}
+.an-stat b{display:block;font-family:var(--mono);font-size:22px;color:var(--gold);line-height:1}
+.an-stat span{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3)}
+
+.an-panel{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.018);
+  padding:20px 20px 16px;margin-bottom:20px}
+.an-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;
+  flex-wrap:wrap;margin-bottom:16px}
+.an-panel-head h3{font-family:var(--display);font-size:22px;text-transform:uppercase;
+  letter-spacing:.02em;margin:0 0 4px;color:var(--ink);font-weight:400}
+.an-panel-head p{margin:0;font-size:13px;color:var(--ink-3);max-width:52ch}
+.an-controls{display:flex;gap:10px;flex-wrap:wrap}
+.an-toggle{display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+.an-tab{background:none;border:0;padding:7px 14px;cursor:pointer;font-family:var(--mono);
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+  transition:background .15s,color .15s}
+.an-tab + .an-tab{border-left:1px solid var(--line-strong)}
+.an-tab:hover{color:var(--ink)}
+.an-tab.sel{background:var(--gold);color:#141414;font-weight:700}
+
+/* Wide charts scroll inside their own box; the page body never scrolls sideways. */
+.an-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.an-chart{display:block;width:100%;min-width:560px;height:auto}
+.an-axis{font-family:var(--mono);font-size:10px;fill:var(--ink-3);letter-spacing:.06em}
+.an-band-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;opacity:.85}
+.an-seg{font-family:var(--mono);font-size:11px;fill:#0e1116;font-weight:700}
+.an-col rect{transition:opacity .12s}
+.an-col:hover rect{opacity:1}
+
+.an-phases{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;
+  margin-bottom:18px}
+.an-phase{border:1px solid var(--line);border-left:3px solid var(--tint);border-radius:8px;
+  padding:14px 16px;background:rgba(255,255,255,.015)}
+.an-phase-name{font-family:var(--display);font-size:19px;text-transform:uppercase;
+  color:var(--tint);letter-spacing:.02em}
+.an-phase-overs{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:12px}
+.an-phase-rate{display:flex;align-items:baseline;gap:7px;margin-bottom:10px}
+.an-phase-rate b{font-family:var(--mono);font-size:26px;color:var(--ink);line-height:1}
+.an-phase-rate span{font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.an-phase-rows div{font-size:12.5px;color:var(--ink-3);line-height:1.75}
+.an-phase-rows em{font-family:var(--mono);font-style:normal;color:var(--ink-2)}
+
+.an-moments{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.an-moment{border:1px solid var(--line);border-radius:8px;padding:16px 18px;
+  background:linear-gradient(160deg,rgba(245,184,61,.07),transparent 62%)}
+.an-moment-label{font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3)}
+.an-moment-value{font-family:var(--display);font-size:44px;line-height:1.05;color:var(--gold-2)}
+.an-moment-value i{font-family:var(--mono);font-style:normal;font-size:12px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-left:7px}
+.an-moment-detail{font-size:12.5px;color:var(--ink-2);margin-top:4px}
+
+.an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.an-lead{border:1px solid var(--line);border-radius:12px;padding:14px 16px 10px;
+  background:rgba(255,255,255,.018);border-top:3px solid var(--ink-3)}
+.an-lead-orange{border-top-color:#ff8c1a}
+.an-lead-purple{border-top-color:#9b5de5}
+.an-lead-econ{border-top-color:var(--mint)}
+.an-lead-sr{border-top-color:var(--gold)}
+.an-lead-head{margin-bottom:10px}
+.an-lead-head b{display:block;font-family:var(--display);font-size:19px;text-transform:uppercase;
+  letter-spacing:.02em;color:var(--ink);font-weight:400}
+.an-lead-head span{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+.an-lead-row{display:grid;grid-template-columns:20px 1fr auto auto;align-items:baseline;gap:10px;
+  padding:7px 0;border-top:1px solid var(--line);font-size:13.5px}
+.an-lead-pos{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.an-lead-name{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-lead-detail{font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
+.an-lead-value{font-family:var(--mono);font-size:15px;color:var(--ink);font-weight:700}
+.an-lead-row.top .an-lead-name{color:var(--ink);font-weight:650}
+.an-lead-row.top .an-lead-value{color:var(--gold-2)}
+
+@media (max-width:640px){
+  .an-head{align-items:flex-start}
+  .an-stats{gap:18px}
+  .an-moment-value{font-size:34px}
+}
+.an-key{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:6px 2px 0}
+.an-key-pip{width:7px;height:7px;border-radius:50%;background:var(--hot);opacity:.9;flex:none}

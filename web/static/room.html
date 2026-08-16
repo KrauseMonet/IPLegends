@@ -151,6 +151,14 @@
   <!-- No per-match skip button in a room (unlike solo's own copy on season.html) --
        A81 removed a room's Impact choice entirely, and a room shows its match result
        through `#roomResult`/`showRoomMatch`, never through this section. -->
+  <!-- ============ SEASON ANALYSIS ============ league rooms only; see room_analysis. -->
+  <section id="analysis" class="hide">
+    <div class="an-wrap" id="anHost"></div>
+    <div class="foot-actions" style="justify-content:center;padding:4px 0 40px">
+      <div class="actions"><button class="act" onclick="go('room')">Back to the room</button></div>
+    </div>
+  </section>
+
   <section id="reveal" class="hide">
 
     <!-- the toss: only ever shown when you actually won it -- otherwise the very next
@@ -289,6 +297,7 @@
 <script src="/static/common.js"></script>
 <script src="/static/auth.js"></script>
 <script src="/static/reveal.js"></script>
+<script src="/static/analysis.js"></script>
 <script src="/static/room.js"></script>
 </body>
 </html>

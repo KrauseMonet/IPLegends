@@ -64,7 +64,8 @@ function effectiveDraftMode(){
 // its own #room (lobby/draft/result/failed, toggled internally by renderRoom) or
 // #reveal (the match toss/over-stepper), never home/draft/season.
 function go(id){
-  for (const s of ['room', 'reveal']) $('#' + s).classList.toggle('hide', s !== id);
+  for (const s of ['room', 'reveal', 'analysis'])
+    $('#' + s).classList.toggle('hide', s !== id);
   window.scrollTo(0, 0);
 }
 
@@ -857,7 +858,23 @@ function showRoomMatchComplete(m){
           <span>🏆 Playoffs</span></div>${playoffsHtml}` : ''}
       </div>
     </div>
-    <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
+    <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}
+      <button class="act" onclick="openRoomAnalysis(this)">Season analysis</button></div>`;
+}
+
+
+// Only ever reached from the league branch above -- `final` and `cup` are one and three
+// matches, and a Manhattan over three innings is a scorecard drawn sideways (the API
+// refuses those formats for the same reason).
+async function openRoomAnalysis(ctrl){
+  await busyClick(ctrl, 'Reading the season…', async () => {
+    try {
+      renderAnalysis(await api(
+        `/api/rooms/${ROOM_CODE}/analysis?player_id=${encodeURIComponent(MY_PID)}`),
+        $('#anHost'));
+      go('analysis');
+    } catch(e){ slip(e.message || 'Could not read the season.'); }
+  });
 }
 
 async function roomPlayAgain(ctrl){

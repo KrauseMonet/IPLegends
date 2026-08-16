@@ -70,6 +70,7 @@
           <button class="act lead" onclick="newDraft(this)">Draft again</button>
           <button class="act" onclick="copyLink()">Copy this game</button>
           <button class="act" onclick="showJourneyCard()">Journey card</button>
+          <button class="act" onclick="openAnalysis(this)">Season analysis</button>
         </div>
       </div>
       <!-- Filled by renderSavePrompt, and only for a signed-out visitor. -->
@@ -92,6 +93,17 @@
         <div class="col-head" style="margin:26px -18px 0"><span>🏆 Playoffs</span></div>
         <div id="bracket"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ============ SEASON ANALYSIS ============
+       Its own screen rather than more panels under the table: the charts want the full
+       width, and this is a thing a viewer opens deliberately once, not something the
+       result screen has to carry every time. -->
+  <section id="analysis" class="hide">
+    <div class="an-wrap" id="anHost"></div>
+    <div class="foot-actions" style="justify-content:center;padding:4px 0 40px">
+      <div class="actions"><button class="act" onclick="go('result')">Back to the season</button></div>
     </div>
   </section>
 
@@ -262,6 +274,7 @@
 <script src="/static/common.js"></script>
 <script src="/static/auth.js"></script>
 <script src="/static/reveal.js"></script>
+<script src="/static/analysis.js"></script>
 <script src="/static/season.js"></script>
 </body>
 </html>

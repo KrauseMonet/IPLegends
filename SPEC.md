@@ -2073,3 +2073,51 @@ with no assignable discipline at all (A27's shape, not A33's).
 
 Every squad member reaching a franchise-season's deal is therefore now a real `Card` — see
 CLAUDE.md's decisions log, A65–A71, for the mechanism.
+
+## 13. Season analysis
+
+**[A104, added 2026-08-16.]** The post-tournament chart set, available in a completed solo
+season and in a completed **`league` room only**. Read-only, on its own route in both cases.
+
+**It required no schema change and no new storage, and that was verified before anything was
+built.** Every number on the screen is aggregated from output the engine already produces:
+`Result` carries two `Innings`, and each `Innings` carries an `over_log` of `OverSnapshot`s
+— over index, bowler, and that over's own runs and wickets — built for §12's reveal
+animation and then discarded. That log is Manhattan data. `game/analysis.py` reads it in
+**1.4 ms over 74 fixtures**, against a season replay of ~2.7s that is already paid.
+
+### 13.1 Phases
+
+Exactly SPEC §4.8's own rule, not a definition invented for this screen: death is the final
+25% of the innings' scheduled overs, `(scheduled_balls * 3 // 4) // 6`, which is over index
+15 in a full twenty. Powerplay is the first six, middle is the rest. A different split here
+would put the charts quietly at odds with every rating drawn on them.
+
+### 13.2 The divisor a Manhattan needs
+
+Aggregated across a tournament, an over's bar must be divided by **how many innings reached
+it**, not by the fixture count — measured on a real season, only **100 of 148** innings
+reach over 20. Without that divisor the last over reads as a collapse when it is really that
+a third of the innings had already ended. `OverBar.innings` carries it.
+
+### 13.3 Volume floors on the rate leaderboards
+
+Economy and strike rate need a floor or they are won by whoever bowled two overs. The floor
+is **half a league campaign (7 of 14 matches) at §12's own reference exposures** — 18 balls
+faced and 24 bowled per match — rather than a round number. An earlier pass used 90/120 and
+returned a best strike rate off 94 balls, under seven a match; at the derived floor the same
+season returns a 367-ball campaign. Runs and wickets are totals, so they need no floor.
+
+### 13.4 What it cannot show
+
+Recorded here and in the module docstring so nobody looks for it: **spin against pace**
+(`people.bowling_style` is NULL for all 816 people — a data-entry gap, not a modelling one,
+parked deliberately), **dismissal kinds** (§10's outcome space is runs 0-6 plus wicket),
+**boundaries and dot balls** (a batting card tallies runs and balls; `over_log` is per over),
+and **wagon wheels** (nothing models shot direction).
+
+### 13.5 Why not `final` or `cup`
+
+A `final` is one match and a `cup` is three. A Manhattan over three innings is a scorecard
+drawn sideways, and the phase splits would read as a claim about form when they would
+actually be a coin toss. The route refuses both formats rather than drawing them.

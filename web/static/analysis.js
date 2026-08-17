@@ -270,7 +270,7 @@ function leaderPanel(title, sub, rows, kind, fmt){
   const body = rows.map((r, i) => `
     <div class="an-lead-row${i === 0 ? ' top' : ''}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}</span>
+      <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
       <span class="an-lead-detail">${r.detail}</span>
       <span class="an-lead-value">${fmt(r.value)}</span>
     </div>`).join('');
@@ -292,7 +292,7 @@ function phasePanel(title, sub, rows, kind){
   const body = rows.slice(0, 6).map((r, i) => `
     <div class="an-lead-row${i === 0 ? ' top' : ''}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}</span>
+      <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
       <span class="an-lead-detail">${r.overs} ov · ${r.wickets}w</span>
       <span class="an-lead-value">${r.economy.toFixed(2)}</span>
     </div>`).join('');
@@ -357,4 +357,12 @@ function positionSvg(rows){
   </svg>
   <div class="an-key"><i class="an-key-swatch gold"></i>runs scored
     <i class="an-key-swatch mint"></i>average (runs per dismissal)</div>`;
+}
+
+
+// [A111] A leaderboard row is a (person, SIDE) pair, not a person: the same man can turn
+// out for more than one drawn side in one tournament, and without the team two rows for
+// him read as a duplicate rather than as two different stints.
+function teamTag(team){
+  return team ? ` <i class="an-team">${team}</i>` : '';
 }

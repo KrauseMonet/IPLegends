@@ -90,6 +90,10 @@ class Leader:
     name: str
     value: float
     detail: str
+    # [A111] Which SIDE this figure was earned for. Not decoration: a person can turn out
+    # for more than one drawn side in the same tournament, so a leaderboard row is a
+    # (person, side) pair and the team is what tells two of them apart.
+    team: str = ""
 
 
 @dataclass
@@ -105,6 +109,7 @@ class PhaseBowler:
 
     name: str
     person_id: str
+    team: str = ""
     overs: int = 0
     runs: int = 0
     wickets: int = 0
@@ -213,8 +218,17 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     a = SeasonAnalysis(phases=_blank_phases(), your_phases=_blank_phases(),
                        manhattan=_blank_manhattan(), your_manhattan=_blank_manhattan())
 
-    bat: dict[str, list] = {}      # name -> [runs, balls, outs]
-    bowl: dict[str, list] = {}     # name -> [wickets, balls, runs]
+    # [A111] Keyed on (person_id, side identity), never on the name and never on the
+    # person alone. Measured on a real season: **16 of 100 people turned out for MORE THAN
+    # ONE side**, because the nine historical opponents are independent franchise-season
+    # draws (A63) and a career spans franchises -- so summing across sides credits a player
+    # with a total no single team produced. Exactly the fault A96 fixed for the Orange and
+    # Purple Caps; this file reproduced it because it keyed on `b.player.name`.
+    #
+    # `id(side)` because `Side` is a plain dataclass with no `eq=False` and is not safely
+    # hashable by value -- the same identity care A79/A80/A96 each needed.
+    bat: dict[tuple, list] = {}    # (person, side) -> [runs, balls, outs, name, team]
+    bowl: dict[tuple, list] = {}   # (person, side) -> [wickets, balls, runs, name, team]
     best_over = None
     highest = None
     # [A110] Keyed by person_id, never the name string -- two drafted seasons can share
@@ -226,11 +240,17 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     for r in results:
         if r is None:
             continue           # a room's round can hold a fixture nobody has resolved yet
-        pairs = ((r.home_innings, r.home), (r.away_innings, r.away))
-        if not all(i for i, _ in pairs):
+        # (innings, the side BATTING, the side BOWLING). The third element matters: a
+        # bowler in `inn.bowling` and every `OverSnapshot` in `inn.over_log` belongs to
+        # the side that did NOT bat this innings. Keying or labelling them by the batting
+        # side attributes a bowler to his OPPONENT -- which changes every match, so his
+        # season splits into per-match fragments. Caught by measuring: the maximum death
+        # overs for any (bowler, side) pair came out at exactly 4, one match's allocation.
+        pairs = ((r.home_innings, r.home, r.away), (r.away_innings, r.away, r.home))
+        if not all(i for i, _, _ in pairs):
             continue
         a.fixtures += 1
-        for inn, side in pairs:
+        for inn, side, fielding in pairs:
             a.innings += 1
             a.overs_logged += len(inn.over_log)
             _accumulate(inn, a.phases, a.manhattan)
@@ -244,11 +264,12 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
                 # Per-over bowling attribution. `bowler_id` is empty only for a snapshot
                 # built by an older caller or a test; falling back to the name keeps the
                 # over counted rather than dropping it, which would understate a workload.
-                key = (snap.bowler_id or snap.bowler, phase_of(snap.over))
+                key = (snap.bowler_id or snap.bowler, id(fielding), phase_of(snap.over))
                 pb = phase_bowl.get(key)
                 if pb is None:
                     pb = phase_bowl[key] = PhaseBowler(name=snap.bowler,
-                                                       person_id=snap.bowler_id)
+                                                       person_id=snap.bowler_id,
+                                                       team=fielding.short)
                 pb.overs += 1
                 pb.runs += snap.over_runs
                 pb.wickets += snap.over_wickets
@@ -287,22 +308,24 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
                     row.outs += 1 if b.out else 0
 
             for b in inn.batting:
-                d = bat.setdefault(b.player.name, [0, 0, 0])
+                d = bat.setdefault((b.player.person_id or b.player.name, id(side)),
+                                   [0, 0, 0, b.player.name, side.short])
                 d[0] += b.runs
                 d[1] += b.balls
                 d[2] += 1 if b.out else 0
             for b in inn.bowling:
-                d = bowl.setdefault(b.player.name, [0, 0, 0])
+                d = bowl.setdefault((b.player.person_id or b.player.name, id(fielding)),
+                                    [0, 0, 0, b.player.name, fielding.short])
                 d[0] += b.wickets
                 d[1] += b.balls
                 d[2] += b.runs
 
     a.best_over, a.highest_innings = best_over, highest
 
-    a.top_scorers = [Leader(n, v[0], f"{v[1]} balls")
-                     for n, v in sorted(bat.items(), key=lambda kv: -kv[1][0])[:10]]
-    a.top_wickets = [Leader(n, v[0], f"{v[1] // BALLS_PER_OVER} overs")
-                     for n, v in sorted(bowl.items(), key=lambda kv: -kv[1][0])[:10]]
+    a.top_scorers = [Leader(v[3], v[0], f"{v[1]} balls", v[4])
+                     for _, v in sorted(bat.items(), key=lambda kv: -kv[1][0])[:10]]
+    a.top_wickets = [Leader(v[3], v[0], f"{v[1] // BALLS_PER_OVER} overs", v[4])
+                     for _, v in sorted(bowl.items(), key=lambda kv: -kv[1][0])[:10]]
 
     # Rate leaders need a volume floor or they are won by whoever bowled two overs -- A33's
     # reasoning at one-tournament scale. The numbers are not picked round: they are half a
@@ -312,23 +335,23 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     # a season and reads as one.
     MIN_BALLS_BOWLED = 24 * 7      # 28 overs
     MIN_BALLS_FACED = 18 * 7
-    econ = [(n, round(v[2] / (v[1] / BALLS_PER_OVER), 2), v[1])
-            for n, v in bowl.items() if v[1] >= MIN_BALLS_BOWLED]
-    a.best_economy = [Leader(n, e, f"{b // BALLS_PER_OVER} overs")
-                      for n, e, b in sorted(econ, key=lambda t: t[1])[:10]]
-    sr = [(n, round(100 * v[0] / v[1], 1), v[1])
-          for n, v in bat.items() if v[1] >= MIN_BALLS_FACED]
-    a.best_strike = [Leader(n, s, f"{b} balls")
-                     for n, s, b in sorted(sr, key=lambda t: -t[1])[:10]]
+    econ = [(v[3], round(v[2] / (v[1] / BALLS_PER_OVER), 2), v[1], v[4])
+            for v in bowl.values() if v[1] >= MIN_BALLS_BOWLED]
+    a.best_economy = [Leader(n, e, f"{b // BALLS_PER_OVER} overs", tm)
+                      for n, e, b, tm in sorted(econ, key=lambda t: t[1])[:10]]
+    sr = [(v[3], round(100 * v[0] / v[1], 1), v[1], v[4])
+          for v in bat.values() if v[1] >= MIN_BALLS_FACED]
+    a.best_strike = [Leader(n, s, f"{b} balls", tm)
+                     for n, s, b, tm in sorted(sr, key=lambda t: -t[1])[:10]]
 
     # [A110] Batting AVERAGE -- runs per dismissal, which is a different claim from strike
     # rate and the one that separates an anchor from a slogger. Same volume floor, plus a
     # dismissal floor: an average off one dismissal is a single score, not an average.
     MIN_DISMISSALS = 5
-    avg = [(n, round(v[0] / v[2], 1), v[2])
-           for n, v in bat.items() if v[1] >= MIN_BALLS_FACED and v[2] >= MIN_DISMISSALS]
-    a.best_averages = [Leader(n, x, f"{o} outs")
-                       for n, x, o in sorted(avg, key=lambda t: -t[1])[:10]]
+    avg = [(v[3], round(v[0] / v[2], 1), v[2], v[4])
+           for v in bat.values() if v[1] >= MIN_BALLS_FACED and v[2] >= MIN_DISMISSALS]
+    a.best_averages = [Leader(n, x, f"{o} outs", tm)
+                       for n, x, o, tm in sorted(avg, key=lambda t: -t[1])[:10]]
 
     a.positions = positions
 
@@ -337,7 +360,7 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     # bowler who bowled two good death overs all tournament does not top the list.
     MIN_PHASE_OVERS = 12
     def _phase_list(phase: str) -> list:
-        rows = [pb for (_, ph), pb in phase_bowl.items()
+        rows = [pb for (_, _, ph), pb in phase_bowl.items()
                 if ph == phase and pb.overs >= MIN_PHASE_OVERS]
         return sorted(rows, key=lambda pb: (pb.economy, -pb.wickets))[:10]
 

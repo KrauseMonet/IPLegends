@@ -831,11 +831,16 @@ class AnalysisLeaderOut(BaseModel):
     name: str
     value: float
     detail: str
+    # [A111] The side this figure was earned FOR. A person can turn out for more than one
+    # drawn side in the same tournament (16 of 100 on a measured season), so a row is a
+    # (person, side) pair and the team is what tells two of his rows apart.
+    team: str = ""
 
 
 class PhaseBowlerOut(BaseModel):
     name: str
     person_id: str
+    team: str = ""
     overs: int
     runs: int
     wickets: int
@@ -1343,7 +1348,8 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
     bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
                                   innings=b.innings, average_runs=b.average_runs)
                        for b in ms]
-    lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value, detail=x.detail) for x in ls]
+    lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value,
+                                     detail=x.detail, team=x.team) for x in ls]
     return AnalysisOut(
         fixtures=a.fixtures, innings=a.innings, overs_logged=a.overs_logged,
         phases=_phase_out(a.phases), your_phases=_phase_out(a.your_phases),
@@ -1351,10 +1357,10 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         top_scorers=lead(a.top_scorers), top_wickets=lead(a.top_wickets),
         best_economy=lead(a.best_economy), best_strike=lead(a.best_strike),
         best_over=a.best_over, highest_innings=a.highest_innings,
-        death_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, overs=b.overs,
+        death_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team, overs=b.overs,
                                       runs=b.runs, wickets=b.wickets, economy=b.economy)
                        for b in a.death_bowlers],
-        powerplay_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, overs=b.overs,
+        powerplay_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team, overs=b.overs,
                                           runs=b.runs, wickets=b.wickets, economy=b.economy)
                            for b in a.powerplay_bowlers],
         bat_first=_split_out(a.bat_first), chasing=_split_out(a.chasing),

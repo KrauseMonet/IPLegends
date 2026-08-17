@@ -1392,3 +1392,6 @@ body.has-ground{
 .an-key-swatch:first-child{margin-left:0}
 .an-key-swatch.gold{background:var(--gold);opacity:.7}
 .an-key-swatch.mint{background:var(--mint)}
+.an-team{font-family:var(--mono);font-style:normal;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);
+  border-radius:3px;padding:1px 4px;margin-left:5px;white-space:nowrap}

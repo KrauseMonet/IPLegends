@@ -463,4 +463,5 @@ def test_the_two_leader_models_stay_distinct():
     from web.app import AnalysisLeaderOut, LeaderOut
 
     assert set(LeaderOut.model_fields) == {"person_id", "name", "total"}
-    assert set(AnalysisLeaderOut.model_fields) == {"name", "value", "detail"}
+    # `team` added by A111: a row is a (person, side) pair, so it names the side.
+    assert set(AnalysisLeaderOut.model_fields) == {"name", "value", "detail", "team"}

@@ -20,6 +20,7 @@ class FakeSnap:
 @dataclass
 class FakePlayer:
     name: str
+    person_id: str = ""      # empty falls back to the name, as the real code does
 
 
 @dataclass
@@ -249,10 +250,49 @@ def test_batting_average_needs_dismissals_not_just_balls():
     # One innings -> one dismissal each, under MIN_DISMISSALS.
     a = season_analysis([FakeResult(FakeSide("A"), FakeSide("B"), inn, FakeInnings())])
     assert a.best_averages == [], "one dismissal is not an average"
-    # Six innings -> six dismissals each, over the floor.
-    many = [FakeResult(FakeSide("A"), FakeSide("B"), inn, FakeInnings()) for _ in range(6)]
+    # Six innings -> six dismissals each, over the floor. ONE side object across all six,
+    # as a real team is: [A111] a tally is keyed on (person, side), so six freshly built
+    # FakeSides would be six different teams with one dismissal apiece.
+    side_a, side_b = FakeSide("A"), FakeSide("B")
+    many = [FakeResult(side_a, side_b, inn, FakeInnings()) for _ in range(6)]
     b = season_analysis(many)
     assert [l.name for l in b.best_averages] == ["Anchor", "OneOut"]
     # The same innings six times, so the RUNS multiply with the dismissals: 3,600 over 6.
     assert b.best_averages[0].value == 600.0
     assert b.best_averages[1].value == 300.0, "and the ordering is by average, not runs"
+
+
+def test_a_player_on_two_sides_is_not_summed_into_one_inflated_row():
+    """[A111] Measured on a real season: 16 of 100 people turned out for MORE THAN ONE
+    side, because the nine historical opponents are independent franchise-season draws and
+    a career spans franchises. Keying a tally on the NAME credited such a player with a
+    combined total no single team produced -- the same fault A96 fixed for the Orange and
+    Purple Caps, reproduced here.
+
+    The rows stay separate AND carry the team, which is what makes two of them legible."""
+    left, right = FakeSide("LEF"), FakeSide("RIG")
+    dave = FakePlayer("D Warner", "person-dave")
+    for_left = FakeInnings(over_log=[FakeSnap(0, 6)],
+                           batting=[FakeCard(dave, runs=400, balls=200, out=True)])
+    for_right = FakeInnings(over_log=[FakeSnap(0, 6)],
+                            batting=[FakeCard(dave, runs=300, balls=150, out=True)])
+    a = season_analysis([FakeResult(left, right, for_left, for_right)])
+
+    rows = [l for l in a.top_scorers if l.name == "D Warner"]
+    assert len(rows) == 2, "one row per (person, side), never one summed row"
+    assert sorted(l.value for l in rows) == [300, 400]
+    assert not any(l.value == 700 for l in a.top_scorers), "700 is a total nobody made"
+    assert {l.team for l in rows} == {"LEF", "RIG"}, "the team is what tells them apart"
+
+
+def test_the_same_side_across_many_matches_still_accumulates():
+    """The fix must not go the other way: a player's own season for ONE team is still one
+    row, summed across every match he played for it."""
+    side, other = FakeSide("MI"), FakeSide("CSK")
+    p = FakePlayer("R Sharma", "person-rohit")
+    inn = FakeInnings(over_log=[FakeSnap(0, 6)],
+                      batting=[FakeCard(p, runs=50, balls=30, out=True)])
+    a = season_analysis([FakeResult(side, other, inn, FakeInnings()) for _ in range(4)])
+    rows = [l for l in a.top_scorers if l.name == "R Sharma"]
+    assert len(rows) == 1 and rows[0].value == 200, "four matches, one side, one row"
+    assert rows[0].team == "MI"

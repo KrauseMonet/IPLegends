@@ -115,6 +115,18 @@ function anPaint(){
 
     <div class="an-panel">
       <div class="an-panel-head"><div>
+        <h3>Spin against pace</h3>
+        <p>Economy and wickets for each style, by phase. Read the <b>economies</b> — those
+           are real. Do not read the over shares as a captain's plan: this engine hands the
+           next over to whoever has bowled least, so every bowler works through all three
+           phases and the mix stays near-constant instead of turning pace onto the new ball
+           and spin into the middle.</p>
+      </div></div>
+      ${styleTable(d.style_phases, d.unknown_style_overs)}
+    </div>
+
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
         <h3>Setting or chasing</h3>
         <p>Every match splits one of each way. A chase averages fewer runs because it
            stops the moment it is won, not because those sides batted worse.</p>
@@ -224,6 +236,57 @@ function phaseCard(p){
 // A single stacked bar of where the season's runs and wickets actually came from. Shares are
 // what a viewer wants here -- "the death is a fifth of the overs and a third of the wickets"
 // is the sentence, and two 100%-wide bars say it without any axis at all.
+// [A113] Spin against pace, per phase. A table rather than a chart: the interesting read
+// is "compare economy down a column", and three phases x two styles is small enough that
+// numbers beat bars -- the SVGs on this screen exist where a shape carries the meaning
+// (a Manhattan, a phase share), which is not the case for six economies.
+//
+// `unknown` is rendered as a row ONLY when it has overs, but the count is always stated in
+// the footnote, at zero or otherwise. That is the A23 shape carried into the UI: the
+// concept is never omitted, so a reader can tell "nothing unknown" from "not measured",
+// while an all-zero row is not made to occupy space it has not earned.
+const ALL_STYLES = ['pace', 'spin', 'unknown'];
+
+function styleTable(rows, unknownOvers){
+  if (!rows || !rows.length) return '';
+  const phases = [...new Set(rows.map(r => r.phase))];
+  const styles = ['pace', 'spin'].concat(unknownOvers > 0 ? ['unknown'] : []);
+  const cell = (p, s) => rows.find(r => r.phase === p && r.style === s)
+    || {overs: 0, runs: 0, wickets: 0, economy: 0, balls_per_wicket: 0};
+  const head = phases.map(p => {
+    const r = rows.find(x => x.phase === p);
+    return `<th>${r.phase_label}<i>Overs ${r.overs_range}</i></th>`;
+  }).join('');
+  const body = styles.map(s => {
+    const label = (rows.find(r => r.style === s) || {}).style_label || s;
+    const tds = phases.map(p => {
+      const c = cell(p, s);
+      if (!c.overs) return `<td class="an-sty-none">–</td>`;
+      // Share of THIS phase's overs. Denominator is every style's overs in this phase --
+      // including unknown even when it has no row of its own, so the percentages down a
+      // column always describe the whole phase and sum to 100.
+      const phaseOvers = ALL_STYLES.reduce((n, st) => n + cell(p, st).overs, 0);
+      const share = phaseOvers ? Math.round(100 * c.overs / phaseOvers) : 0;
+      return `<td title="${label}, ${c.overs} overs · ${c.runs} runs · ${c.wickets} wickets">
+        <b>${c.economy.toFixed(2)}</b>
+        <i>${c.wickets} wkt · ${c.overs} ov · ${share}% of phase</i></td>`;
+    }).join('');
+    return `<tr class="an-sty-${s}"><th scope="row">${label}</th>${tds}</tr>`;
+  }).join('');
+  return `<div class="an-scroll"><table class="an-sty">
+      <thead><tr><th></th>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+    <p class="an-sty-foot">Economy is runs per over. The share of each phase reflects how many
+      of the attack's five bowlers bowl that style, not when a captain used them — bowling
+      order here is workload-based by design, so a phase policy is not modelled. ${unknownOvers > 0
+      ? `<b>${unknownOvers} over${unknownOvers === 1 ? '' : 's'}</b> were bowled by someone
+         whose style is unrecorded and are counted in their own row, never folded into
+         either style.`
+      : `Every over is attributed: <b>no bowler</b> in this season had an unrecorded style.`}</p>`;
+}
+
+
 function phaseBarSvg(phases){
   const W = 760, rowH = 34, pad = 8;
   const rows = [['Runs', phases.map(p => p.runs)],

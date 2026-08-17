@@ -2120,12 +2120,9 @@ season returns a 367-ball campaign. Runs and wickets are totals, so they need no
 
 ### 13.4 What it cannot show
 
-Recorded here and in the module docstring so nobody looks for it: **spin against pace**
-(still unavailable, but **the reason changed with A112 and the old one — "NULL for all 816
-people, a data-entry gap" — is now false**: the column is filled for all 479 bowlers, and
-the remaining blocker is that `Card` does not carry `bowling_style` and the deck never
-selects it, so the innings this screen aggregates have no style to attribute an over to.
-A deck field and a snapshot column, not a CSV), **dismissal kinds** (§10's outcome space is runs 0-6 plus wicket),
+**Spin against pace has MOVED OUT of this section — [A113] delivered it; see §13.6.**
+
+Recorded here and in the module docstring so nobody looks for it: **dismissal kinds** (§10's outcome space is runs 0-6 plus wicket),
 **boundaries and dot balls** (a batting card tallies runs and balls; `over_log` is per over),
 and **wagon wheels** (nothing models shot direction).
 
@@ -2134,6 +2131,34 @@ and **wagon wheels** (nothing models shot direction).
 A `final` is one match and a `cup` is three. A Manhattan over three innings is a scorecard
 drawn sideways, and the phase splits would read as a claim about form when they would
 actually be a coin toss. The route refuses both formats rather than drawing them.
+
+### 13.6 Spin against pace, per phase [A113]
+
+Economy, wickets and overs for each bowling style in each phase. The style reaches this
+screen through a chain, none of which existed before: `people.bowling_style` (§6.3, filled
+by A112) -> `Card.bowling_style` (selected in `load_deck`) -> `Player.bowling_style` (via
+`to_player`) -> looked up per over from `Innings.bowling`. It is **not** copied onto
+`OverSnapshot`: the innings already holds every `Player` who bowled, so a per-over copy
+would be a second copy of one fact with nothing keeping the two in step (A19).
+
+**An unknown style is its own bucket in every phase and is never folded into a real one**
+(A23). It is not a hypothetical: 97 people bowled in the archive without ever reaching
+§6.3's 30-legal-ball threshold, so `people.bowling_style` does not know them and never will
+— measured at 109 of 2,826 overs, 3.9%, in a real season. The bucket is reported even at
+zero, so "nothing unknown" can never be confused with "the bucket was omitted". Anything
+that is not exactly `pace` or `spin` lands in `unknown` by whitelist, so a style string a
+future archive invents surfaces to be noticed rather than being coerced into one of the two.
+
+**The per-phase ECONOMIES are meaningful; the per-phase over SHARES are not, and this was
+measured rather than assumed.** Real T20 puts pace on the new ball and at the death and
+spin through the middle. This engine cannot reproduce that: `choose_bowler` gives the next
+over to whoever has bowled least and knows nothing of phase or style — the deliberate
+omission §10 already records. Measured over 74 fixtures: pace took **51.0%** of powerplay
+overs, **58.5%** of middle and **53.5%** of death, every phase within four points of its
+**55.1%** overall share, with individual bowlers appearing evenly in both the powerplay and
+the death. So a share here describes the **style mix of the five-man attack**, not a
+captain's policy, and the screen says so. Modelling a real bowling order is a separate,
+unbuilt tactical layer; if it is ever built, this table is what would show it working.
 
 ## 14. Booting without the database
 

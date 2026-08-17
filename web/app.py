@@ -809,6 +809,23 @@ class PhaseSplitOut(BaseModel):
     balls_per_wicket: float = Field(description="0.0 when no wicket fell -- not a rate of 0")
 
 
+class StyleSplitOut(BaseModel):
+    """[A113] One (phase, bowling style) cell. Every phase carries all three styles,
+    `unknown` included and at zero when nothing is unknown, so a reader can never confuse
+    "no unknown overs" with "the bucket was left out"."""
+
+    phase: str
+    phase_label: str
+    overs_range: str
+    style: str = Field(description="pace | spin | unknown -- never folded together (A23)")
+    style_label: str
+    overs: int
+    runs: int
+    wickets: int
+    economy: float = Field(description="0.0 when no overs -- not an economy of 0")
+    balls_per_wicket: float = Field(description="0.0 when no wicket fell")
+
+
 class OverBarOut(BaseModel):
     over: int = Field(description="1-based, as a scorecard writes it")
     runs: int
@@ -886,6 +903,14 @@ class AnalysisOut(BaseModel):
     chasing: InningsSplitOut
     positions: list[PositionRowOut]
     best_averages: list[AnalysisLeaderOut]
+    # [A113] Flat (phase x style) rows rather than a nested dict: the frontend groups them
+    # by phase for display, and a flat list keeps the shape the other tables here already
+    # use. Always exactly len(PHASES) * len(STYLES) rows.
+    style_phases: list[StyleSplitOut]
+    unknown_style_overs: int = Field(
+        description="Overs bowled by someone whose bowling_style is unknown, across all "
+                    "phases. 0 today (A112 filled all 479 bowlers) and reported anyway, "
+                    "so a future gap is visible rather than silently absorbed.")
 
 
 # --- mapping ---------------------------------------------------------------------------
@@ -1339,6 +1364,16 @@ def _phase_out(phases: dict) -> list[PhaseSplitOut]:
             for p, s in ((p, phases[p]) for p in analysis.PHASES)]
 
 
+def _style_out(style_phases: dict) -> list[StyleSplitOut]:
+    return [StyleSplitOut(phase=p, phase_label=analysis.PHASE_LABEL[p],
+                          overs_range=analysis.PHASE_OVERS[p],
+                          style=s, style_label=analysis.STYLE_LABEL[s],
+                          overs=cell.overs, runs=cell.runs, wickets=cell.wickets,
+                          economy=cell.economy, balls_per_wicket=cell.balls_per_wicket)
+            for p in analysis.PHASES for s in analysis.STYLES
+            for cell in (style_phases[p][s],)]
+
+
 def _split_out(s: analysis.InningsSplit) -> InningsSplitOut:
     return InningsSplitOut(innings=s.innings, runs=s.runs, wins=s.wins,
                            average=s.average, win_rate=s.win_rate)
@@ -1367,7 +1402,10 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         positions=[PositionRowOut(position=r.position, runs=r.runs, balls=r.balls,
                                   outs=r.outs, innings=r.innings, average=r.average,
                                   strike_rate=r.strike_rate) for r in a.positions],
-        best_averages=lead(a.best_averages))
+        best_averages=lead(a.best_averages),
+        style_phases=_style_out(a.style_phases),
+        unknown_style_overs=sum(a.style_phases[p]["unknown"].overs
+                                for p in analysis.PHASES))
 
 
 @app.get("/api/season/{state}/analysis", response_model=AnalysisOut)

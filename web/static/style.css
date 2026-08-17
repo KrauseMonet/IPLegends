@@ -1387,6 +1387,28 @@ body.has-ground{
 .an-split-rows div{font-size:12.5px;color:var(--ink-3);line-height:1.75}
 .an-split-rows em{font-family:var(--mono);font-style:normal;color:var(--ink-2)}
 
+/* [A113] spin against pace, per phase */
+.an-sty{width:100%;border-collapse:collapse;min-width:460px}
+.an-sty th,.an-sty td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+.an-sty thead th{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:400;white-space:nowrap}
+.an-sty thead th i{display:block;font-style:normal;font-size:9.5px;color:var(--ink-3);
+  opacity:.75;letter-spacing:.1em;margin-top:2px}
+.an-sty tbody th{font-family:var(--display);font-size:15px;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--ink-2);font-weight:400;white-space:nowrap}
+.an-sty tbody td b{font-family:var(--mono);font-size:16px;color:var(--ink);font-weight:700}
+.an-sty tbody td i{display:block;font-family:var(--mono);font-style:normal;font-size:10px;
+  color:var(--ink-3);margin-top:3px;white-space:nowrap}
+.an-sty tbody tr:last-child th,.an-sty tbody tr:last-child td{border-bottom:none}
+/* A style gets a colour so the two rows read apart at a glance; unknown stays neutral
+   deliberately -- it is an absence of information, not a third kind of bowling. */
+.an-sty-pace tbody th,.an-sty-pace th[scope=row]{color:var(--hot)}
+.an-sty-spin tbody th,.an-sty-spin th[scope=row]{color:#4aa8ff}
+.an-sty-unknown th[scope=row]{color:var(--ink-3)}
+.an-sty-none{color:var(--ink-3);font-family:var(--mono)}
+.an-sty-foot{margin:12px 0 0;font-size:12px;color:var(--ink-3);max-width:70ch;line-height:1.6}
+.an-sty-foot b{color:var(--ink-2);font-weight:600}
+
 .an-key-swatch{width:9px;height:9px;border-radius:2px;flex:none;display:inline-block;
   margin:0 6px 0 14px;vertical-align:middle}
 .an-key-swatch:first-child{margin-left:0}

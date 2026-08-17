@@ -152,6 +152,14 @@ class Card:
     # not read as an Indian one. A51 filled them all, so it is NULL for nobody today; the
     # type stays because a revised archive can reintroduce one.
     overseas: bool | None = None
+    # 'pace' | 'spin' | None, straight off `people.bowling_style` (SPEC 6.3 / A112's
+    # hand-filled CSV). NULL for exactly the same class of reason as `overseas` above and
+    # it gets the same treatment: A112 filled all 479 bowlers who cleared the 30-legal-ball
+    # threshold, so nobody who bowls is unknown TODAY, but the type stays `str | None` and
+    # is never defaulted. A revised archive can reintroduce an unknown, and a batter who
+    # never bowled is legitimately None forever. Downstream must bucket None separately --
+    # folding it into the majority style is exactly A23's failure.
+    bowling_style: str | None = None
     # A58/A60's integer 70-99, the card's face value.
     display: int | None = None
     # [A76] Which numbered batting positions this card may occupy -- already the FINAL
@@ -282,7 +290,7 @@ def load_deck(conn) -> Deck:
         )
         select s.franchise_season_id, s.person_id, p.primary_name,
                s.role, s.batting_band,
-               f.season_year, f.display_name, p.is_overseas,
+               f.season_year, f.display_name, p.is_overseas, p.bowling_style,
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,
                max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl,
                max(r.display_rating) as display,
@@ -297,7 +305,8 @@ def load_deck(conn) -> Deck:
             on bt.person_id = s.person_id and bt.fs_id = s.franchise_season_id
           left join bowling bw
             on bw.person_id = s.person_id and bw.fs_id = s.franchise_season_id
-         group by 1, 2, 3, 4, 5, 6, 7, 8, bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
+         group by 1, 2, 3, 4, 5, 6, 7, 8, 9,
+                  bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
         """
     ).fetchall()
 
@@ -327,7 +336,7 @@ def load_deck(conn) -> Deck:
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for (fs_id, person_id, name, role, band,
-         season_year, franchise, overseas, bat, bowl, display,
+         season_year, franchise, overseas, bowling_style, bat, bowl, display,
          bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls) in rows:
         batting_band = batting_role(
             season_by_key.get((fs_id, person_id), {}),
@@ -337,7 +346,7 @@ def load_deck(conn) -> Deck:
         keeper_eligible = role == "keeper" or person_id in ever_kept
         cards_by_fs[fs_id].append(
             Card(fs_id, person_id, name, bat, bowl, band, role, keeper_eligible,
-                 season_year, franchise, overseas, display,
+                 season_year, franchise, overseas, bowling_style, display,
                  BATTING_ROLE_SLOTS[batting_band],
                  bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
                  bowl_runs=bowl_runs, bowl_balls=bowl_balls)

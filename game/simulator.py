@@ -82,6 +82,18 @@ class Player:
     # person rather than by a name two different drafted seasons could share. Empty only
     # for the synthetic "average XI" filler, which is never looked up by identity.
     person_id: str = ""
+    # 'pace' | 'spin' | None, carried from Card for the same reason and in the same shape
+    # as `person_id` above: Season Analysis splits an over's economy by style, and the
+    # innings is what it aggregates, so the style has to reach the innings. NOT copied onto
+    # OverSnapshot -- `Innings.bowling` already holds every Player, so the style is looked
+    # up per over from there (A19: a second copy of the same fact on every over would be
+    # redundancy with nothing checking it).
+    #
+    # None is a real value and must never be defaulted to a style (A23). It covers two
+    # different populations: the synthetic "average XI" filler, which is given None rather
+    # than a guess, and anyone `people.bowling_style` does not know -- nobody who bowls
+    # today, since A112 filled all 479, but a revised archive can reintroduce one.
+    bowling_style: str | None = None
 
 
 @dataclass

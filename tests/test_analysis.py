@@ -21,6 +21,10 @@ class FakeSnap:
 class FakePlayer:
     name: str
     person_id: str = ""      # empty falls back to the name, as the real code does
+    # [A113] 'pace' | 'spin' | None. None is the default deliberately: a fake that says
+    # nothing about style must land in the `unknown` bucket, never be assumed into a real
+    # one, which is the property test_a_bowler_with_no_known_style_* pins.
+    bowling_style: str | None = None
 
 
 @dataclass
@@ -296,3 +300,95 @@ def test_the_same_side_across_many_matches_still_accumulates():
     rows = [l for l in a.top_scorers if l.name == "R Sharma"]
     assert len(rows) == 1 and rows[0].value == 200, "four matches, one side, one row"
     assert rows[0].team == "MI"
+
+
+# --- [A113] spin against pace ---------------------------------------------------------------
+
+def _styled(log, bowlers):
+    """One innings whose `bowling` list carries the styles the over log refers to.
+
+    The style is deliberately NOT on the snapshot -- `style_of` looks it up from
+    `Innings.bowling` (A19), so a test that set it on FakeSnap would be testing nothing the
+    real code does.
+    """
+    return FakeInnings(over_log=log,
+                       bowling=[FakeCard(FakePlayer(n, person_id=n, bowling_style=s))
+                                for n, s in bowlers])
+
+
+def _snaps(overs, bowler):
+    return [FakeSnap(over=o, over_runs=6, over_wickets=1, bowler=bowler, bowler_id=bowler)
+            for o in overs]
+
+
+def test_spin_and_pace_overs_land_in_the_right_phase_buckets():
+    """The whole point of the feature: a pace bowler's powerplay overs and a spinner's
+    middle overs must not end up in the same cell, nor in each other's."""
+    inn = _styled(_snaps([0, 1], "quick") + _snaps([7, 8], "tweaker"),
+                  [("quick", "pace"), ("tweaker", "spin")])
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.style_phases["powerplay"]["pace"].overs == 2
+    assert a.style_phases["powerplay"]["spin"].overs == 0
+    assert a.style_phases["middle"]["spin"].overs == 2
+    assert a.style_phases["middle"]["pace"].overs == 0
+    # and the runs/wickets ride along with the overs, not just the count
+    assert a.style_phases["powerplay"]["pace"].runs == 12
+    assert a.style_phases["middle"]["spin"].wickets == 2
+
+
+def test_a_bowler_with_no_known_style_is_counted_as_neither():
+    """A23 at the point it actually bites. `bowling_style = None` is a real population --
+    97 people bowled in the archive but never reached SPEC 6.3's 30-legal-ball threshold,
+    so they have no style and never will. Folding them into the majority style is the
+    error no internal check can catch, so it gets its own test."""
+    inn = _styled(_snaps([0, 1, 2], "mystery"), [("mystery", None)])
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.style_phases["powerplay"]["unknown"].overs == 3
+    assert a.style_phases["powerplay"]["pace"].overs == 0
+    assert a.style_phases["powerplay"]["spin"].overs == 0
+
+
+def test_an_unrecognised_style_string_is_unknown_rather_than_accepted():
+    """`style_of` whitelists 'pace'/'spin' instead of trusting whatever it is given, so a
+    value a future archive invents surfaces as unknown and gets noticed rather than being
+    silently promoted to a third real bucket."""
+    inn = _styled(_snaps([0], "odd"), [("odd", "left-arm wrist spin")])
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.style_phases["powerplay"]["unknown"].overs == 1
+    assert a.style_phases["powerplay"]["spin"].overs == 0, "not matched on the word 'spin'"
+
+
+def test_the_style_split_reconciles_with_the_phase_totals():
+    """The test most likely to catch a real bug: every over bowled in a phase must appear
+    in exactly one style bucket for that phase, so the three styles sum to the phase's own
+    over count -- which `phases` computes independently, in `_accumulate`, from the same
+    log. A dropped over, a double-count, or an over attributed to the wrong phase breaks
+    this even when each individual bucket looks plausible.
+
+    Deliberately mixes all three styles AND both innings, so a bug that only shows up on
+    the second side (the shape that produced A101's swapped bowling figures) is in scope.
+    """
+    home = _styled(_snaps([0, 1, 2], "p1") + _snaps([7, 8], "s1") + _snaps([15, 16], "u1"),
+                   [("p1", "pace"), ("s1", "spin"), ("u1", None)])
+    away = _styled(_snaps([3], "p2") + _snaps([9, 10, 11], "s2") + _snaps([17], "u2"),
+                   [("p2", "pace"), ("s2", "spin"), ("u2", None)])
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), home, away)])
+    for phase in PHASES:
+        by_style = sum(a.style_phases[phase][s].overs
+                       for s in ("pace", "spin", "unknown"))
+        assert by_style == a.phases[phase].overs, (
+            f"{phase}: {by_style} style-attributed overs against "
+            f"{a.phases[phase].overs} in the phase total")
+    # and nothing was lost overall
+    assert sum(a.style_phases[p][s].overs for p in PHASES
+               for s in ("pace", "spin", "unknown")) == a.overs_logged
+
+
+def test_every_phase_carries_all_three_style_buckets_even_at_zero():
+    """An absent bucket and a zero bucket say different things (A31's own argument for
+    storing its five never-observed states as explicit zeroes). A consumer must never have
+    to tell 'no unknown overs' from 'unknown was omitted'."""
+    inn = _styled(_snaps([0], "p1"), [("p1", "pace")])
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    for phase in PHASES:
+        assert set(a.style_phases[phase]) == {"pace", "spin", "unknown"}, phase

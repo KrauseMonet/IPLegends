@@ -9,15 +9,6 @@ already paid, and this whole aggregation adds ~1.3ms on top of it.
 
 WHAT THE ENGINE CANNOT ANSWER, so that nobody looks for it here:
 
-- **Spin against pace.** Still unavailable, but **the reason changed on 2026-08-17 and the
-  old one is now false**: this said `people.bowling_style` is NULL for all 816 people and
-  that the override CSV awaited a human. A112 filled it -- 479 of 479 bowlers, 313 pace and
-  166 spin, no NULL for anyone who bowled 30+ legal balls. The blocker is no longer data
-  entry but PLUMBING: `etl.feasibility.Card` does not carry `bowling_style` and the deck
-  never selects it, so the `Result`/`Innings` objects this file aggregates have no style to
-  attribute an over to. That is a real change in what it would take -- a deck field and a
-  snapshot column, not a CSV -- so it is recorded rather than left reading as a data gap
-  somebody might go off and re-fill. Still parked rather than approximated.
 - **Dismissal kinds.** The simulator's outcome space is runs 0-6 plus "wicket" (A47), so
   there is no caught/bowled/lbw to split by.
 - **Boundaries and dot balls.** A `BatterCard` tallies runs and balls, not fours, sixes or
@@ -29,7 +20,21 @@ bowls the death, attributed over by over off `OverSnapshot.bowler_id`), batting 
 against chasing (`Innings.chased` is the engine's own flag, so no inference), batting by
 POSITION (`Innings.batting` is in batting order, so the index is the position), and batting
 averages (`BatterCard.out` distinguishes a dismissal from a not-out, which strike rate
-alone cannot).
+alone cannot), and [A113] **spin against pace, per phase**.
+
+Spin-vs-pace was listed here as something the engine COULD NOT answer until 2026-08-17, and
+it is worth saying what changed, because the reason moved twice. First it was a data gap:
+`people.bowling_style` was NULL for everybody. A112 filled it (479 of 479 bowlers, 313 pace
+and 166 spin). That left a PLUMBING gap -- the style was in the database and the analysis
+never touches the database -- so A113 threaded it: `bowling_style` onto `Card` (selected in
+`load_deck`), onto `Player` (via `to_player`), and it is then looked up per over from
+`Innings.bowling` rather than copied onto every `OverSnapshot` (A19). An UNKNOWN style is
+its own bucket in every phase and is never folded into either real one (A23) -- and it is
+NOT empty, since 97 people bowled without ever reaching SPEC 6.3's 30-ball threshold.
+
+**Read `StyleSplit` before displaying this: the per-phase ECONOMIES are meaningful and the
+per-phase over SHARES are not**, because `choose_bowler` assigns overs by workload and
+models no phase policy. That is measured, not assumed.
 
 PHASES follow SPEC 4.8/A5 exactly, rather than a definition invented for this screen: death
 is the final 25% of the innings' scheduled overs -- `(scheduled_balls * 3 // 4) // 6`, which
@@ -125,6 +130,55 @@ class PhaseBowler:
 
 
 @dataclass
+class StyleSplit:
+    """Spin against pace in ONE phase, attributed over by over.
+
+    Per-phase economy and wickets for each style. The ECONOMIES are the real output here.
+
+    **The over SHARES are not a cricket finding and must not be presented as one, which was
+    measured rather than assumed.** Real T20 puts pace on the new ball and at the death and
+    spin through the middle; this engine cannot reproduce that, because `choose_bowler`
+    hands the next over to whoever has bowled least and knows nothing about phase or style
+    -- a deliberate omission its own docstring already records ("a real captain saves their
+    best for the death; this one does not"). Measured on a real 74-fixture season: pace took
+    51.0% of powerplay overs, 58.5% of middle and 53.5% of death, every phase within four
+    points of its 55.1% overall share, and individual bowlers turned up evenly in both the
+    powerplay and the death (Maharoof 14 overs in each). So a phase share here measures the
+    STYLE MIX OF THE FIVE-MAN ATTACK, not a captain's policy. Recorded here because the
+    obvious reading of this table is the wrong one, and the first draft of the UI copy for
+    it asserted exactly the pattern the engine does not produce.
+
+    `unknown` is its own bucket and is NEVER folded into either style (A23). It is NOT
+    empty: 97 people bowled in the archive but never reached SPEC 6.3's 30-legal-ball
+    threshold, so `people.bowling_style` does not know them and never will -- 109 of 2,826
+    overs in the measured season, about 3.9%.
+
+    The bucket is reported even when empty, for the same reason A31 stores its five
+    never-observed states as explicit zeroes: an absent row and a zero row say different
+    things, and silently counting an unknown as the majority style is precisely the error
+    internal checks cannot catch.
+    """
+
+    overs: int = 0
+    runs: int = 0
+    wickets: int = 0
+
+    @property
+    def economy(self) -> float:
+        return round(self.runs / self.overs, 2) if self.overs else 0.0
+
+    @property
+    def balls_per_wicket(self) -> float:
+        return round(self.overs * BALLS_PER_OVER / self.wickets, 1) if self.wickets else 0.0
+
+
+# The bucket names. `unknown` is a first-class member rather than an afterthought, so
+# every consumer that iterates STYLES gets it for free and cannot quietly omit it.
+STYLES = ("pace", "spin", "unknown")
+STYLE_LABEL = {"pace": "Pace", "spin": "Spin", "unknown": "Unknown"}
+
+
+@dataclass
 class InningsSplit:
     """Batting first against chasing. `Innings.chased` is set by the engine, so this needs
     no inference about which innings came second."""
@@ -187,10 +241,44 @@ class SeasonAnalysis:
     chasing: InningsSplit = field(default_factory=InningsSplit)
     positions: list = field(default_factory=list)          # 11 rows
     best_averages: list = field(default_factory=list)       # runs per dismissal
+    # [A113] phase -> style -> StyleSplit. Every phase carries all three of STYLES, so a
+    # reader never has to distinguish "no unknown overs" from "the unknown bucket was
+    # omitted" -- the same reason A31 stores its five never-observed states as explicit
+    # zeroes rather than absent rows.
+    style_phases: dict = field(default_factory=dict)
 
 
 def _blank_phases() -> dict:
     return {p: PhaseSplit() for p in PHASES}
+
+
+def _blank_style_phases() -> dict:
+    return {p: {s: StyleSplit() for s in STYLES} for p in PHASES}
+
+
+def style_of(innings, snap) -> str:
+    """Which STYLES bucket this over belongs to.
+
+    Looked up from `Innings.bowling` rather than read off a field on `OverSnapshot`: the
+    innings already holds every `Player` who bowled, so copying the style onto each of the
+    twenty snapshots would be a second copy of one fact with nothing keeping them in step
+    (A19). Keyed on `person_id`, falling back to the name only when a snapshot carries no
+    id -- the same precedence the per-bowler phase attribution above already uses, and for
+    the same reason: never key a player on a name string when an id is available.
+
+    Anything not exactly 'pace' or 'spin' -- None, or a value a future archive invents --
+    lands in 'unknown'. Deliberately a whitelist, not `or 'unknown'`: a new style string
+    should show up as unknown and be noticed, not be silently accepted as a third real
+    bucket nor coerced into one of the two.
+    """
+    by_id, by_name = {}, {}
+    for bc in innings.bowling:
+        by_id[bc.player.person_id] = bc.player.bowling_style
+        by_name[bc.player.name] = bc.player.bowling_style
+    style = by_id.get(snap.bowler_id) if snap.bowler_id else None
+    if style is None:
+        style = by_name.get(snap.bowler)
+    return style if style in ("pace", "spin") else "unknown"
 
 
 def _blank_manhattan() -> list:
@@ -221,7 +309,8 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     stated rather than assumed.
     """
     a = SeasonAnalysis(phases=_blank_phases(), your_phases=_blank_phases(),
-                       manhattan=_blank_manhattan(), your_manhattan=_blank_manhattan())
+                       manhattan=_blank_manhattan(), your_manhattan=_blank_manhattan(),
+                       style_phases=_blank_style_phases())
 
     # [A111] Keyed on (person_id, side identity), never on the name and never on the
     # person alone. Measured on a real season: **16 of 100 people turned out for MORE THAN
@@ -278,6 +367,14 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
                 pb.overs += 1
                 pb.runs += snap.over_runs
                 pb.wickets += snap.over_wickets
+
+                # [A113] Spin against pace, in the same pass and off the same snapshot, so
+                # the style totals cannot drift from the per-bowler ones above -- both are
+                # driven by one iteration over one over_log.
+                ss = a.style_phases[phase_of(snap.over)][style_of(inn, snap)]
+                ss.overs += 1
+                ss.runs += snap.over_runs
+                ss.wickets += snap.over_wickets
             if highest is None or inn.runs > highest["runs"]:
                 highest = {"runs": inn.runs, "wickets": inn.wickets,
                            "overs": inn.overs, "side": side.short}

@@ -777,7 +777,7 @@ class ProfileOut(BaseModel):
     solo_titles: int = 0
     friend_titles: int = 0
     top_batters: list[LeaderOut] = Field(description="up to 5, by total runs desc")
-    top_bowlers: list[LeaderOut] = Field(description="up to 4, by total wickets desc")
+    top_bowlers: list[LeaderOut] = Field(description="up to 5, by total wickets desc")
 
 
 class SaveResultIn(BaseModel):

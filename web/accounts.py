@@ -118,9 +118,18 @@ class ProfileStats:
 
 
 def profile_stats(conn, account_id: int) -> ProfileStats:
-    """Games played, titles won, and the top 5 batters / top 4 bowlers by total runs/
+    """Games played, titles won, and the top 5 batters / top 5 bowlers by total runs/
     wickets across every game this account has saved. Reads only `game_results`/
     `game_result_players` (migration 027) -- nothing here re-simulates anything.
+
+    **Five and five.** It was 5 and 4 from the feature's original request onward, and that
+    asymmetry rested on nothing: no cricketing rule, no measurement, and no note anywhere
+    in CLAUDE.md or SPEC.md justifying it. The layout argued against it too -- the two
+    lists render side by side as Orange Cap and Purple Cap columns, so a four-row column
+    beside a five-row one simply looked short. The Purple Cap is no less a season-long
+    award than the Orange Cap, and this table aggregates across every saved game rather
+    than one XI, so the "a side has more batters than bowlers" rationalisation does not
+    apply here either.
 
     The `is not null` filters matter: a pure bowler who never batted in any saved game
     must never appear in `top_batters` with a manufactured 0 (A23/A71's rule, carried
@@ -194,7 +203,7 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
              where gr.account_id = %s and grp.sim_bowl_wickets is not null
              group by p.person_id, p.primary_name
              order by total_wickets desc, p.primary_name
-             limit 4
+             limit 5
             """,
             (account_id,),
         )

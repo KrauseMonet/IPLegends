@@ -1,4 +1,4 @@
-// The career profile page: games played, titles won, and the top 5 batters / top 4
+// The career profile page: games played, titles won, and the top 5 batters / top 5
 // bowlers by total runs/wickets across every game this account has saved (solo or
 // room, migration 027). Read-only -- nothing here writes anything; the save hooks live
 // in season.js/room.js instead, right where a game actually completes.

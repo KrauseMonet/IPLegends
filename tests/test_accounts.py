@@ -155,7 +155,7 @@ class FakeConn:
 
         if sql_norm.startswith("select p.person_id, p.primary_name, sum(grp.sim_bowl_wickets)"):
             (account_id,) = params
-            return FakeCursor(self._leaderboard(account_id, stat_index=4, limit=4))
+            return FakeCursor(self._leaderboard(account_id, stat_index=4, limit=5))
 
         raise AssertionError(f"FakeConn does not know this query: {sql_norm[:80]!r}")
 
@@ -349,23 +349,29 @@ def test_profile_stats_sums_runs_across_games_for_the_same_player(conn):
     assert stats.top_batters[0].total == 100
 
 
-def test_profile_stats_ranks_top_5_batters_and_top_4_bowlers_by_total(conn):
+def test_profile_stats_ranks_the_top_5_batters_and_top_5_bowlers_by_total(conn):
+    """Five and five. It was five and FOUR until 2026-08-17, on no basis at all -- see
+    `profile_stats`' own docstring.
+
+    Both sides seed SIX players so the limit is actually exercised: with only five bowlers
+    seeded (as this test had) a `limit 5` and a `limit 6` return the same list, and the
+    assertion would pass without the limit doing anything."""
     account = accounts.create_account(conn, "alice", "alice@example.com", "correcthorse")
     for i in range(6):
         conn.seed_person(f"bat{i}", f"Batter {i}")
-    for i in range(5):
         conn.seed_person(f"bowl{i}", f"Bowler {i}")
     squad = (
         [_SquadEntry(f"bat{i}", sim_bat_runs=(i + 1) * 10, sim_bat_balls=10) for i in range(6)]
         + [_SquadEntry(f"bowl{i}", sim_bowl_wickets=(i + 1), sim_bowl_runs=20, sim_bowl_balls=24)
-           for i in range(5)]
+           for i in range(6)]
     )
     accounts.save_game_result(conn, account.account_id, "solo", "k1", champion=False, squad=squad)
     stats = accounts.profile_stats(conn, account.account_id)
     assert len(stats.top_batters) == 5
     assert [r.person_id for r in stats.top_batters] == ["bat5", "bat4", "bat3", "bat2", "bat1"]
-    assert len(stats.top_bowlers) == 4
-    assert [r.person_id for r in stats.top_bowlers] == ["bowl4", "bowl3", "bowl2", "bowl1"]
+    assert len(stats.top_bowlers) == 5
+    assert [r.person_id for r in stats.top_bowlers] == ["bowl5", "bowl4", "bowl3", "bowl2", "bowl1"]
+    assert "bowl0" not in [r.person_id for r in stats.top_bowlers], "the 6th is cut, not kept"
 
 
 def test_profile_stats_never_shows_a_pure_bowler_as_a_batter(conn):

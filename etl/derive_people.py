@@ -42,8 +42,28 @@ INTERNATIONAL_ARCHIVES = (
     "t20s_male_json.zip",
 )
 
-# SPEC 6.3. Below this a style would be guesswork about someone who barely bowled.
-MIN_LEGAL_BALLS_FOR_STYLE = 30
+# SPEC 6.3. Every person who has bowled a legal ball is asked about.
+#
+# This was 30, on the reasoning that below it a style would be guesswork about someone
+# who barely bowled. That reasoning was wrong about what the question IS, and A113 is
+# what showed it: a bowling action is a fact about the PLAYER, not about the workload,
+# so a man who bowled four balls in nineteen years still has one and it is exactly as
+# knowable from the public record as R Ashwin's. The threshold was not protecting
+# against guesswork -- nothing here guesses, a blank stays NULL -- it was declining to
+# ask a question that has an answer.
+#
+# It had a measurable cost. The threshold is career-wide while A65 rates anyone who
+# bowled a single ball, so 97 people ended up in the deck with no style at all, and
+# they bowled 109 of 2,826 overs -- 3.9% -- in a real simulated season, landing in
+# Season Analysis's own `unknown` bucket. That bucket exists for A23's reason and stays
+# (a revised archive can always introduce a bowler nobody has ruled on yet), but it
+# should be empty in the ordinary case rather than permanently holding a twenty-fifth
+# of the attack.
+#
+# A8 recorded the old boundary as permanent -- "NULL means never bowled enough to be
+# asked about" -- and that sentence is now false. 1, not 0, because someone who never
+# bowled at all is not a bowler and has nothing to be asked.
+MIN_LEGAL_BALLS_FOR_STYLE = 1
 
 # The IPL's home nation, so `is_overseas` is a fact about a known nationality rather
 # than a guess. It is never used as a fallback: see the note on A3 below.

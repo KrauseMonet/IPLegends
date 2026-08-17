@@ -139,7 +139,7 @@ function anPaint(){
       <div class="an-scroll">${positionSvg(d.positions)}</div>
     </div>
 
-    <div class="an-lists">
+    <div class="an-lists an-lists-5">
       ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v, 'runs')}
       ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v, 'wickets')}
       ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1), 'runs per dismissal')}
@@ -331,9 +331,9 @@ function leaderPanel(title, sub, rows, kind, fmt, unit){
     return `
     <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
-      <span class="an-lead-detail">${r.detail}</span>
+      <span class="an-lead-name">${r.name}</span>
       <span class="an-lead-value">${fmt(r.value)}</span>
+      <span class="an-lead-sub">${teamTag(r.team)}${r.detail}</span>
     </div>`;
   }).join('');
   return `<div class="an-lead an-lead-${kind}">
@@ -357,9 +357,9 @@ function phasePanel(title, sub, rows, kind){
     return `
     <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
-      <span class="an-lead-detail">${r.overs} ov · ${r.wickets}w</span>
+      <span class="an-lead-name">${r.name}</span>
       <span class="an-lead-value">${r.economy.toFixed(2)}</span>
+      <span class="an-lead-sub">${teamTag(r.team)}${r.overs} ov · ${r.wickets}w</span>
     </div>`;
   }).join('');
   return `<div class="an-lead an-lead-${kind}">
@@ -429,16 +429,22 @@ function positionSvg(rows){
 // [A111] A leaderboard row is a (person, SIDE) pair, not a person: the same man can turn
 // out for more than one drawn side in one tournament, and without the team two rows for
 // him read as a duplicate rather than as two different stints.
+//
+// The tag sits on the row's SECOND line, beside the detail, rather than inline after the
+// name. On one line it was competing with the name for the same ~120px and losing to it:
+// five boards across a 1200px screen made "T Stubbs" render as "T St..." and the tag
+// itself never appeared at all, so the A111 fix it exists to deliver was invisible on
+// every row. A second line costs vertical space the panel has and buys back the width
+// the names did not.
 function teamTag(team){
-  return team ? ` <i class="an-team">${team}</i>` : '';
+  return team ? `<i class="an-team">${team}</i>` : '';
 }
 
-// A112. `.an-lead-name` ellipsises, because five leaderboards on one row leave each of
-// them ~209px and the A111 team tag takes a slice of that -- so "JC Buttler" renders as
-// "JC ...". The clipping is correct; the full text simply has to be reachable somewhere,
-// and a native `title` is the same tooltip mechanism the SVGs in this file already use
-// (manhattanSvg, phaseBarSvg, positionSvg all carry <title> children). One convention,
-// no positioning logic to get wrong, and it cannot overflow the viewport.
+// The `title` remains, because a name can still outrun its line on a narrow viewport --
+// but it is now the fallback rather than the only way to read a row. It is the same
+// tooltip mechanism the SVGs in this file already use (manhattanSvg, phaseBarSvg,
+// positionSvg all carry <title> children): one convention, no positioning logic to get
+// wrong, and it cannot overflow the viewport.
 //
 // Escaped because this lands in an ATTRIBUTE, where a double quote in a name would end
 // the attribute early and corrupt the markup. Archive names are plain text today, so

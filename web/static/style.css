@@ -1333,7 +1333,14 @@ body.has-ground{
   letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-left:7px}
 .an-moment-detail{font-size:12.5px;color:var(--ink-2);margin-top:4px}
 
-.an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:16px}
+.an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:16px}
+/* Five boards is a prime count, so `auto-fit` orphans one of them onto a row of its own
+   at any width that fits four -- stretched to full width and looking like a different
+   component. The count is fixed and known, so it is stated rather than inferred. */
+.an-lists-5{grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}
+@media (max-width:1180px){.an-lists-5{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:760px){.an-lists-5{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:470px){.an-lists-5{grid-template-columns:minmax(0,1fr)}}
 .an-lead{border:1px solid var(--line);border-radius:12px;padding:14px 16px 10px;
   background:rgba(255,255,255,.018);border-top:3px solid var(--ink-3)}
 .an-lead-orange{border-top-color:#ff8c1a}
@@ -1345,12 +1352,21 @@ body.has-ground{
   letter-spacing:.02em;color:var(--ink);font-weight:400}
 .an-lead-head span{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--ink-3)}
-.an-lead-row{display:grid;grid-template-columns:20px 1fr auto auto;align-items:baseline;gap:10px;
-  padding:7px 0;border-top:1px solid var(--line);font-size:13.5px}
-.an-lead-pos{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
-.an-lead-name{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.an-lead-detail{font-family:var(--mono);font-size:10.5px;color:var(--ink-3)}
-.an-lead-value{font-family:var(--mono);font-size:15px;color:var(--ink);font-weight:700}
+/* Two lines per row: name and value on the first, team and detail on the second. Five
+   boards across a desktop width leave each card ~215px, which one line cannot hold a
+   name, a team tag, a detail and a number in -- the name lost that contest and ellipsised
+   to "T St...". Giving the name the whole line minus its own number is what makes it
+   legible; nothing was dropped, it moved down. `min-width:0` is what actually lets the
+   ellipsis apply inside a grid track, whose default `auto` minimum refuses to shrink. */
+.an-lead-row{display:grid;grid-template-columns:15px minmax(0,1fr) auto;align-items:baseline;
+  column-gap:7px;row-gap:1px;padding:8px 0;border-top:1px solid var(--line);font-size:13.8px}
+.an-lead-pos{grid-column:1;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.an-lead-name{grid-column:2;min-width:0;color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-lead-value{grid-column:3;font-family:var(--mono);font-size:14.5px;color:var(--ink);font-weight:700}
+.an-lead-sub{grid-column:2/4;min-width:0;font-family:var(--mono);font-size:10px;
+  letter-spacing:.04em;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-lead-sub .an-team{margin:0 6px 0 0}
 .an-lead-row.top .an-lead-name{color:var(--ink);font-weight:650}
 .an-lead-row.top .an-lead-value{color:var(--gold-2)}
 

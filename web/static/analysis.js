@@ -235,10 +235,23 @@ function phaseCard(p){
 // numbers beat bars -- the SVGs on this screen exist where a shape carries the meaning
 // (a Manhattan, a phase share), which is not the case for six economies.
 //
-// `unknown` is rendered as a row ONLY when it has overs, but the count is always stated in
-// the footnote, at zero or otherwise. That is the A23 shape carried into the UI: the
-// concept is never omitted, so a reader can tell "nothing unknown" from "not measured",
-// while an all-zero row is not made to occupy space it has not earned.
+// `unknown` is invisible on screen -- no row, no footnote clause -- until it has overs,
+// and then it gets both.
+//
+// [A114] It used to state the count in the footnote at zero too, so a reader could tell
+// "nothing unknown" from "not measured". That was worth the line while A112's 30-ball
+// threshold left 97 bowlers permanently unrecorded and the bucket held 3.9% of a real
+// season's overs; a reader had a live reason to ask. A114 dropped the threshold to 1 and
+// filled all 97, so the bucket is now empty in the ordinary case and the sentence had
+// become a standing reassurance about a problem that no longer exists.
+//
+// The A23 guard itself is unchanged and is the reason both branches survive: the deck can
+// still acquire a styleless bowler from a revised archive, and on the day it does the row
+// and the count both appear. What went is the announcement at zero, not the reporting.
+//
+// `unknown` stays in ALL_STYLES regardless, because it is the DENOMINATOR -- a phase's
+// share is over every style's overs, so folding it out would make the percentages down a
+// column sum past 100 the moment the bucket is non-empty.
 const ALL_STYLES = ['pace', 'spin', 'unknown'];
 
 function styleTable(rows, unknownOvers){
@@ -272,10 +285,10 @@ function styleTable(rows, unknownOvers){
       <tbody>${body}</tbody>
     </table></div>
     <p class="an-sty-foot">Economy is runs per over. Share is of that phase's overs; the
-      bowling order is set by workload, not by phase. ${unknownOvers > 0
-      ? `<b>${unknownOvers} over${unknownOvers === 1 ? '' : 's'}</b> were bowled by someone
+      bowling order is set by workload, not by phase.${unknownOvers > 0
+      ? ` <b>${unknownOvers} over${unknownOvers === 1 ? '' : 's'}</b> were bowled by someone
          whose style is unrecorded, counted in their own row.`
-      : `Every over is attributed: <b>no bowler</b> this season had an unrecorded style.`}</p>`;
+      : ''}</p>`;
 }
 
 

@@ -63,8 +63,8 @@ function anPaint(){
         <div>
           <h3>Manhattan</h3>
           <p>${AN_METRIC === 'runs'
-                ? 'Average runs per over, across every innings that reached it.'
-                : 'Wickets falling in each over of the innings.'}</p>
+                ? 'Runs per over, averaged over the innings that reached it.'
+                : 'Wickets per over.'}</p>
         </div>
         <div class="an-controls">
           <div class="an-toggle">
@@ -83,7 +83,7 @@ function anPaint(){
     <div class="an-panel">
       <div class="an-panel-head"><div>
         <h3>The three phases</h3>
-        <p>Powerplay, middle overs, death -- split exactly the way the ratings split them.</p>
+        <p>Overs 1-6, 7-15, 16-20.</p>
       </div></div>
       <div class="an-phases">${phases.map(phaseCard).join('')}</div>
       <div class="an-scroll">${phaseBarSvg(phases)}</div>
@@ -104,8 +104,7 @@ function anPaint(){
     <div class="an-panel">
       <div class="an-panel-head"><div>
         <h3>Who bowls the hard overs</h3>
-        <p>Attributed over by over, so a death economy is measured rather than inferred.
-           A season total cannot tell these two jobs apart.</p>
+        <p>Economy in each phase, attributed over by over.</p>
       </div></div>
       <div class="an-lists an-lists-2">
         ${phasePanel('At the death', 'Overs 16-20 · lowest economy', d.death_bowlers, 'death')}
@@ -116,11 +115,7 @@ function anPaint(){
     <div class="an-panel">
       <div class="an-panel-head"><div>
         <h3>Spin against pace</h3>
-        <p>Economy and wickets for each style, by phase. Read the <b>economies</b> — those
-           are real. Do not read the over shares as a captain's plan: this engine hands the
-           next over to whoever has bowled least, so every bowler works through all three
-           phases and the mix stays near-constant instead of turning pace onto the new ball
-           and spin into the middle.</p>
+        <p>Economy, wickets and overs for each style, by phase.</p>
       </div></div>
       ${styleTable(d.style_phases, d.unknown_style_overs)}
     </div>
@@ -128,8 +123,7 @@ function anPaint(){
     <div class="an-panel">
       <div class="an-panel-head"><div>
         <h3>Setting or chasing</h3>
-        <p>Every match splits one of each way. A chase averages fewer runs because it
-           stops the moment it is won, not because those sides batted worse.</p>
+        <p>Average score and win rate. A chase ends when it is won.</p>
       </div></div>
       <div class="an-vs">
         ${splitCard('Batting first', d.bat_first, 'first')}
@@ -140,7 +134,7 @@ function anPaint(){
     <div class="an-panel">
       <div class="an-panel-head"><div>
         <h3>The batting order</h3>
-        <p>Runs, average and strike rate by the number a batter went in at.</p>
+        <p>Runs and average by the number a batter went in at.</p>
       </div></div>
       <div class="an-scroll">${positionSvg(d.positions)}</div>
     </div>
@@ -277,13 +271,11 @@ function styleTable(rows, unknownOvers){
       <thead><tr><th></th>${head}</tr></thead>
       <tbody>${body}</tbody>
     </table></div>
-    <p class="an-sty-foot">Economy is runs per over. The share of each phase reflects how many
-      of the attack's five bowlers bowl that style, not when a captain used them — bowling
-      order here is workload-based by design, so a phase policy is not modelled. ${unknownOvers > 0
+    <p class="an-sty-foot">Economy is runs per over. Share is of that phase's overs; the
+      bowling order is set by workload, not by phase. ${unknownOvers > 0
       ? `<b>${unknownOvers} over${unknownOvers === 1 ? '' : 's'}</b> were bowled by someone
-         whose style is unrecorded and are counted in their own row, never folded into
-         either style.`
-      : `Every over is attributed: <b>no bowler</b> in this season had an unrecorded style.`}</p>`;
+         whose style is unrecorded, counted in their own row.`
+      : `Every over is attributed: <b>no bowler</b> this season had an unrecorded style.`}</p>`;
 }
 
 

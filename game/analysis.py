@@ -71,14 +71,20 @@ class PhaseSplit:
     overs: int = 0
     fours: int = 0
     sixes: int = 0
+    # Legal balls, which is NOT `overs * 6`: an innings that ends mid-over contributes a
+    # part-over to whichever phase it ended in, and that part is real cricket that has to
+    # go somewhere. `overs` stays a count of COMPLETED overs for display; `balls` is the
+    # denominator every rate below uses, so a phase credited with a part-over's runs is
+    # not also credited with a whole over's worth of time to score them.
+    balls: int = 0
 
     @property
     def run_rate(self) -> float:
-        return round(self.runs / self.overs, 2) if self.overs else 0.0
+        return round(self.runs * BALLS_PER_OVER / self.balls, 2) if self.balls else 0.0
 
     @property
     def balls_per_wicket(self) -> float:
-        return round(self.overs * BALLS_PER_OVER / self.wickets, 1) if self.wickets else 0.0
+        return round(self.balls / self.wickets, 1) if self.wickets else 0.0
 
     @property
     def boundary_runs(self) -> int:
@@ -326,6 +332,25 @@ def _blank_manhattan() -> list:
 
 
 def _accumulate(innings, phases: dict, bars: list) -> None:
+    """Fold one innings into the phase totals and the Manhattan bars.
+
+    **The phases are TOTALS and must be complete; the Manhattan is an AVERAGE PER OVER and
+    must not be.** That asymmetry is deliberate and is the whole subtlety here.
+
+    `over_log` holds only fully completed overs, so an innings that ends mid-over -- all
+    out, or a chase won -- leaves its last few balls unlogged. Measured on one real season:
+    44 runs of one side's 2,173, and league-wide about 1.3%. Left out of the phase totals
+    those runs simply vanish, and they vanish NON-RANDOMLY: a chase ends mid-over far more
+    often than an innings does otherwise, so it is the death that is systematically
+    understated. So the remainder is attributed here, to the phase of the over the innings
+    actually ended in, along with its wickets, boundaries and balls.
+
+    The bars get no such treatment. A bar answers "what does over 14 usually yield", and
+    two balls of a won chase is not a comparable unit of that question -- folding it in
+    would drag the average down with an over nobody finished bowling. So the bars stay on
+    complete overs, and `sum(bars.runs) < sum(phases.runs)` by design rather than by
+    oversight.
+    """
     for snap in innings.over_log:
         if snap.over >= len(bars):
             continue                     # a miscounted/extended over cannot land in a bar
@@ -333,6 +358,7 @@ def _accumulate(innings, phases: dict, bars: list) -> None:
         split.runs += snap.over_runs
         split.wickets += snap.over_wickets
         split.overs += 1
+        split.balls += BALLS_PER_OVER
         split.fours += snap.over_fours
         split.sixes += snap.over_sixes
         bar = bars[snap.over]
@@ -341,6 +367,33 @@ def _accumulate(innings, phases: dict, bars: list) -> None:
         bar.innings += 1
         bar.fours += snap.over_fours
         bar.sixes += snap.over_sixes
+
+    # The part-over the log never recorded. Its index is exactly how many whole overs were
+    # logged, and everything it contains is the innings' own total minus what the log
+    # accounts for -- no new field on the engine, and nothing that has to be kept in step
+    # with anything (A19).
+    logged = len(innings.over_log)
+    if logged >= len(bars):
+        return                           # a full innings telescopes exactly; nothing left
+    runs_left = innings.runs - sum(s.over_runs for s in innings.over_log)
+    wkts_left = innings.wickets - sum(s.over_wickets for s in innings.over_log)
+    fours_left = innings.fours - sum(s.over_fours for s in innings.over_log)
+    sixes_left = innings.sixes - sum(s.over_sixes for s in innings.over_log)
+    balls_left = getattr(innings, "balls", 0) - logged * BALLS_PER_OVER
+    # Gated on there being ANYTHING left, not on balls alone. A chase won on a WIDE scores
+    # runs without advancing the ball count, so `balls_left` is 0 while real runs sit
+    # unattributed -- measured at 2 runs across one 74-fixture season, which is small,
+    # non-zero, and exactly the kind of residue that never gets explained if it is left in.
+    # An innings that ended cleanly on an over boundary has all five at zero and adds
+    # nothing, so no over nobody bowled is ever invented.
+    if not (runs_left or wkts_left or fours_left or sixes_left or balls_left):
+        return
+    split = phases[phase_of(logged)]
+    split.runs += runs_left
+    split.wickets += wkts_left
+    split.fours += fours_left
+    split.sixes += sixes_left
+    split.balls += max(balls_left, 0)
 
 
 def season_analysis(results, track=None) -> SeasonAnalysis:

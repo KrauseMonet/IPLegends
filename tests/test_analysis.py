@@ -50,15 +50,37 @@ class FakeSide:
 
 @dataclass
 class FakeInnings:
+    """[A116] The innings-level totals DERIVE from `over_log` unless a test states them.
+
+    They used to default to 0 alongside a populated log, which is a shape no real innings
+    can have -- `Innings.runs` is always at least the sum of its logged overs. That passed
+    only because the old code reached the remainder through a `balls_left > 0` gate that a
+    zeroed fixture failed by accident. Deriving makes every such fixture a legal innings,
+    so a test says what it means instead of relying on a guard to ignore it. Passing a
+    value explicitly (as the part-over tests do) still wins."""
+
     over_log: list = field(default_factory=list)
     batting: list = field(default_factory=list)
     bowling: list = field(default_factory=list)
-    runs: int = 0
-    wickets: int = 0
+    runs: int | None = None
+    wickets: int | None = None
     overs: str = "20.0"
     chased: bool = False
-    fours: int = 0
-    sixes: int = 0
+    fours: int | None = None
+    sixes: int | None = None
+    balls: int | None = None
+
+    def __post_init__(self):
+        if self.runs is None:
+            self.runs = sum(s.over_runs for s in self.over_log)
+        if self.wickets is None:
+            self.wickets = sum(s.over_wickets for s in self.over_log)
+        if self.fours is None:
+            self.fours = sum(s.over_fours for s in self.over_log)
+        if self.sixes is None:
+            self.sixes = sum(s.over_sixes for s in self.over_log)
+        if self.balls is None:
+            self.balls = 6 * len(self.over_log)
 
 
 @dataclass
@@ -434,18 +456,23 @@ def test_a_phase_with_runs_but_no_boundary_shares_zero_rather_than_dividing_by_n
 
 
 def test_tournament_totals_come_from_the_innings_not_the_over_log():
-    """A partial final over is never logged (`OverSnapshot`'s own rule), so the six that
-    wins a chase is invisible to the phase table and must NOT be missing from the
-    headline. The innings here carries two more fours than its log does, which is exactly
-    the shape of a chase ending mid-over."""
+    """A partial final over is never logged, so the six that wins a chase is invisible to
+    `over_log` and must not be missing from the headline. The innings here carries two more
+    fours than its log does -- the shape of a chase ending mid-over.
+
+    [A116] The PHASES now pick that remainder up too, so they agree with the totals. What
+    still differs is the MANHATTAN, which stays on completed overs by design: it is an
+    average per over, and a part-over is not one."""
     inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=10, over_fours=1, over_sixes=1)],
-                      runs=100, fours=3, sixes=1)
+                      runs=100, fours=3, sixes=1, balls=9)
     a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
-    assert a.phases["powerplay"].fours == 1        # the log's view
     assert a.total_fours == 3                      # the innings' view
     assert a.total_sixes == 1
     assert a.boundary_runs == 3 * 4 + 1 * 6
     assert a.boundary_share == 18.0                # 18 of 100
+    assert sum(p.fours for p in a.phases.values()) == 3     # phases reconcile
+    assert sum(p.runs for p in a.phases.values()) == 100
+    assert a.manhattan[0].fours == 1               # the bar keeps the log's view
 
 
 def test_most_sixes_is_a_person_and_side_pair_like_every_other_board():
@@ -486,3 +513,84 @@ def test_boundaries_are_attributed_to_the_batting_position_the_man_came_in_at():
     assert (a.positions[0].fours, a.positions[0].sixes) == (6, 1)
     assert (a.positions[1].fours, a.positions[1].sixes) == (1, 2)
     assert (a.positions[2].fours, a.positions[2].sixes) == (0, 0)
+
+
+# --- [A116] the part-over an innings ends in --------------------------------------------
+
+def test_the_unlogged_part_over_lands_in_the_phase_the_innings_ended_in():
+    """`over_log` holds completed overs only, so a chase won mid-over leaves its last few
+    balls unrecorded. Those runs are real and must not vanish: here the log accounts for
+    50 of a 62-run innings, and the missing 12 belong to the death, because over index 16
+    is where the innings stopped."""
+    log = [FakeSnap(over=o, over_runs=(10 if o >= 15 else 5), over_fours=1)
+           for o in range(16)]                      # overs 1-16 complete
+    logged_runs = sum(s.over_runs for s in log)
+    inn = FakeInnings(over_log=log, runs=logged_runs + 12, wickets=2, fours=17, sixes=1,
+                      balls=16 * 6 + 3)             # ended on the 3rd ball of over 17
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert sum(p.runs for p in a.phases.values()) == inn.runs
+    assert sum(p.fours for p in a.phases.values()) == inn.fours
+    assert a.phases["death"].balls == 6 + 3         # over 16 complete, then three balls
+    assert a.phases["death"].overs == 1             # but only ONE completed over
+
+
+def test_a_rate_is_measured_on_balls_so_a_part_over_is_not_a_whole_one():
+    """12 runs off 3 balls is 24 an over, not 12. Dividing by completed overs would credit
+    a part-over's runs with a full over of time to score them."""
+    inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=6)], runs=18, balls=6 + 3)
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.phases["powerplay"].runs == 18
+    assert a.phases["powerplay"].balls == 9
+    assert a.phases["powerplay"].run_rate == 12.0   # 18 runs / 1.5 overs
+
+
+def test_an_innings_ending_exactly_on_an_over_boundary_adds_no_part_over():
+    """All out on the last ball of an over. There is no remainder, and inventing a
+    zero-ball one would count an over nobody bowled."""
+    inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=6), FakeSnap(over=1, over_runs=6)],
+                      runs=12, balls=12)
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.phases["powerplay"].balls == 12
+    assert a.phases["powerplay"].overs == 2
+    assert a.phases["powerplay"].runs == 12
+
+
+def test_the_manhattan_deliberately_excludes_the_part_over_the_phases_include():
+    """The two answer different questions and must not be made to agree. A bar is an
+    AVERAGE PER OVER, and two balls of a won chase is not a comparable unit of that; the
+    phases are TOTALS, and a total that drops real runs is simply wrong."""
+    inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=6)], runs=18, balls=9)
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert sum(p.runs for p in a.phases.values()) == 18       # complete
+    assert sum(b.runs for b in a.manhattan) == 6              # completed overs only
+    assert a.manhattan[1].innings == 0        # over 2 was never finished, so never counted
+
+
+def test_a_chase_won_on_a_wide_still_has_its_runs_attributed():
+    """A wide scores without advancing the ball count, so an innings can end with runs
+    unaccounted for and `balls_left` at zero. Gating the remainder on balls alone dropped
+    exactly these -- 2 runs across one real 74-fixture season, small enough to look like
+    rounding and never be explained."""
+    inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=6)], runs=7, balls=6)
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.phases["powerplay"].runs == 7
+    assert sum(p.runs for p in a.phases.values()) == a.total_runs
+
+
+def test_the_phase_totals_always_sum_to_the_tournament_total():
+    """The invariant the whole fix exists to establish, over a mix of innings shapes: one
+    complete, one ending mid-over, one ending on a wide, one ending exactly on an over."""
+    def inn(log, runs, balls, **kw):
+        return FakeInnings(over_log=log, runs=runs, balls=balls, **kw)
+    full = [FakeSnap(over=o, over_runs=5) for o in range(20)]
+    innings = [
+        inn(full, 100, 120),                                        # complete
+        inn([FakeSnap(over=o, over_runs=5) for o in range(17)], 90, 17 * 6 + 4),  # mid-over
+        inn([FakeSnap(over=o, over_runs=5) for o in range(10)], 51, 60),          # on a wide
+        inn([FakeSnap(over=o, over_runs=5) for o in range(8)], 40, 48),           # clean
+    ]
+    results = [FakeResult(FakeSide("H"), FakeSide("A"), innings[0], innings[1]),
+               FakeResult(FakeSide("X"), FakeSide("Y"), innings[2], innings[3])]
+    a = season_analysis(results)
+    assert a.total_runs == 100 + 90 + 51 + 40
+    assert sum(p.runs for p in a.phases.values()) == a.total_runs

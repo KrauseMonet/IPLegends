@@ -143,10 +143,14 @@ def _bowler(name, wickets, balls=24, person_id=None):
 
 def test_add_batting_accumulates_runs_across_matches():
     acc = JourneyAccumulator()
-    acc.add_batting(Innings(batting=[_batter("A", 30, 20), _batter("B", 10, 8)], bowling=[]))
-    acc.add_batting(Innings(batting=[_batter("A", 15, 10)], bowling=[]))
+    acc.add_batting(Innings(batting=[_batter("A", 30, 20), _batter("B", 10, 8)],
+                            bowling=[], runs=44))
+    acc.add_batting(Innings(batting=[_batter("A", 15, 10)], bowling=[], runs=18))
     assert acc.runs == {"A": 45, "B": 10}
-    assert acc.total_runs == 55
+    # [A116] The TEAM's runs, not the batters' sum. Each innings above carries 4 and 3
+    # extras, and a card that says RUNS means the score on the board -- summing the
+    # batters silently dropped every wide, bye and no-ball, about 5% of a real season.
+    assert acc.total_runs == 62
 
 
 def test_a_batter_who_never_faced_a_ball_is_not_counted():
@@ -156,11 +160,31 @@ def test_a_batter_who_never_faced_a_ball_is_not_counted():
     assert acc.total_runs == 0
 
 
+def test_the_team_total_counts_extras_no_batter_is_credited_with():
+    """The bug this pins directly: an innings of 12 off the bat and 8 extras is a score of
+    20, and every one of those 8 belongs on the card. Nothing internal could have caught
+    it -- the per-player figures were right and the total agreed with nothing."""
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("A", 12, 10)], bowling=[], runs=20, extras=8))
+    assert acc.runs == {"A": 12}
+    assert acc.total_runs == 20
+
+
 def test_add_bowling_accumulates_wickets_across_matches():
     acc = JourneyAccumulator()
-    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 2), _bowler("Y", 0)]))
-    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 1)]))
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 2), _bowler("Y", 0)], wickets=2))
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 1)], wickets=1))
     assert acc.wickets == {"X": 3, "Y": 0}
+    assert acc.total_wickets == 3
+
+
+def test_the_wicket_total_is_the_teams_not_the_bowlers_sum():
+    """Identical today -- every dismissal this engine produces is bowler-credited -- so
+    this pins the BASIS rather than a number that currently differs. The day a run-out is
+    added, the tile has to keep meaning "wickets we took"."""
+    acc = JourneyAccumulator()
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("X", 2)], wickets=3))
+    assert acc.wickets == {"X": 2}
     assert acc.total_wickets == 3
 
 
@@ -206,13 +230,13 @@ def test_journey_stats_combines_the_league_record_with_however_far_the_playoffs_
     season.champion = them  # lost the final
 
     acc = JourneyAccumulator()
-    acc.add_batting(Innings(batting=[_batter("A", 50, 30)], bowling=[]))
-    acc.add_bowling(Innings(batting=[], bowling=[_bowler("B", 2)]))
+    acc.add_batting(Innings(batting=[_batter("A", 50, 30)], bowling=[], runs=54))
+    acc.add_bowling(Innings(batting=[], bowling=[_bowler("B", 2)], wickets=2))
 
     stats = journey_stats(season, you, acc)
     assert stats.played == 16 and stats.won == 10 and stats.lost == 6
     assert stats.champion is False
-    assert stats.runs == 50 and stats.wickets == 2
+    assert stats.runs == 54 and stats.wickets == 2
     assert stats.top_scorer == ("A", 50)
     assert stats.top_wicket_taker == ("B", 2)
 

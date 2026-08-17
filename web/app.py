@@ -817,7 +817,10 @@ class PhaseSplitOut(BaseModel):
     overs_range: str = Field(description="1-6 / 7-15 / 16-20, for the axis label")
     runs: int
     wickets: int
-    overs: int
+    overs: int = Field(description="COMPLETED overs; the rate denominator is `balls`")
+    balls: int = Field(
+        default=0,
+        description="legal balls, including a part-over an innings ended in -- not overs*6")
     run_rate: float
     balls_per_wicket: float = Field(description="0.0 when no wicket fell -- not a rate of 0")
     fours: int = 0
@@ -931,6 +934,11 @@ class AnalysisOut(BaseModel):
     # never logged, so an over_log sum would miss the six that won a chase); the counts
     # inside `phases` are on the over_log basis, because there a boundary has to land in
     # a named phase. The two differ slightly and are meant to.
+    total_runs: int = Field(
+        default=0,
+        description="[A116] every run in the tournament, on the INNINGS basis. The phase "
+                    "totals sum to exactly this; the Manhattan bars deliberately do not, "
+                    "being an average per completed over")
     total_fours: int = 0
     total_sixes: int = 0
     boundary_runs: int = 0
@@ -1397,7 +1405,7 @@ def season_save(state: str, request: Request) -> SaveResultOut:
 def _phase_out(phases: dict) -> list[PhaseSplitOut]:
     return [PhaseSplitOut(phase=p, label=analysis.PHASE_LABEL[p],
                           overs_range=analysis.PHASE_OVERS[p], runs=s.runs,
-                          wickets=s.wickets, overs=s.overs, run_rate=s.run_rate,
+                          wickets=s.wickets, overs=s.overs, balls=s.balls, run_rate=s.run_rate,
                           balls_per_wicket=s.balls_per_wicket, fours=s.fours,
                           sixes=s.sixes, boundary_share=s.boundary_share)
             for p, s in ((p, phases[p]) for p in analysis.PHASES)]
@@ -1444,7 +1452,7 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
                                   strike_rate=r.strike_rate, fours=r.fours,
                                   sixes=r.sixes) for r in a.positions],
         best_averages=lead(a.best_averages),
-        total_fours=a.total_fours, total_sixes=a.total_sixes,
+        total_runs=a.total_runs, total_fours=a.total_fours, total_sixes=a.total_sixes,
         boundary_runs=a.boundary_runs, boundary_share=a.boundary_share,
         most_sixes=lead(a.most_sixes), most_fours=lead(a.most_fours),
         style_phases=_style_out(a.style_phases),

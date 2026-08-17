@@ -314,7 +314,16 @@ class JourneyAccumulator:
             self.balls_faced[pid] = self.balls_faced.get(pid, 0) + b.balls
             self.fours[pid] = self.fours.get(pid, 0) + b.fours
             self.sixes[pid] = self.sixes.get(pid, 0) + b.sixes
-            self.total_runs += b.runs
+        # The TEAM's runs, not the sum of the batters' -- extras belong to the side that
+        # batted, and this is the number a card labelled RUNS is claiming.
+        #
+        # It summed `b.runs` until 2026-08-18, so it silently dropped every wide, no-ball,
+        # bye and leg-bye: measured at 111 runs over one solo season and 115 over one
+        # room's, about 5% of the total. Nothing internal could catch it -- the per-player
+        # figures it is built from were right, and it never had to agree with anything
+        # else. It surfaced only when Season Analysis started reporting the same side's
+        # runs from a different basis and the two did not match.
+        self.total_runs += innings.runs
 
     def add_bowling(self, innings) -> None:
         for bo in innings.bowling:
@@ -325,7 +334,12 @@ class JourneyAccumulator:
             self.wickets[pid] = self.wickets.get(pid, 0) + bo.wickets
             self.runs_conceded[pid] = self.runs_conceded.get(pid, 0) + bo.runs
             self.balls_bowled[pid] = self.balls_bowled.get(pid, 0) + bo.balls
-            self.total_wickets += bo.wickets
+        # Likewise the team's wickets. Identical to the bowlers' sum TODAY, because every
+        # dismissal this engine produces is credited to a bowler (A47's outcome space has
+        # no run-out) -- measured, 83 = 83 and 71 = 71. Taken from the innings anyway, so
+        # that the day a run-out is added the tile keeps meaning "wickets we took" instead
+        # of quietly becoming "wickets our bowlers were credited with".
+        self.total_wickets += innings.wickets
 
 
 def _leader(totals: dict[str, int], names: dict[str, str] | None = None) -> tuple[str, int]:

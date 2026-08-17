@@ -283,6 +283,16 @@ class SeasonAnalysis:
     total_sixes: int = 0
     most_sixes: list = field(default_factory=list)
     most_fours: list = field(default_factory=list)
+    # [A117] The tracked side's own, so the screen's "Your side" toggle drives the
+    # boundary panel the way it already drives the Manhattan and the phase splits.
+    # Computed here rather than by filtering the league boards in the browser: those are
+    # a top TEN, so a client-side filter would show only the players of yours who happened
+    # to place in it and silently call that your side's list.
+    your_total_runs: int = 0
+    your_total_fours: int = 0
+    your_total_sixes: int = 0
+    your_most_sixes: list = field(default_factory=list)
+    your_most_fours: list = field(default_factory=list)
 
     @property
     def boundary_runs(self) -> int:
@@ -292,6 +302,15 @@ class SeasonAnalysis:
     def boundary_share(self) -> float:
         """Percent of every run scored in the tournament that arrived in a boundary."""
         return round(100 * self.boundary_runs / self.total_runs, 1) if self.total_runs else 0.0
+
+    @property
+    def your_boundary_runs(self) -> int:
+        return 4 * self.your_total_fours + 6 * self.your_total_sixes
+
+    @property
+    def your_boundary_share(self) -> float:
+        return (round(100 * self.your_boundary_runs / self.your_total_runs, 1)
+                if self.your_total_runs else 0.0)
 
 
 def _blank_phases() -> dict:
@@ -518,6 +537,10 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
             a.total_runs += inn.runs
             a.total_fours += inn.fours
             a.total_sixes += inn.sixes
+            if track is not None and side is track:
+                a.your_total_runs += inn.runs
+                a.your_total_fours += inn.fours
+                a.your_total_sixes += inn.sixes
 
             for b in inn.batting:
                 d = bat.setdefault((b.player.person_id or b.player.name, id(side)),
@@ -574,12 +597,20 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     # fourteen, and floor it and you would be answering a different question than the one
     # a viewer asked. The `detail` carries the balls faced so a short, violent season is
     # visible as one rather than hidden.
-    a.most_sixes = [Leader(v[3], v[6], f"{v[1]} balls", v[4])
-                    for _, v in sorted(bat.items(), key=lambda kv: (-kv[1][6], kv[1][1]))[:10]
-                    if v[6] > 0]
-    a.most_fours = [Leader(v[3], v[5], f"{v[1]} balls", v[4])
-                    for _, v in sorted(bat.items(), key=lambda kv: (-kv[1][5], kv[1][1]))[:10]
-                    if v[5] > 0]
+    def _boundary_board(idx: int, only_side: int | None) -> list:
+        rows = [(k, v) for k, v in bat.items()
+                if v[idx] > 0 and (only_side is None or k[1] == only_side)]
+        return [Leader(v[3], v[idx], f"{v[1]} balls", v[4])
+                for _, v in sorted(rows, key=lambda kv: (-kv[1][idx], kv[1][1]))[:10]]
+
+    a.most_sixes = _boundary_board(6, None)
+    a.most_fours = _boundary_board(5, None)
+    # `id(track)` matches the second half of the (person, side) key. Identity, never a
+    # name -- `Side` is a plain dataclass with no `eq=False`, and two drawn sides can
+    # share a name, which is the same care A79/A80/A96/A111 each needed in turn.
+    if track is not None:
+        a.your_most_sixes = _boundary_board(6, id(track))
+        a.your_most_fours = _boundary_board(5, id(track))
 
     a.positions = positions
 

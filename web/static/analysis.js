@@ -57,6 +57,20 @@ function anPaint(){
       <button class="an-tab ${AN_SCOPE === 'yours' ? 'sel' : ''}" onclick="anSetScope('yours')">Your side</button>
     </div>` : '';
 
+  // [A117] Every boundary figure the panel below shows, resolved once for the current
+  // scope. The panel carries its own copy of the toggle rather than relying on the one in
+  // the Manhattan head three screens up -- that is where this was reported from, and a
+  // control that governs a number should be next to the number. Both write the same
+  // global and `anPaint` redraws everything, so the two can never disagree.
+  const yours = AN_SCOPE === 'yours';
+  const bdy = {
+    fours: yours ? d.your_total_fours : d.total_fours,
+    sixes: yours ? d.your_total_sixes : d.total_sixes,
+    share: yours ? d.your_boundary_share : d.boundary_share,
+    sixBoard: yours ? d.your_most_sixes : d.most_sixes,
+    fourBoard: yours ? d.your_most_fours : d.most_fours,
+  };
+
   $('#anBody').innerHTML = `
     <div class="an-panel">
       <div class="an-panel-head">
@@ -121,15 +135,18 @@ function anPaint(){
     </div>
 
     <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>Boundaries</h3>
-        <p>${d.total_fours.toLocaleString()} fours and ${d.total_sixes.toLocaleString()}
-           sixes — ${d.boundary_share}% of every run scored.</p>
-      </div></div>
-      ${boundaryPhases(d.phases)}
+      <div class="an-panel-head">
+        <div>
+          <h3>Boundaries</h3>
+          <p>${bdy.fours.toLocaleString()} fours and ${bdy.sixes.toLocaleString()}
+             sixes — ${bdy.share}% of ${yours ? "your side's runs" : 'every run scored'}.</p>
+        </div>
+        ${scopeToggle}
+      </div>
+      ${boundaryPhases(phases)}
       <div class="an-lists an-lists-2">
-        ${leaderPanel('Most sixes', 'Cleared the rope', d.most_sixes, 'six', v => v, 'sixes')}
-        ${leaderPanel('Most fours', 'Found the fence', d.most_fours, 'four', v => v, 'fours')}
+        ${leaderPanel('Most sixes', 'Cleared the rope', bdy.sixBoard, 'six', v => v, 'sixes')}
+        ${leaderPanel('Most fours', 'Found the fence', bdy.fourBoard, 'four', v => v, 'fours')}
       </div>
     </div>
 

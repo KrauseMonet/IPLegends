@@ -594,3 +594,68 @@ def test_the_phase_totals_always_sum_to_the_tournament_total():
     a = season_analysis(results)
     assert a.total_runs == 100 + 90 + 51 + 40
     assert sum(p.runs for p in a.phases.values()) == a.total_runs
+
+
+# --- [A117] the "Your side" scope --------------------------------------------------------
+
+def _two_sided_season():
+    """One tracked side and one opponent, with different boundary counts, so a figure
+    computed for the wrong scope cannot coincidentally match the right one."""
+    you, them = FakeSide("YOU"), FakeSide("THEM")
+    mine = FakeInnings(
+        over_log=[FakeSnap(over=0, over_runs=20, over_fours=2, over_sixes=2)],
+        batting=[FakeCard(FakePlayer("Your Hitter", person_id="y1"),
+                          runs=20, balls=10, fours=2, sixes=2)])
+    # 40 of their 50 runs are boundaries, so their share (80%) differs from yours (100%)
+    # -- otherwise a figure computed for the wrong scope could match the right one by luck.
+    theirs = FakeInnings(
+        over_log=[FakeSnap(over=0, over_runs=50, over_fours=7, over_sixes=2)],
+        batting=[FakeCard(FakePlayer("Their Hitter", person_id="t1"),
+                          runs=50, balls=22, fours=7, sixes=2)])
+    return you, FakeResult(you, them, mine, theirs)
+
+
+def test_your_side_boundary_totals_count_only_the_tracked_sides_innings():
+    you, r = _two_sided_season()
+    a = season_analysis([r], track=you)
+    assert (a.total_fours, a.total_sixes) == (9, 4)          # both sides
+    assert (a.your_total_fours, a.your_total_sixes) == (2, 2)
+    assert a.your_total_runs == 20
+    assert a.your_boundary_runs == 2 * 4 + 2 * 6
+    assert a.your_boundary_share == 100.0                    # all 20 came in boundaries
+    assert a.boundary_share != a.your_boundary_share         # and the two really differ
+
+
+def test_your_side_boundary_boards_hold_only_your_own_players():
+    you, r = _two_sided_season()
+    a = season_analysis([r], track=you)
+    assert [x.name for x in a.most_sixes] == ["Your Hitter", "Their Hitter"]
+    assert [x.name for x in a.your_most_sixes] == ["Your Hitter"]
+    assert [x.name for x in a.your_most_fours] == ["Your Hitter"]
+    assert all(x.team == "YOU" for x in a.your_most_sixes)
+
+
+def test_with_no_tracked_side_the_your_figures_stay_empty_rather_than_mirroring_the_league():
+    """A spectator has no side. Zero and empty, never a quiet copy of the league numbers --
+    that would read as 'your side happened to score exactly the whole tournament'."""
+    _, r = _two_sided_season()
+    a = season_analysis([r])
+    assert (a.your_total_runs, a.your_total_fours, a.your_total_sixes) == (0, 0, 0)
+    assert a.your_most_sixes == [] and a.your_most_fours == []
+    assert a.your_boundary_share == 0.0
+    assert a.total_fours == 9                                 # the league side still works
+
+
+def test_two_sides_sharing_a_name_are_not_confused_by_the_scope_filter():
+    """`Side` has no `eq=False`, so a name comparison would put the other side's hitter on
+    your board. Identity is what separates them."""
+    you, them = FakeSide("MI"), FakeSide("MI")        # same short, different objects
+    mine = FakeInnings(runs=18, sixes=3,
+                       batting=[FakeCard(FakePlayer("Mine", person_id="m"),
+                                         runs=18, balls=5, sixes=3)])
+    theirs = FakeInnings(runs=54, sixes=9,
+                         batting=[FakeCard(FakePlayer("Theirs", person_id="t"),
+                                           runs=54, balls=12, sixes=9)])
+    a = season_analysis([FakeResult(you, them, mine, theirs)], track=you)
+    assert [x.name for x in a.your_most_sixes] == ["Mine"]
+    assert a.your_total_sixes == 3

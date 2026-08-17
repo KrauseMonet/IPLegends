@@ -946,6 +946,15 @@ class AnalysisOut(BaseModel):
         default=0.0, description="percent of every run in the tournament hit for four or six")
     most_sixes: list[AnalysisLeaderOut] = Field(default_factory=list)
     most_fours: list[AnalysisLeaderOut] = Field(default_factory=list)
+    # [A117] The tracked side's own boundary figures, so the screen's "Your side" toggle
+    # drives this panel too. Empty / zero when there is no tracked side (a spectator).
+    your_total_runs: int = 0
+    your_total_fours: int = 0
+    your_total_sixes: int = 0
+    your_boundary_runs: int = 0
+    your_boundary_share: float = 0.0
+    your_most_sixes: list[AnalysisLeaderOut] = Field(default_factory=list)
+    your_most_fours: list[AnalysisLeaderOut] = Field(default_factory=list)
     # [A113] Flat (phase x style) rows rather than a nested dict: the frontend groups them
     # by phase for display, and a flat list keeps the shape the other tables here already
     # use. Always exactly len(PHASES) * len(STYLES) rows.
@@ -1455,6 +1464,10 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         total_runs=a.total_runs, total_fours=a.total_fours, total_sixes=a.total_sixes,
         boundary_runs=a.boundary_runs, boundary_share=a.boundary_share,
         most_sixes=lead(a.most_sixes), most_fours=lead(a.most_fours),
+        your_total_runs=a.your_total_runs, your_total_fours=a.your_total_fours,
+        your_total_sixes=a.your_total_sixes, your_boundary_runs=a.your_boundary_runs,
+        your_boundary_share=a.your_boundary_share,
+        your_most_sixes=lead(a.your_most_sixes), your_most_fours=lead(a.your_most_fours),
         style_phases=_style_out(a.style_phases),
         unknown_style_overs=sum(a.style_phases[p]["unknown"].overs
                                 for p in analysis.PHASES))

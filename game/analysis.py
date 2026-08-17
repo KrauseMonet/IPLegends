@@ -9,10 +9,15 @@ already paid, and this whole aggregation adds ~1.3ms on top of it.
 
 WHAT THE ENGINE CANNOT ANSWER, so that nobody looks for it here:
 
-- **Spin against pace.** `people.bowling_style` is NULL for all 816 people -- the column
-  exists and was never filled (the override CSV still awaits a human, per CLAUDE.md's own
-  table). This is a data-entry gap, not a modelling one, and no amount of work in this file
-  produces it. Parked deliberately rather than approximated.
+- **Spin against pace.** Still unavailable, but **the reason changed on 2026-08-17 and the
+  old one is now false**: this said `people.bowling_style` is NULL for all 816 people and
+  that the override CSV awaited a human. A112 filled it -- 479 of 479 bowlers, 313 pace and
+  166 spin, no NULL for anyone who bowled 30+ legal balls. The blocker is no longer data
+  entry but PLUMBING: `etl.feasibility.Card` does not carry `bowling_style` and the deck
+  never selects it, so the `Result`/`Innings` objects this file aggregates have no style to
+  attribute an over to. That is a real change in what it would take -- a deck field and a
+  snapshot column, not a CSV -- so it is recorded rather than left reading as a data gap
+  somebody might go off and re-fill. Still parked rather than approximated.
 - **Dismissal kinds.** The simulator's outcome space is runs 0-6 plus "wicket" (A47), so
   there is no caught/bowled/lbw to split by.
 - **Boundaries and dot balls.** A `BatterCard` tallies runs and balls, not fours, sixes or

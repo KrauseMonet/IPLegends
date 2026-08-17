@@ -824,6 +824,16 @@ directly (A19), so catches were measured for free and A19 stands unchanged.
 deliveries, style column blank. **The CSV is the only source of truth.** Until filled,
 `bowling_style` stays NULL and pace/spin splits return NULL, never a guess.
 
+**[A112] FILLED 2026-08-17 — 479 of 479, 313 pace and 166 spin, nothing blank.** Method:
+ESPNcricinfo 403s automated fetch, so `cricinfo_id` was used as a *join key* via Wikidata
+P2697 onto the Wikipedia infobox rather than as a URL, keeping identity anchored on the id
+and never on the name string. A `source` column beside the decision records how each row
+was decided (`web` 459, `web-search` 17, `user` 3). **The "returns NULL, never a guess"
+rule above is unchanged and still live**, but it no longer fires for any bowler in the CSV;
+`people.bowling_style` is NULL only for the **337** people who never reached the 30-ball
+threshold and so were never asked about. That is a permanent scope boundary rather than a
+gap awaiting a human, so a consumer must still handle NULL — for a different reason.
+
 **[A30]** This is the one of the four files that no derivation can narrow even partly.
 Cricsheet records no bowling action anywhere, and nothing in the ball-by-ball data
 implies one — economy and phase usage correlate with pace or spin without ever
@@ -2111,8 +2121,11 @@ season returns a 367-ball campaign. Runs and wickets are totals, so they need no
 ### 13.4 What it cannot show
 
 Recorded here and in the module docstring so nobody looks for it: **spin against pace**
-(`people.bowling_style` is NULL for all 816 people — a data-entry gap, not a modelling one,
-parked deliberately), **dismissal kinds** (§10's outcome space is runs 0-6 plus wicket),
+(still unavailable, but **the reason changed with A112 and the old one — "NULL for all 816
+people, a data-entry gap" — is now false**: the column is filled for all 479 bowlers, and
+the remaining blocker is that `Card` does not carry `bowling_style` and the deck never
+selects it, so the innings this screen aggregates have no style to attribute an over to.
+A deck field and a snapshot column, not a CSV), **dismissal kinds** (§10's outcome space is runs 0-6 plus wicket),
 **boundaries and dot balls** (a batting card tallies runs and balls; `over_log` is per over),
 and **wagon wheels** (nothing models shot direction).
 

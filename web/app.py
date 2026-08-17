@@ -833,6 +833,34 @@ class AnalysisLeaderOut(BaseModel):
     detail: str
 
 
+class PhaseBowlerOut(BaseModel):
+    name: str
+    person_id: str
+    overs: int
+    runs: int
+    wickets: int
+    economy: float
+
+
+class InningsSplitOut(BaseModel):
+    innings: int
+    runs: int
+    wins: int
+    average: float = Field(description="mean innings total")
+    win_rate: float
+
+
+class PositionRowOut(BaseModel):
+    position: int
+    runs: int
+    balls: int
+    outs: int
+    innings: int
+    average: float = Field(description="runs per DISMISSAL; 0.0 means no dismissal yet, "
+                                        "which the UI shows as a dash rather than a zero")
+    strike_rate: float
+
+
 class AnalysisOut(BaseModel):
     fixtures: int
     innings: int
@@ -847,6 +875,12 @@ class AnalysisOut(BaseModel):
     best_strike: list[AnalysisLeaderOut]
     best_over: dict | None
     highest_innings: dict | None
+    death_bowlers: list[PhaseBowlerOut]
+    powerplay_bowlers: list[PhaseBowlerOut]
+    bat_first: InningsSplitOut
+    chasing: InningsSplitOut
+    positions: list[PositionRowOut]
+    best_averages: list[AnalysisLeaderOut]
 
 
 # --- mapping ---------------------------------------------------------------------------
@@ -1300,6 +1334,11 @@ def _phase_out(phases: dict) -> list[PhaseSplitOut]:
             for p, s in ((p, phases[p]) for p in analysis.PHASES)]
 
 
+def _split_out(s: analysis.InningsSplit) -> InningsSplitOut:
+    return InningsSplitOut(innings=s.innings, runs=s.runs, wins=s.wins,
+                           average=s.average, win_rate=s.win_rate)
+
+
 def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
     bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
                                   innings=b.innings, average_runs=b.average_runs)
@@ -1311,7 +1350,18 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         manhattan=bars(a.manhattan), your_manhattan=bars(a.your_manhattan),
         top_scorers=lead(a.top_scorers), top_wickets=lead(a.top_wickets),
         best_economy=lead(a.best_economy), best_strike=lead(a.best_strike),
-        best_over=a.best_over, highest_innings=a.highest_innings)
+        best_over=a.best_over, highest_innings=a.highest_innings,
+        death_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, overs=b.overs,
+                                      runs=b.runs, wickets=b.wickets, economy=b.economy)
+                       for b in a.death_bowlers],
+        powerplay_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, overs=b.overs,
+                                          runs=b.runs, wickets=b.wickets, economy=b.economy)
+                           for b in a.powerplay_bowlers],
+        bat_first=_split_out(a.bat_first), chasing=_split_out(a.chasing),
+        positions=[PositionRowOut(position=r.position, runs=r.runs, balls=r.balls,
+                                  outs=r.outs, innings=r.innings, average=r.average,
+                                  strike_rate=r.strike_rate) for r in a.positions],
+        best_averages=lead(a.best_averages))
 
 
 @app.get("/api/season/{state}/analysis", response_model=AnalysisOut)

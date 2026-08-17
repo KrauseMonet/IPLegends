@@ -19,6 +19,13 @@ WHAT THE ENGINE CANNOT ANSWER, so that nobody looks for it here:
   dots, and `over_log` is per over rather than per ball.
 - **Wagon wheels.** Nothing models shot direction.
 
+WHAT IT DOES COVER, beyond the phase totals [A110]: per-bowler phase economy (who actually
+bowls the death, attributed over by over off `OverSnapshot.bowler_id`), batting first
+against chasing (`Innings.chased` is the engine's own flag, so no inference), batting by
+POSITION (`Innings.batting` is in batting order, so the index is the position), and batting
+averages (`BatterCard.out` distinguishes a dismissal from a not-out, which strike rate
+alone cannot).
+
 PHASES follow SPEC 4.8/A5 exactly, rather than a definition invented for this screen: death
 is the final 25% of the innings' scheduled overs -- `(scheduled_balls * 3 // 4) // 6`, which
 is over index 15 in a full twenty -- powerplay is the first six, middle is the rest. Using a
@@ -86,6 +93,69 @@ class Leader:
 
 
 @dataclass
+class PhaseBowler:
+    """One bowler's work in ONE phase, attributed over by over.
+
+    This is the section the whole feature exists for: `OverSnapshot` records who bowled
+    each over, so a death-overs economy is a real measurement here rather than an
+    inference from a season total. In T20 that is the difference between a good bowler and
+    a valuable one -- an economy of 7 across twenty overs at the death is a different
+    player from the same 7 in the powerplay, and no season aggregate can tell them apart.
+    """
+
+    name: str
+    person_id: str
+    overs: int = 0
+    runs: int = 0
+    wickets: int = 0
+
+    @property
+    def economy(self) -> float:
+        return round(self.runs / self.overs, 2) if self.overs else 0.0
+
+
+@dataclass
+class InningsSplit:
+    """Batting first against chasing. `Innings.chased` is set by the engine, so this needs
+    no inference about which innings came second."""
+
+    innings: int = 0
+    runs: int = 0
+    wins: int = 0
+
+    @property
+    def average(self) -> float:
+        return round(self.runs / self.innings, 1) if self.innings else 0.0
+
+    @property
+    def win_rate(self) -> float:
+        return round(100 * self.wins / self.innings, 1) if self.innings else 0.0
+
+
+@dataclass
+class PositionRow:
+    """Batting position 1-11. `Innings.batting` is built in batting order
+    (`cards[0]` is the striker at ball one), so the list index IS the position."""
+
+    position: int
+    runs: int = 0
+    balls: int = 0
+    outs: int = 0
+    innings: int = 0
+
+    @property
+    def average(self) -> float:
+        # Runs per DISMISSAL, cricket's own convention -- a not-out is not a completed
+        # innings. Zero dismissals means no average exists, which is a dash rather than
+        # an infinity or a zero.
+        return round(self.runs / self.outs, 1) if self.outs else 0.0
+
+    @property
+    def strike_rate(self) -> float:
+        return round(100 * self.runs / self.balls, 1) if self.balls else 0.0
+
+
+@dataclass
 class SeasonAnalysis:
     fixtures: int = 0
     innings: int = 0
@@ -100,6 +170,13 @@ class SeasonAnalysis:
     best_strike: list = field(default_factory=list)
     best_over: dict | None = None
     highest_innings: dict | None = None
+    # [A110]
+    death_bowlers: list = field(default_factory=list)      # best economy, overs 16-20
+    powerplay_bowlers: list = field(default_factory=list)  # best economy, overs 1-6
+    bat_first: InningsSplit = field(default_factory=InningsSplit)
+    chasing: InningsSplit = field(default_factory=InningsSplit)
+    positions: list = field(default_factory=list)          # 11 rows
+    best_averages: list = field(default_factory=list)       # runs per dismissal
 
 
 def _blank_phases() -> dict:
@@ -136,10 +213,15 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     a = SeasonAnalysis(phases=_blank_phases(), your_phases=_blank_phases(),
                        manhattan=_blank_manhattan(), your_manhattan=_blank_manhattan())
 
-    bat: dict[str, list] = {}      # name -> [runs, balls]
+    bat: dict[str, list] = {}      # name -> [runs, balls, outs]
     bowl: dict[str, list] = {}     # name -> [wickets, balls, runs]
     best_over = None
     highest = None
+    # [A110] Keyed by person_id, never the name string -- two drafted seasons can share
+    # one, and this aggregates across every side in the tournament. The name rides along
+    # for display only.
+    phase_bowl: dict[tuple[str, str], PhaseBowler] = {}
+    positions = [PositionRow(position=i + 1) for i in range(11)]
 
     for r in results:
         if r is None:
@@ -159,14 +241,56 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
                 if best_over is None or snap.over_runs > best_over["runs"]:
                     best_over = {"runs": snap.over_runs, "over": snap.over + 1,
                                  "bowler": snap.bowler, "side": side.short}
+                # Per-over bowling attribution. `bowler_id` is empty only for a snapshot
+                # built by an older caller or a test; falling back to the name keeps the
+                # over counted rather than dropping it, which would understate a workload.
+                key = (snap.bowler_id or snap.bowler, phase_of(snap.over))
+                pb = phase_bowl.get(key)
+                if pb is None:
+                    pb = phase_bowl[key] = PhaseBowler(name=snap.bowler,
+                                                       person_id=snap.bowler_id)
+                pb.overs += 1
+                pb.runs += snap.over_runs
+                pb.wickets += snap.over_wickets
             if highest is None or inn.runs > highest["runs"]:
                 highest = {"runs": inn.runs, "wickets": inn.wickets,
                            "overs": inn.overs, "side": side.short}
 
+            # Batting first against chasing, from the PAIR POSITION, not `Innings.chased`.
+            #
+            # `chased` was the obvious-looking field and it is a different fact: the engine
+            # sets it only when a target is actually overhauled (`innings.runs > target`),
+            # so it marks a SUCCESSFUL chase and is false for every first innings AND every
+            # failed one. Reading it as "batted second" gave 108 bat-first innings against
+            # 40 chasing -- which does not even split 148 evenly -- and a chasing win rate
+            # of 100%, because the flag and the win condition were the same thing.
+            #
+            # `home` bats first here by construction (`play()` calls `play_innings` for
+            # home with no target, then for away with one), which is what `pairs` orders
+            # by, so the first element of the pair is the first innings.
+            split = a.bat_first if inn is r.home_innings else a.chasing
+            split.innings += 1
+            split.runs += inn.runs
+            if r.winner is side:
+                split.wins += 1
+
+            for pos, b in enumerate(inn.batting):
+                # `Innings.batting` is in batting order, so the index IS the position --
+                # but only for someone who actually came to the crease. A card that never
+                # faced a ball is not a completed innings at that position and would drag
+                # every average down with a phantom zero.
+                if pos < len(positions) and b.faced_any:
+                    row = positions[pos]
+                    row.innings += 1
+                    row.runs += b.runs
+                    row.balls += b.balls
+                    row.outs += 1 if b.out else 0
+
             for b in inn.batting:
-                d = bat.setdefault(b.player.name, [0, 0])
+                d = bat.setdefault(b.player.name, [0, 0, 0])
                 d[0] += b.runs
                 d[1] += b.balls
+                d[2] += 1 if b.out else 0
             for b in inn.bowling:
                 d = bowl.setdefault(b.player.name, [0, 0, 0])
                 d[0] += b.wickets
@@ -196,4 +320,27 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
           for n, v in bat.items() if v[1] >= MIN_BALLS_FACED]
     a.best_strike = [Leader(n, s, f"{b} balls")
                      for n, s, b in sorted(sr, key=lambda t: -t[1])[:10]]
+
+    # [A110] Batting AVERAGE -- runs per dismissal, which is a different claim from strike
+    # rate and the one that separates an anchor from a slogger. Same volume floor, plus a
+    # dismissal floor: an average off one dismissal is a single score, not an average.
+    MIN_DISMISSALS = 5
+    avg = [(n, round(v[0] / v[2], 1), v[2])
+           for n, v in bat.items() if v[1] >= MIN_BALLS_FACED and v[2] >= MIN_DISMISSALS]
+    a.best_averages = [Leader(n, x, f"{o} outs")
+                       for n, x, o in sorted(avg, key=lambda t: -t[1])[:10]]
+
+    a.positions = positions
+
+    # A phase economy needs enough overs IN THAT PHASE to mean anything. Four overs at the
+    # death is one match's full allocation; the floor is a season's worth of the job, so a
+    # bowler who bowled two good death overs all tournament does not top the list.
+    MIN_PHASE_OVERS = 12
+    def _phase_list(phase: str) -> list:
+        rows = [pb for (_, ph), pb in phase_bowl.items()
+                if ph == phase and pb.overs >= MIN_PHASE_OVERS]
+        return sorted(rows, key=lambda pb: (pb.economy, -pb.wickets))[:10]
+
+    a.death_bowlers = _phase_list("death")
+    a.powerplay_bowlers = _phase_list("powerplay")
     return a

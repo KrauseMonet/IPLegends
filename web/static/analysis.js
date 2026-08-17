@@ -101,9 +101,42 @@ function anPaint(){
       </div>
     </div>
 
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
+        <h3>Who bowls the hard overs</h3>
+        <p>Attributed over by over, so a death economy is measured rather than inferred.
+           A season total cannot tell these two jobs apart.</p>
+      </div></div>
+      <div class="an-lists an-lists-2">
+        ${phasePanel('At the death', 'Overs 16-20 · lowest economy', d.death_bowlers, 'death')}
+        ${phasePanel('In the powerplay', 'Overs 1-6 · lowest economy', d.powerplay_bowlers, 'power')}
+      </div>
+    </div>
+
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
+        <h3>Setting or chasing</h3>
+        <p>Every match splits one of each way. A chase averages fewer runs because it
+           stops the moment it is won, not because those sides batted worse.</p>
+      </div></div>
+      <div class="an-vs">
+        ${splitCard('Batting first', d.bat_first, 'first')}
+        ${splitCard('Chasing', d.chasing, 'chase')}
+      </div>
+    </div>
+
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
+        <h3>The batting order</h3>
+        <p>Runs, average and strike rate by the number a batter went in at.</p>
+      </div></div>
+      <div class="an-scroll">${positionSvg(d.positions)}</div>
+    </div>
+
     <div class="an-lists">
       ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v)}
       ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v)}
+      ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1))}
       ${leaderPanel('Best economy', 'Runs per over conceded', d.best_economy, 'econ', v => v.toFixed(2))}
       ${leaderPanel('Best strike rate', 'Runs per hundred balls', d.best_strike, 'sr', v => v.toFixed(1))}
     </div>`;
@@ -245,4 +278,83 @@ function leaderPanel(title, sub, rows, kind, fmt){
     <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
     ${body}
   </div>`;
+}
+
+
+// --- [A110] phase specialists, the setting/chasing split, and the batting order ---------
+
+function phasePanel(title, sub, rows, kind){
+  if (!rows || !rows.length){
+    return `<div class="an-lead an-lead-${kind}">
+      <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
+      <div class="cap-empty">Nobody bowled enough overs in this phase to rank.</div></div>`;
+  }
+  const body = rows.slice(0, 6).map((r, i) => `
+    <div class="an-lead-row${i === 0 ? ' top' : ''}">
+      <span class="an-lead-pos">${i + 1}</span>
+      <span class="an-lead-name">${r.name}</span>
+      <span class="an-lead-detail">${r.overs} ov · ${r.wickets}w</span>
+      <span class="an-lead-value">${r.economy.toFixed(2)}</span>
+    </div>`).join('');
+  return `<div class="an-lead an-lead-${kind}">
+    <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>${body}</div>`;
+}
+
+function splitCard(title, s, kind){
+  // A dash, not a 0%, when nothing has been played -- the same "no evidence is a dash"
+  // convention the ratings and the profile page already use.
+  const pct = s.innings ? s.win_rate.toFixed(0) + '%' : '–';
+  return `<div class="an-split an-split-${kind}">
+    <div class="an-split-title">${title}</div>
+    <div class="an-split-big">${s.innings ? s.average.toFixed(1) : '–'}<i>avg score</i></div>
+    <div class="an-split-gauge"><span style="width:${s.innings ? s.win_rate : 0}%"></span></div>
+    <div class="an-split-rows">
+      <div><em>${pct}</em> of these were won</div>
+      <div><em>${s.wins}</em> wins from <em>${s.innings}</em> innings</div>
+    </div>
+  </div>`;
+}
+
+// Runs by batting position, with average drawn as a line over the bars. Two quantities
+// that answer different questions -- volume against reliability -- and the interesting
+// reading is where they disagree.
+function positionSvg(rows){
+  if (!rows || !rows.length) return '';
+  const W = 760, H = 250, L = 44, R = 40, T = 24, B = 40;
+  const plotW = W - L - R, plotH = H - T - B;
+  const bw = plotW / rows.length;
+  const maxRuns = Math.max(1, ...rows.map(r => r.runs));
+  const maxAvg = Math.max(1, ...rows.map(r => r.average));
+  const yRuns = v => T + plotH - (v / maxRuns) * plotH;
+  const yAvg = v => T + plotH - (v / maxAvg) * plotH;
+
+  const bars = rows.map((r, i) => {
+    const x = L + i * bw + bw * 0.18, w = bw * 0.64;
+    const h = Math.max(r.runs > 0 ? 2 : 0, T + plotH - yRuns(r.runs));
+    return `<g class="an-col"><title>Position ${r.position}: ${r.runs} runs, average ${
+        r.outs ? r.average : '--'}, SR ${r.strike_rate} over ${r.innings} innings</title>
+      <rect x="${x.toFixed(1)}" y="${yRuns(r.runs).toFixed(1)}" width="${w.toFixed(1)}"
+        height="${h.toFixed(1)}" rx="2" fill="var(--gold)" opacity=".7"/>
+      <text x="${(x + w / 2).toFixed(1)}" y="${H - B + 16}" class="an-axis"
+        text-anchor="middle">${r.position}</text></g>`;
+  }).join('');
+
+  const pts = rows.filter(r => r.outs)
+    .map(r => `${(L + (r.position - 1) * bw + bw / 2).toFixed(1)},${yAvg(r.average).toFixed(1)}`);
+  const line = pts.length > 1
+    ? `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--mint)"
+         stroke-width="2" stroke-linejoin="round"/>` +
+      pts.map(p => `<circle cx="${p.split(',')[0]}" cy="${p.split(',')[1]}" r="3"
+         fill="var(--mint)"/>`).join('')
+    : '';
+
+  return `<svg class="an-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"
+    role="img" aria-label="Runs and average by batting position">
+    <text x="${L - 8}" y="${T - 8}" class="an-axis" text-anchor="end">runs</text>
+    <text x="${W - R + 8}" y="${T - 8}" class="an-axis">avg</text>
+    ${bars}${line}
+    <text x="${W - R}" y="${H - 6}" class="an-axis" text-anchor="end">batting position</text>
+  </svg>
+  <div class="an-key"><i class="an-key-swatch gold"></i>runs scored
+    <i class="an-key-swatch mint"></i>average (runs per dismissal)</div>`;
 }

@@ -338,6 +338,13 @@ class OverSnapshot:
     balls: int               # cumulative balls after this over
     over_runs: int           # runs scored THIS over alone
     over_wickets: int        # wickets that fell THIS over alone
+    # [A110] The person, not the name. Per-over bowler attribution is what makes a
+    # phase-by-phase bowling analysis possible at all, and CLAUDE.md's standing rule
+    # forbids keying a player on a name string -- two drafted seasons can legitimately
+    # share one. Last in the field list because it carries a default; empty only for an
+    # OverSnapshot built by an older caller or a test, and the analysis falls back to the
+    # name in that case rather than dropping the over.
+    bowler_id: str = ""
 
 
 @dataclass
@@ -442,6 +449,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
         # documents itself as being.
         innings.over_log.append(OverSnapshot(
             over=over, bowler=bowler.player.name,
+            bowler_id=bowler.player.person_id,
             runs=innings.runs, wickets=innings.wickets, balls=innings.balls,
             over_runs=innings.runs - over_start_runs,
             over_wickets=innings.wickets - over_start_wickets,

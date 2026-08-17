@@ -1333,7 +1333,7 @@ body.has-ground{
   letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-left:7px}
 .an-moment-detail{font-size:12.5px;color:var(--ink-2);margin-top:4px}
 
-.an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:16px}
 .an-lead{border:1px solid var(--line);border-radius:12px;padding:14px 16px 10px;
   background:rgba(255,255,255,.018);border-top:3px solid var(--ink-3)}
 .an-lead-orange{border-top-color:#ff8c1a}
@@ -1362,3 +1362,33 @@ body.has-ground{
 .an-key{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:6px 2px 0}
 .an-key-pip{width:7px;height:7px;border-radius:50%;background:var(--hot);opacity:.9;flex:none}
+
+/* --- [A110] phase specialists, setting/chasing, batting order --- */
+.an-lists-2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.an-lead-death{border-top-color:var(--hot)}
+.an-lead-power{border-top-color:var(--gold)}
+.an-lead-avg{border-top-color:#4aa8ff}
+.an-lead .cap-empty{font-size:12.5px;color:var(--ink-3);padding:10px 0 4px}
+
+.an-vs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.an-split{border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+  background:rgba(255,255,255,.015);border-left:3px solid var(--tint,var(--ink-3))}
+.an-split-first{--tint:var(--gold)}
+.an-split-chase{--tint:var(--mint)}
+.an-split-title{font-family:var(--display);font-size:19px;text-transform:uppercase;
+  letter-spacing:.02em;color:var(--tint)}
+.an-split-big{font-family:var(--mono);font-size:30px;color:var(--ink);line-height:1.2;
+  margin:6px 0 10px}
+.an-split-big i{font-family:var(--mono);font-style:normal;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-left:8px}
+.an-split-gauge{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;
+  margin-bottom:10px}
+.an-split-gauge span{display:block;height:100%;background:var(--tint);border-radius:3px}
+.an-split-rows div{font-size:12.5px;color:var(--ink-3);line-height:1.75}
+.an-split-rows em{font-family:var(--mono);font-style:normal;color:var(--ink-2)}
+
+.an-key-swatch{width:9px;height:9px;border-radius:2px;flex:none;display:inline-block;
+  margin:0 6px 0 14px;vertical-align:middle}
+.an-key-swatch:first-child{margin-left:0}
+.an-key-swatch.gold{background:var(--gold);opacity:.7}
+.an-key-swatch.mint{background:var(--mint)}

@@ -14,6 +14,7 @@ class FakeSnap:
     over_runs: int
     over_wickets: int = 0
     bowler: str = "A Bowler"
+    bowler_id: str = ""
 
 
 @dataclass
@@ -27,6 +28,8 @@ class FakeCard:
     runs: int = 0
     balls: int = 0
     wickets: int = 0
+    out: bool = False
+    faced_any: bool = True
 
 
 @dataclass
@@ -42,6 +45,7 @@ class FakeInnings:
     runs: int = 0
     wickets: int = 0
     overs: str = "20.0"
+    chased: bool = False
 
 
 @dataclass
@@ -50,6 +54,7 @@ class FakeResult:
     away: FakeSide
     home_innings: FakeInnings
     away_innings: FakeInnings
+    winner: FakeSide | None = None
 
 
 def _result(home_log, away_log, home=None, away=None):
@@ -145,3 +150,109 @@ def test_an_unplayed_fixture_is_skipped_not_counted():
     unplayed = FakeResult(FakeSide("A"), FakeSide("B"), None, None)
     a = season_analysis([None, unplayed, _result([FakeSnap(0, 6)], [])])
     assert a.fixtures == 1 and a.innings == 2
+
+
+# --- [A110] per-bowler phase attribution, chases, positions, averages -----------------
+
+def _bowl_log(overs, bowler, bid, runs=6, wkts=0):
+    return [FakeSnap(over=o, over_runs=runs, over_wickets=wkts, bowler=bowler, bowler_id=bid)
+            for o in overs]
+
+
+def test_a_bowlers_death_overs_are_separated_from_his_powerplay_overs():
+    """The point of the whole section. A season economy averages the two together and
+    cannot tell a death specialist from a powerplay one; per-over attribution can."""
+    death = _bowl_log(range(15, 20), "Death Man", "d1", runs=9)          # 5 overs @ 9
+    power = _bowl_log(range(0, 6), "Power Man", "p1", runs=5)            # 6 overs @ 5
+    # 12 overs of each, so both clear MIN_PHASE_OVERS.
+    log = (death + power) * 3
+    a = season_analysis([_result(log, [])])
+    assert [b.name for b in a.death_bowlers] == ["Death Man"]
+    assert [b.name for b in a.powerplay_bowlers] == ["Power Man"]
+    assert a.death_bowlers[0].economy == 9.0
+    assert a.powerplay_bowlers[0].economy == 5.0
+
+
+def test_phase_bowling_is_keyed_on_person_not_name():
+    """CLAUDE.md's standing rule. Two drafted seasons can share a name, and this
+    aggregates across every side in the tournament."""
+    a_log = _bowl_log(range(15, 20), "J Smith", "person-a", runs=6) * 3
+    b_log = _bowl_log(range(15, 20), "J Smith", "person-b", runs=12) * 3
+    a = season_analysis([_result(a_log, b_log)])
+    assert len(a.death_bowlers) == 2, "same name, two people -- two rows"
+    assert {b.person_id for b in a.death_bowlers} == {"person-a", "person-b"}
+    assert [b.economy for b in a.death_bowlers] == [6.0, 12.0], "cheapest first"
+
+
+def test_a_bowler_below_the_phase_floor_is_left_out():
+    """Four death overs is one match's allocation; a leaderboard off that is a scoreline."""
+    a = season_analysis([_result(_bowl_log(range(16, 20), "Cameo", "c1", runs=1), [])])
+    assert a.death_bowlers == []
+
+
+def test_batting_first_and_chasing_split_on_the_pair_position_not_the_chased_flag():
+    """A FAILED chase is the case that matters, and the first version of this test did not
+    contain one -- so it passed against both the right implementation and the wrong one.
+
+    `Innings.chased` looks like "batted second" and is not: the engine sets it only when a
+    target is actually overhauled, so it is false for every first innings AND every failed
+    chase. Reading it as the split gave 108 bat-first against 40 chasing on a real season
+    (which does not even divide 148) and a chasing win rate of 100%, because the flag and
+    the win condition were the same fact. `home` bats first by construction."""
+    home, away = FakeSide("HOM"), FakeSide("AWY")
+    # Away batted second and FELL SHORT: chased is False even though they chased.
+    failed = FakeResult(home, away,
+                        FakeInnings(over_log=[FakeSnap(0, 6)], runs=180, chased=False),
+                        FakeInnings(over_log=[FakeSnap(0, 6)], runs=150, chased=False),
+                        winner=home)
+    a = season_analysis([failed])
+    assert a.chasing.innings == 1, "a failed chase is still a chase"
+    assert a.chasing.runs == 150 and a.chasing.wins == 0
+    assert a.bat_first.innings == 1 and a.bat_first.runs == 180 and a.bat_first.wins == 1
+
+    # And a successful one, so both branches of the win count are covered.
+    won = FakeResult(home, away,
+                     FakeInnings(over_log=[FakeSnap(0, 6)], runs=180, chased=False),
+                     FakeInnings(over_log=[FakeSnap(0, 6)], runs=181, chased=True),
+                     winner=away)
+    b = season_analysis([failed, won])
+    assert b.bat_first.innings == 2 and b.chasing.innings == 2, "every match has one of each"
+    assert b.bat_first.wins == 1 and b.chasing.wins == 1
+    assert b.chasing.win_rate == 50.0
+
+
+def test_batting_positions_use_the_list_order_and_skip_a_man_who_never_batted():
+    """`Innings.batting` is in batting order, so the index is the position -- but a card
+    that never faced a ball is not an innings at that position, and counting it would drag
+    the average down with a phantom zero."""
+    inn = FakeInnings(over_log=[FakeSnap(0, 6)], batting=[
+        FakeCard(FakePlayer("Opener"), runs=60, balls=40, out=True),
+        FakeCard(FakePlayer("Two"), runs=30, balls=20, out=False),
+        FakeCard(FakePlayer("Did not bat"), runs=0, balls=0, faced_any=False),
+    ])
+    a = season_analysis([FakeResult(FakeSide("A"), FakeSide("B"), inn, FakeInnings())])
+    assert (a.positions[0].runs, a.positions[0].outs, a.positions[0].innings) == (60, 1, 1)
+    assert a.positions[0].average == 60.0 and a.positions[0].strike_rate == 150.0
+    assert a.positions[1].outs == 0, "not out"
+    assert a.positions[1].average == 0.0, "no dismissal means no average, not infinity"
+    assert a.positions[2].innings == 0, "never faced a ball"
+    assert len(a.positions) == 11
+
+
+def test_batting_average_needs_dismissals_not_just_balls():
+    """An average off one dismissal is a single score. Strike rate and average are
+    different claims and this one needs its own floor."""
+    inn = FakeInnings(over_log=[FakeSnap(0, 6)], batting=[
+        FakeCard(FakePlayer("Anchor"), runs=600, balls=400, out=True),
+        FakeCard(FakePlayer("OneOut"), runs=300, balls=200, out=True),
+    ])
+    # One innings -> one dismissal each, under MIN_DISMISSALS.
+    a = season_analysis([FakeResult(FakeSide("A"), FakeSide("B"), inn, FakeInnings())])
+    assert a.best_averages == [], "one dismissal is not an average"
+    # Six innings -> six dismissals each, over the floor.
+    many = [FakeResult(FakeSide("A"), FakeSide("B"), inn, FakeInnings()) for _ in range(6)]
+    b = season_analysis(many)
+    assert [l.name for l in b.best_averages] == ["Anchor", "OneOut"]
+    # The same innings six times, so the RUNS multiply with the dismissals: 3,600 over 6.
+    assert b.best_averages[0].value == 600.0
+    assert b.best_averages[1].value == 300.0, "and the ordering is by average, not runs"

@@ -134,11 +134,11 @@ function anPaint(){
     </div>
 
     <div class="an-lists">
-      ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v)}
-      ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v)}
-      ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1))}
-      ${leaderPanel('Best economy', 'Runs per over conceded', d.best_economy, 'econ', v => v.toFixed(2))}
-      ${leaderPanel('Best strike rate', 'Runs per hundred balls', d.best_strike, 'sr', v => v.toFixed(1))}
+      ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v, 'runs')}
+      ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v, 'wickets')}
+      ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1), 'runs per dismissal')}
+      ${leaderPanel('Best economy', 'Runs per over conceded', d.best_economy, 'econ', v => v.toFixed(2), 'runs per over')}
+      ${leaderPanel('Best strike rate', 'Runs per hundred balls', d.best_strike, 'sr', v => v.toFixed(1), 'runs per 100 balls')}
     </div>`;
 }
 
@@ -265,15 +265,22 @@ function momentCard(label, value, detail, unit){
   </div>`;
 }
 
-function leaderPanel(title, sub, rows, kind, fmt){
+function leaderPanel(title, sub, rows, kind, fmt, unit){
   if (!rows.length) return '';
-  const body = rows.map((r, i) => `
-    <div class="an-lead-row${i === 0 ? ' top' : ''}">
+  // `unit` is the board's own reading of its number, so the tooltip says "675 runs" on
+  // the Orange Cap and "6.26 runs per over" on the economy board rather than one generic
+  // word that is wrong on four of the five.
+  const body = rows.map((r, i) => {
+    const tip = `${r.name}${r.team ? ' — ' + r.team : ''} · ${fmt(r.value)} ${unit}`
+      + (r.detail ? ` · ${r.detail}` : '');
+    return `
+    <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
       <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
       <span class="an-lead-detail">${r.detail}</span>
       <span class="an-lead-value">${fmt(r.value)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="an-lead an-lead-${kind}">
     <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
     ${body}
@@ -289,13 +296,17 @@ function phasePanel(title, sub, rows, kind){
       <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
       <div class="cap-empty">Nobody bowled enough overs in this phase to rank.</div></div>`;
   }
-  const body = rows.slice(0, 6).map((r, i) => `
-    <div class="an-lead-row${i === 0 ? ' top' : ''}">
+  const body = rows.slice(0, 6).map((r, i) => {
+    const tip = `${r.name}${r.team ? ' — ' + r.team : ''}`
+      + ` · economy ${r.economy.toFixed(2)} · ${r.overs} overs · ${r.wickets} wickets`;
+    return `
+    <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
       <span class="an-lead-name">${r.name}${teamTag(r.team)}</span>
       <span class="an-lead-detail">${r.overs} ov · ${r.wickets}w</span>
       <span class="an-lead-value">${r.economy.toFixed(2)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="an-lead an-lead-${kind}">
     <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>${body}</div>`;
 }
@@ -365,4 +376,22 @@ function positionSvg(rows){
 // him read as a duplicate rather than as two different stints.
 function teamTag(team){
   return team ? ` <i class="an-team">${team}</i>` : '';
+}
+
+// A112. `.an-lead-name` ellipsises, because five leaderboards on one row leave each of
+// them ~209px and the A111 team tag takes a slice of that -- so "JC Buttler" renders as
+// "JC ...". The clipping is correct; the full text simply has to be reachable somewhere,
+// and a native `title` is the same tooltip mechanism the SVGs in this file already use
+// (manhattanSvg, phaseBarSvg, positionSvg all carry <title> children). One convention,
+// no positioning logic to get wrong, and it cannot overflow the viewport.
+//
+// Escaped because this lands in an ATTRIBUTE, where a double quote in a name would end
+// the attribute early and corrupt the markup. Archive names are plain text today, so
+// this guards against a future one rather than a present one.
+function attr(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

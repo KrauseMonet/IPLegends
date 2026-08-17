@@ -17,6 +17,34 @@ function copyRoomCode(){
     .catch(() => slip(ROOM_CODE));
 }
 
+// The code is what somebody TYPES on /rooms's join tab; the link is what you paste into
+// a chat. Both are kept because they serve different flows and neither replaces the
+// other.
+//
+// The URL carries the room code and NOTHING ELSE, which is load-bearing rather than
+// tidy. A99 deliberately put {code, playerId} in localStorage instead of the URL
+// because `player_id` is this app's only proof of which seat you are -- there are no
+// accounts in a room -- so a player_id in a shareable link would hand every recipient
+// the ability to act AS that seat: pick their cards, leave, or call their toss. A
+// recipient of this link is a stranger to the room and must stay one: /rooms/{code}
+// finds no matching localStorage session and bounces them to /rooms?code=..., where
+// they enter their own name and `join_room` mints them their own fresh player_id.
+//
+// Measured against all three states before the wording was written, because the link is
+// NOT valid forever and copy that implied otherwise would be a lie: `join_room` refuses
+// once `status != 'lobby'` ("this room has already started") and, separately, once the
+// seats are taken ("this room is full"). Both were reproduced -- a lobby room with a
+// free seat joins and mints a fresh player_id; a drafting room and a full room each
+// bounce the recipient to /rooms?code=... with that exact reason shown as a toast, which
+// is graceful rather than a 404. Hence "in the lobby with a seat free", covering both
+// refusals: "still in the lobby" alone would over-promise on a full room.
+function copyRoomLink(){
+  const url = `${location.origin}/rooms/${ROOM_CODE}`;
+  navigator.clipboard.writeText(url)
+    .then(() => slip('Link copied — good while the room is in the lobby with a seat free.'))
+    .catch(() => slip(url));
+}
+
 let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
 // The per-pick countdown ticks locally once a second between polls, instead of only
 // updating (and visibly jumping by 2) whenever a poll response lands. ROOM_TIMER_BASE

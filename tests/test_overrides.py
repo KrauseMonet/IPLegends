@@ -110,6 +110,53 @@ def test_every_row_carries_a_cricinfo_id(filename, column):
     assert all(row["cricinfo_id"] for row in rows), filename
 
 
+def test_a_column_the_generator_does_not_produce_is_never_destroyed(tmp_path):
+    """A112. The column-wise twin of the orphan-row rule above.
+
+    `bowling_style.csv` carries a `source` column recording HOW each hand-checked style
+    was decided. No generator produces it, so it is absent from every caller's `columns`
+    list - and the old code wrote `fieldnames=columns`, which erased it on the next run
+    while faithfully preserving the decisions themselves. A file whose decisions survived
+    but whose provenance silently did not is indistinguishable from one that was never
+    checked, which is the single outcome this whole module exists to prevent.
+    """
+    path = tmp_path / "k.csv"
+    write(
+        path,
+        COLUMNS + ["source"],
+        [{"person_id": "a", "name": "A", "catches": "3", "kept": "y", "source": "web"}],
+    )
+    merge_override(
+        path, COLUMNS,
+        [{"person_id": "a", "name": "A", "catches": "9", "kept": ""}],
+        decided="kept",
+    )
+    row = read(path)[0]
+    assert row["source"] == "web", "provenance was destroyed"
+    # The other two rules still hold alongside it, or the fix traded one for another.
+    assert row["kept"] == "y" and row["catches"] == "9"
+
+
+def test_a_carried_column_survives_on_a_row_that_is_no_longer_derived(tmp_path):
+    """Orphan rows are built by a separate expression from merged ones, so the rule
+    above is unprotected on exactly the rows most likely to hold hand-entered work."""
+    path = tmp_path / "k.csv"
+    write(
+        path,
+        COLUMNS + ["source"],
+        [{"person_id": "gone", "name": "G", "catches": "1", "kept": "y", "source": "web"}],
+    )
+    merge_override(
+        path, COLUMNS,
+        [{"person_id": "b", "name": "B", "catches": "2", "kept": ""}],
+        decided="kept",
+    )
+    rows = read(path)
+    assert [r["person_id"] for r in rows] == ["b", "gone"]
+    assert rows[1]["source"] == "web"
+    assert rows[0]["source"] == "", "blank in, blank out - a new row invents no provenance"
+
+
 def test_a_new_row_never_arrives_carrying_a_decision(tmp_path):
     """Blank in, blank out. The merge may copy a decision forward but never mint one."""
     path = tmp_path / "k.csv"

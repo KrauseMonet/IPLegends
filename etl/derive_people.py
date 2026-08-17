@@ -11,6 +11,11 @@ recomputed, so it is **never written over**; the derived ones are refreshed on e
 because a signal added later is useless if it can only reach rows that did not exist yet.
 `merge_override` takes the decision column by name so the two cannot be confused. A30.
 
+A third kind exists and is neither: a column a human added that this code does not
+generate at all, such as `bowling_style.csv`'s `source`. `merge_override` cannot refresh
+what it does not produce, so it carries such a column across untouched rather than
+dropping it - it never destroys a column it did not generate. A112.
+
 None of these generators decides anything a human is meant to decide. Where the archive
 proves an answer they record it; where it merely suggests one they rank the candidates
 and leave the column blank, and blank means undecided rather than no.
@@ -303,25 +308,45 @@ def merge_override(
     *,
     decided: str,
 ) -> tuple[int, int, int]:
-    """Rewrite the file, refreshing evidence and preserving every decision.
+    """Rewrite the file, refreshing evidence and destroying nothing it did not generate.
 
     Each override CSV mixes two kinds of column and they need opposite treatment.
     `decided` names the one a human fills in: it is the only copy of work that cannot
     be recomputed, so it is carried across untouched and never written over, not even
-    with an equal value. Every other column is evidence we derived, so it is refreshed
-    from this run - otherwise adding a new signal could never reach a row that already
-    existed, which is the whole point of the exercise.
+    with an equal value. Every other column in `columns` is evidence we derived, so it
+    is refreshed from this run - otherwise adding a new signal could never reach a row
+    that already existed, which is the whole point of the exercise.
 
     Rows come out in the order given, so a caller that sorts by likelihood gets a file
     whose top row is the one most worth reading. An existing row with no counterpart in
     `rows` is kept verbatim at the end rather than dropped: it may hold a decision, and
     a generator that can silently delete one is a generator that will.
+
+    That last rule has a column-wise twin, and A112 added it after the row-wise one had
+    stood alone for months. A column present in the file but absent from `columns` was
+    not generated here, so this function knows nothing about it and cannot recompute it:
+    it is appended untouched instead of being dropped. `bowling_style.csv` grew a
+    `source` column recording HOW each of 476 hand-checked styles was decided, and the
+    old code would have erased it on the next --bowling-style run while faithfully
+    preserving the decisions themselves - leaving a file whose provenance was gone and
+    whose decisions looked untouched, which is indistinguishable from provenance that
+    was never recorded. Registering each new column by name would work and was rejected:
+    it protects only the columns somebody remembered to register, and the next audit
+    column added is exactly the one nobody will. Same reasoning as A53 naming the
+    dependant in a truncate rather than reaching for CASCADE - refuse loudly by default,
+    never empty something silently.
     """
     OVERRIDES.mkdir(parents=True, exist_ok=True)
     existing: list[dict] = []
+    present: list[str] = []
     if path.exists():
         with path.open(newline="", encoding="utf-8") as handle:
-            existing = list(csv.DictReader(handle))
+            reader = csv.DictReader(handle)
+            present = list(reader.fieldnames or ())
+            existing = list(reader)
+    # Columns this run did not generate. Never refreshed, never dropped.
+    carried = [c for c in present if c not in columns]
+    fieldnames = list(columns) + carried
     by_key = {tuple(row.get(c, "") for c in key): row for row in existing}
 
     merged, added = [], 0
@@ -330,13 +355,15 @@ def merge_override(
         was = by_key.pop(tuple(str(row.get(c, "")) for c in key), None)
         if was is None:
             added += 1
+            out.update({c: "" for c in carried})
         else:
             out[decided] = was.get(decided, "")
+            out.update({c: was.get(c, "") for c in carried})
         merged.append(out)
-    orphans = [{c: row.get(c, "") for c in columns} for row in by_key.values()]
+    orphans = [{c: row.get(c, "") for c in fieldnames} for row in by_key.values()]
 
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(merged)
         writer.writerows(orphans)

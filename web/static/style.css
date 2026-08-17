@@ -970,6 +970,18 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
 .scorecard-frame tr.top-bat td{background:rgba(245,184,61,.08)}
 .scorecard-frame tr.top-bat td:first-child{color:var(--gold-2);font-weight:750;
   box-shadow:inset 2px 0 0 var(--gold)}
+/* [A115] A zero boundary count is a dash, dimmed further than an ordinary cell, so the
+   eye lands on the batters who did clear the rope rather than filtering past a column of
+   noughts to find them. */
+.scorecard-frame td.bdy-none{color:var(--ink-3);opacity:.55}
+/* The shared `td` rule is `padding:6px 0` -- no horizontal padding at all. Four numeric
+   columns had enough natural width to survive that; six do not, and on a phone the row
+   ran together into "1046110 6170.5" with no way to tell where one column ended. The
+   separation has to be real space rather than a smaller font, because these are the
+   numbers the card exists to show. Scoped to the scorecard so the standings table, which
+   shares the same base rules and is not crowded, is untouched. */
+.scorecard-frame th.n,.scorecard-frame td.n{padding-left:9px;white-space:nowrap}
+.scorecard-frame td:first-child{padding-right:4px}
 
 /* --- legality: a list of what is LEFT, not a list of what is WRONG --------------------------
    The panel showed red failure lines throughout a draft that is going perfectly well --
@@ -1385,6 +1397,30 @@ body.has-ground{
 .an-lead-power{border-top-color:var(--gold)}
 .an-lead-avg{border-top-color:#4aa8ff}
 .an-lead .cap-empty{font-size:12.5px;color:var(--ink-3);padding:10px 0 4px}
+
+/* --- [A115] boundaries --- */
+.an-bdy{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;
+  margin-bottom:16px}
+.an-bdy-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+  background:rgba(255,255,255,.015);border-top:3px solid var(--tint,var(--ink-3))}
+.an-bdy-head b{display:block;font-family:var(--display);font-size:18px;
+  text-transform:uppercase;letter-spacing:.02em;color:var(--tint);font-weight:400}
+.an-bdy-head span{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+.an-bdy-counts{display:flex;gap:26px;margin:12px 0 14px}
+.an-bdy-counts em{display:block;font-family:var(--mono);font-size:26px;font-style:normal;
+  font-weight:700;color:var(--ink);line-height:1.1}
+.an-bdy-counts span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.an-bdy-bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;
+  margin-bottom:7px}
+.an-bdy-bar span{display:block;height:100%;background:var(--tint,var(--ink-3));
+  border-radius:3px}
+.an-bdy-share b{font-family:var(--mono);font-size:15px;color:var(--ink);font-weight:700}
+.an-bdy-share span{font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-left:7px}
+.an-lead-six{border-top-color:#9b5de5}
+.an-lead-four{border-top-color:#4aa8ff}
 
 .an-vs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
 .an-split{border:1px solid var(--line);border-radius:10px;padding:16px 18px;

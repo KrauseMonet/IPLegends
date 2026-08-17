@@ -310,6 +310,28 @@ def draw(probs: tuple[float, ...], rng: random.Random) -> int:
     return len(probs) - 1
 
 
+# [A115] A ball's outcome index, for the two that are boundaries. `OFF_THE_BAT` is
+# (0,1,2,3,4,5,6) and the draw returns index+1 for runs, so a four is index 5 and a six
+# index 7. Named rather than written as literals at the tally site, because the offset
+# between an outcome index and the runs it is worth is exactly the kind of thing that
+# reads as correct while being one out.
+FOUR, SIX = OFF_THE_BAT.index(4) + 1, OFF_THE_BAT.index(6) + 1
+
+# What fraction of the archive's 4s and 6s were RUN rather than hit to the fence.
+# Cricsheet carries a `non_boundary` flag for exactly this, and it is vanishingly rare:
+# 21 of 34,447 fours (0.061%) and 8 of 15,779 sixes (0.051%), 29 deliveries in nineteen
+# seasons. `state_ball_outcomes.runs_4` and `runs_6` (migration 007) count them, so the
+# engine's four-rate is really the "four runs off the bat" rate and the boundary counts
+# here overstate by about six hundredths of a percent.
+#
+# Recorded and NOT modelled, deliberately. Splitting the outcome space to carry it would
+# double the state grid to price a difference three orders of magnitude below the noise
+# in any cell. But it is written down because it is the A22 shape — a figure every
+# internal check agrees with, since the database is perfectly consistent with reading a
+# `runs_batter = 4` as a boundary — and a number nobody has named is indistinguishable
+# from one nobody has checked.
+
+
 @dataclass
 class BatterCard:
     player: Player
@@ -317,6 +339,8 @@ class BatterCard:
     balls: int = 0
     out: bool = False
     faced_any: bool = False
+    fours: int = 0
+    sixes: int = 0
 
 
 @dataclass
@@ -325,6 +349,11 @@ class BowlerCard:
     balls: int = 0
     runs: int = 0
     wickets: int = 0
+    # Boundaries CONCEDED. Free at the same tally site as the batter's own, and the pair
+    # is what makes a death-overs economy legible: two bowlers at 9.00 are different
+    # bowlers if one was hit for six fours and the other for four sixes.
+    fours: int = 0
+    sixes: int = 0
 
     @property
     def overs(self) -> str:
@@ -357,6 +386,13 @@ class OverSnapshot:
     # OverSnapshot built by an older caller or a test, and the analysis falls back to the
     # name in that case rather than dropping the over.
     bowler_id: str = ""
+    # [A115] Boundaries in THIS over alone, the same delta shape `over_runs` already has.
+    # Defaults and last in the field list for `bowler_id`'s reason: a snapshot built by an
+    # older caller or a test stays constructible, and a consumer sees 0 rather than an
+    # AttributeError. Note that 0 is honest here in a way it is not for a style (A23) —
+    # an over with no boundary genuinely had none, where an unobserved style is unknown.
+    over_fours: int = 0
+    over_sixes: int = 0
 
 
 @dataclass
@@ -367,6 +403,8 @@ class Innings:
     wickets: int = 0
     balls: int = 0
     extras: int = 0
+    fours: int = 0
+    sixes: int = 0
     commentary: list[str] = field(default_factory=list)
     over_log: list[OverSnapshot] = field(default_factory=list)
     chased: bool = False
@@ -402,6 +440,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
         bowler = choose_bowler(attack, previous)
         previous = bowler
         over_start_runs, over_start_wickets = innings.runs, innings.wickets
+        over_start_fours, over_start_sixes = innings.fours, innings.sixes
 
         for _ in range(BALLS_PER_OVER):
             # A wide is not a ball faced and does not advance the over, so it is drawn
@@ -443,6 +482,18 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 striker.runs += runs
                 innings.runs += runs
                 bowler.runs += runs
+                # [A115] Tallied from the outcome the draw ALREADY made -- no extra rng
+                # draw and no second decision, so a seeded season replays to the identical
+                # match it did before this existed (A62). Every consumer of a boundary
+                # count reads a number that was there all along and was being discarded.
+                if outcome == FOUR:
+                    striker.fours += 1
+                    bowler.fours += 1
+                    innings.fours += 1
+                elif outcome == SIX:
+                    striker.sixes += 1
+                    bowler.sixes += 1
+                    innings.sixes += 1
                 if runs % 2 == 1:
                     striker, non_striker = non_striker, striker
 
@@ -465,6 +516,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
             runs=innings.runs, wickets=innings.wickets, balls=innings.balls,
             over_runs=innings.runs - over_start_runs,
             over_wickets=innings.wickets - over_start_wickets,
+            over_fours=innings.fours - over_start_fours,
+            over_sixes=innings.sixes - over_start_sixes,
         ))
         striker, non_striker = non_striker, striker
 

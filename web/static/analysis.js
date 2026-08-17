@@ -122,6 +122,19 @@ function anPaint(){
 
     <div class="an-panel">
       <div class="an-panel-head"><div>
+        <h3>Boundaries</h3>
+        <p>${d.total_fours.toLocaleString()} fours and ${d.total_sixes.toLocaleString()}
+           sixes — ${d.boundary_share}% of every run scored.</p>
+      </div></div>
+      ${boundaryPhases(d.phases)}
+      <div class="an-lists an-lists-2">
+        ${leaderPanel('Most sixes', 'Cleared the rope', d.most_sixes, 'six', v => v, 'sixes')}
+        ${leaderPanel('Most fours', 'Found the fence', d.most_fours, 'four', v => v, 'fours')}
+      </div>
+    </div>
+
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
         <h3>Setting or chasing</h3>
         <p>Average score and win rate. A chase ends when it is won.</p>
       </div></div>
@@ -291,6 +304,28 @@ function styleTable(rows, unknownOvers){
       : ''}</p>`;
 }
 
+
+// [A115] Boundaries per phase: the counts, and what share of the phase's runs they were.
+// The share is the reading worth having -- a death over is not just higher-scoring, it is
+// differently scored, and the share says so where two raw counts do not. Bars are drawn
+// against the largest share rather than 100%, because nothing reaches 100 and a bar with
+// four fifths of it empty carries no information.
+function boundaryPhases(phases){
+  if (!phases || !phases.length) return '';
+  const peak = Math.max(1, ...phases.map(p => p.boundary_share));
+  return `<div class="an-bdy">${phases.map(p => `
+    <div class="an-bdy-card" style="--tint:${PHASE_TINT[p.phase]}">
+      <div class="an-bdy-head"><b>${p.label}</b><span>Overs ${p.overs_range}</span></div>
+      <div class="an-bdy-counts">
+        <div><em>${p.fours.toLocaleString()}</em><span>fours</span></div>
+        <div><em>${p.sixes.toLocaleString()}</em><span>sixes</span></div>
+      </div>
+      <div class="an-bdy-share">
+        <div class="an-bdy-bar"><span style="width:${(100 * p.boundary_share / peak).toFixed(1)}%"></span></div>
+        <b>${p.boundary_share}%</b><span>of runs in boundaries</span>
+      </div>
+    </div>`).join('')}</div>`;
+}
 
 function phaseBarSvg(phases){
   const W = 760, rowH = 34, pad = 8;

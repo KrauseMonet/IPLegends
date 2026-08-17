@@ -285,25 +285,29 @@ def archive_innings(conn) -> dict[str, float]:
     being a measurement the moment the archive is reloaded, and this one is the whole
     yardstick.
     """
-    n, total, extras, wickets, all_out, sd = conn.execute(
+    n, total, extras, wickets, all_out, sd, fours, sixes = conn.execute(
         f"""
         with fit as (
-            select match_id, runs_batter + runs_extras as runs, runs_extras,
+            select match_id, runs_batter + runs_extras as runs, runs_extras, runs_batter,
                    (wicket_kind is not null and wicket_kind <> all(%s)) as is_wicket
             from deliveries where {FITTING_SET}
         ), per_innings as (
             select match_id, sum(runs) as total, sum(runs_extras) as extras,
-                   sum(case when is_wicket then 1 else 0 end) as w
+                   sum(case when is_wicket then 1 else 0 end) as w,
+                   sum(case when runs_batter = 4 then 1 else 0 end) as fours,
+                   sum(case when runs_batter = 6 then 1 else 0 end) as sixes
             from fit group by 1
         )
         select count(*), avg(total), avg(extras), avg(w),
-               avg(case when w >= 10 then 1.0 else 0.0 end), stddev_pop(total)
+               avg(case when w >= 10 then 1.0 else 0.0 end), stddev_pop(total),
+               avg(fours), avg(sixes)
         from per_innings
         """,
         (list(NOT_A_WICKET),),
     ).fetchone()
     return {"innings": n, "total": float(total), "extras": float(extras),
-            "wickets": float(wickets), "all_out": float(all_out), "sd": float(sd)}
+            "wickets": float(wickets), "all_out": float(all_out), "sd": float(sd),
+            "fours": float(fours), "sixes": float(sixes)}
 
 
 def validate(conn, model: Model, trials: int, seed: int) -> None:
@@ -337,6 +341,14 @@ def validate(conn, model: Model, trials: int, seed: int) -> None:
         ("  of which extras", sum(i.extras for i in innings) / trials, archive["extras"]),
         ("mean wickets", sum(i.wickets for i in innings) / trials, archive["wickets"]),
         ("SD of totals", variance ** 0.5, archive["sd"]),
+        # [A115] The boundary counts are the reason this feature needed a check at all.
+        # The tilt reshapes the outcome distribution, so a four-rate is NOT right by
+        # construction the way the tally itself is -- and at league average the tilt is
+        # the identity, so these two rows test that the state grid's own runs_4/runs_6
+        # mass composes correctly across twenty overs. Same standing as the rows above:
+        # queried from the archive, no free parameter to move, nothing to tune.
+        ("mean fours", sum(i.fours for i in innings) / trials, archive["fours"]),
+        ("mean sixes", sum(i.sixes for i in innings) / trials, archive["sixes"]),
     ]
 
     print(f"=== engine against the archive, {trials} league-average innings, seed {seed} ===\n")

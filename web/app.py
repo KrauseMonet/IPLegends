@@ -371,6 +371,8 @@ class BatterOut(BaseModel):
         default=None, description="null only when faced_any is false")
     is_impact: bool = Field(
         default=False, description="he is playing as this side's Impact Player")
+    fours: int = 0
+    sixes: int = 0
 
 
 class BowlerOut(BaseModel):
@@ -381,6 +383,8 @@ class BowlerOut(BaseModel):
     economy: float
     is_impact: bool = Field(
         default=False, description="he is playing as this side's Impact Player")
+    fours: int = Field(default=0, description="boundaries CONCEDED")
+    sixes: int = Field(default=0, description="sixes CONCEDED")
 
 
 class OverOut(BaseModel):
@@ -391,6 +395,8 @@ class OverOut(BaseModel):
     balls: int = Field(description="cumulative balls after this over")
     over_runs: int = Field(description="runs scored THIS over alone")
     over_wickets: int = Field(description="wickets that fell THIS over alone")
+    over_fours: int = 0
+    over_sixes: int = 0
 
 
 class InningsOut(BaseModel):
@@ -398,6 +404,8 @@ class InningsOut(BaseModel):
     wickets: int
     overs: str
     extras: int
+    fours: int = 0
+    sixes: int = 0
     batting: list[BatterOut] = Field(description="in batting order, all eleven")
     bowling: list[BowlerOut] = Field(description="the five who bowled at least one ball")
     commentary: list[str] = Field(
@@ -460,6 +468,11 @@ class JourneySquadEntryOut(BaseModel):
     kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
     sim_bat_runs: int | None = None
     sim_bat_balls: int | None = None
+    # [A115] Boundaries this tournament. Same null convention as everything else here:
+    # None means he never faced a ball, NOT that he faced some and hit no boundary --
+    # those are different facts and a zero would collapse them (A23/A71).
+    sim_bat_fours: int | None = None
+    sim_bat_sixes: int | None = None
     sim_bowl_wickets: int | None = None
     sim_bowl_runs: int | None = None
     sim_bowl_balls: int | None = None
@@ -807,6 +820,13 @@ class PhaseSplitOut(BaseModel):
     overs: int
     run_rate: float
     balls_per_wicket: float = Field(description="0.0 when no wicket fell -- not a rate of 0")
+    fours: int = 0
+    sixes: int = 0
+    boundary_share: float = Field(
+        default=0.0,
+        description="[A115] percent of THIS phase's runs that came in boundaries. Both "
+                    "sides of the ratio are on the over_log basis, so it does not mix "
+                    "with the innings-basis totals on AnalysisOut")
 
 
 class StyleSplitOut(BaseModel):
@@ -832,6 +852,8 @@ class OverBarOut(BaseModel):
     wickets: int
     innings: int = Field(description="how many innings reached this over; the divisor")
     average_runs: float
+    fours: int = 0
+    sixes: int = 0
 
 
 class AnalysisLeaderOut(BaseModel):
@@ -881,6 +903,8 @@ class PositionRowOut(BaseModel):
     average: float = Field(description="runs per DISMISSAL; 0.0 means no dismissal yet, "
                                         "which the UI shows as a dash rather than a zero")
     strike_rate: float
+    fours: int = 0
+    sixes: int = 0
 
 
 class AnalysisOut(BaseModel):
@@ -903,6 +927,17 @@ class AnalysisOut(BaseModel):
     chasing: InningsSplitOut
     positions: list[PositionRowOut]
     best_averages: list[AnalysisLeaderOut]
+    # [A115] Boundaries. `total_*` are on the INNINGS basis (a partial final over is
+    # never logged, so an over_log sum would miss the six that won a chase); the counts
+    # inside `phases` are on the over_log basis, because there a boundary has to land in
+    # a named phase. The two differ slightly and are meant to.
+    total_fours: int = 0
+    total_sixes: int = 0
+    boundary_runs: int = 0
+    boundary_share: float = Field(
+        default=0.0, description="percent of every run in the tournament hit for four or six")
+    most_sixes: list[AnalysisLeaderOut] = Field(default_factory=list)
+    most_fours: list[AnalysisLeaderOut] = Field(default_factory=list)
     # [A113] Flat (phase x style) rows rather than a nested dict: the frontend groups them
     # by phase for display, and a flat list keeps the shape the other tables here already
     # use. Always exactly len(PHASES) * len(STYLES) rows.
@@ -958,6 +993,7 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
         person_id=pid, name=card.name, franchise=card.franchise,
         season_year=card.season_year, kind=_kind(card),
         sim_bat_runs=acc.runs.get(pid), sim_bat_balls=acc.balls_faced.get(pid),
+        sim_bat_fours=acc.fours.get(pid), sim_bat_sixes=acc.sixes.get(pid),
         sim_bowl_wickets=acc.wickets.get(pid), sim_bowl_runs=acc.runs_conceded.get(pid),
         sim_bowl_balls=acc.balls_bowled.get(pid),
     )
@@ -1132,7 +1168,7 @@ def _batter_out(b) -> BatterOut:
     return BatterOut(
         name=b.player.name, runs=b.runs, balls=b.balls, out=b.out, faced_any=b.faced_any,
         strike_rate=round(b.runs * 100 / b.balls, 1) if b.faced_any else None,
-        is_impact=b.player.is_impact,
+        is_impact=b.player.is_impact, fours=b.fours, sixes=b.sixes,
     )
 
 
@@ -1140,18 +1176,20 @@ def _bowler_out(bo) -> BowlerOut:
     return BowlerOut(
         name=bo.player.name, overs=bo.overs, runs=bo.runs, wickets=bo.wickets,
         economy=round(bo.runs * 6 / bo.balls, 2), is_impact=bo.player.is_impact,
+        fours=bo.fours, sixes=bo.sixes,
     )
 
 
 def _over_out(o) -> OverOut:
     return OverOut(over=o.over, bowler=o.bowler, runs=o.runs, wickets=o.wickets,
-                   balls=o.balls, over_runs=o.over_runs, over_wickets=o.over_wickets)
+                   balls=o.balls, over_runs=o.over_runs, over_wickets=o.over_wickets,
+                   over_fours=o.over_fours, over_sixes=o.over_sixes)
 
 
 def _innings_out(innings) -> InningsOut:
     return InningsOut(
         runs=innings.runs, wickets=innings.wickets, overs=innings.overs,
-        extras=innings.extras,
+        extras=innings.extras, fours=innings.fours, sixes=innings.sixes,
         batting=[_batter_out(b) for b in innings.batting],
         # A bowler in the attack who never got an over (the innings ended first) has
         # nothing to show -- BOWLERS_IN_TWELVE (A50) means the pool is exactly five, not
@@ -1360,7 +1398,8 @@ def _phase_out(phases: dict) -> list[PhaseSplitOut]:
     return [PhaseSplitOut(phase=p, label=analysis.PHASE_LABEL[p],
                           overs_range=analysis.PHASE_OVERS[p], runs=s.runs,
                           wickets=s.wickets, overs=s.overs, run_rate=s.run_rate,
-                          balls_per_wicket=s.balls_per_wicket)
+                          balls_per_wicket=s.balls_per_wicket, fours=s.fours,
+                          sixes=s.sixes, boundary_share=s.boundary_share)
             for p, s in ((p, phases[p]) for p in analysis.PHASES)]
 
 
@@ -1381,7 +1420,8 @@ def _split_out(s: analysis.InningsSplit) -> InningsSplitOut:
 
 def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
     bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
-                                  innings=b.innings, average_runs=b.average_runs)
+                                  innings=b.innings, average_runs=b.average_runs,
+                                  fours=b.fours, sixes=b.sixes)
                        for b in ms]
     lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value,
                                      detail=x.detail, team=x.team) for x in ls]
@@ -1401,8 +1441,12 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         bat_first=_split_out(a.bat_first), chasing=_split_out(a.chasing),
         positions=[PositionRowOut(position=r.position, runs=r.runs, balls=r.balls,
                                   outs=r.outs, innings=r.innings, average=r.average,
-                                  strike_rate=r.strike_rate) for r in a.positions],
+                                  strike_rate=r.strike_rate, fours=r.fours,
+                                  sixes=r.sixes) for r in a.positions],
         best_averages=lead(a.best_averages),
+        total_fours=a.total_fours, total_sixes=a.total_sixes,
+        boundary_runs=a.boundary_runs, boundary_share=a.boundary_share,
+        most_sixes=lead(a.most_sixes), most_fours=lead(a.most_fours),
         style_phases=_style_out(a.style_phases),
         unknown_style_overs=sum(a.style_phases[p]["unknown"].overs
                                 for p in analysis.PHASES))

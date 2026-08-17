@@ -15,6 +15,10 @@ class FakeSnap:
     over_wickets: int = 0
     bowler: str = "A Bowler"
     bowler_id: str = ""
+    # [A115] Default 0 so every pre-existing fixture stays valid and keeps meaning what it
+    # meant. A boundary-specific test sets them explicitly rather than relying on these.
+    over_fours: int = 0
+    over_sixes: int = 0
 
 
 @dataclass
@@ -35,6 +39,8 @@ class FakeCard:
     wickets: int = 0
     out: bool = False
     faced_any: bool = True
+    fours: int = 0
+    sixes: int = 0
 
 
 @dataclass
@@ -51,6 +57,8 @@ class FakeInnings:
     wickets: int = 0
     overs: str = "20.0"
     chased: bool = False
+    fours: int = 0
+    sixes: int = 0
 
 
 @dataclass
@@ -392,3 +400,89 @@ def test_every_phase_carries_all_three_style_buckets_even_at_zero():
     a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
     for phase in PHASES:
         assert set(a.style_phases[phase]) == {"pace", "spin", "unknown"}, phase
+
+
+# --- [A115] boundaries ---------------------------------------------------------------------
+
+def test_phase_boundaries_land_in_the_phase_the_over_belongs_to():
+    """The same phase rule the runs already follow. A six in over 18 is a death six, and
+    the fours/sixes must not pool into one tournament-wide number the way a naive
+    accumulator would leave them."""
+    log = [FakeSnap(over=0, over_runs=10, over_fours=2, over_sixes=0),    # powerplay
+           FakeSnap(over=8, over_runs=8, over_fours=1, over_sixes=0),     # middle
+           FakeSnap(over=18, over_runs=20, over_fours=1, over_sixes=2)]   # death
+    a = season_analysis([_result(log, [])])
+    assert (a.phases["powerplay"].fours, a.phases["powerplay"].sixes) == (2, 0)
+    assert (a.phases["middle"].fours, a.phases["middle"].sixes) == (1, 0)
+    assert (a.phases["death"].fours, a.phases["death"].sixes) == (1, 2)
+
+
+def test_boundary_share_is_measured_against_its_own_phases_runs():
+    """Both sides of the ratio come off the same snapshots. 2 fours and 2 sixes is 20 runs
+    of a 40-run phase, so 50% -- and reading the denominator off the innings total instead
+    would put a real boundary over a bigger number and understate every phase."""
+    log = [FakeSnap(over=18, over_runs=40, over_fours=2, over_sixes=2)]
+    a = season_analysis([_result(log, [])])
+    assert a.phases["death"].boundary_runs == 20
+    assert a.phases["death"].boundary_share == 50.0
+
+
+def test_a_phase_with_runs_but_no_boundary_shares_zero_rather_than_dividing_by_nothing():
+    a = season_analysis([_result([FakeSnap(over=0, over_runs=6)], [])])
+    assert a.phases["powerplay"].boundary_share == 0.0
+    assert a.phases["middle"].boundary_share == 0.0     # no runs at all, still not a crash
+
+
+def test_tournament_totals_come_from_the_innings_not_the_over_log():
+    """A partial final over is never logged (`OverSnapshot`'s own rule), so the six that
+    wins a chase is invisible to the phase table and must NOT be missing from the
+    headline. The innings here carries two more fours than its log does, which is exactly
+    the shape of a chase ending mid-over."""
+    inn = FakeInnings(over_log=[FakeSnap(over=0, over_runs=10, over_fours=1, over_sixes=1)],
+                      runs=100, fours=3, sixes=1)
+    a = season_analysis([FakeResult(FakeSide("H"), FakeSide("A"), inn, FakeInnings())])
+    assert a.phases["powerplay"].fours == 1        # the log's view
+    assert a.total_fours == 3                      # the innings' view
+    assert a.total_sixes == 1
+    assert a.boundary_runs == 3 * 4 + 1 * 6
+    assert a.boundary_share == 18.0                # 18 of 100
+
+
+def test_most_sixes_is_a_person_and_side_pair_like_every_other_board():
+    """A111's rule, which this file has now had to apply four times: the same man on two
+    drawn sides is two rows, never one summed total no team produced."""
+    mumbai, chennai = FakeSide("MI"), FakeSide("CSK")
+    hitter = FakePlayer("A Hitter", person_id="p1")
+    for_mi = FakeInnings(batting=[FakeCard(hitter, runs=60, balls=30, sixes=5, fours=2)])
+    for_csk = FakeInnings(batting=[FakeCard(hitter, runs=40, balls=25, sixes=4, fours=1)])
+    a = season_analysis([
+        FakeResult(mumbai, FakeSide("X"), for_mi, FakeInnings()),
+        FakeResult(chennai, FakeSide("Y"), for_csk, FakeInnings()),
+    ])
+    rows = [(r.name, r.value, r.team) for r in a.most_sixes]
+    assert rows == [("A Hitter", 5, "MI"), ("A Hitter", 4, "CSK")]
+    assert 9 not in [r.value for r in a.most_sixes]      # never the summed total
+
+
+def test_a_batter_who_hit_none_is_absent_from_the_boundary_boards():
+    """Absent, not present with a zero. A leaderboard of noughts is not a leaderboard."""
+    a = season_analysis([FakeResult(
+        FakeSide("H"), FakeSide("A"),
+        FakeInnings(batting=[FakeCard(FakePlayer("A Blocker", person_id="p9"),
+                                      runs=20, balls=40)]),
+        FakeInnings())])
+    assert a.most_sixes == []
+    assert a.most_fours == []
+
+
+def test_boundaries_are_attributed_to_the_batting_position_the_man_came_in_at():
+    a = season_analysis([FakeResult(
+        FakeSide("H"), FakeSide("A"),
+        FakeInnings(batting=[
+            FakeCard(FakePlayer("Opener", person_id="o"), runs=50, balls=30, fours=6, sixes=1),
+            FakeCard(FakePlayer("Three", person_id="t"), runs=20, balls=15, fours=1, sixes=2),
+        ]),
+        FakeInnings())])
+    assert (a.positions[0].fours, a.positions[0].sixes) == (6, 1)
+    assert (a.positions[1].fours, a.positions[1].sixes) == (1, 2)
+    assert (a.positions[2].fours, a.positions[2].sixes) == (0, 0)

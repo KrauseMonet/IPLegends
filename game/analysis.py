@@ -69,6 +69,8 @@ class PhaseSplit:
     runs: int = 0
     wickets: int = 0
     overs: int = 0
+    fours: int = 0
+    sixes: int = 0
 
     @property
     def run_rate(self) -> float:
@@ -77,6 +79,22 @@ class PhaseSplit:
     @property
     def balls_per_wicket(self) -> float:
         return round(self.overs * BALLS_PER_OVER / self.wickets, 1) if self.wickets else 0.0
+
+    @property
+    def boundary_runs(self) -> int:
+        return 4 * self.fours + 6 * self.sixes
+
+    @property
+    def boundary_share(self) -> float:
+        """Percent of this phase's runs that came in boundaries.
+
+        Numerator and denominator both come from the SAME `over_log` snapshots, which is
+        why this is a property here rather than computed against an innings total. A
+        partial final over is never logged (`OverSnapshot`'s own rule), so phase runs are
+        slightly below innings runs -- mixing the two bases would put a real four over a
+        larger denominator and quietly understate every phase.
+        """
+        return round(100 * self.boundary_runs / self.runs, 1) if self.runs else 0.0
 
 
 @dataclass
@@ -89,6 +107,8 @@ class OverBar:
     runs: int = 0
     wickets: int = 0
     innings: int = 0
+    fours: int = 0
+    sixes: int = 0
 
     @property
     def average_runs(self) -> float:
@@ -206,6 +226,8 @@ class PositionRow:
     balls: int = 0
     outs: int = 0
     innings: int = 0
+    fours: int = 0
+    sixes: int = 0
 
     @property
     def average(self) -> float:
@@ -246,6 +268,24 @@ class SeasonAnalysis:
     # omitted" -- the same reason A31 stores its five never-observed states as explicit
     # zeroes rather than absent rows.
     style_phases: dict = field(default_factory=dict)
+    # [A115] Boundaries. The totals are on the INNINGS basis (complete, including a
+    # partial final over); the per-phase counts inside `phases` are on the over_log basis
+    # (a boundary has to land in a named phase to be counted there). The two therefore
+    # disagree slightly and are meant to -- see `PhaseSplit.boundary_share`.
+    total_runs: int = 0
+    total_fours: int = 0
+    total_sixes: int = 0
+    most_sixes: list = field(default_factory=list)
+    most_fours: list = field(default_factory=list)
+
+    @property
+    def boundary_runs(self) -> int:
+        return 4 * self.total_fours + 6 * self.total_sixes
+
+    @property
+    def boundary_share(self) -> float:
+        """Percent of every run scored in the tournament that arrived in a boundary."""
+        return round(100 * self.boundary_runs / self.total_runs, 1) if self.total_runs else 0.0
 
 
 def _blank_phases() -> dict:
@@ -293,10 +333,14 @@ def _accumulate(innings, phases: dict, bars: list) -> None:
         split.runs += snap.over_runs
         split.wickets += snap.over_wickets
         split.overs += 1
+        split.fours += snap.over_fours
+        split.sixes += snap.over_sixes
         bar = bars[snap.over]
         bar.runs += snap.over_runs
         bar.wickets += snap.over_wickets
         bar.innings += 1
+        bar.fours += snap.over_fours
+        bar.sixes += snap.over_sixes
 
 
 def season_analysis(results, track=None) -> SeasonAnalysis:
@@ -321,7 +365,8 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
     #
     # `id(side)` because `Side` is a plain dataclass with no `eq=False` and is not safely
     # hashable by value -- the same identity care A79/A80/A96 each needed.
-    bat: dict[tuple, list] = {}    # (person, side) -> [runs, balls, outs, name, team]
+    # (person, side) -> [runs, balls, outs, name, team, fours, sixes]
+    bat: dict[tuple, list] = {}
     bowl: dict[tuple, list] = {}   # (person, side) -> [wickets, balls, runs, name, team]
     best_over = None
     highest = None
@@ -408,13 +453,27 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
                     row.runs += b.runs
                     row.balls += b.balls
                     row.outs += 1 if b.out else 0
+                    row.fours += b.fours
+                    row.sixes += b.sixes
+
+            # [A115] Tournament boundary totals, from the INNINGS rather than the over
+            # log. A partial final over is never logged, so an over_log sum would miss
+            # every boundary hit in the shot that won a chase -- and those are exactly
+            # the ones a viewer remembers. The per-phase table stays on the over_log
+            # basis, because there a boundary has to land in a specific phase; here it
+            # only has to be counted.
+            a.total_runs += inn.runs
+            a.total_fours += inn.fours
+            a.total_sixes += inn.sixes
 
             for b in inn.batting:
                 d = bat.setdefault((b.player.person_id or b.player.name, id(side)),
-                                   [0, 0, 0, b.player.name, side.short])
+                                   [0, 0, 0, b.player.name, side.short, 0, 0])
                 d[0] += b.runs
                 d[1] += b.balls
                 d[2] += 1 if b.out else 0
+                d[5] += b.fours
+                d[6] += b.sixes
             for b in inn.bowling:
                 d = bowl.setdefault((b.player.person_id or b.player.name, id(fielding)),
                                     [0, 0, 0, b.player.name, fielding.short])
@@ -454,6 +513,20 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
            for v in bat.values() if v[1] >= MIN_BALLS_FACED and v[2] >= MIN_DISMISSALS]
     a.best_averages = [Leader(n, x, f"{o} outs", tm)
                        for n, x, o, tm in sorted(avg, key=lambda t: -t[1])[:10]]
+
+    # [A115] Most sixes and most fours. NO volume floor, deliberately, and the asymmetry
+    # with the three boards above is the point: a strike rate or an economy is a RATE, so
+    # a tiny denominator makes it meaningless and A33's argument applies. A six count is a
+    # COUNT -- twelve sixes are twelve sixes whether they came in four innings or
+    # fourteen, and floor it and you would be answering a different question than the one
+    # a viewer asked. The `detail` carries the balls faced so a short, violent season is
+    # visible as one rather than hidden.
+    a.most_sixes = [Leader(v[3], v[6], f"{v[1]} balls", v[4])
+                    for _, v in sorted(bat.items(), key=lambda kv: (-kv[1][6], kv[1][1]))[:10]
+                    if v[6] > 0]
+    a.most_fours = [Leader(v[3], v[5], f"{v[1]} balls", v[4])
+                    for _, v in sorted(bat.items(), key=lambda kv: (-kv[1][5], kv[1][1]))[:10]
+                    if v[5] > 0]
 
     a.positions = positions
 

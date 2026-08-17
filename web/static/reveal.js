@@ -216,6 +216,14 @@ function impactTag(isImpact){
   return isImpact ? ' <span class="impact-tag">IMP</span>' : '';
 }
 
+// [A115] A boundary count of zero reads as a dash, not a 0. Ten noughts down a column is
+// noise a reader has to filter past to find the two numbers that matter; a dash is the
+// same convention this app already uses for "no average yet" and "nothing to report".
+// It says none were hit, which is a fact, not that none were measured.
+function bdyCell(n){
+  return n ? `<td class="n">${n}</td>` : `<td class="n bdy-none">–</td>`;
+}
+
 function scorecardInnings(short, score, inn){
   // The innings' best contribution, so a scorecard has a subject rather than being a wall
   // of equally-weighted rows. Ties resolve to whoever appears first, which is batting
@@ -226,20 +234,31 @@ function scorecardInnings(short, score, inn){
   const batting = inn.batting.map(b => {
     const isTop = b.faced_any && !topDone && topRuns !== null && b.runs === topRuns && topRuns > 0;
     if (isTop) topDone = true;
+    // [A115] `4s` and `6s` sit between balls and strike rate, which is where every real
+    // scorecard puts them (R B 4s 6s SR). A `0` is printed as a dim dash rather than a
+    // zero: a column of noughts is what makes a scorecard hard to scan, and the two
+    // batters who did hit boundaries are the ones the column exists to find.
     return b.faced_any
     ? `<tr class="${isTop ? 'top-bat' : ''}"><td>${b.name}${b.out ? '' : ' *'}${impactTag(b.is_impact)}</td><td class="n">${b.runs}</td>
-        <td class="n">${b.balls}</td><td class="n">${b.strike_rate}</td></tr>`
+        <td class="n">${b.balls}</td>${bdyCell(b.fours)}${bdyCell(b.sixes)}<td class="n">${b.strike_rate}</td></tr>`
     : `<tr class="tail"><td>${b.name}${impactTag(b.is_impact)}</td>
-        <td class="n" colspan="3" style="font-style:italic">did not bat</td></tr>`;
+        <td class="n" colspan="5" style="font-style:italic">did not bat</td></tr>`;
   }).join('');
-  const bowling = inn.bowling.map(bo => `<tr><td>${bo.name}${impactTag(bo.is_impact)}</td>
+  // Boundaries CONCEDED ride in the row's tooltip rather than as two more columns. Seven
+  // columns do not fit a phone, and this is a secondary reading of a bowling figure --
+  // the primary one, economy, is already there.
+  const bowling = inn.bowling.map(bo => `<tr title="${bo.fours} four${
+      bo.fours === 1 ? '' : 's'} and ${bo.sixes} six${bo.sixes === 1 ? '' : 'es'} conceded">
+    <td>${bo.name}${impactTag(bo.is_impact)}</td>
     <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
     <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';
   return `<div>
     <table>
-      <caption>${short} · ${score} (${inn.overs} ov, ${inn.extras} extras)</caption>
-      <tr><th>Batting</th><th class="n">R</th><th class="n">B</th><th class="n">SR</th></tr>
+      <caption>${short} · ${score} (${inn.overs} ov, ${inn.extras} extras) · ${
+        inn.fours}x4 ${inn.sixes}x6</caption>
+      <tr><th>Batting</th><th class="n">R</th><th class="n">B</th><th class="n">4s</th>
+        <th class="n">6s</th><th class="n">SR</th></tr>
       ${batting}
     </table>
     <table>
@@ -333,6 +352,14 @@ function simFigures(c){
     : bat.balls >= bowl.balls;   // allrounder/unrated: whichever he did more of this run
   return batLeads ? {primary: bat.text, secondary: bowl.text}
                   : {primary: bowl.text, secondary: bat.text};
+}
+
+// [A115] "38x4 12x6", or null when he hit neither. Null-safe on the counts themselves,
+// because `_journey_entry` sends None for a man who never faced a ball -- and `0` there
+// would claim he batted without clearing the rope, which is a different innings.
+function boundaryLine(c){
+  const f = c.sim_bat_fours || 0, s = c.sim_bat_sixes || 0;
+  return (f || s) ? `${f}x4 ${s}x6` : null;
 }
 
 const KIND_CHIP = {
@@ -461,10 +488,20 @@ function drawJourneyCard(d, header){
     ctx.fillStyle = fig.primary === 'DID NOT PLAY' ? ink3 : green;
     ctx.font = `700 24px ${CARD_MONO}`;
     ctx.fillText(fig.primary, rowX + rowW - padX, midY1);
-    if (fig.secondary){
+    // [A115] Boundaries share the row's SECOND line rather than taking a line or a tile
+    // of their own. A pure batter leaves that line empty, so his read for free; an
+    // all-rounder already uses it for his other discipline, so the two join with a
+    // separator. At 17px mono the longest combination is about a third of the row, so
+    // this cannot collide with the name on the left the way a 24px primary line could.
+    //
+    // Omitted entirely when he hit none, rather than printed as `0x4 0x6` -- the same
+    // reason the scorecard cell is a dash. He batted and did not clear the rope; that is
+    // legible as an absence and unreadable as a row of noughts.
+    const second = [fig.secondary, boundaryLine(c)].filter(Boolean).join('   ·   ');
+    if (second){
       ctx.fillStyle = ink3;
       ctx.font = `500 17px ${CARD_MONO}`;
-      ctx.fillText(fig.secondary, rowX + rowW - padX, midY2);
+      ctx.fillText(second, rowX + rowW - padX, midY2);
     }
   });
 

@@ -295,6 +295,12 @@ class JourneyAccumulator:
     runs_conceded: dict[str, int] = field(default_factory=dict)
     balls_bowled: dict[str, int] = field(default_factory=dict)
     names: dict[str, str] = field(default_factory=dict)
+    # [A115] Boundaries per person, for the journey card's own twelve rows. Kept beside
+    # `runs` rather than derived from it, because they are not derivable: 40 runs off 30
+    # balls is a different innings depending on whether it held four sixes or none, and
+    # that difference is the whole reason a viewer wants the column.
+    fours: dict[str, int] = field(default_factory=dict)
+    sixes: dict[str, int] = field(default_factory=dict)
     total_runs: int = 0
     total_wickets: int = 0
 
@@ -306,6 +312,8 @@ class JourneyAccumulator:
             self.names[pid] = b.player.name
             self.runs[pid] = self.runs.get(pid, 0) + b.runs
             self.balls_faced[pid] = self.balls_faced.get(pid, 0) + b.balls
+            self.fours[pid] = self.fours.get(pid, 0) + b.fours
+            self.sixes[pid] = self.sixes.get(pid, 0) + b.sixes
             self.total_runs += b.runs
 
     def add_bowling(self, innings) -> None:

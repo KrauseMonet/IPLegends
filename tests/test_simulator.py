@@ -339,3 +339,117 @@ def test_play_innings_is_deterministic_so_the_log_capture_hides_no_state_leak():
             for o in a.over_log] == [
             (o.over, o.bowler, o.runs, o.wickets, o.over_runs, o.over_wickets)
             for o in b.over_log]
+
+
+# --- [A115] boundaries -------------------------------------------------------------------
+#
+# The tally reads the outcome index the draw ALREADY produced, so the danger is not that
+# it miscounts a four -- it is that it counts the WRONG INDEX and never says so. A model
+# whose whole mass sits on one outcome is what makes that visible: if `FOUR` were off by
+# one, an all-fours innings would report zero fours and 120 threes' worth of runs, and no
+# internal consistency check would notice because the runs would still add up.
+
+ALL_FOURS = _FixedModel((0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0), _VALUES)
+ALL_SIXES = _FixedModel((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), _VALUES)
+ALL_TWOS = _FixedModel((0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0), _VALUES)
+# Dots, singles, twos, fours and sixes in roughly archive-like proportion, no wicket -- so
+# every over completes and the per-over deltas can be reconciled against the innings.
+REAL_MIX = _FixedModel((0.0, 0.34, 0.36, 0.06, 0.0, 0.16, 0.0, 0.08), _VALUES)
+
+
+def test_every_ball_a_four_is_counted_as_a_four_and_not_as_anything_else():
+    """Pins the outcome INDEX, which is the only thing here that can be silently wrong."""
+    innings = play_innings(ALL_FOURS, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0),
+                           random.Random(4))
+    balls = OVERS * BALLS_PER_OVER
+    assert innings.fours == balls
+    assert innings.sixes == 0
+    assert innings.runs == 4 * balls          # the runs and the count must agree
+    assert sum(b.fours for b in innings.batting) == balls
+    assert sum(bo.fours for bo in innings.bowling) == balls
+
+
+def test_every_ball_a_six_is_counted_as_a_six_and_not_as_a_four():
+    innings = play_innings(ALL_SIXES, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0),
+                           random.Random(5))
+    balls = OVERS * BALLS_PER_OVER
+    assert innings.sixes == balls
+    assert innings.fours == 0
+    assert innings.runs == 6 * balls
+
+
+def test_runs_that_are_not_boundaries_are_never_counted_as_boundaries():
+    """Twos all innings: 240 runs and not one boundary. Guards the other direction --
+    a tally keyed on the RUNS rather than the outcome would still be right for 4 and 6,
+    and this is the case that separates the two implementations."""
+    innings = play_innings(ALL_TWOS, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0),
+                           random.Random(6))
+    assert innings.runs == 2 * OVERS * BALLS_PER_OVER
+    assert (innings.fours, innings.sixes) == (0, 0)
+
+
+def test_a_batters_own_boundaries_sum_to_the_innings_total():
+    """The three tallies (batter, bowler, innings) are written at one site from one
+    outcome, so any two disagreeing means one of the three lines was missed."""
+    innings = play_innings(REAL_MIX, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0),
+                           random.Random(7))
+    assert sum(b.fours for b in innings.batting) == innings.fours
+    assert sum(b.sixes for b in innings.batting) == innings.sixes
+    assert sum(bo.fours for bo in innings.bowling) == innings.fours
+    assert sum(bo.sixes for bo in innings.bowling) == innings.sixes
+    assert innings.fours > 0 and innings.sixes > 0     # the fixture must exercise both
+
+
+def test_per_over_boundaries_are_the_deltas_between_consecutive_entries():
+    innings = play_innings(REAL_MIX, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0),
+                           random.Random(8))
+    prev_f = prev_s = 0
+    running_f = running_s = 0
+    for o in innings.over_log:
+        running_f += o.over_fours
+        running_s += o.over_sixes
+        assert o.over_fours >= 0 and o.over_sixes >= 0
+        prev_f, prev_s = running_f, running_s
+    # Every over completed here, so the per-over deltas must reconstruct the innings total
+    # exactly. (A partial final over is not logged, which is why this fixture cannot take
+    # a wicket -- see test_a_partial_final_over_gets_no_log_entry.)
+    assert len(innings.over_log) == OVERS
+    assert (running_f, running_s) == (innings.fours, innings.sixes)
+
+
+class _CountingRandom(random.Random):
+    """A `random.Random` that records how many values were drawn from it.
+
+    Subclassed rather than wrapped so `draw()` and `play_innings` see a real Random --
+    the point is to count the engine's own consumption, not to change it.
+    """
+
+    def __init__(self, seed):
+        super().__init__(seed)
+        self.draws = 0
+
+    def random(self):
+        self.draws += 1
+        return super().random()
+
+
+def test_counting_boundaries_consumes_no_rng_draw():
+    """A62's seed determinism is the reason this matters more than it looks: the tally is
+    a pure read of a decision already made, so an innings played from a given seed must be
+    the same innings it was before boundaries existed.
+
+    **Asserted against an INDEPENDENT count of the draws, not against a second run of the
+    same engine.** The obvious version -- play the seed twice and compare -- was written
+    first and is a tautology: an extra draw lands in both runs and cancels, so it passes
+    with a spurious `rng.random()` sitting in the ball loop. Verified by inserting exactly
+    that and watching it stay green.
+
+    Three draws per ball is the whole budget and each is accounted for: the wide check,
+    the outcome, and the byes/leg-byes check. A boundary is read off the outcome the
+    second of those already produced, so it must add nothing to this number.
+    """
+    rng = _CountingRandom(11)
+    innings = play_innings(REAL_MIX, _players(11), _players(BOWLERS_IN_TWELVE, bowl=0.0), rng)
+    assert innings.balls == OVERS * BALLS_PER_OVER      # no wicket, so a full innings
+    assert innings.fours > 0 and innings.sixes > 0      # boundaries really were tallied
+    assert rng.draws == 3 * innings.balls

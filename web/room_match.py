@@ -35,6 +35,7 @@ single non-interactive `play()` call per fixture.
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass, field
 from itertools import zip_longest
 
@@ -306,6 +307,101 @@ def _league_revealed_count(room: Room) -> int:
     throughs = [mv.get("through", 0) for mv in room.match_moves
                 if isinstance(mv, dict) and mv.get("kind") == "league-reveal"]
     return max(throughs, default=0)
+
+
+# How long a match-phase step may sit waiting on a human before it resolves itself.
+#
+# The MATCH phase had no timeout of any kind -- `web/rooms.py` carries 19 references to
+# `turn_started_at`/`pick_afk` for the draft and this module carried none -- so two
+# unbounded waits could freeze a room permanently: a host who closed their tab left every
+# other seat on "Waiting for the host to continue…" forever, and a toss winner who left
+# stranded that fixture, since `_FixtureToss.next_toss` returns None for a human whose
+# move never arrives and nothing else ever filled it in.
+#
+# Deliberately GENEROUS, because this is a safety net rather than the pacing mechanism.
+# The reveal is paced client-side -- the host's own screen advances a few seconds after
+# its animation ends -- and a full match at the slowest speed setting is about 48 seconds
+# of animation, so a timeout short enough to feel responsive would advance the round out
+# from under people still watching it. Ninety seconds clears the slowest reveal, leaves
+# room for a host who has deliberately hit Pause to actually pause, and is far short of
+# "nobody is coming back".
+#
+# It does bound that Pause, and that is the intended trade rather than an oversight: an
+# unbounded pause is exactly the freeze this constant exists to make impossible, so a
+# host who steps away mid-pause still cannot strand nine other people.
+MATCH_STEP_TIMEOUT_S = 90
+
+
+def _last_step_at(room: Room) -> float:
+    """When the current step began, as an epoch second on the same clock `time.time()`
+    reads -- the timestamp of the most recent match move, or the end of the draft if the
+    match phase has not recorded one yet.
+
+    Reading the LAST move rather than storing a separate "step started" field is what
+    keeps this migration-free: every match move is recorded at the moment a step ends,
+    which is the same moment the next one begins. A move from before this was introduced
+    carries no `at` at all and is treated as arbitrarily old, so a room frozen under the
+    old code resolves itself on the next request rather than staying stuck forever."""
+    stamps = [mv["at"] for mv in room.match_moves
+              if isinstance(mv, dict) and isinstance(mv.get("at"), (int, float))]
+    if stamps:
+        return max(stamps)
+    if room.match_moves:
+        return 0.0     # pre-timestamp moves: treat as ancient, so a frozen room recovers
+    return room.turn_started_at or 0.0
+
+
+def _stamped(move: dict) -> dict:
+    """Every match move carries when it happened. Nothing reads an individual move's
+    timestamp -- only the maximum matters (`_last_step_at`) -- but stamping them all is
+    what makes that maximum mean "when did the current step begin" rather than "when did
+    whichever kind of move I remembered to stamp happen"."""
+    return {**move, "at": time.time()}
+
+
+def _auto_resolve(room: Room, deck, model) -> bool:
+    """Resolve ONE step that has been waiting past the timeout, and report whether it did.
+
+    Resolve-on-read (A62), the same shape `rooms._resolve` uses for the draft: no
+    scheduler, no background job -- whichever request arrives next does the work. One step
+    per call rather than a loop, deliberately: the move this records is stamped with the
+    current time, so an abandoned room drains one step per timeout period instead of
+    fast-forwarding to the end the instant anybody looks at it. That keeps a room that
+    everyone briefly left in a state they can rejoin and still watch.
+
+    Ordering matches `replay_room_matches`'s own: the start gate, then the league reveal
+    cursor, then a pending toss, then the round advance -- a room can only ever be waiting
+    on one of them at a time, but checking in the engine's own order means this can never
+    resolve a step the engine does not consider current."""
+    if time.time() - _last_step_at(room) <= MATCH_STEP_TIMEOUT_S:
+        return False
+    replay = replay_room_matches(room, deck, model)
+
+    if replay.awaiting_start:
+        room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
+        return True
+
+    if replay.league_progress is not None:
+        revealed, total = replay.league_progress
+        if revealed < total:
+            room.match_moves = room.match_moves + [
+                _stamped({"kind": "league-reveal", "through": revealed + 1})]
+            return True
+
+    for fixture in (replay.current_round or []):
+        if fixture.result is None and fixture.pending_toss_winner_pid is not None:
+            # The same default a CPU-owned winner already gets, for the same reason: it
+            # is a decision nobody is present to make, not a decision being taken away.
+            room.match_moves = room.match_moves + [_stamped(
+                {"kind": "toss", "stage": fixture.stage, "elects": TOSS_DEFAULT_ELECTS})]
+            return True
+
+    if replay.advance_ready:
+        room.match_moves = room.match_moves + [
+            _stamped({"kind": "advance", "round": replay.round_label})]
+        return True
+
+    return False
 
 
 def _paused(entries: list[RoomResultEntry], states: list[RoomFixtureState], label: str,
@@ -660,10 +756,27 @@ def room_journey(room: Room, replay: RoomMatchReplay, pid: str) -> RoomJourney |
 
 
 def room_match_state(conn, code: str, deck, model) -> tuple[Room, RoomMatchReplay]:
-    """Read-only poll: reuses `rooms.room_state`'s own loader (a no-op resolve once the
-    draft is complete, matching every other room route's "load, maybe advance, save"
-    shape) and replays the match phase on top."""
+    """Poll: reuses `rooms.room_state`'s own loader (a no-op resolve once the draft is
+    complete) and replays the match phase on top -- then, if this room has been sitting
+    on a human who never came back, resolves ONE step itself and saves.
+
+    Not read-only any more, and the discipline that makes that safe is A119's: the
+    overwhelmingly common case does not write at all. `_auto_resolve` returns False
+    without touching anything whenever the current step is still inside its timeout,
+    which is every poll of a room anybody is actually watching -- so a write happens only
+    on the rare poll that genuinely rescues a stalled room, not on the ~0.5 polls/second
+    per seat that arrive the rest of the time.
+
+    The re-load under a lock before writing matters for the same reason it does in
+    `rooms.room_state`: several seats poll on their own timers, so two can decide to
+    rescue the same step at once. Re-checking under the lock means the second one finds
+    the step already resolved and writes nothing."""
     room = rooms.room_state(conn, code, deck)
+    if not _auto_resolve(room, deck, model):
+        return room, replay_room_matches(room, deck, model)
+    room = rooms._load_room(conn, code, lock=True)
+    if _auto_resolve(room, deck, model):
+        rooms._save_room(conn, room)
     return room, replay_room_matches(room, deck, model)
 
 
@@ -683,7 +796,8 @@ def submit_toss(conn, code: str, player_id: str, stage: str, elects: str, deck, 
         raise RoomError(f"the toss for {stage!r} has already been answered")
     if fixture.pending_toss_winner_pid != player_id:
         raise RoomError("you did not win this toss")
-    room.match_moves = room.match_moves + [{"kind": "toss", "stage": stage, "elects": elects}]
+    room.match_moves = room.match_moves + [_stamped(
+        {"kind": "toss", "stage": stage, "elects": elects})]
     rooms._save_room(conn, room)
     return room
 
@@ -695,7 +809,8 @@ def advance_match(conn, code: str, player_id: str, deck, model) -> Room:
     replay = replay_room_matches(room, deck, model)
     if not replay.advance_ready:
         raise RoomError("this room is not waiting to advance right now")
-    room.match_moves = room.match_moves + [{"kind": "advance", "round": replay.round_label}]
+    room.match_moves = room.match_moves + [_stamped(
+        {"kind": "advance", "round": replay.round_label})]
     rooms._save_room(conn, room)
     return room
 
@@ -713,7 +828,7 @@ def start_matches(conn, code: str, player_id: str, deck, model) -> Room:
     replay = replay_room_matches(room, deck, model)
     if not replay.awaiting_start:
         raise RoomError("this room is not waiting to start right now")
-    room.match_moves = room.match_moves + [{"kind": "start"}]
+    room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
     rooms._save_room(conn, room)
     return room
 
@@ -737,6 +852,7 @@ def advance_league_reveal(conn, code: str, player_id: str, through: int, deck, m
         raise RoomError(f"only {total} group-stage fixtures exist")
     if through <= revealed:
         return room
-    room.match_moves = room.match_moves + [{"kind": "league-reveal", "through": through}]
+    room.match_moves = room.match_moves + [_stamped(
+        {"kind": "league-reveal", "through": through})]
     rooms._save_room(conn, room)
     return room

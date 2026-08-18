@@ -172,7 +172,24 @@ function toggleOverPause(){
   if (OVER_STEP.paused) clearOverTimer(); else scheduleNextOver();
 }
 
+// The speed setting is a preference, not a per-match choice -- it used to reset to
+// Normal on every page load, so anyone who prefers Fast re-picked it at the start of
+// every session (and a league room shows a viewer fifteen of their own matches). Stored
+// under the same key both pages read, so solo and a room agree on it.
+const OVER_SPEED_KEY = 'iplegends_reveal_speed';
+
+function restoreOverSpeed(){
+  const sel = document.getElementById('overSpeedSelect');
+  if (!sel) return;
+  let saved = null;
+  try { saved = localStorage.getItem(OVER_SPEED_KEY); } catch(e){ saved = null; }
+  // Only a value the select actually offers -- a stale or hand-edited entry must not
+  // leave the control showing one speed while the stepper runs at another.
+  if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved;
+}
+
 function setOverSpeed(ms){
+  try { localStorage.setItem(OVER_SPEED_KEY, String(ms)); } catch(e){ /* private mode */ }
   if (!OVER_STEP) return;
   OVER_STEP.speed = Number(ms);
   if (!OVER_STEP.paused){ clearOverTimer(); scheduleNextOver(); }

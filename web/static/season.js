@@ -424,6 +424,7 @@ async function boot(){
   renderDeckStats(m);
 }
 
+restoreOverSpeed();
 boot().then(async () => {
   const enter = new URLSearchParams(location.search).get('enter');
   const hash = location.hash.slice(1);

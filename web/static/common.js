@@ -60,11 +60,14 @@ function slip(msg){
 // slot) can be a complex element with its own child spans, and blanking its content to
 // plain text would be a worse flash than just dimming it via the section-wide freeze;
 // pass null for those callers and rely on the freeze alone.
+// `ctrl` may be null: some calls are made by a timer rather than a click (a room's own
+// auto-advance countdown), and those have no button to dim or relabel. The busy scope
+// still applies -- the request is just as real -- so the page still shows it is working.
 async function busyClick(ctrl, busyLabel, fn){
-  const scope = ctrl.closest('section') || document.body;
+  const scope = (ctrl && ctrl.closest('section')) || document.body;
   scope.classList.add('busy-wait');
-  const relabel = busyLabel && ctrl.tagName === 'BUTTON';
-  const prevText = ctrl.textContent;
+  const relabel = busyLabel && ctrl && ctrl.tagName === 'BUTTON';
+  const prevText = ctrl ? ctrl.textContent : null;
   if (relabel) ctrl.textContent = busyLabel;
   try { await fn(); }
   finally {

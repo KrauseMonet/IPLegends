@@ -897,3 +897,146 @@ def test_sides_actually_use_the_fixed_abbreviation(monkeypatch):
     monkeypatch.setattr(rooms_mod, "room_sides", fake_room_sides)
     shorts = {pid: side.short for pid, side in room_match._sides_with_pid(None, None)}
     assert shorts == {"p1": "KRA", "p2": "CSK 2010"}, shorts
+
+
+# --- the match phase can no longer freeze on a human who left -------------------------
+#
+# Before this, `web/room_match.py` had no notion of time at all -- against 19 references
+# to `turn_started_at`/`pick_afk` in the draft's own module -- so a host who closed their
+# tab left every other seat on "Waiting for the host to continue…" indefinitely, and a
+# toss winner who left stranded that fixture for good. These pin the failsafe that
+# resolves such a step on its own.
+
+def _age_match_moves(room, seconds):
+    """Backdate every match move, so the next request sees a step that has been waiting.
+    Mutates in place and returns the room, mirroring how the tests above drive state."""
+    room.match_moves = [
+        {**mv, "at": mv["at"] - seconds} if isinstance(mv, dict) and "at" in mv else mv
+        for mv in room.match_moves
+    ]
+    return room
+
+
+def test_a_toss_nobody_answers_resolves_itself_once_it_times_out(conn):
+    """The fixture-level freeze: `_FixtureToss.next_toss` returns None for a human whose
+    move never arrives, and nothing used to fill it in ever."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    stage, winner, _loser, _replay = _find_toss_winner(conn, room, host_id, guest_id)
+
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert _find_pending_toss(replay) is not None, "expected a toss to be pending"
+
+    room = rooms._load_room(conn, room.code, lock=False)
+    _age_match_moves(room, room_match.MATCH_STEP_TIMEOUT_S + 1)
+    rooms._save_room(conn, room)
+
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert _find_pending_toss(replay) is None, "the abandoned toss never resolved"
+    assert any(mv.get("kind") == "toss" and mv.get("stage") == stage
+               for mv in rooms._load_room(conn, room.code, lock=False).match_moves)
+
+
+def test_a_round_the_host_never_advances_moves_on_once_it_times_out(conn):
+    """The room-level freeze, and the worse of the two: it blocked EVERY other seat.
+
+    A 'cup', not a 'final': a one-match format completes the moment its only fixture
+    resolves and so never reaches an advance step at all, which would make this pass
+    without exercising anything."""
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    for _ in range(8):
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+        if replay.advance_ready or replay.complete:
+            break
+        pending = _find_pending_toss(replay)
+        if pending is None:
+            break
+        stage, winner = pending
+        room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.advance_ready, "could not drive the cup to an advance gate"
+
+    room = rooms._load_room(conn, room.code, lock=False)
+    _age_match_moves(room, room_match.MATCH_STEP_TIMEOUT_S + 1)
+    rooms._save_room(conn, room)
+
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert any(mv.get("kind") == "advance"
+               for mv in rooms._load_room(conn, room.code, lock=False).match_moves), \
+        "the round never advanced without the host"
+
+
+def test_a_step_still_inside_its_timeout_is_left_alone_and_writes_nothing(conn):
+    """The other half, and the one that keeps the failsafe from becoming the pacing
+    mechanism: a room somebody is actually watching must not be fast-forwarded, and a
+    poll of it must not write (A119 -- every seat polls this every two seconds)."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    before = rooms._load_room(conn, room.code, lock=False)
+
+    for _ in range(3):
+        _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+        assert _find_pending_toss(replay) is not None, "a live toss was auto-resolved"
+
+    after = rooms._load_room(conn, room.code, lock=False)
+    assert after.version == before.version, "a poll inside the timeout wrote to the room"
+    assert after.match_moves == before.match_moves
+
+
+def test_the_failsafe_restarts_its_own_clock_so_a_room_does_not_fast_forward(conn):
+    """An abandoned room drains ONE step per timeout period rather than racing to the end
+    the instant anybody looks at it -- so a room everyone briefly left is still in a state
+    they can come back and watch.
+
+    Asserted across TWO polls, not one, and that is the point: a single poll resolves one
+    step whatever happens, because `room_match_state` re-loads the room before writing and
+    that discards any extra. What actually stops the SECOND poll is the timestamp on the
+    move the first one recorded, and only a two-poll test can tell those apart -- checked
+    by unstamping the auto-recorded move, which makes the second poll resolve another
+    step and fails this."""
+    # A 'cup', not a 'final': a one-match format is COMPLETE after a single step, so it
+    # has no second step for a runaway to consume and would pass either way. A cup's two
+    # semi-finals give the failsafe somewhere else to go if its clock does not restart.
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    room = rooms._load_room(conn, room.code, lock=False)
+    _age_match_moves(room, room_match.MATCH_STEP_TIMEOUT_S + 1)
+    rooms._save_room(conn, room)
+
+    before = len(rooms._load_room(conn, room.code, lock=False).match_moves)
+    room_match.room_match_state(conn, room.code, DECK, MODEL)
+    after_one = len(rooms._load_room(conn, room.code, lock=False).match_moves)
+    assert after_one == before + 1, f"expected one step, got {after_one - before}"
+
+    room_match.room_match_state(conn, room.code, DECK, MODEL)
+    after_two = len(rooms._load_room(conn, room.code, lock=False).match_moves)
+    assert after_two == after_one, \
+        "the failsafe kept firing -- the step it recorded did not restart the clock"
+
+
+def test_moves_recorded_by_a_real_player_are_timestamped(conn):
+    """`_last_step_at` reads the maximum `at` across the log, so a move without one would
+    make the step look older than it is and invite the failsafe to fire early."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    stage, winner, _loser, _replay = _find_toss_winner(conn, room, host_id, guest_id)
+    room_match.submit_toss(conn, room.code, winner, stage, "bat", DECK, MODEL)
+    moves = rooms._load_room(conn, room.code, lock=False).match_moves
+    assert moves, "no match moves were recorded at all"
+    for mv in moves:
+        assert isinstance(mv.get("at"), (int, float)), f"unstamped move: {mv}"
+
+
+def test_a_room_frozen_before_timestamps_existed_still_recovers(conn):
+    """Migration-free by design, so rooms already in flight carry unstamped moves. Those
+    are treated as arbitrarily old rather than as "just now", so a room stuck under the
+    old code rescues itself on the next request instead of staying stuck for its whole
+    24-hour life."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    room = rooms._load_room(conn, room.code, lock=False)
+    room.match_moves = [{k: v for k, v in mv.items() if k != "at"}
+                        for mv in room.match_moves]
+    rooms._save_room(conn, room)
+
+    before = len(rooms._load_room(conn, room.code, lock=False).match_moves)
+    room_match.room_match_state(conn, room.code, DECK, MODEL)
+    after = rooms._load_room(conn, room.code, lock=False).match_moves
+    assert len(after) == before + 1, "an un-timestamped frozen room did not recover"
+    assert isinstance(after[-1].get("at"), (int, float)), \
+        "the recovery move itself must be stamped, or the room re-freezes"

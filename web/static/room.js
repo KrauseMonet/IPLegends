@@ -108,6 +108,68 @@ let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
 // analogue for a league room's round-robin, which needs a COUNT rather than a stage
 // name -- every one of its fixtures shares the literal stage "league", not a unique
 // label like "Semi-final 1". All four reset per room in enterRoom.
+// Auto-advance. The host used to be a required CLICK on every step -- 74 of them for a
+// ten-seat league room, each one blocking all nine other seats on "Waiting for the host
+// to continue…". The tournament's result is already fully computed by then (revealing is
+// presentation, A82), so the host paces it rather than gates it: the countdown starts as
+// soon as this client is no longer mid-reveal and fires the same call the button did.
+//
+// Armed only on the host's own client, because only the host may make these calls -- and
+// that is what keeps the reveal SHARED rather than every seat running off at its own
+// pace. A host who closes the tab is covered separately and server-side, by
+// `room_match.MATCH_STEP_TIMEOUT_S`, so nothing here is load-bearing against a freeze.
+//
+// `key` is what the countdown is FOR (a round label, or the league cursor position), so a
+// poll landing mid-countdown re-renders without restarting it, and a genuinely new step
+// re-arms it.
+let ROOM_AUTO = null;          // {key, deadline, paused, fire}
+let ROOM_AUTO_TICK = null;
+// A knockout result wants a beat to be read; a league fixture is one row of a montage
+// with 69 others behind it, so it moves briskly. Skip ahead exists for both.
+const ROOM_AUTO_MS = 6000, ROOM_LEAGUE_AUTO_MS = 2000;
+
+function roomDisarmAuto(){
+  ROOM_AUTO = null;
+  if (ROOM_AUTO_TICK){ clearInterval(ROOM_AUTO_TICK); ROOM_AUTO_TICK = null; }
+}
+
+function roomArmAuto(key, ms, fire){
+  if (ROOM_AUTO && ROOM_AUTO.key === key) return;   // already counting for this step
+  ROOM_AUTO = {key, deadline: Date.now() + ms, paused: false, fire};
+  if (!ROOM_AUTO_TICK) ROOM_AUTO_TICK = setInterval(roomAutoTick, 250);
+  roomAutoTick();
+}
+
+function roomAutoTick(){
+  const el = $('#roomAutoLine');
+  if (!ROOM_AUTO){ if (el) el.textContent = ''; return; }
+  if (ROOM_AUTO.paused){ if (el) el.textContent = 'Paused'; return; }
+  const left = Math.max(0, Math.ceil((ROOM_AUTO.deadline - Date.now()) / 1000));
+  if (el) el.textContent = left > 0 ? `Continuing in ${left}…` : 'Continuing…';
+  if (left > 0) return;
+  const fire = ROOM_AUTO.fire;
+  roomDisarmAuto();
+  fire();
+}
+
+function roomAutoPause(btn){
+  if (!ROOM_AUTO) return;
+  ROOM_AUTO.paused = !ROOM_AUTO.paused;
+  // Restart the countdown from full on resume rather than resuming a stale deadline --
+  // whoever hit pause wanted to look at something, and handing them one second back is
+  // worse than handing them the whole beat again.
+  if (!ROOM_AUTO.paused) ROOM_AUTO.deadline = Date.now() + ROOM_AUTO_MS;
+  if (btn) btn.textContent = ROOM_AUTO.paused ? 'Resume' : 'Pause';
+  roomAutoTick();
+}
+
+function roomAutoNow(){
+  if (!ROOM_AUTO) return;
+  const fire = ROOM_AUTO.fire;
+  roomDisarmAuto();
+  fire();
+}
+
 let ROOM_REVEAL_ACTIVE = null, ROOM_REVEALED_STAGE = null, ROOM_SPECTATE_SHOWN = false;
 let ROOM_LEAGUE_REVEALED_THROUGH = 0;
 // Bumped ONLY by a mutation (toss/advance/pick/kick/start) -- never by pollRoom itself.
@@ -698,12 +760,16 @@ function roomWaitingHtml(m, myMatch){
   // phase always has advance_ready=false -- the round-robin never has anyone's toss to
   // wait on, only the host's own pacing.
   if (m.league_revealed != null && m.league_revealed < m.league_total){
+    // The host no longer CLICKS through seventy fixtures -- the countdown does it, and
+    // the buttons are there to override it rather than to drive it.
     const actions = m.you_decide_league_reveal
       ? `<div class="foot-actions room-actions">
-           <button class="act lead" onclick="roomLeagueAdvance(${m.league_revealed + 1}, this)">Continue</button>
+           <button class="act lead" onclick="roomAutoNow()">Continue now</button>
+           <button class="act" onclick="roomAutoPause(this)">Pause</button>
            <button class="act" onclick="roomLeagueAdvance(${m.league_total}, this)">Skip ahead</button>
-         </div>`
-      : `<div class="margin">Waiting for the host to continue…</div>`;
+         </div>
+         <div class="margin" id="roomAutoLine"></div>`
+      : `<div class="margin">Up next shortly…</div>`;
     const leagueTableHtml = roomTableHtml(m);
     return `<div class="report compact">
       <div class="over-line">League: ${m.league_revealed} of ${m.league_total} played</div>
@@ -730,10 +796,15 @@ function roomWaitingHtml(m, myMatch){
   const advanceHtml = m.advance_ready
     ? (m.you_decide_advance
         ? `<div class="foot-actions room-actions">
-             <button class="act lead" onclick="roomAdvanceMatch(this)">Continue</button>
+             <button class="act lead" onclick="roomAutoNow()">Continue now</button>
+             <button class="act" onclick="roomAutoPause(this)">Pause</button>
              <button class="act" onclick="roomSkipAhead(this)">Skip ahead</button>
-           </div>`
-        : `<div class="margin">Waiting for the host to continue…</div>`)
+           </div>
+           <div class="margin" id="roomAutoLine"></div>`
+        // Not "waiting for the host" any more: nobody is waiting ON anyone, the next
+        // round is simply coming. The wording used to describe a dependency that is no
+        // longer there, which is its own small piece of the room feeling stuck.
+        : `<div class="margin">Next round shortly…</div>`)
     : '';
 
   const tableHtml = roomTableHtml(m);
@@ -846,6 +917,18 @@ function roomStartReveal(myMatch){
   })();
 }
 
+// Solo has had "Skip this match" since A90; a room had only "skip to the end of this
+// INNINGS", so a viewer wanting out of a match they had lost interest in clicked twice
+// per match and could never jump one. Needs no server call, unlike solo's own version:
+// a room's whole result is already client-side by the time the reveal starts, so this
+// just abandons the innings chain and lands where the chain would have landed anyway.
+function roomSkipThisMatch(){
+  if (!ROOM_REVEAL_ACTIVE) return;
+  clearOverTimer();
+  OVER_STEP = null;
+  roomFinishReveal(ROOM_REVEAL_ACTIVE);
+}
+
 function roomFinishReveal(myMatch){
   ROOM_REVEAL_ACTIVE = null;
   ROOM_REVEALED_STAGE = myMatch.stage;
@@ -892,13 +975,17 @@ function showRoomMatch(m){
   // Mid-animation for the viewer's own match -- a poll landing here mid-reveal must
   // not disturb it; ROOM_MATCH_DATA is already fresh, roomFinishReveal reads it once
   // the stepper is actually done.
-  if (ROOM_REVEAL_ACTIVE) return;
+  // A countdown must never outlive the screen it belongs to: the host watching their own
+  // match must not have the next round advance out from under them.
+  if (ROOM_REVEAL_ACTIVE){ roomDisarmAuto(); return; }
 
   // Every seat reviews its own finished twelve -- and the three ratings that come with
   // it -- before a single ball is bowled. Nothing below this point (not even a first
   // toss) has been resolved yet while this holds, mirroring how a league's group-stage
   // reveal is checked ahead of the ordinary match-waiting branches below it.
-  if (m.awaiting_start){ renderRoomStartReview(m); return; }
+  // The squad-review gate is a deliberate look-at-your-team moment rather than a paced
+  // step, so nothing counts down behind it.
+  if (m.awaiting_start){ roomDisarmAuto(); renderRoomStartReview(m); return; }
 
   // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
   // round-robin fixture isn't participant-scoped the way a knockout fixture is -- the
@@ -915,6 +1002,7 @@ function showRoomMatch(m){
       m.league_revealed > ROOM_LEAGUE_REVEALED_THROUGH){
     ROOM_LEAGUE_REVEALED_THROUGH = m.league_revealed;
     if (m.league_next_result.result.yours){
+      roomDisarmAuto();
       roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
       return;
     }
@@ -930,9 +1018,9 @@ function showRoomMatch(m){
   // comment has the why), so a straight `if (m.complete)` check here would show that
   // fixture's scoreline with no reveal at all, for both sides.
   const toReveal = roomMyMatchToReveal(m);
-  if (toReveal){ roomEnterReveal(toReveal); return; }
+  if (toReveal){ roomDisarmAuto(); roomEnterReveal(toReveal); return; }
 
-  if (m.complete){ showRoomMatchComplete(m); return; }
+  if (m.complete){ roomDisarmAuto(); showRoomMatchComplete(m); return; }
 
   const myMatch = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
   const el = $('#roomMatchBody');
@@ -947,11 +1035,36 @@ function showRoomMatch(m){
   const gap = gapBody ? `<div class="room-gap">${gapBody}</div>` : '';
 
   if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
+    roomDisarmAuto();
     el.innerHTML = roomSpectateChoiceHtml() + gap;
     return;
   }
 
   el.innerHTML = roomWaitingHtml(m, myMatch) + gap;
+  roomSyncAuto(m);
+}
+
+// Arm (or clear) the countdown to match whatever step the room is now on. Called only
+// after a waiting screen has actually been rendered, so `#roomAutoLine` exists for the
+// ticker to write into, and only for the host, since only the host may make these calls.
+//
+// Every OTHER path through showRoomMatch -- mid-reveal, the start review, a completed
+// room -- disarms instead: a countdown left running behind a screen that no longer has a
+// step to advance would fire into nothing, and worse, would fire while the host is still
+// watching their own match.
+function roomSyncAuto(m){
+  if (m.league_revealed != null && m.league_revealed < m.league_total){
+    if (!m.you_decide_league_reveal){ roomDisarmAuto(); return; }
+    const target = m.league_revealed + 1;
+    roomArmAuto(`league:${m.league_revealed}`, ROOM_LEAGUE_AUTO_MS,
+      () => roomLeagueAdvance(target, null));
+    return;
+  }
+  if (m.advance_ready && m.you_decide_advance){
+    roomArmAuto(`round:${m.round_label}`, ROOM_AUTO_MS, () => roomAdvanceMatch(null));
+    return;
+  }
+  roomDisarmAuto();
 }
 
 // Guards the save call against firing on every 2s poll once the room is complete --
@@ -1168,6 +1281,7 @@ function roomCodeFromPath(){
 // is the only source of truth: a saved session is verified against the URL's own code
 // before anything is shown, and any mismatch or failure bounces to /rooms with the code
 // pre-filled rather than guessing.
+restoreOverSpeed();
 boot().then(async () => {
   const urlCode = roomCodeFromPath();
   if (!urlCode){ location.href = '/rooms'; return; }

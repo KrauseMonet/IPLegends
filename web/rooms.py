@@ -124,6 +124,11 @@ class Room:
     # (list_open_rooms below). Set once at creation, never updated afterward, same as
     # format/timer_seconds/draft_mode.
     is_open: bool = False
+    # migration 030 -- the stored monotonic state counter, as READ. Never incremented
+    # here: `_save_room` increments it in the database and writes the new value back onto
+    # this field, so the number a request serves is always the one the write produced
+    # rather than an in-memory guess at it.
+    version: int = 0
 
     @property
     def seats(self) -> int:
@@ -172,28 +177,53 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
     this lock rather than racing. `lock=False` is for a caller that only needs to
     look, not write (`room_state`'s own fast path) -- see its docstring for why a
     plain poll doesn't need this lock at all most of the time."""
-    row = conn.execute(
+    # ONE round trip, not two. This used to read `rooms` and then `room_players` as
+    # separate statements; on a remote database a round trip is the dominant cost of a
+    # request (the queries themselves are a primary-key lookup and a ten-row index scan),
+    # and every seat polling every 2s pays this on a connection of its own. The join is
+    # `for update of r` rather than a bare `for update`: the lock this function exists to
+    # take is on the ROOM row, and Postgres refuses `for update` on the nullable side of
+    # an outer join anyway -- which is the right restriction here, since a room with no
+    # seats yet must still load rather than erroring.
+    if lock:
+        # SET LOCAL, not SET: under transaction-mode pooling (Neon's pooled endpoint is
+        # PgBouncer) a session-level setting can outlive this transaction and reach the
+        # next client handed the same server connection. LOCAL is scoped to the
+        # transaction the statement below runs in, which is exactly the scope the lock
+        # itself has. Issued only when actually locking -- a read-only poll waits on no
+        # lock, so bounding one for it was a round trip per request buying nothing.
+        conn.execute("set local lock_timeout = '5s'")
+    rows = conn.execute(
         f"""
-        select code, format, timer_seconds, seed, host_id, status,
-               turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open
-          from rooms where code = %s {"for update" if lock else ""}
+        select r.code, r.format, r.timer_seconds, r.seed, r.host_id, r.status,
+               r.turn_started_at, r.failure_reason, r.moves, r.match_moves,
+               r.draft_mode, r.is_open, r.version,
+               p.player_id, p.name, p.is_cpu
+          from rooms r
+          left join room_players p on p.room_code = r.code
+         where r.code = %s
+         order by p.seat_order
+        {"for update of r" if lock else ""}
         """,
         (code,),
-    ).fetchone()
-    if row is None:
+    ).fetchall()
+    if not rows:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
-     turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open) = row
+     turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open,
+     version) = rows[0][:13]
     room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
                 host_id=host_id, status=status,
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
                 moves=list(moves or []), match_moves=list(match_moves or []),
-                draft_mode=draft_mode, is_open=is_open)
-    for player_id, name, is_cpu in conn.execute(
-        "select player_id, name, is_cpu from room_players "
-        "where room_code = %s order by seat_order",
-        (code,),
-    ):
+                draft_mode=draft_mode, is_open=is_open, version=version)
+    for row in rows:
+        player_id, name, is_cpu = row[13], row[14], row[15]
+        # NULL on every column of the right-hand side means the outer join matched no
+        # seat at all -- a room that exists with nobody in it, which is a real state
+        # (`leave_room` can empty a lobby), not a missing row to guess at.
+        if player_id is None:
+            continue
         room.players[player_id] = RoomPlayer(player_id, name, is_cpu)
     return room
 
@@ -202,31 +232,29 @@ def _save_room(conn, room: Room) -> None:
     # draft_mode and is_open join format/timer_seconds/seed/host_id as "set once at
     # creation, never updated" -- deliberately absent from the ON CONFLICT clause
     # below, same as those already are.
-    conn.execute(
+    # `version = rooms.version + 1` reads the CURRENT stored value and increments it in
+    # the same statement, so two concurrent writers cannot both produce the same number --
+    # this is the database's own counter, not one carried in from the caller's `Room`
+    # object, which could be an arbitrarily stale read. RETURNING writes it straight back
+    # onto the object so whatever serialises this room afterwards serves the version its
+    # own write produced, without a second SELECT to go and fetch it.
+    room.version = conn.execute(
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode, is_open)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            draft_mode, is_open, version)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
-            match_moves = excluded.match_moves
+            match_moves = excluded.match_moves,
+            version = rooms.version + 1
+        returning version
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
          Json(room.match_moves), room.draft_mode, room.is_open),
-    )
-    # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
-    # separate `conn.execute` per player, but every existing player's row is a guaranteed
-    # ON CONFLICT DO NOTHING no-op (a seat's identity never changes after it's created:
-    # `RoomPlayer`'s own docstring), so a 10-seat league room was paying up to nine wasted
-    # round trips on EVERY single write -- a pick, an auto-resolve, anything that touches
-    # `_save_room` -- for zero effect. Measured directly against this project's own Neon
-    # connection: ~0.3-0.5s per additional round trip on an already-open connection, which
-    # is most of why a pick in a full room felt slow rather than any lock contention (that
-    # was the earlier, separate fix -- A92). Values are still individually conflict-
-    # checked/skipped exactly as before; only the round-trip count changes.
+    ).fetchone()[0]
     # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
     # separate `conn.execute` per player, but every existing player's row is a guaranteed
     # ON CONFLICT DO NOTHING no-op (a seat's identity never changes after it's created:
@@ -658,6 +686,19 @@ def _resolve(room: Room, deck: Deck) -> None:
         room.turn_started_at = time.time()
 
 
+def _mutable_state(room: Room):
+    """Everything `_resolve` is capable of changing, as a comparable value -- used to tell
+    "this poll actually caught the room up" from "another poll got here first".
+
+    Deliberately NOT `room.version`: that only moves when a write happens, so comparing it
+    across a resolve would always report no change and the room would never be saved at
+    all. These are the four fields `_resolve` assigns to, and it assigns to nothing else.
+    `moves` is compared by LENGTH because `_resolve` only ever appends -- it never edits a
+    recorded move, and a length is cheap where a deep comparison of the whole log is not.
+    """
+    return (room.status, room.turn_started_at, len(room.moves), room.failure_reason)
+
+
 def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: Deck) -> Room:
     room = _load_room(conn, code)
     _resolve(room, deck)
@@ -707,15 +748,29 @@ def room_state(conn, code: str, deck: Deck) -> Room:
     Checking that clock here, without a lock, is therefore equivalent to asking "would
     `_resolve` do anything at all" without needing the full replay to answer it. If the
     clock HASN'T run out, resolving is guaranteed to be a no-op and this returns the
-    lock-free read directly. If it HAS, this escalates to a locked re-read (another
-    poll may have already caught it up in the meantime -- re-reading under the lock
-    just means `_resolve` finds nothing left to do and `_save_room` writes back the
-    same content, harmless) and does the real resolve-and-save."""
+    lock-free read directly. If it HAS, this escalates to a locked re-read and does the
+    real resolve-and-save -- but only if the resolve actually changed something. Another
+    poll may have caught the room up between this one's two reads, in which case there is
+    nothing left to do and NOTHING IS WRITTEN; see the comment on that branch below for
+    why that case is the common one at a timeout rather than a rare one."""
     room = _load_room(conn, code, lock=False)
     if room.status != "drafting" or time.time() - room.turn_started_at <= room.timer_seconds:
         return room
     room = _load_room(conn, code, lock=True)
+    before = _mutable_state(room)
     _resolve(room, deck)
+    if _mutable_state(room) == before:
+        # Nothing to do after all, so nothing is written. This is the COMMON case at a
+        # timeout rather than a rare one: every connected seat polls on its own 2s timer,
+        # so when a turn's clock runs out they all escalate to the locked read at once and
+        # queue behind each other -- but only the FIRST one through finds work. The rest
+        # used to each perform a full write of identical content, serialised one after
+        # another, with any real pick submitted in that window queuing behind the lot of
+        # them (and able to hit `lock_timeout` and fail outright). Skipping the write does
+        # not skip the lock, so this is not a correctness shortcut: the read is still
+        # serialised against a concurrent writer, and a caller that DOES find work still
+        # writes under the lock exactly as before.
+        return room
     _save_room(conn, room)
     return room
 

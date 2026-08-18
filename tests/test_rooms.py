@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 import random
+import time
 
 from etl.feasibility import (
     TWELVE_SIZE, XI_SIZE, Card, Deck, eligible, order_errors, pick_rational,
@@ -64,10 +65,30 @@ class FakeConn:
             (code,) = params
             return FakeCursor([(1,)] if code in self.rooms else [])
 
-        if sql_norm.startswith("select code, format"):
+        # Matched on the JOIN, not on a prefix: `_load_room` and `list_open_rooms` now
+        # BOTH begin "select r.code, r.format", so a prefix test would route one to the
+        # other's branch. This one is checked first and is the only query joining the two
+        # tables.
+        if "left join room_players" in sql_norm:
             (code,) = params
             row = self.rooms.get(code)
-            return FakeCursor([row] if row else [])
+            if row is None:
+                return FakeCursor([])
+            seats = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
+            if not seats:
+                # A room with no seats still returns exactly one row, with every column
+                # of the right-hand side NULL -- that is what an outer join does, and
+                # `_load_room` has an explicit branch for it.
+                return FakeCursor([tuple(row) + (None, None, None)])
+            return FakeCursor([
+                tuple(row) + (pid, name, is_cpu)
+                for (_seat, pid, name, is_cpu) in seats
+            ])
+
+        if sql_norm.startswith("set local lock_timeout"):
+            # Real Postgres bounds how long the locking read waits; there is no lock to
+            # wait on here, so this only has to be accepted rather than simulated.
+            return FakeCursor([])
 
         if sql_norm.startswith("select r.code, r.format"):
             (limit,) = params
@@ -75,8 +96,12 @@ class FakeConn:
             # Newest first -- self.rooms is a plain dict, insertion-ordered oldest
             # first, mirroring the real query's `order by r.created_at desc`.
             for row in reversed(list(self.rooms.values())):
-                (code, fmt, _timer, _seed, host_id, status, *_rest, draft_mode,
-                 is_open) = row
+                # Indexed, not unpacked with a trailing *_rest: `version` is now the
+                # last column, so "the last two are draft_mode and is_open" silently
+                # became false -- is_open read the version (always truthy) and every
+                # closed room started listing itself as open.
+                (code, fmt, _timer, _seed, host_id, status) = row[:6]
+                draft_mode, is_open = row[10], row[11]
                 if not (is_open and status == "lobby"):
                     continue
                 timer_seconds = row[2]
@@ -85,11 +110,6 @@ class FakeConn:
                 host_name = host_row[2] if host_row else None
                 out.append((code, fmt, timer_seconds, draft_mode, host_name, len(seats)))
             return FakeCursor(out[:limit])
-
-        if sql_norm.startswith("select player_id, name, is_cpu"):
-            (code,) = params
-            rows = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
-            return FakeCursor([(pid, name, is_cpu) for (_seat, pid, name, is_cpu) in rows])
 
         if sql_norm.startswith("insert into room_players"):
             # One multi-row insert per call now (`_save_room`'s own docstring on why),
@@ -118,9 +138,11 @@ class FakeConn:
             match_moves_value = match_moves.obj if hasattr(match_moves, "obj") else match_moves
             existing = self.rooms.get(code)
             if existing is None:
+                # version starts at 1, matching the real INSERT's own literal -- a room
+                # that has been written once is at version 1, not 0.
                 self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, draft_mode, is_open)
+                                     match_moves_value, draft_mode, is_open, 1)
             else:
                 # Mirrors the real `on conflict (code) do update set` clause exactly --
                 # only status/turn_started_at/failure_reason/moves/match_moves are ever
@@ -132,11 +154,16 @@ class FakeConn:
                 # `_save_room` call NOT actually changing the seed in real Postgres,
                 # silently papered over by a fake that changes it anyway.
                 (ecode, efmt, etimer, eseed, ehost, _estatus,
-                 _eturn, _efail, _emoves, _ematch, edraft, eopen) = existing
+                 _eturn, _efail, _emoves, _ematch, edraft, eopen, eversion) = existing
+                # `version = rooms.version + 1` in the real ON CONFLICT clause: it
+                # increments on EVERY write, whatever changed, and is never reset --
+                # including by play_again, which resets everything else about the room.
                 self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, edraft, eopen)
-            return FakeCursor([])
+                                     match_moves_value, edraft, eopen, eversion + 1)
+            # RETURNING version -- `_save_room` reads this back onto the Room object so
+            # the response it serves carries the version its own write produced.
+            return FakeCursor([(self.rooms[code][12],)])
 
         if sql_norm.startswith("update rooms set seed"):
             seed, code = params
@@ -1124,3 +1151,113 @@ def test_room_sides_gives_every_seat_a_legal_twelve(conn, fmt):
             twelve = [c for c in order if c] + ([impact] if impact else [])
             assert order_errors(order, impact, twelve) == [], \
                 f"seat {pid} is not a legal twelve"
+
+
+# --- migration 030: the monotonic state counter ---------------------------------------
+#
+# The counter exists so a CLIENT can order responses that arrive out of order. Nothing in
+# Python reads it, so these tests are the only thing holding it -- exactly the standing
+# "a rule in behaviour, not in a CHECK, is unprotected without a test" case.
+
+def test_every_write_increments_the_version(conn):
+    """Whatever changed, and whether or not anything meaningful did. A version that only
+    moved on 'interesting' writes would be useless for ordering, because the client has
+    no way to know which writes the server considered interesting."""
+    room, host_id = _make_room(conn, "final", timer_seconds=30)
+    seen = [room.version]
+    room, _bob = rooms.join_room(conn, room.code, "Bob", DECK)
+    seen.append(room.version)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    seen.append(room.version)
+    replay = rooms.replay_room(room, DECK)
+    _fs, candidates = replay.pending_deal
+    seat = replay.seats[replay.pending_seat_id]
+    slot = sorted(candidates[0].slots & seat.open_slots)[0]
+    room = rooms.submit_pick(conn, room.code, replay.pending_seat_id, 0, slot, DECK)
+    seen.append(room.version)
+    assert seen == sorted(set(seen)), f"versions must strictly increase, got {seen}"
+
+
+def test_version_keeps_climbing_across_play_again(conn):
+    """`play_again` resets the room -- fresh seed, both move logs cleared, back to lobby.
+    The version must NOT reset with it. This is the case that rules out deriving the
+    counter from `len(moves)` (or anything else already stored), which was the first
+    thing tried: a derived counter goes backwards here, and a client that has correctly
+    been told to ignore anything older would then ignore the entire new game."""
+    room, host_id = _make_room(conn, "final", timer_seconds=30)
+    room, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    room = _play_room_to_completion(conn, room, DECK, [host_id, bob_id])
+    assert room.status == "complete"
+    before = room.version
+    room = rooms.play_again(conn, room.code, host_id)
+    assert room.status == "lobby"
+    assert room.moves == [] and room.match_moves == []
+    assert room.version > before, (
+        f"version fell from {before} to {room.version} across play_again")
+
+
+def test_a_poll_that_resolves_nothing_writes_nothing(conn, monkeypatch):
+    """The write, not the lock, is what a redundant poll used to cost. Every connected
+    seat escalates to the locked read when a turn's clock expires, but only the FIRST
+    one through finds work -- the rest used to each write identical content, serialised
+    one behind another, with any real pick submitted in that window queued behind the
+    lot of them (and able to hit `lock_timeout` and fail outright).
+
+    `_resolve` is stubbed to a no-op here, and that is the point rather than a shortcut:
+    the branch under test only ever fires when ANOTHER caller resolved the turn between
+    this one's lock-free read and its locked one, which single-threaded code cannot reach
+    on its own -- `_resolve` otherwise always finds work on an expired clock, which is
+    exactly why the first version of this test passed with the branch deleted. Stubbing
+    it reproduces the lost race precisely: an escalated caller that finds nothing to do.
+
+    Asserted on the version rather than by counting statements, because the version is
+    what a write is DEFINED to move: if a save happens it moves, whatever the SQL was."""
+    room, host_id = _make_room(conn, "final", timer_seconds=30)
+    room, _bob = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+
+    # Clock still running: returns from the lock-free read, never escalates at all.
+    live = rooms.room_state(conn, room.code, DECK)
+    assert rooms.room_state(conn, room.code, DECK).version == live.version
+
+    stored = rooms._load_room(conn, room.code, lock=False)
+    stored.turn_started_at = time.time() - 999
+    rooms._save_room(conn, stored)
+    expired_at = rooms._load_room(conn, room.code, lock=False).version
+
+    monkeypatch.setattr(rooms, "_resolve", lambda room, deck: None)
+    for _ in range(5):
+        again = rooms.room_state(conn, room.code, DECK)
+        assert again.version == expired_at, (
+            "a poll with nothing to resolve wrote anyway: "
+            f"{expired_at} -> {again.version}")
+
+
+def test_a_poll_that_does_resolve_still_writes(conn):
+    """The other half, and the reason the test above cannot stand alone: skipping the
+    write when nothing changed must not turn into skipping it when something did. An
+    expired turn really does get auto-picked and really is persisted."""
+    room, host_id = _make_room(conn, "final", timer_seconds=30)
+    room, _bob = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    stored = rooms._load_room(conn, room.code, lock=False)
+    stored.turn_started_at = time.time() - 999
+    rooms._save_room(conn, stored)
+    before = rooms._load_room(conn, room.code, lock=False)
+
+    after = rooms.room_state(conn, room.code, DECK)
+    assert after.version > before.version, "the auto-pick was not persisted"
+    assert len(after.moves) == len(before.moves) + 1
+    assert rooms._load_room(conn, room.code, lock=False).moves == after.moves
+
+
+def test_a_room_with_no_seats_still_loads(conn):
+    """The outer join returns one all-NULL right-hand side rather than no rows at all,
+    and `_load_room` has an explicit branch for it. Reachable for real: `leave_room`
+    frees a seat, and the last one leaving empties the lobby."""
+    room, host_id = _make_room(conn, "final", timer_seconds=30)
+    conn.players[room.code] = {}
+    loaded = rooms._load_room(conn, room.code, lock=False)
+    assert loaded.players == {}
+    assert loaded.code == room.code

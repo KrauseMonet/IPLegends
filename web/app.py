@@ -618,6 +618,23 @@ class RoomStateOut(BaseModel):
     is_open: bool = Field(
         description="the host's own choice at creation -- true if this room is listed "
                     "publicly for anyone to join without the code")
+    version: int = Field(
+        description="monotonic room state counter (migration 030). Several seats poll "
+                    "this room on their own timers, so two responses can be in flight "
+                    "at once and land out of order; a client must discard any response "
+                    "whose version is below the highest it has already applied, rather "
+                    "than trusting arrival order.")
+    server_now: float = Field(
+        description="the server's own clock (epoch seconds) at the moment it built this "
+                    "response, alongside `turn_started_at` in the same units. A client "
+                    "derives the countdown from these two rather than from "
+                    "`seconds_remaining` and its own arrival time -- the request spent an "
+                    "unknown and variable amount of time in flight, so treating a reading "
+                    "as current on arrival makes the clock jump by however much that "
+                    "varied between polls.")
+    turn_started_at: float = Field(
+        description="when the current turn's clock started, epoch seconds on the same "
+                    "clock as `server_now`. 0.0 outside 'drafting'.")
 
 
 class OpenRoomOut(BaseModel):
@@ -1521,18 +1538,25 @@ def _db():
     rather than anything room-specific) -- the accounts/auth routes reuse it unchanged
     now that they're the second thing in the app to need a per-request connection.
 
-    Two bounds that didn't used to exist, both diagnosed from drafts freezing on a pick
-    with no error and no way to tell why: `connect_timeout` bounds how long a request
-    waits for Neon itself (TCP/TLS plus, on the free tier, waking a suspended compute)
-    rather than hanging on a dead or very slow endpoint indefinitely; `lock_timeout`
-    bounds how long a request waits for a row lock (`_load_room`'s, today) once
-    connected, so a request that's genuinely stuck behind another (rather than just slow
-    to reach the database) fails fast with a clean, retryable error instead of sitting
-    until whatever the hosting platform's own request timeout eventually kills it. Both
-    are caught by `_lock_not_available`/`_db_unavailable` below and turned into a 503
-    rather than a raw 500."""
+    `connect_timeout` bounds how long a request waits for Neon itself (TCP/TLS plus, on
+    the free tier, waking a suspended compute) rather than hanging on a dead or very slow
+    endpoint indefinitely. Caught by `_db_unavailable` below and turned into a 503 rather
+    than a raw 500.
+
+    The companion bound, `lock_timeout`, is NOT set here any more and this is not an
+    oversight. It was a `SET` statement on this connection -- a full round trip to a
+    remote database on every request, including the read-only polls that never take a
+    lock at all and are the overwhelming majority of traffic. Folding it into the
+    connection's startup options instead does not work: Neon's pooled endpoint is
+    PgBouncer, which rejects `lock_timeout` as a startup parameter outright ("unsupported
+    startup parameter in options"), so this was tried against the real database and
+    refused rather than reasoned about. It now lives in `rooms._load_room`, issued as
+    `SET LOCAL` only on the locking path -- which is both cheaper (writes are rare next
+    to polls) and better targeted, since that call is the only place a lock is ever
+    waited on. `SET LOCAL` rather than `SET` deliberately: under transaction-mode pooling
+    a session-level setting can outlive the transaction that set it and reach whoever
+    gets that server connection next."""
     with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
-        conn.execute("set lock_timeout = '5s'")
         yield conn
 
 
@@ -1692,6 +1716,9 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
         failure_reason=room.failure_reason,
         draft_mode=room.draft_mode,
         is_open=room.is_open,
+        version=room.version,
+        server_now=time.time(),
+        turn_started_at=room.turn_started_at,
     )
 
 

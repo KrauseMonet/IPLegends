@@ -254,6 +254,12 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
   0%,100%{opacity:1}
   50%{opacity:.5}
 }
+/* The room's reconnecting notice. Deliberately quiet -- it reports a condition that
+   usually clears itself within a poll or two, and it appears above a draft in progress,
+   so it must not read as an error the player has to act on. */
+.room-offline{margin:0 0 12px;padding:8px 14px;border:1px solid var(--red);
+  border-radius:4px;background:rgba(226,71,46,.09);color:var(--red-2);
+  font-size:.82rem;letter-spacing:.04em;text-transform:uppercase;text-align:center}
 .line{display:grid;grid-template-columns:96px minmax(0,1.7fr) minmax(0,1fr) 2.4em;
   align-items:baseline;column-gap:12px;padding:9px 18px;
   border-bottom:1px solid var(--line);font-size:14.5px}

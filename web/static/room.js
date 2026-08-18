@@ -46,11 +46,54 @@ function copyRoomLink(){
 }
 
 let ROOM_CODE = null, MY_PID = null, ROOM = null, ROOM_POLL = null, ROOM_PENDING = null;
-// The per-pick countdown ticks locally once a second between polls, instead of only
-// updating (and visibly jumping by 2) whenever a poll response lands. ROOM_TIMER_BASE
-// is the last server-authoritative reading -- {value, max, at} -- and every poll
-// refreshes it; ROOM_TIMER_TICK renders the extrapolated value every second in between.
+// The highest room `version` (migration 030) this client has already applied. Several
+// seats poll the same room on their own timers and a response can take longer than the
+// 2s interval, so two requests are routinely in flight at once and can land in either
+// order -- and every response used to be applied on arrival regardless of when the
+// server actually read it. That is what made a pick appear and then vanish: the poll
+// issued just before a pick landed could return just after it and roll the UI back onto
+// pre-pick state, leaving a seat looking at its own turn with nothing selectable
+// (ROOM_PENDING is only ever set by a real click, never restored by a render). Ordering
+// by a server-assigned counter is the fix; arrival order is not information.
+let ROOM_VERSION_SEEN = -1;
+// The per-pick countdown. ROOM_TIMER_BASE is just {startedAt, max} -- when the server
+// says this turn began, and how long a turn is. Everything else is derived from
+// serverClock() below, so the countdown is a computation rather than a local decrement,
+// and re-rendering it can never make it drift.
 let ROOM_TIMER_TICK = null, ROOM_TIMER_BASE = null;
+
+// Our estimate of the server's clock. Naively this is just `server_now - Date.now()`
+// measured on any response -- but that difference also contains however long the
+// response spent in flight, which varies from poll to poll, so re-measuring it on every
+// poll makes the estimate jitter by exactly the amount the countdown used to jump by.
+// (The original bug was the same quantity in a different place: a "seconds remaining"
+// value stamped with its ARRIVAL time. Deriving from the server's clock instead is
+// necessary but not sufficient -- measured, a 3s-delayed response still read 3s high.)
+//
+// So: NTP's two standard moves. Halve the round trip, on the assumption the two legs are
+// roughly symmetric, which removes most of the delay rather than all of one leg. And keep
+// the sample with the SMALLEST round trip seen rather than the most recent one, because
+// the fastest exchange is the least contaminated -- which also means the estimate settles
+// after the first few polls and then stops moving, so the displayed clock stops twitching.
+let ROOM_CLOCK_OFFSET = 0, ROOM_CLOCK_BEST_RTT = Infinity;
+
+function serverClock(){ return Date.now() / 1000 + ROOM_CLOCK_OFFSET; }
+
+// Every room fetch goes through here rather than `api` directly, so a clock sample is
+// taken from whatever response happens to be quickest -- polls and mutations alike.
+async function roomApi(path, opts){
+  const t0 = Date.now();
+  const body = await api(path, opts);
+  const t1 = Date.now();
+  if (body && typeof body.server_now === 'number'){
+    const rtt = (t1 - t0) / 1000;
+    if (rtt < ROOM_CLOCK_BEST_RTT){
+      ROOM_CLOCK_BEST_RTT = rtt;
+      ROOM_CLOCK_OFFSET = body.server_now + rtt / 2 - t1 / 1000;
+    }
+  }
+  return body;
+}
 // Whose squad the "Batting order" column shows during someone else's turn: false = the
 // active player's (the default), true = my own. Resets whenever the active player changes
 // so a stale choice doesn't linger into the next person's turn.
@@ -127,50 +170,151 @@ function enterRoom(code, playerId){
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
   ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
   ROOM_LEAGUE_REVEALED_THROUGH = 0;
+  // Reset per ROOM, not per session: versions are counted per room row, so a version
+  // carried over from a room we just left would silently reject the new room's early
+  // states until it happened to climb past it.
+  ROOM_VERSION_SEEN = -1;
+  ROOM_POLL_FAILS = 0;
+  ROOM_TIMER_BASE = null;
+  // Re-measured per room rather than kept for the tab's lifetime: the best-RTT sample is
+  // sticky by design, and a lucky sample from an earlier session is not evidence about
+  // this one (the device may have changed network entirely between the two).
+  ROOM_CLOCK_OFFSET = 0; ROOM_CLOCK_BEST_RTT = Infinity;
   go('room');
   pollRoom();
   if (ROOM_POLL) clearInterval(ROOM_POLL);
   ROOM_POLL = setInterval(pollRoom, 2000);
   if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
   ROOM_TIMER_TICK = setInterval(tickRoomTimer, 1000);
+  watchRoomVisibility();
+}
+
+// Browsers throttle setInterval hard in a background tab (to roughly once a minute) and
+// suspend it outright when a phone locks or the user switches apps -- so a seat that
+// tabs away stops polling entirely, sees neither its own turn arriving nor the clock
+// running out, and comes back to a screen that has been frozen for minutes and a pick
+// that was auto-made for it. Nothing here used to notice that at all. Polling therefore
+// stops on hide (it was not working anyway, and a throttled interval firing on a stale
+// tab is just noise) and, on return, fetches IMMEDIATELY rather than waiting up to a
+// further 2s to catch up.
+let ROOM_VISIBILITY_BOUND = false;
+function watchRoomVisibility(){
+  if (ROOM_VISIBILITY_BOUND) return;
+  ROOM_VISIBILITY_BOUND = true;
+  document.addEventListener('visibilitychange', () => {
+    if (!ROOM_CODE) return;
+    if (document.hidden){
+      if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+    } else if (!ROOM_POLL && (!ROOM || ROOM.status !== 'failed')){
+      // Not on a FAILED room: `renderRoomFailed` stops polling deliberately, and there
+      // is nothing further to learn about a room that has stranded. Every other status
+      // resumes, 'complete' included -- the match phase polls on this same interval.
+      pollRoom();
+      ROOM_POLL = setInterval(pollRoom, 2000);
+      // The countdown is derived from the server's own clock rather than counted down
+      // locally, so it needs no catch-up of its own here -- re-rendering it is enough,
+      // and it will already show the correct (probably expired) value.
+      tickRoomTimer();
+    }
+  });
+  // A phone waking or a network coming back does not always fire visibilitychange, and
+  // a poll that fires while offline fails silently and waits a full interval to retry.
+  window.addEventListener('online', () => { if (ROOM_CODE) pollRoom(); });
+}
+
+// Apply a room payload only if it is NEWER than whatever we last applied. Returns
+// whether it was applied, so a caller that fetched something further off the back of it
+// (the match payload) can drop that too rather than pairing fresh data with stale.
+//
+// Every path that receives a room object goes through here -- polls AND mutation
+// responses alike. A mutation is not automatically fresher than a poll already applied:
+// its own response was built before any poll issued after it, so ordering both by the
+// same server-assigned counter is what makes the two safe to interleave at all.
+function applyRoom(room){
+  if (room.version <= ROOM_VERSION_SEEN) return false;
+  ROOM_VERSION_SEEN = room.version;
+  ROOM = room;
+  if (room.status === 'drafting'){
+    // Only what the server actually asserts -- when the turn began, and how long a turn
+    // is. No arrival time is recorded, because the countdown must not depend on one.
+    ROOM_TIMER_BASE = {
+      startedAt: room.turn_started_at,
+      max: room.timer_seconds || 30,
+    };
+  } else {
+    ROOM_TIMER_BASE = null;
+  }
+  return true;
 }
 
 async function pollRoom(){
   if (!ROOM_CODE) return;
-  const myGen = ROOM_GEN;   // captured, never bumped -- a poll never competes with another poll
+  const myGen = ROOM_GEN;   // a mutation started after this poll was issued supersedes it
   try {
     // player_id identifies the caller so the server knows whose options (if anyone's)
     // to include -- only the currently active seat's own caller ever sees them.
-    const room = await api('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
-    if (myGen !== ROOM_GEN) return;   // a mutation started after this poll was issued
-    ROOM = room;
-    // Resync the local ticker to the server's own reading here, on the poll that
-    // actually fetched it -- never inside renderRoomDraft, which also re-runs off the
-    // same cached ROOM object (toggleRoomView) and would otherwise snap the countdown
-    // back to a stale value on every such re-render instead of continuing smoothly.
-    if (room.status === 'drafting'){
-      ROOM_TIMER_BASE = {value: room.seconds_remaining, max: room.timer_seconds || 30, at: performance.now()};
-    }
+    const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
+    if (myGen !== ROOM_GEN) return;
+    if (!applyRoom(room)) return;     // an older read than one already applied
+    roomOnline(true);
     if (ROOM.status === 'complete'){
       // The match phase keeps polling on the SAME interval as the draft -- a toss
       // winner, or the host advancing, needs every other seat's own screen to pick the
       // change up without a manual refresh.
+      const at = ROOM_VERSION_SEEN;
       const m = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${encodeURIComponent(MY_PID)}`);
       if (myGen !== ROOM_GEN) return;
+      // The match payload is a SECOND request and races the same way the room one does,
+      // so it needs the same ordering rather than being trusted for having arrived. It
+      // carries no version of its own, but every match move is written through
+      // `_save_room` (web/room_match.py) and so moves the room's -- meaning a room
+      // version that advanced while this was in flight is exactly the signal that a
+      // newer poll has already fetched a fresher match than this one.
+      if (at !== ROOM_VERSION_SEEN) return;
       ROOM_MATCH_DATA = m;
     }
     renderRoom();
-  } catch(e){ /* a transient poll failure isn't worth interrupting the user over */ }
+  } catch(e){
+    if (e.status === 404){
+      // The room is GONE, not unreachable -- swept past ROOM_TTL_HOURS, most likely.
+      // Counting this as a connectivity failure would sit a "Reconnecting…" notice over
+      // a room that is never coming back. Handled the same way `boot`'s own resume
+      // handles a 404: clear the saved session for good and send them somewhere real.
+      if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
+      clearRoomSession();
+      slip('This room has expired.');
+      location.href = '/rooms';
+      return;
+    }
+    // A single failure is genuinely not worth interrupting anyone over -- but silently
+    // swallowing EVERY one is what made a room that was actually erroring look exactly
+    // like a room that was merely slow, for players and for anyone trying to debug it.
+    // roomOnline counts consecutive failures and only says anything once they stop
+    // looking like a blip.
+    roomOnline(false);
+  }
+}
+
+// Consecutive poll failures, and the banner they eventually earn. One dropped request on
+// a phone changing cells is normal and says nothing; several in a row is worth showing,
+// because the screen is otherwise frozen with no explanation.
+let ROOM_POLL_FAILS = 0;
+const ROOM_FAILS_BEFORE_WARNING = 3;
+function roomOnline(ok){
+  ROOM_POLL_FAILS = ok ? 0 : ROOM_POLL_FAILS + 1;
+  const el = $('#roomOffline');
+  if (!el) return;
+  el.classList.toggle('hide', ROOM_POLL_FAILS < ROOM_FAILS_BEFORE_WARNING);
 }
 
 async function startRoomDraft(ctrl){
   await busyClick(ctrl, 'Starting…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await api(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
       if (myGen !== ROOM_GEN) return;
-      ROOM = room;
+      applyRoom(room);
       renderRoom();
     } catch(e){ slip(e.message); }
   });
@@ -204,11 +348,14 @@ async function roomSubmitPick(index, slot, ctrl){
   await busyClick(ctrl, 'Taking…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await api(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({player_id: MY_PID, index, slot})});
       if (myGen !== ROOM_GEN) return;
-      ROOM = room;
+      applyRoom(room);
+      // Cleared unconditionally, not only when applyRoom accepted: the selection this
+      // held has been submitted either way, and leaving it set would let a second click
+      // resubmit an index against a deal the server has already moved past.
       ROOM_PENDING = null;
       renderRoom();
     } catch(e){ slip(e.message); }
@@ -260,11 +407,11 @@ async function kickRoomPlayer(targetId, ctrl){
   await busyClick(ctrl, 'Kicking…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await api(`/api/rooms/${ROOM_CODE}/kick`, {method:'POST',
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/kick`, {method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({player_id: MY_PID, target_id: targetId})});
       if (myGen !== ROOM_GEN) return;
-      ROOM = room;
+      applyRoom(room);
       renderRoom();
     } catch(e){ slip(e.message); }
   });
@@ -287,17 +434,19 @@ function showRoomDeal(deal, fallbackText){
   }
 }
 
-// Renders the countdown purely from ROOM_TIMER_BASE, extrapolated by wall-clock time
-// since it was last set from a real server reading -- called once a second by
-// ROOM_TIMER_TICK, and once more immediately whenever a fresh poll lands (via
-// renderRoomDraft) so a resync is never left waiting up to a second to appear.
+// Renders the countdown from ROOM_TIMER_BASE, which holds the server's own turn-start
+// time and our measured offset from its clock -- so this is a straight computation of
+// "how much of the turn is left", not a local decrement that drifts. Called once a
+// second by ROOM_TIMER_TICK, and once more immediately whenever a fresh poll lands (via
+// renderRoomDraft) so a correction is never left waiting up to a second to appear.
 function tickRoomTimer(){
   if (!ROOM_TIMER_BASE) return;
   const el = $('#roomTimer');
   if (!el) return;
-  const {value, max, at} = ROOM_TIMER_BASE;
-  const elapsed = (performance.now() - at) / 1000;
-  const remaining = Math.max(0, Math.round(value - elapsed));
+  const {startedAt, max} = ROOM_TIMER_BASE;
+  // Nothing here depends on when any response arrived, which is the whole point: flight
+  // time varies from poll to poll and used to be absorbed silently into the reading.
+  const remaining = Math.max(0, Math.round(max - (serverClock() - startedAt)));
   el.textContent = remaining;
   const urgent = remaining > 0 && remaining <= 5;
   el.classList.toggle('urgent', urgent);
@@ -909,10 +1058,10 @@ async function roomPlayAgain(ctrl){
   await busyClick(ctrl, 'Resetting…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await api(`/api/rooms/${ROOM_CODE}/play-again`, {method:'POST',
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/play-again`, {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
       if (myGen !== ROOM_GEN) return;
-      ROOM = room;
+      applyRoom(room);
       // A fresh lobby has no match of its own yet -- cleared explicitly rather than
       // left stale, so a later completion can never be masked by this game's leftovers
       // (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut would

@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import pathlib
 import time
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from typing import Literal
 
 import psycopg
@@ -34,6 +34,7 @@ from game.season import (
 from game.simulator import load_model
 from web import accounts
 from web import auth
+from web import db
 from web import room_match as room_match_lib
 from web import rooms
 from tools import snapshot_deck
@@ -1087,6 +1088,12 @@ def health() -> dict:
         # a snapshot the deployment forgot degrades to a working, slower site, and without
         # this there would be nothing to tell the two apart from outside.
         "source": STATE.get("source"),
+        # Connection reuse, for the same reason: it is invisible when it works, so a
+        # process that had silently stopped reusing (and gone back to paying a connect on
+        # every request) would look like nothing more than a slower site. `reused` far
+        # exceeding `opened` on a warm process is the healthy shape; `opened` climbing
+        # with every request means reuse is not happening at all.
+        "db": db.stats(),
     }
 
 
@@ -1529,35 +1536,29 @@ def twelve(state: str) -> dict:
 # solo draft/season routes never touch this at all -- their whole deck/model is loaded
 # once at boot (`lifespan`, DIRECT_URL) and held in `STATE` for the process's life.
 
-@contextmanager
-def _db():
-    """A short-lived connection per request, against the POOLED endpoint. Unlike the
-    boot-time DIRECT_URL load (one connection, once, for the process's whole life), this
-    is exactly the many-short-transactions pattern PgBouncer transaction-mode pooling
-    exists for. Originally room-only (hence every caller's own variable name, `conn`,
-    rather than anything room-specific) -- the accounts/auth routes reuse it unchanged
-    now that they're the second thing in the app to need a per-request connection.
-
-    `connect_timeout` bounds how long a request waits for Neon itself (TCP/TLS plus, on
-    the free tier, waking a suspended compute) rather than hanging on a dead or very slow
-    endpoint indefinitely. Caught by `_db_unavailable` below and turned into a 503 rather
-    than a raw 500.
-
-    The companion bound, `lock_timeout`, is NOT set here any more and this is not an
-    oversight. It was a `SET` statement on this connection -- a full round trip to a
-    remote database on every request, including the read-only polls that never take a
-    lock at all and are the overwhelming majority of traffic. Folding it into the
-    connection's startup options instead does not work: Neon's pooled endpoint is
-    PgBouncer, which rejects `lock_timeout` as a startup parameter outright ("unsupported
-    startup parameter in options"), so this was tried against the real database and
-    refused rather than reasoned about. It now lives in `rooms._load_room`, issued as
-    `SET LOCAL` only on the locking path -- which is both cheaper (writes are rare next
-    to polls) and better targeted, since that call is the only place a lock is ever
-    waited on. `SET LOCAL` rather than `SET` deliberately: under transaction-mode pooling
-    a session-level setting can outlive the transaction that set it and reach whoever
-    gets that server connection next."""
-    with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
-        yield conn
+# A per-request transaction on a connection this thread KEEPS between requests, against
+# the POOLED endpoint -- `web.db` owns the lifetime and explains at length why it is a
+# thread-local cache rather than a `psycopg_pool` (a pool's background maintenance thread
+# does not run while a Lambda is frozen, so its idea of which connections are fresh is
+# precisely the thing that cannot be trusted). Unlike the boot-time DIRECT_URL load (one
+# connection, once, for the process's whole life), these are still many short
+# transactions, which is what PgBouncer transaction-mode pooling exists for.
+#
+# Originally room-only -- hence every caller's own variable name, `conn`, rather than
+# anything room-specific -- and the accounts/auth routes reuse it unchanged.
+#
+# `lock_timeout` is deliberately NOT set here. It was a `SET` statement on this
+# connection, a full round trip to a remote database on every request, including the
+# read-only polls that never take a lock at all and are the overwhelming majority of
+# traffic. Folding it into the connection's startup options does not work: Neon's pooled
+# endpoint is PgBouncer, which rejects `lock_timeout` as a startup parameter outright
+# ("unsupported startup parameter in options") -- tried against the real database and
+# refused, rather than reasoned about. It now lives in `rooms._load_room`, issued as
+# `SET LOCAL` on the locking path only, which is both cheaper and better targeted since
+# that call is the only place a lock is ever waited on. `SET LOCAL` rather than `SET`
+# matters more than ever now that connections are reused: a session-level setting
+# outlives the transaction that set it, and this connection now has a long life ahead.
+_db = db.connection
 
 
 def _current_account_id(request: Request) -> int | None:

@@ -1040,3 +1040,88 @@ def test_a_room_frozen_before_timestamps_existed_still_recovers(conn):
     assert len(after) == before + 1, "an un-timestamped frozen room did not recover"
     assert isinstance(after[-1].get("at"), (int, float)), \
         "the recovery move itself must be stamped, or the room re-freezes"
+
+
+# --- skipping to the end of the group stage, and to the end of the tournament ----------
+
+def test_skip_to_tournament_finishes_a_room_that_still_has_a_live_toss(conn):
+    """The case the old client-side "Skip ahead" could NEVER reach. It looped
+    `/match/advance` while `advance_ready` held -- and a fixture still waiting on a real
+    human toss makes `advance_ready` false, so it stopped there with the tournament
+    unfinished and no way forward but to answer the toss."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert _find_pending_toss(replay) is not None, "expected a live toss to skip past"
+    assert not replay.advance_ready, "the premise: advance_ready is false here"
+
+    room = room_match.skip_ahead(conn, room.code, host_id, "tournament", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete, "skip to end left the room unfinished"
+    assert replay.champion_pid is not None
+
+
+def test_skip_to_tournament_finishes_a_cup_with_several_rounds_left(conn):
+    room, host_id, seat_ids = _make_room_and_complete_cup(conn)
+    room = room_match.skip_ahead(conn, room.code, host_id, "tournament", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete
+    stages = {e.stage for e in replay.results}
+    assert "Final" in stages, f"never reached the final: {sorted(stages)}"
+
+
+def test_skip_group_stage_stops_at_the_playoffs_rather_than_finishing_the_room(conn):
+    """The whole point of a separate group-stage target: get past seventy fixtures without
+    throwing away the part worth watching. A skip that ran on to the champion would make
+    this option pointless."""
+    room, host_id = _make_and_complete_league(conn)
+    room = room_match.skip_ahead(conn, room.code, host_id, "group_stage", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.league_progress is None, "the group stage was not fully revealed"
+    assert not replay.complete, "skipping the group stage should not end the tournament"
+    assert replay.table is not None and len(replay.table) == 10
+
+
+def test_skip_group_stage_then_skip_to_end_completes_it(conn):
+    room, host_id = _make_and_complete_league(conn)
+    room_match.skip_ahead(conn, room.code, host_id, "group_stage", DECK, MODEL)
+    room = room_match.skip_ahead(conn, room.code, host_id, "tournament", DECK, MODEL)
+    _, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    assert replay.complete and replay.champion_pid is not None
+
+
+def test_skip_is_host_only(conn):
+    """It advances SHARED state -- "move this room on for everyone", not "stop showing me
+    animations" -- so a non-host firing it would take the tournament off the other seats.
+    Per-match skips, which touch only the caller's own screen, are client-side and need no
+    permission at all."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    with pytest.raises(rooms.RoomError):
+        room_match.skip_ahead(conn, room.code, guest_id, "tournament", DECK, MODEL)
+
+
+def test_skip_rejects_an_unknown_target(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    with pytest.raises(rooms.RoomError):
+        room_match.skip_ahead(conn, room.code, host_id, "everything", DECK, MODEL)
+
+
+def test_skip_group_stage_is_a_no_op_on_a_format_that_has_none(conn):
+    """'final' and 'cup' have no round-robin at all. Asking to skip one must leave the
+    room exactly as it was rather than quietly running the whole tournament instead --
+    which is what a target this one did not understand would otherwise do."""
+    room, host_id, guest_id = _complete_final_room(conn)
+    before = rooms._load_room(conn, room.code, lock=False)
+    room_match.skip_ahead(conn, room.code, host_id, "group_stage", DECK, MODEL)
+    after = rooms._load_room(conn, room.code, lock=False)
+    assert after.match_moves == before.match_moves
+    assert after.version == before.version, "a no-op skip wrote to the room"
+
+
+def test_skip_to_end_is_idempotent_on_a_finished_room(conn):
+    room, host_id, guest_id = _complete_final_room(conn)
+    room_match.skip_ahead(conn, room.code, host_id, "tournament", DECK, MODEL)
+    settled = rooms._load_room(conn, room.code, lock=False)
+    room_match.skip_ahead(conn, room.code, host_id, "tournament", DECK, MODEL)
+    again = rooms._load_room(conn, room.code, lock=False)
+    assert again.match_moves == settled.match_moves
+    assert again.version == settled.version, "a repeat skip wrote to the room"

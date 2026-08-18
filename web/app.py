@@ -2124,6 +2124,38 @@ class RoomLeagueRevealIn(BaseModel):
     through: int = Field(ge=1, description="reveal the group stage through this many fixtures")
 
 
+class RoomSkipIn(BaseModel):
+    player_id: str
+    target: str = Field(
+        description="'group_stage' stops once a league room's round-robin is fully "
+                    "revealed, leaving the playoffs to be watched normally; "
+                    "'tournament' runs the whole room to its result.")
+
+
+@app.post("/api/rooms/{code}/match/skip", response_model=RoomMatchOut)
+def room_skip(code: str, body: RoomSkipIn) -> RoomMatchOut:
+    """Resolve every remaining step up to a target in ONE request, with the same declared
+    defaults every automatic move source here already uses.
+
+    Host-only, like the other two pacing routes, because it advances SHARED state -- it
+    means "move this room on for everybody", not "stop showing me animations". A viewer
+    who has simply seen enough has per-match skips that touch only their own screen.
+
+    Distinct from `/match/league-advance` with `through = total`, which this supersedes for
+    the group stage: that could only ever move the reveal CURSOR, so it stalled the moment
+    the room needed anything else (a pending toss, a round advance). This resolves whatever
+    the room is actually waiting on, whatever kind of step that is."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _db() as conn:
+        try:
+            room = room_match_lib.skip_ahead(
+                conn, code, body.player_id, body.target, deck, model)
+            replay = room_match_lib.replay_room_matches(room, deck, model)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _room_match_out(room, replay, body.player_id, deck)
+
+
 @app.post("/api/rooms/{code}/match/league-advance", response_model=RoomMatchOut)
 def room_league_advance(code: str, body: RoomLeagueRevealIn) -> RoomMatchOut:
     """Only the host paces a league room's own round-robin, one fixture ('Continue',

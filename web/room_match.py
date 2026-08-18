@@ -359,24 +359,21 @@ def _stamped(move: dict) -> dict:
     return {**move, "at": time.time()}
 
 
-def _auto_resolve(room: Room, deck, model) -> bool:
-    """Resolve ONE step that has been waiting past the timeout, and report whether it did.
-
-    Resolve-on-read (A62), the same shape `rooms._resolve` uses for the draft: no
-    scheduler, no background job -- whichever request arrives next does the work. One step
-    per call rather than a loop, deliberately: the move this records is stamped with the
-    current time, so an abandoned room drains one step per timeout period instead of
-    fast-forwarding to the end the instant anybody looks at it. That keeps a room that
-    everyone briefly left in a state they can rejoin and still watch.
+def _resolve_one_step(room: Room, replay: RoomMatchReplay, *, league_to: int | None = None) -> bool:
+    """Record the ONE move the room is currently waiting on, and report whether there was
+    one. The single implementation of "what does this room need next", shared by the
+    inactivity failsafe and by the deliberate skips -- a second copy of this would be a
+    second place for "what counts as the current step" to drift from the engine.
 
     Ordering matches `replay_room_matches`'s own: the start gate, then the league reveal
-    cursor, then a pending toss, then the round advance -- a room can only ever be waiting
-    on one of them at a time, but checking in the engine's own order means this can never
-    resolve a step the engine does not consider current."""
-    if time.time() - _last_step_at(room) <= MATCH_STEP_TIMEOUT_S:
-        return False
-    replay = replay_room_matches(room, deck, model)
+    cursor, then a pending toss, then the round advance. A room can only ever be waiting on
+    one of them at a time, but checking in the engine's own order means this can never
+    resolve a step the engine does not consider current.
 
+    `league_to` is how a skip collapses the group stage in a single move instead of
+    seventy: the reveal cursor is a TARGET (A86), so one move can carry it all the way to
+    the total. The failsafe leaves it None and advances the cursor by one, because it is
+    rescuing a stalled room rather than fast-forwarding it."""
     if replay.awaiting_start:
         room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
         return True
@@ -384,14 +381,19 @@ def _auto_resolve(room: Room, deck, model) -> bool:
     if replay.league_progress is not None:
         revealed, total = replay.league_progress
         if revealed < total:
-            room.match_moves = room.match_moves + [
-                _stamped({"kind": "league-reveal", "through": revealed + 1})]
-            return True
+            through = total if league_to is None else min(league_to, total)
+            if through > revealed:
+                room.match_moves = room.match_moves + [
+                    _stamped({"kind": "league-reveal", "through": through})]
+                return True
 
     for fixture in (replay.current_round or []):
         if fixture.result is None and fixture.pending_toss_winner_pid is not None:
-            # The same default a CPU-owned winner already gets, for the same reason: it
-            # is a decision nobody is present to make, not a decision being taken away.
+            # The same default a CPU-owned winner already gets, for the same reason: it is
+            # a decision nobody is present to make, not one being taken away. This is also
+            # what lets a skip get PAST a pending toss -- the old "Skip ahead" looped on
+            # `advance_ready` alone, which a pending toss makes false, so it could never
+            # reach the end of a tournament that still had a real toss outstanding.
             room.match_moves = room.match_moves + [_stamped(
                 {"kind": "toss", "stage": fixture.stage, "elects": TOSS_DEFAULT_ELECTS})]
             return True
@@ -402,6 +404,29 @@ def _auto_resolve(room: Room, deck, model) -> bool:
         return True
 
     return False
+
+
+def _auto_resolve(room: Room, deck, model) -> bool:
+    """Resolve ONE step that has been waiting past the timeout, and report whether it did.
+
+    Resolve-on-read (A62), the same shape `rooms._resolve` uses for the draft: no
+    scheduler, no background job -- whichever request arrives next does the work. One step
+    per call rather than a loop, deliberately: the move this records is stamped with the
+    current time, so an abandoned room drains one step per timeout period instead of
+    fast-forwarding to the end the instant anybody looks at it. That keeps a room that
+    everyone briefly left in a state they can rejoin and still watch.
+
+    Advances the league cursor by ONE (`league_to=revealed + 1`) rather than to the total:
+    this is rescuing a room nobody is watching, not skipping one on purpose, and collapsing
+    seventy fixtures because a host stepped away for two minutes would destroy the reveal
+    they came back for."""
+    if time.time() - _last_step_at(room) <= MATCH_STEP_TIMEOUT_S:
+        return False
+    replay = replay_room_matches(room, deck, model)
+    league_to = None
+    if replay.league_progress is not None:
+        league_to = replay.league_progress[0] + 1
+    return _resolve_one_step(room, replay, league_to=league_to)
 
 
 def _paused(entries: list[RoomResultEntry], states: list[RoomFixtureState], label: str,
@@ -830,6 +855,59 @@ def start_matches(conn, code: str, player_id: str, deck, model) -> Room:
         raise RoomError("this room is not waiting to start right now")
     room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
     rooms._save_room(conn, room)
+    return room
+
+
+SKIP_TARGETS = ("group_stage", "tournament")
+
+# A tournament cannot need more steps than this, so a loop that hits it is a bug rather
+# than a big room: a ten-seat league is one start gate + one league-reveal move + four
+# playoff rounds with at most one toss each, well under twenty. Bounded because this is
+# the one place that loops step resolution, and an unbounded loop over replayed state is
+# how a single request would hang a room instead of failing it.
+_SKIP_STEP_CAP = 40
+
+
+def skip_ahead(conn, code: str, player_id: str, target: str, deck, model) -> Room:
+    """Resolve every remaining step up to `target` in one request, using the same declared
+    defaults every automatic move source in this codebase already uses.
+
+    `'group_stage'` stops the moment a league room's round-robin is fully revealed, leaving
+    the playoffs to be watched normally -- the point of it is to get past seventy fixtures,
+    not to skip the part worth seeing. `'tournament'` runs to `complete`.
+
+    Host-only, matching `advance_match`/`advance_league_reveal`, because this advances
+    SHARED state: it is not "stop showing ME animations" but "move this room on for
+    everybody", and a non-host firing it would take the tournament away from the other
+    seats. A viewer who has merely seen enough already has per-match skips
+    (`roomSkipThisMatch`, `skipOverStepper`) that touch nothing but their own screen.
+
+    Loops `_resolve_one_step` rather than reimplementing the step ladder, which is what
+    lets it get past a pending toss -- the old client-side "Skip ahead" looped on
+    `advance_ready` alone and stalled on exactly that. Idempotent in the same sense the
+    other mutators are: a room already at the target records nothing and returns."""
+    if target not in SKIP_TARGETS:
+        raise RoomError(f"target must be one of {SKIP_TARGETS}, got {target!r}")
+    room = rooms._load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can skip ahead")
+
+    changed = False
+    for _ in range(_SKIP_STEP_CAP):
+        replay = replay_room_matches(room, deck, model)
+        if replay.complete:
+            break
+        if target == "group_stage" and replay.league_progress is None:
+            # Either the group stage is fully revealed, or this format never had one.
+            break
+        if not _resolve_one_step(room, replay):
+            break
+        changed = True
+    else:
+        raise RoomError("could not skip ahead: too many steps remained")
+
+    if changed:
+        rooms._save_room(conn, room)
     return room
 
 

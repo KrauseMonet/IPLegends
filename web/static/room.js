@@ -766,7 +766,8 @@ function roomWaitingHtml(m, myMatch){
       ? `<div class="foot-actions room-actions">
            <button class="act lead" onclick="roomAutoNow()">Continue now</button>
            <button class="act" onclick="roomAutoPause(this)">Pause</button>
-           <button class="act" onclick="roomLeagueAdvance(${m.league_total}, this)">Skip ahead</button>
+           <button class="act" onclick="roomSkipTo('group_stage', this)">Skip group stage</button>
+           <button class="act" onclick="roomSkipTo('tournament', this)">Skip to end</button>
          </div>
          <div class="margin" id="roomAutoLine"></div>`
       : `<div class="margin">Up next shortly…</div>`;
@@ -798,7 +799,7 @@ function roomWaitingHtml(m, myMatch){
         ? `<div class="foot-actions room-actions">
              <button class="act lead" onclick="roomAutoNow()">Continue now</button>
              <button class="act" onclick="roomAutoPause(this)">Pause</button>
-             <button class="act" onclick="roomSkipAhead(this)">Skip ahead</button>
+             <button class="act" onclick="roomSkipTo('tournament', this)">Skip to end</button>
            </div>
            <div class="margin" id="roomAutoLine"></div>`
         // Not "waiting for the host" any more: nobody is waiting ON anyone, the next
@@ -901,6 +902,7 @@ async function roomSubmitTossReveal(elects, ctrl){
 
 function roomStartReveal(myMatch){
   ROOM_REVEAL_ACTIVE = myMatch;
+  roomShowRevealSkips();
   const r = myMatch.result;
   const steps = [];
   if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`, null]);
@@ -922,6 +924,20 @@ function roomStartReveal(myMatch){
 // per match and could never jump one. Needs no server call, unlike solo's own version:
 // a room's whole result is already client-side by the time the reveal starts, so this
 // just abandons the innings chain and lands where the chain would have landed anyway.
+// Solo offers "skip the group stage" and "skip to the end" from inside the reveal, so a
+// viewer who has seen enough does not have to sit through the rest of an animation first.
+// A room gets the same two, restricted to the HOST: they resolve the tournament for every
+// seat, where "Skip innings"/"Skip match" beside them touch nothing but this screen.
+// Group-stage skipping is offered only where a group stage exists.
+function roomShowRevealSkips(){
+  const amHost = !!ROOM && ROOM.host_id === MY_PID;
+  const hasGroup = !!ROOM_MATCH_DATA && ROOM_MATCH_DATA.league_total != null
+                    && ROOM_MATCH_DATA.league_revealed < ROOM_MATCH_DATA.league_total;
+  const g = $('#roomSkipGroupBtn'), e = $('#roomSkipEndBtn');
+  if (g) g.classList.toggle('hide', !(amHost && hasGroup));
+  if (e) e.classList.toggle('hide', !amHost);
+}
+
 function roomSkipThisMatch(){
   if (!ROOM_REVEAL_ACTIVE) return;
   clearOverTimer();
@@ -1224,11 +1240,10 @@ async function roomStartMatches(ctrl){
   });
 }
 
-// `through` is the TARGET cursor, not an increment -- Continue sends revealed + 1,
-// Skip ahead sends the group stage's own total, so this is one round trip either way
-// rather than a client-side loop (unlike roomSkipAhead, which loops a handful of ROUND
-// advances -- looping 70 times here would be both slower and pointless, since the
-// server already knows how to jump straight to any cursor in one call).
+// `through` is the TARGET cursor, not an increment, so one round trip moves it any
+// distance -- the auto-advance countdown sends `revealed + 1` per fixture. Skipping the
+// group stage no longer comes through here at all: it needs to resolve whatever the room
+// is waiting on rather than only the reveal cursor, so it goes to `roomSkipTo`.
 async function roomLeagueAdvance(through, ctrl){
   await busyClick(ctrl, 'Revealing…', async () => {
     const myGen = ++ROOM_GEN;
@@ -1243,22 +1258,33 @@ async function roomLeagueAdvance(through, ctrl){
   });
 }
 
-// Bulk-advances through as many already-fully-resolved rounds as the server will allow
-// in one go -- never resolves anyone's own toss for them (that stays a real, live
-// decision), it only removes the repeated "Continue" clicks a room otherwise needs once
-// per round that turned out to have nothing left to wait on.
-async function roomSkipAhead(ctrl){
-  await busyClick(ctrl, 'Skipping ahead…', async () => {
+// 'group_stage' | 'tournament'. Replaces the old client-side advance loop, which walked
+// `/match/advance` while `advance_ready` held -- and `advance_ready` is false whenever a
+// fixture is still waiting on a real toss, so it stalled there and could never actually
+// reach the end of a tournament. One server call now resolves whatever the room is waiting
+// on, of whatever kind, so "skip to the end" means it.
+async function roomSkipTo(target, ctrl){
+  const label = target === 'group_stage' ? 'Skipping group stage…' : 'Simulating…';
+  await busyClick(ctrl, label, async () => {
     const myGen = ++ROOM_GEN;
+    // Any countdown belongs to the step we are about to blow past; leaving it armed would
+    // fire an advance into a room that has already moved on.
+    roomDisarmAuto();
     try {
-      let m = ROOM_MATCH_DATA, guard = 0;
-      while (!m.complete && m.advance_ready && m.you_decide_advance && guard++ < 10){
-        m = await api(`/api/rooms/${ROOM_CODE}/match/advance`, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({player_id: MY_PID})});
-      }
+      const m = await api(`/api/rooms/${ROOM_CODE}/match/skip`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: MY_PID, target})});
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
+      // A skip is a decision to stop watching, so it must not land back in a reveal.
+      // ROOM_REVEALED_STAGE/ROOM_LEAGUE_REVEALED_THROUGH are what showRoomMatch consults
+      // to decide whether a fixture still owes this viewer an animation; without moving
+      // them forward, skipping to the end would immediately start playing the final.
+      ROOM_REVEAL_ACTIVE = null;
+      if (m.league_total != null) ROOM_LEAGUE_REVEALED_THROUGH = m.league_total;
+      const mine = (m.results || []).filter(e => e.result.yours);
+      if (mine.length) ROOM_REVEALED_STAGE = mine[mine.length - 1].stage;
+      go('room');
       showRoomMatch(m);
     } catch(e){ slip(e.message); }
   });

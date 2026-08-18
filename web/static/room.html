@@ -217,6 +217,12 @@
         </select>
         <button class="act" onclick="skipOverStepper()">Skip innings</button>
         <button class="act" onclick="roomSkipThisMatch()">Skip match</button>
+        <!-- Host only, shown by roomStartReveal: these two advance the room for EVERY
+             seat, unlike the two above, which only stop this viewer's own animation. -->
+        <button class="act hide" id="roomSkipGroupBtn"
+          onclick="roomSkipTo('group_stage', this)">Skip group stage</button>
+        <button class="act hide" id="roomSkipEndBtn"
+          onclick="roomSkipTo('tournament', this)">Skip to end</button>
       </div>
     </div>
   </section>
@@ -311,6 +317,6 @@
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script src="/static/reveal.js?v=50a84e0ab6"></script>
 <script src="/static/analysis.js?v=318fdf444f"></script>
-<script src="/static/room.js?v=d4ebe47b5b"></script>
+<script src="/static/room.js?v=c52f6bf5f3"></script>
 </body>
 </html>

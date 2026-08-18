@@ -124,6 +124,12 @@ class Room:
     # (list_open_rooms below). Set once at creation, never updated afterward, same as
     # format/timer_seconds/draft_mode.
     is_open: bool = False
+    # migration 031 -- how long since this room was last active, as READ. Computed by
+    # the database rather than carried as a timestamp, so no clock comparison ever crosses
+    # between Postgres and Python (migration 019's own header makes the same point about
+    # `turn_started_at` going the other way). Never written from here; `_save_room` and
+    # `_touch_room` are what move it.
+    idle_seconds: float = 0.0
     # migration 030 -- the stored monotonic state counter, as READ. Never incremented
     # here: `_save_room` increments it in the database and writes the new value back onto
     # this field, so the number a request serves is always the one the write produced
@@ -155,11 +161,45 @@ class Room:
 # to cleanup).
 ROOM_TTL_HOURS = 24
 
+# An OPEN room still sitting in the lobby is deleted once it has been inactive this long.
+# Scoped deliberately narrowly, and each half of the scope is doing work:
+#   * `is_open`, because these are the rooms a stranger can walk into off the public Join
+#     list -- a dead private room harms nobody and its host may be about to share the code.
+#   * `lobby`, because an open room that has STARTED is no longer listed anyway
+#     (`list_open_rooms` filters on status), so deleting one would destroy a game in
+#     progress for no benefit to anybody browsing.
+# Everything outside that scope keeps ROOM_TTL_HOURS.
+OPEN_ROOM_IDLE_MINUTES = 15
+
+# How stale `updated_at` may get before a plain poll refreshes it. This is what makes
+# "inactive" mean "nobody is here" rather than "nobody has written recently" -- polls do
+# not write (A119), so an occupied lobby waiting on one more player generates no writes at
+# all and would otherwise be swept out from under the people sitting in it.
+#
+# A THIRD of the idle window, so a room with anybody present refreshes about three times
+# before it could ever be considered idle -- one missed heartbeat cannot delete a live
+# room. The cost is bounded and tiny: at most one write per room per five minutes, however
+# many seats are polling and however often, against the ~0.5 writes/second/seat that
+# updating on every poll would have cost.
+PRESENCE_HEARTBEAT_MINUTES = 5
+
 
 def _sweep_stale_rooms(conn) -> None:
+    """Two rules, one statement. Every room ages out after ROOM_TTL_HOURS whatever it was
+    doing; an OPEN room still in the lobby goes much sooner once nobody is there, because
+    it is the one kind a stranger can find and walk into off the public list.
+
+    `updated_at`, not `created_at`, for the second rule -- the rooms this exists to remove
+    are exactly the ones created and then abandoned, so creation time says nothing about
+    whether anyone is still around."""
     conn.execute(
-        "delete from rooms where created_at < now() - make_interval(hours => %s)",
-        (ROOM_TTL_HOURS,),
+        """
+        delete from rooms
+         where created_at < now() - make_interval(hours => %s)
+            or (is_open and status = 'lobby'
+                and updated_at < now() - make_interval(mins => %s))
+        """,
+        (ROOM_TTL_HOURS, OPEN_ROOM_IDLE_MINUTES),
     )
 
 
@@ -198,6 +238,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
         select r.code, r.format, r.timer_seconds, r.seed, r.host_id, r.status,
                r.turn_started_at, r.failure_reason, r.moves, r.match_moves,
                r.draft_mode, r.is_open, r.version,
+               extract(epoch from (now() - r.updated_at)) as idle_seconds,
                p.player_id, p.name, p.is_cpu
           from rooms r
           left join room_players p on p.room_code = r.code
@@ -211,14 +252,15 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
      turn_started_at, failure_reason, moves, match_moves, draft_mode, is_open,
-     version) = rows[0][:13]
+     version, idle_seconds) = rows[0][:14]
     room = Room(code=code, format=fmt, timer_seconds=timer_seconds, seed=seed,
                 host_id=host_id, status=status,
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
                 moves=list(moves or []), match_moves=list(match_moves or []),
-                draft_mode=draft_mode, is_open=is_open, version=version)
+                draft_mode=draft_mode, is_open=is_open, version=version,
+                idle_seconds=float(idle_seconds or 0.0))
     for row in rows:
-        player_id, name, is_cpu = row[13], row[14], row[15]
+        player_id, name, is_cpu = row[14], row[15], row[16]
         # NULL on every column of the right-hand side means the outer join matched no
         # seat at all -- a room that exists with nobody in it, which is a real state
         # (`leave_room` can empty a lobby), not a missing row to guess at.
@@ -248,7 +290,11 @@ def _save_room(conn, room: Room) -> None:
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
             match_moves = excluded.match_moves,
-            version = rooms.version + 1
+            version = rooms.version + 1,
+            -- Every write is activity by definition: a join, a leave, a pick, a toss,
+            -- an advance. The poll path adds the missing half (somebody merely PRESENT)
+            -- via `_touch_room` below.
+            updated_at = now()
         returning version
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
@@ -325,10 +371,21 @@ class OpenRoom:
 
 
 def list_open_rooms(conn) -> list[OpenRoom]:
-    """Open, still-joinable rooms -- `is_open` and still in the lobby -- newest first,
-    capped at `OPEN_ROOMS_LIMIT`. A room already full is excluded here in Python, not
-    SQL: capacity is `ROOM_FORMATS[format]`, a constant keyed by format, not a stored
-    column, so there is nothing to compare against inside the query itself."""
+    """Open, still-joinable rooms -- `is_open`, still in the lobby, and ACTIVE within
+    `OPEN_ROOM_IDLE_MINUTES` -- most recently active first, capped at `OPEN_ROOMS_LIMIT`.
+
+    The idle filter is here as well as in the sweep, and duplicating it is the point: the
+    sweep only runs when somebody creates a room, so without this a dead room stays
+    advertised until that happens to occur. Filtering on read makes the list correct
+    immediately and costs no write.
+
+    Ordered by activity rather than creation, which is a real change of meaning: a room
+    somebody just joined is a better thing to show a stranger than one merely created more
+    recently and since abandoned.
+
+    A room already full is excluded here in Python, not SQL: capacity is
+    `ROOM_FORMATS[format]`, a constant keyed by format, not a stored column, so there is
+    nothing to compare against inside the query itself."""
     rows = conn.execute(
         """
         select r.code, r.format, r.timer_seconds, r.draft_mode,
@@ -337,10 +394,11 @@ def list_open_rooms(conn) -> list[OpenRoom]:
                (select count(*) from room_players where room_code = r.code) as seats_filled
           from rooms r
          where r.is_open and r.status = 'lobby'
-         order by r.created_at desc
+           and r.updated_at > now() - make_interval(mins => %s)
+         order by r.updated_at desc
          limit %s
         """,
-        (OPEN_ROOMS_LIMIT,),
+        (OPEN_ROOM_IDLE_MINUTES, OPEN_ROOMS_LIMIT),
     ).fetchall()
     return [
         OpenRoom(code=code, format=fmt, timer_seconds=timer_seconds, draft_mode=draft_mode,
@@ -728,6 +786,21 @@ def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: De
     return room
 
 
+def _touch_room(conn, room: Room) -> None:
+    """Record that somebody is still here, at most once per PRESENCE_HEARTBEAT_MINUTES.
+
+    A single UPDATE of one column, not a `_save_room`: nothing about the room has changed,
+    so re-writing its moves and bumping `version` would be a lie to every client watching
+    the version to order responses (A119) -- a heartbeat is not a state change and must not
+    read as one.
+
+    Guarded on `idle_seconds` from the read the caller already did, so the common poll
+    costs nothing extra: a room being actively used writes once every five minutes,
+    whatever its seat count and however fast anyone polls."""
+    conn.execute("update rooms set updated_at = now() where code = %s", (room.code,))
+    room.idle_seconds = 0.0
+
+
 def room_state(conn, code: str, deck: Deck) -> Room:
     """Read-only poll: resolve any expired turn first, so a client that polls slowly
     still sees an up-to-date room rather than one waiting on a clock nobody is checking.
@@ -754,6 +827,11 @@ def room_state(conn, code: str, deck: Deck) -> Room:
     nothing left to do and NOTHING IS WRITTEN; see the comment on that branch below for
     why that case is the common one at a timeout rather than a rare one."""
     room = _load_room(conn, code, lock=False)
+    # Presence, before anything else and regardless of status: a lobby waiting on one more
+    # player is exactly the case that generates no writes of its own, and is exactly the
+    # case the idle sweep would otherwise delete out from under the people sitting in it.
+    if room.idle_seconds > PRESENCE_HEARTBEAT_MINUTES * 60:
+        _touch_room(conn, room)
     if room.status != "drafting" or time.time() - room.turn_started_at <= room.timer_seconds:
         return room
     room = _load_room(conn, code, lock=True)

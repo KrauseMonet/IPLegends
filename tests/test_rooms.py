@@ -54,12 +54,34 @@ class FakeConn:
     def __init__(self):
         self.rooms: dict[str, tuple] = {}                  # code -> row tuple
         self.players: dict[str, dict[str, tuple]] = {}      # code -> {player_id: row}
+        # `rooms.updated_at` (migration 031). Kept separately rather than appended to the
+        # row tuple because it is read back as a DERIVED age, never as the timestamp --
+        # exactly how the real query exposes it.
+        self.updated_at: dict[str, float] = {}
+        # How many times the poll's throttled heartbeat has actually written. Counted
+        # because the heartbeat deliberately does NOT change any value a test could
+        # otherwise observe (that is the point of it -- see `_touch_room`), so a
+        # heartbeat firing on every poll is invisible to any assertion about state.
+        self.touches = 0
 
     def execute(self, sql: str, params: tuple = ()) -> FakeCursor:
         sql_norm = " ".join(sql.split()).lower()
 
         if sql_norm.startswith("delete from rooms"):
-            return FakeCursor([])   # tests never age a room out mid-run
+            # The idle-sweep half of `_sweep_stale_rooms` is really implemented here: a
+            # fake that no-ops the delete would let a test for the sweep pass without the
+            # sweep existing at all, which is what this branch used to do. The TTL half is
+            # not -- nothing in a test is 24 hours old, and pretending to track
+            # `created_at` would be simulating a clause no test exercises.
+            _ttl_hours, idle_mins = params
+            for code in [c for c in list(self.rooms)
+                         if self.rooms[c][11]                       # is_open
+                         and self.rooms[c][5] == "lobby"            # status
+                         and time.time() - self.updated_at.get(c, 0.0) > idle_mins * 60]:
+                del self.rooms[code]
+                self.players.pop(code, None)
+                self.updated_at.pop(code, None)
+            return FakeCursor([])
 
         if sql_norm.startswith("select 1 from rooms"):
             (code,) = params
@@ -74,14 +96,19 @@ class FakeConn:
             row = self.rooms.get(code)
             if row is None:
                 return FakeCursor([])
+            # `idle_seconds` is DERIVED by the real query (extract(epoch from now() -
+            # updated_at)), not stored -- computed here too rather than kept as a column,
+            # which is what lets a test move `updated_at` and see the effect.
+            idle = max(0.0, time.time() - self.updated_at.get(code, time.time()))
+            row = tuple(row) + (idle,)
             seats = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
             if not seats:
                 # A room with no seats still returns exactly one row, with every column
                 # of the right-hand side NULL -- that is what an outer join does, and
                 # `_load_room` has an explicit branch for it.
-                return FakeCursor([tuple(row) + (None, None, None)])
+                return FakeCursor([row + (None, None, None)])
             return FakeCursor([
-                tuple(row) + (pid, name, is_cpu)
+                row + (pid, name, is_cpu)
                 for (_seat, pid, name, is_cpu) in seats
             ])
 
@@ -91,11 +118,13 @@ class FakeConn:
             return FakeCursor([])
 
         if sql_norm.startswith("select r.code, r.format"):
-            (limit,) = params
+            idle_mins, limit = params
             out = []
-            # Newest first -- self.rooms is a plain dict, insertion-ordered oldest
-            # first, mirroring the real query's `order by r.created_at desc`.
-            for row in reversed(list(self.rooms.values())):
+            # Most recently ACTIVE first, mirroring `order by r.updated_at desc` -- the
+            # real query stopped ordering by creation when the idle rule landed, because a
+            # room somebody just joined is a better thing to show than a newer, dead one.
+            for row in sorted(self.rooms.values(),
+                              key=lambda r: self.updated_at.get(r[0], 0.0), reverse=True):
                 # Indexed, not unpacked with a trailing *_rest: `version` is now the
                 # last column, so "the last two are draft_mode and is_open" silently
                 # became false -- is_open read the version (always truthy) and every
@@ -103,6 +132,11 @@ class FakeConn:
                 (code, fmt, _timer, _seed, host_id, status) = row[:6]
                 draft_mode, is_open = row[10], row[11]
                 if not (is_open and status == "lobby"):
+                    continue
+                # The idle filter the real query applies in SQL. Without it the fake would
+                # list rooms the server itself hides, and a test for the idle rule could
+                # pass against a filter that was never written.
+                if time.time() - self.updated_at.get(code, 0.0) > idle_mins * 60:
                     continue
                 timer_seconds = row[2]
                 seats = self.players.get(code, {})
@@ -163,7 +197,14 @@ class FakeConn:
                                      match_moves_value, edraft, eopen, eversion + 1)
             # RETURNING version -- `_save_room` reads this back onto the Room object so
             # the response it serves carries the version its own write produced.
+            self.updated_at[code] = time.time()
             return FakeCursor([(self.rooms[code][12],)])
+
+        if sql_norm.startswith("update rooms set updated_at"):
+            (code,) = params
+            self.updated_at[code] = time.time()
+            self.touches += 1
+            return FakeCursor([])
 
         if sql_norm.startswith("update rooms set seed"):
             seed, code = params
@@ -1261,3 +1302,134 @@ def test_a_room_with_no_seats_still_loads(conn):
     loaded = rooms._load_room(conn, room.code, lock=False)
     assert loaded.players == {}
     assert loaded.code == room.code
+
+
+# --- migration 031: an abandoned open room closes itself -------------------------------
+#
+# The public Join list was advertising rooms created and never touched again -- measured on
+# the live database before this was built, one idle 80 minutes and two idle around 22
+# hours, each a single seat a stranger would join and then sit alone in.
+
+def _make_idle(conn, code, minutes):
+    """Set a room's idle age outright."""
+    conn.updated_at[code] = time.time() - minutes * 60
+
+
+def _advance(conn, code, minutes):
+    """Let `minutes` of wall time PASS, rather than setting an absolute age.
+
+    The difference is the whole occupied-lobby test: setting the age absolutely on each
+    turn of a loop means time never accumulates, so a room polled every six minutes for
+    twenty looks six minutes idle whether or not the heartbeat is doing anything -- which
+    is exactly how the first version of that test passed with the heartbeat deleted."""
+    conn.updated_at[code] = conn.updated_at.get(code, time.time()) - minutes * 60
+
+
+def test_an_idle_open_room_drops_off_the_public_list(conn):
+    """Note what this can and cannot show. `FakeConn` is a second, independent
+    implementation keyed on the SQL prefix -- it never reads the real WHERE clause -- so
+    this pins the BEHAVIOUR the room layer must have, not the query text that delivers it.
+    Deleting the real filter leaves this green. The query itself is verified where it
+    actually can be, against live Postgres (A108 reached the same conclusion about the
+    profile query, and for the same reason)."""
+    room, _host = rooms.create_room(conn, "cup", 30, "Ghost", is_open=True)
+    assert room.code in {r.code for r in rooms.list_open_rooms(conn)}
+    _make_idle(conn, room.code, rooms.OPEN_ROOM_IDLE_MINUTES + 1)
+    assert room.code not in {r.code for r in rooms.list_open_rooms(conn)}, \
+        "an abandoned room is still being advertised to strangers"
+
+
+def test_an_idle_open_room_is_swept(conn):
+    """Filtering the list hides it; the sweep is what removes it. Both exist because the
+    sweep only runs when somebody creates a room."""
+    room, _host = rooms.create_room(conn, "cup", 30, "Ghost", is_open=True)
+    _make_idle(conn, room.code, rooms.OPEN_ROOM_IDLE_MINUTES + 1)
+    rooms.create_room(conn, "final", 30, "Someone else")   # triggers the sweep
+    with pytest.raises(rooms.RoomError):
+        rooms._load_room(conn, room.code, lock=False)
+
+
+def test_an_occupied_lobby_is_not_swept_even_though_nobody_writes(conn):
+    """The failure this feature could most easily have caused, and the reason the
+    heartbeat exists at all. Polls deliberately do not write (A119), so three people
+    sitting in a lobby waiting for a fourth produce NO writes -- and would look exactly
+    like an abandoned room. Asserted through `room_state` rather than by calling
+    `_touch_room` directly, so it fails if the poll stops calling it."""
+    room, host = rooms.create_room(conn, "cup", 30, "Host", is_open=True)
+    rooms.join_room(conn, room.code, "Two", DECK)
+    rooms.join_room(conn, room.code, "Three", DECK)
+
+    # Twenty-four minutes pass -- comfortably past the sweep's own window -- with nobody
+    # doing anything but sitting on the page. Time ACCUMULATES here: without the
+    # heartbeat, `updated_at` never moves and the room ends up 24 minutes idle.
+    for _ in range(4):
+        _advance(conn, room.code, rooms.PRESENCE_HEARTBEAT_MINUTES + 1)
+        rooms.room_state(conn, room.code, DECK)
+    assert (time.time() - conn.updated_at[room.code]) < rooms.OPEN_ROOM_IDLE_MINUTES * 60
+
+    rooms.create_room(conn, "final", 30, "Someone else")   # triggers the sweep
+    still = rooms._load_room(conn, room.code, lock=False)
+    assert len(still.players) == 3, "a lobby with three people in it was deleted"
+    assert room.code in {r.code for r in rooms.list_open_rooms(conn)}
+
+
+def test_the_heartbeat_is_throttled_rather_than_firing_on_every_poll(conn):
+    """A119 took the write off the poll path deliberately; the heartbeat must not put it
+    back. Counted, not inferred from state: a heartbeat changes nothing a state assertion
+    could see -- that is its whole design (`_touch_room` does not bump `version`) -- so an
+    earlier version of this test, which watched `version`, passed happily against a
+    heartbeat firing on every single poll."""
+    room, _host = rooms.create_room(conn, "cup", 30, "Host", is_open=True)
+    conn.touches = 0
+    for _ in range(6):
+        rooms.room_state(conn, room.code, DECK)
+    assert conn.touches == 0, f"a fresh room's polls wrote {conn.touches} times"
+
+    _make_idle(conn, room.code, rooms.PRESENCE_HEARTBEAT_MINUTES + 1)
+    for _ in range(6):
+        rooms.room_state(conn, room.code, DECK)
+    assert conn.touches == 1, (
+        f"expected one heartbeat once the window elapsed, got {conn.touches}")
+
+
+def test_the_heartbeat_is_not_a_state_change(conn):
+    """`version` is how every connected client orders responses (A119). A heartbeat says
+    nothing about the room's state, so bumping it would make each of them discard the view
+    it is holding for no reason."""
+    room, _host = rooms.create_room(conn, "cup", 30, "Host", is_open=True)
+    before = rooms._load_room(conn, room.code, lock=False)
+    _make_idle(conn, room.code, rooms.PRESENCE_HEARTBEAT_MINUTES + 1)
+    rooms.room_state(conn, room.code, DECK)
+    after = rooms._load_room(conn, room.code, lock=False)
+    assert after.version == before.version, "the heartbeat bumped the state version"
+    assert after.moves == before.moves
+
+
+def test_a_private_room_and_a_started_room_are_left_alone(conn):
+    """The scope is deliberately narrow. A private room harms nobody -- its host may be
+    about to share the code -- and an open room that has STARTED is not on the list
+    anyway, so deleting it would destroy a live game for no benefit to anyone browsing."""
+    private, _h1 = rooms.create_room(conn, "cup", 30, "Private", is_open=False)
+    started, h2 = rooms.create_room(conn, "final", 30, "Started", is_open=True)
+    rooms.join_room(conn, started.code, "Guest", DECK)
+    rooms.start_room(conn, started.code, h2, DECK)
+
+    _make_idle(conn, private.code, rooms.OPEN_ROOM_IDLE_MINUTES + 5)
+    _make_idle(conn, started.code, rooms.OPEN_ROOM_IDLE_MINUTES + 5)
+    rooms.create_room(conn, "final", 30, "Someone else")   # triggers the sweep
+
+    assert rooms._load_room(conn, private.code, lock=False).code == private.code
+    assert rooms._load_room(conn, started.code, lock=False).status == "drafting"
+
+
+def test_the_open_list_is_ordered_by_activity_not_creation(conn):
+    """A room somebody just joined is a better thing to show a stranger than a newer one
+    that has since been abandoned."""
+    older, _h = rooms.create_room(conn, "cup", 30, "Older", is_open=True)
+    newer, _h2 = rooms.create_room(conn, "cup", 30, "Newer", is_open=True)
+    _make_idle(conn, older.code, 2)
+    _make_idle(conn, newer.code, 1)
+    rooms.join_room(conn, older.code, "Arrival", DECK)     # activity on the older room
+    codes = [r.code for r in rooms.list_open_rooms(conn)]
+    assert codes.index(older.code) < codes.index(newer.code), \
+        f"expected the just-joined room first, got {codes}"

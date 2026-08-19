@@ -84,8 +84,13 @@ STATE_TABLES = {
 # deliveries leak into this aggregate", which is a real question of a table built FROM the
 # archive and a meaningless one of a table that never reads it. Answering a meaningless
 # question would be the vacuous check this project has already had to delete twice.
+# `daily_challenges`/`daily_results` join them for the same reason and not by analogy: a
+# challenge is a scenario generated for a date, and a result is what one account's own
+# simulated match produced -- both come out of the match engine, neither reads `deliveries`
+# at all, so "were super overs excluded" has no answer here rather than a passing one.
 OPERATIONAL_TABLES = {"rooms", "room_players",
-                      "accounts", "game_results", "game_result_players"}
+                      "accounts", "game_results", "game_result_players",
+                      "daily_challenges", "daily_results"}
 
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
 # for every kind in the archive, so a kind added later cannot fall silently between them.

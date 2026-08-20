@@ -156,6 +156,20 @@ def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | N
     return evaluate(scenario, my_innings, their_innings), my_innings, their_innings
 
 
+def bonuses_on_offer(scenario: Scenario) -> list[str]:
+    """Which bonuses today's kind can actually award.
+
+    Not all three are available on every day, and that is a consequence of the format
+    rather than an oversight: a chase is one innings, so nobody bowls and there is no
+    four-wicket haul to take; a defence is not a chase, so there is nothing to finish
+    early. Listed so the page can state what is on offer rather than promising a bonus
+    that cannot be earned today."""
+    from game.scenarios import FINISHED_EARLY, FOUR_WICKET_HAUL, OPENER_CENTURY
+    on = [OPENER_CENTURY]
+    on.append(FOUR_WICKET_HAUL if scenario.kind == DEFEND_BY else FINISHED_EARLY)
+    return on
+
+
 # --- the day, in the database ---------------------------------------------------------------
 
 class DailyError(ValueError):

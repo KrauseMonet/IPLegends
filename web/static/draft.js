@@ -1,7 +1,19 @@
-// The solo draft page. Reached only by navigation from home (a fresh POST /api/draft
-// result folded into the URL hash) or by a direct/reloaded URL carrying a draft state
-// in the hash -- this page's own boot() is the resume path for both.
+// The draft screen, shared by the solo draft and the daily challenge. The two differ in
+// four small ways and in nothing else, which is why this is parameterised rather than
+// forked -- a second copy of the pick/placement/reposition logic would be a second place
+// for A73's atomic placement and A76's eligibility rules to drift.
+//
+//   * WHICH endpoints picks go to (`DRAFT_API`),
+//   * where the resume state comes from (a URL hash here; today's row for the daily),
+//   * whether rerolls exist at all -- driven off `rerolls_allowed`, which the server now
+//     reports per session rather than as a module constant, so the control simply is not
+//     shown when the mode withholds it,
+//   * and what the finished twelve leads to (a season here; a submission there).
+//
+// `daily.js` sets these before calling `render`; the solo page leaves the defaults.
 let S = null;
+let DRAFT_API = '/api/draft';
+let ON_COMPLETE = null;      // null = this page's own "Play the season" behaviour
 
 // Mode is chosen on the home page and travels here as '#state?mode=memory' (mirroring
 // the existing hash-decoration convention render() below re-writes on every pick, so a
@@ -37,7 +49,7 @@ function openSlots(s){
 async function submitPick(i, slot, ctrl){
   await busyClick(ctrl, 'Taking…', async () => {
     try {
-      S = await api(`/api/draft/${S.state}/pick`, {
+      S = await api(`${DRAFT_API}/${S.state}/pick`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({index: i, slot})});
       PENDING = null;
@@ -91,7 +103,7 @@ async function submitReposition(fromSlot, toSlot, ctrl){
   REPOSITION_PENDING = null;
   await busyClick(ctrl, null, async () => {
     try {
-      S = await api(`/api/draft/${S.state}/reposition`, {
+      S = await api(`${DRAFT_API}/${S.state}/reposition`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({from_slot: from, to_slot: toSlot})});
       render(S);
@@ -102,7 +114,7 @@ async function submitReposition(fromSlot, toSlot, ctrl){
 async function rerollDeal(kind, ctrl){
   await busyClick(ctrl, 'Rerolling…', async () => {
     try {
-      S = await api(`/api/draft/${S.state}/reroll`, {method:'POST',
+      S = await api(`${DRAFT_API}/${S.state}/reroll`, {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
       PENDING = null;
       render(S);
@@ -129,7 +141,9 @@ function render(s){
       LAST_DEAL_FS = s.deal.fs_id;
       rollDeal($('#dealYear'), $('#dealTeam'), s.deal.season_year, s.deal.franchise);
     }
-    $('#rerollRow').classList.remove('hide');
+    // Hidden outright where the mode has no rerolls, rather than shown disabled: a
+    // greyed control still advertises something this draft will never offer.
+    $('#rerollRow').classList.toggle('hide', s.rerolls_allowed <= 0);
     const rerollsLeft = s.rerolls_allowed - s.rerolls_used;
     $('#rerollTeamBtn').disabled = rerollsLeft <= 0;
     $('#rerollSeasonBtn').disabled = rerollsLeft <= 0;
@@ -205,6 +219,7 @@ function renderPanels(){
       'time before the twelve is complete.</div>';
   }
 
+  if (ON_COMPLETE){ ON_COMPLETE(s); return; }
   $('#simBtn').classList.toggle('hide', !s.squad_complete);
   $('#simBtn').disabled = !s.playable;
   $('#simBtn').textContent = s.playable ? 'Play the season' : 'Not yet legal';
@@ -279,7 +294,11 @@ function abandonDraft(){
   location.href = '/';
 }
 
-boot().then(() => {
+// The solo page's own resume path, skipped on the daily page, which boots itself.
+// Read off `window` rather than a `const` in daily.js: that file loads AFTER this one, so
+// its binding does not exist yet at this moment -- the first version checked for it here
+// and duly sent the daily page home on every load.
+if (!window.DAILY_PAGE) boot().then(() => {
   const [h, query] = location.hash.slice(1).split('?');
   if (query === 'mode=memory') DRAFT_MODE = 'memory';
   if (!h || !h.includes('-')){

@@ -119,6 +119,12 @@ class Session:
     order: tuple[Card | None, ...]         # length XI_SIZE; order[i] bats at position i+1
     impact: Card | None
     errors: tuple[str, ...]                # order_errors(...); empty means playable
+    # The budget this session was actually REPLAYED under, not the module default. A mode
+    # can withhold rerolls (the daily challenge does), and a Session that reported the
+    # default anyway would have every consumer -- the API response, and through it the
+    # page -- offering a control the server would refuse. A70: a value that claims
+    # behaviour the code does not have is worse than no value.
+    rerolls_allowed: int = REROLLS_ALLOWED
 
     @property
     def squad_complete(self) -> bool:
@@ -134,7 +140,7 @@ class Session:
 
     @property
     def rerolls_remaining(self) -> int:
-        return REROLLS_ALLOWED - self.rerolls_used
+        return self.rerolls_allowed - self.rerolls_used
 
     @property
     def state(self) -> str:
@@ -322,7 +328,8 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
         order = list(state.order)
         picks = list(state.picks)
         return Session(seed, moves, deal, picks, tuple(order), state.impact,
-                       tuple(order_errors(order, state.impact, picks)))
+                       tuple(order_errors(order, state.impact, picks)),
+                       rerolls_allowed=rerolls_allowed)
 
     if not result.completed:
         # The guarantee re-drew to its cap and still found nothing. Check 12 asserts this
@@ -331,7 +338,8 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
         raise InvalidState(
             f"this draft cannot be completed - stranded on {result.stranded_on}")
     return Session(seed, moves, None, result.picks, tuple(result.order), result.impact,
-                   tuple(order_errors(result.order, result.impact, result.picks)))
+                   tuple(order_errors(result.order, result.impact, result.picks)),
+                   rerolls_allowed=rerolls_allowed)
 
 
 def _blocked(deck: Deck, fs_id: int, state: DraftState) -> list[tuple[Card, str]]:

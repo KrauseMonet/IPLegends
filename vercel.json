@@ -36,6 +36,7 @@
     { "src": "/", "dest": "/web/static/index.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/draft", "dest": "/web/static/draft.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/season", "dest": "/web/static/season.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/daily", "dest": "/web/static/daily.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/rooms", "dest": "/web/static/rooms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/rooms/[^/]+", "dest": "/web/static/room.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/profile", "dest": "/web/static/profile.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },

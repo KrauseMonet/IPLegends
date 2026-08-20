@@ -246,8 +246,15 @@ def test_scoring_marks_the_very_innings_it_played(seed):
     from game.scenarios import CHASE, Scenario
     s = Scenario(CHASE, 1, "X 2013", "Final", target=170)
     outcome, my_inn, _ = daily.score_day(MODEL, s, _a_side(), None, random.Random(seed))
-    assert outcome.margin == 10 - my_inn.wickets
     assert outcome.objective_met == my_inn.chased
+    # The margin's own rule differs by whether the chase came off, so the assertion has to
+    # follow it: wickets in hand on a success, how close it came on a failure. Asserting
+    # only the success form is what made this test fail once the failure form was
+    # introduced -- correctly, since it was checking a rule that had changed.
+    if my_inn.chased:
+        assert outcome.margin == 10 - my_inn.wickets
+    else:
+        assert outcome.margin == -(s.target + 1 - my_inn.runs)
 
 
 # --- the integrity rule specific to a daily ------------------------------------------------
@@ -291,3 +298,35 @@ def test_a_days_target_is_the_same_however_often_it_is_generated():
 
     c, _ = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
     assert (c.scenario, c.deck_fs_ids) != (a.scenario, a.deck_fs_ids)
+
+
+def test_only_the_bonuses_today_can_actually_award_are_advertised():
+    """Not all three are available on every day, and that is a consequence of the format
+    rather than an oversight: a chase is one innings, so nobody bowls and there is no
+    four-wicket haul to take; a defence is not a chase, so there is nothing to finish
+    early. Promising a bonus that cannot be earned would be the page lying about the rules.
+
+    Asserted against what `bonuses_earned` can actually return for that kind, not against a
+    hand-written list -- otherwise the two could drift and this would still pass."""
+    from game.scenarios import (
+        CHASE, DEFEND_BY, FINISHED_EARLY, FOUR_WICKET_HAUL, OPENER_CENTURY, Scenario,
+    )
+    chase = Scenario(CHASE, 1, "X", "Final", target=170)
+    defence = Scenario(DEFEND_BY, 1, "X", "Final", runs_required=20)
+
+    assert set(daily.bonuses_on_offer(chase)) == {OPENER_CENTURY, FINISHED_EARLY}
+    assert set(daily.bonuses_on_offer(defence)) == {OPENER_CENTURY, FOUR_WICKET_HAUL}
+
+    # And each advertised bonus is one the evaluator really can hand out for that kind.
+    from game.simulator import BatterCard, BowlerCard, Innings, Player
+    def _p(n): return Player(name=n, bat=0.0, bowl=None, person_id=n)
+    ton = [BatterCard(player=_p("a"), runs=120, balls=50, faced_any=True)] + \
+          [BatterCard(player=_p(f"b{i}"), runs=0, balls=0) for i in range(10)]
+    haul = [BowlerCard(player=_p("w"), wickets=4, balls=24, runs=20)]
+
+    quick = Innings(batting=ton, bowling=[], runs=180, wickets=2, balls=90, chased=True)
+    reply = Innings(batting=ton, bowling=haul, runs=140, wickets=8, balls=120)
+    assert set(daily.bonuses_on_offer(chase)) <= set(
+        __import__("game.scenarios", fromlist=["x"]).bonuses_earned(chase, quick, None))
+    assert set(daily.bonuses_on_offer(defence)) <= set(
+        __import__("game.scenarios", fromlist=["x"]).bonuses_earned(defence, quick, reply))

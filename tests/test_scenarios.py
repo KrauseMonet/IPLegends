@@ -273,3 +273,25 @@ def test_a_defence_without_the_oppositions_reply_is_refused_rather_than_assumed(
     s = Scenario(DEFEND_BY, 1, "RCB 2016", "Final", runs_required=20)
     with pytest.raises(ValueError):
         evaluate(s, innings(runs=180))
+
+
+def test_a_failed_chase_is_ranked_on_how_close_it_came_not_on_wickets_in_hand():
+    """Ranking a failure on wickets in hand rewards NOT losing any -- a side that blocked
+    out twenty overs for 100/1 would place above one that fell two runs short at 149/9.
+    Nothing is compared across the tiers, because `objective_met` separates them first."""
+    s = _chase()                                    # target 185, so 186 is needed
+    close = evaluate(s, innings(runs=184, wickets=9, chased=False), innings(runs=185))
+    blocked = evaluate(s, innings(runs=100, wickets=1, chased=False), innings(runs=185))
+
+    assert not close.objective_met and not blocked.objective_met
+    assert close.margin == -2 and blocked.margin == -86
+    assert rank_key(False, close.margin, 0) > rank_key(False, blocked.margin, 0), \
+        "blocking out for 100/1 outranked falling two short"
+    assert "Fell 2 short" in close.summary
+
+
+def test_a_successful_chase_still_outranks_every_failure_however_narrow():
+    s = _chase()
+    scraped = evaluate(s, innings(runs=186, wickets=9, chased=True), innings(runs=185))
+    agonising = evaluate(s, innings(runs=185, wickets=0, chased=False), innings(runs=185))
+    assert rank_key(True, scraped.margin, 0) > rank_key(False, agonising.margin, 999)

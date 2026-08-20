@@ -171,14 +171,24 @@ def evaluate(scenario: Scenario, mine: Innings, theirs: Innings | None = None) -
         summary = (f"Won by {margin} runs" if margin > 0
                    else f"Lost by {-margin} runs" if margin < 0 else "Tied")
     else:
-        # A chase's margin is what was left in hand -- the conventional way a chase is
-        # reported, and the only unit in which two successful chases are comparable.
-        margin = WICKETS_PER_INNINGS - mine.wickets
         chased = mine.chased
+        in_hand = WICKETS_PER_INNINGS - mine.wickets
         met = chased and (scenario.kind == CHASE
-                          or margin >= scenario.wickets_required)
-        summary = (f"Chased with {margin} wickets in hand" if chased
-                   else f"Fell {scenario.target + 1 - mine.runs} short")
+                          or in_hand >= scenario.wickets_required)
+        if chased:
+            # The conventional way a chase is reported, and the only unit in which two
+            # successful chases compare.
+            margin = in_hand
+        else:
+            # A FAILED chase is ranked on how close it came, as a negative number, and
+            # this is a correction rather than a flourish: ranking a failure on wickets in
+            # hand rewards not losing any, so a side that blocked out twenty overs for
+            # 100/1 would place above one that fell two runs short at 149/9. Nothing is
+            # compared across the two, because `objective_met` tiers them first -- margin
+            # only ever orders successes against successes and failures against failures.
+            margin = -(scenario.target + 1 - mine.runs)
+        summary = (f"Chased with {in_hand} wickets in hand" if chased
+                   else f"Fell {-margin} short")
 
     return Outcome(objective_met=met, margin=margin, bonus_points=points,
                    bonuses_met=bonuses, summary=summary)

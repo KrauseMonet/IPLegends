@@ -12,6 +12,7 @@ re-queried, so a request touches the database exactly never (SPEC 11.3).
 
 from __future__ import annotations
 
+import datetime
 import os
 import pathlib
 import time
@@ -34,6 +35,7 @@ from game.season import (
 from game.simulator import load_model
 from web import accounts
 from web import auth
+from web import daily as daily_lib
 from web import db
 from web import room_match as room_match_lib
 from web import rooms
@@ -224,6 +226,14 @@ def season_page() -> FileResponse:
     once at boot and then stripped from the URL; the season's own state lives in the
     hash alone from then on, exactly like /draft."""
     return FileResponse(STATIC / "season.html")
+
+
+@app.get("/daily", include_in_schema=False)
+def daily_page() -> FileResponse:
+    """The page only. Whether this visitor may PLAY is decided by `/api/daily`, which 401s
+    a signed-out caller -- the page renders its own sign-in gate off that rather than the
+    route guessing at identity it would have to read a cookie to know."""
+    return FileResponse(STATIC / "daily.html")
 
 
 @app.get("/rooms", include_in_schema=False)
@@ -1035,7 +1045,7 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
 
 
 def _session_out(s: sess.Session) -> SessionOut:
-    from etl.feasibility import OVERSEAS_CAP, REROLLS_ALLOWED
+    from etl.feasibility import OVERSEAS_CAP
     rating = None
     if s.squad_complete:
         all_twelve = [c for c in s.order if c is not None] + (
@@ -1047,7 +1057,7 @@ def _session_out(s: sess.Session) -> SessionOut:
         overseas_taken=sum(1 for c in s.picks if c.overseas is True),
         overseas_cap=OVERSEAS_CAP,
         rerolls_used=s.rerolls_used,
-        rerolls_allowed=REROLLS_ALLOWED,
+        rerolls_allowed=s.rerolls_allowed,
         picks=[_card(c) for c in s.picks],
         order=[None if c is None else _card(c) for c in s.order],
         impact=None if s.impact is None else _card(s.impact),
@@ -1721,6 +1731,170 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
         server_now=time.time(),
         turn_started_at=room.turn_started_at,
     )
+
+
+# --- the daily challenge ------------------------------------------------------------------
+#
+# Signed in only, and that is the FEATURE rather than a restriction bolted onto it: a
+# leaderboard needs a stable identity to rank, and one attempt per day is enforced against
+# an account (migration 032's primary key). A signed-out visitor gets a 401 with a shape
+# the page can act on, and the page sends them to sign in rather than showing a draft they
+# could never submit.
+
+
+def _today():
+    """The challenge date, in UTC. One shared day boundary for everybody rather than each
+    player's own midnight -- a "daily" whose day depends on your timezone would put two
+    people on different challenges and rank them against each other anyway."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
+def _require_account(request: Request) -> int:
+    account_id = _current_account_id(request)
+    if account_id is None:
+        raise HTTPException(status_code=401, detail="sign in to play the daily challenge")
+    return account_id
+
+
+class DailyOut(BaseModel):
+    challenge_date: str
+    scenario: str = Field(description="the one line shown before a ball is bowled")
+    kind: str
+    margin_unit: str = Field(description="'runs' or 'wickets' -- what today ranks on")
+    opposition: str
+    stage: str
+    target: int | None = Field(description="the score to REACH; null for a defence")
+    bonuses: list[str] = Field(description="what today's bonuses are, in plain words")
+    played: bool = Field(description="true once this account has used its one attempt")
+    result: dict | None = Field(description="their own recorded attempt, once played")
+    state: str | None = Field(
+        description="a fresh draft state for this account's own deal; null once played")
+
+
+class DailySubmitIn(BaseModel):
+    state: str
+
+
+class DailyBoardRow(BaseModel):
+    rank: int
+    username: str
+    objective_met: bool
+    margin: int
+    bonus_points: int
+    bonuses: list[str]
+
+
+def _daily_out(conn, account_id: int, day) -> DailyOut:
+    from game.scenarios import BONUS_LABELS
+    result = daily_lib.result_for(conn, day.challenge_date, account_id)
+    return DailyOut(
+        challenge_date=str(day.challenge_date),
+        scenario=day.scenario.describe(),
+        kind=day.scenario.kind,
+        margin_unit=day.scenario.margin_unit,
+        opposition=day.scenario.opposition_name,
+        stage=day.scenario.stage,
+        target=(None if day.scenario.target is None else day.scenario.target + 1),
+        bonuses=[BONUS_LABELS[b] for b in daily_lib.bonuses_on_offer(day.scenario)],
+        played=result is not None,
+        result=result,
+        state=(None if result is not None
+               else sess.encode(daily_lib.player_seed(day.challenge_date, account_id), ())),
+    )
+
+
+@app.get("/api/daily", response_model=DailyOut)
+def daily_today(request: Request) -> DailyOut:
+    account_id = _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        return _daily_out(conn, account_id, day)
+
+
+def _daily_session(conn, account_id: int, state: str, day) -> sess.Session:
+    """Replay one daily state against the day's own deck, refusing a seed this account was
+    never dealt -- the check `web.daily.decode_own_state` exists for."""
+    try:
+        seed, moves = daily_lib.decode_own_state(state, day.challenge_date, account_id)
+    except daily_lib.DailyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        return daily_lib.replay_day(STATE["deck"], day.challenge_date, account_id,
+                                     day.deck_fs_ids, moves)
+    except sess.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/daily/draft/{state}", response_model=SessionOut)
+def daily_draft(state: str, request: Request) -> SessionOut:
+    account_id = _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        return _session_out(_daily_session(conn, account_id, state, day))
+
+
+@app.post("/api/daily/draft/{state}/pick", response_model=SessionOut)
+def daily_pick(state: str, body: PickIn, request: Request) -> SessionOut:
+    """One move, pick and placement together, exactly as the solo draft (A73). There is no
+    reroll route here at all -- not merely a refusal, but no endpoint: today's picks are
+    meant to be final and from memory, and everybody is answering the same question off the
+    same squads."""
+    account_id = _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        current = _daily_session(conn, account_id, state, day)
+        if current.squad_complete:
+            raise HTTPException(status_code=409, detail="this squad is already full")
+        seed, moves = sess.decode(state)
+        return _session_out(_daily_session(
+            conn, account_id, sess.encode(seed, moves + (sess.Pick(body.index, body.slot),)),
+            day))
+
+
+@app.post("/api/daily/draft/{state}/reposition", response_model=SessionOut)
+def daily_reposition(state: str, body: RepositionIn, request: Request) -> SessionOut:
+    """Rearranging the order IS allowed here, unlike rerolling: it is skill applied to what
+    you were dealt rather than an escape from it. Still bounded by A76 eligibility."""
+    account_id = _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        current = _daily_session(conn, account_id, state, day)
+        if current.squad_complete:
+            raise HTTPException(status_code=409, detail="this squad is already full")
+        seed, moves = sess.decode(state)
+        return _session_out(_daily_session(
+            conn, account_id,
+            sess.encode(seed, moves + (sess.Reposition(body.from_slot, body.to_slot),)),
+            day))
+
+
+@app.post("/api/daily/submit", response_model=DailyOut)
+def daily_submit(body: DailySubmitIn, request: Request) -> DailyOut:
+    """Mark the attempt and record it. The client sends a state and never a score --
+    everything is recomputed here, so a fabricated submission either fails to replay or
+    replays into a real, played result."""
+    account_id = _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        try:
+            daily_lib.submit(conn, day.challenge_date, account_id, body.state,
+                             STATE["deck"], STATE["model"])
+        except daily_lib.DailyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except sess.InvalidState as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _daily_out(conn, account_id, day)
+
+
+@app.get("/api/daily/leaderboard", response_model=list[DailyBoardRow])
+def daily_board(request: Request, limit: int = 50) -> list[DailyBoardRow]:
+    """Public to anyone signed in. Not gated on having played: seeing what today asked and
+    who is doing well is most of the reason to come back tomorrow."""
+    _require_account(request)
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        rows = daily_lib.leaderboard(conn, day.challenge_date, limit)
+    return [DailyBoardRow(rank=i, **r) for i, r in enumerate(rows, 1)]
 
 
 @app.post("/api/rooms", response_model=CreatedRoomOut)

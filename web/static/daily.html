@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
-<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<title>Daily Challenge · The Legends Almanack</title>
+<meta name="description" content="One scenario a day, the same sixteen squads for everyone. Draft from memory and chase the target.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:description" content="One scenario a day, the same sixteen squads for everyone. Draft from memory and chase the target.">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -59,7 +59,26 @@
   </div>
 
   <!-- ============ DRAFT ============ -->
-  <section id="draft">
+  <section id="dailyGate" class="hide">
+    <div class="report compact">
+      <div class="call">Sign in to play the daily challenge</div>
+      <div class="margin">One scenario a day, the same squads for everyone, one attempt each
+        — so it needs an account to rank you against.</div>
+      <div class="foot-actions">
+        <a class="act lead" id="gateSignIn" href="/profile">Sign in or register</a>
+        <a class="act" href="/">Back</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="dailyDone" class="hide"></section>
+
+  <section id="draft" class="hide">
+    <div class="report compact" id="dailyBanner" style="margin-bottom:18px">
+      <div class="over-line" id="dailyDate">—</div>
+      <div class="call" id="dailyScenario">—</div>
+      <div class="margin" id="dailyBonuses"></div>
+    </div>
     <div class="folio">
       <div class="col">
         <div class="col-head"><span>Dealt to you</span></div>
@@ -170,6 +189,10 @@
 
 <script src="/static/common.js?v=b79043f827"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
+<!-- Set BEFORE draft.js: it decides whether draft.js runs its own solo resume-from-hash
+     boot. daily.js loads afterwards and cannot answer that question in time. -->
+<script>window.DAILY_PAGE = true;</script>
 <script src="/static/draft.js?v=5aa00895cf"></script>
+<script src="/static/daily.js?v=dfcb7d052a"></script>
 </body>
 </html>

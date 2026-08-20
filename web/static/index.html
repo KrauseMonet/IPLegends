@@ -8,6 +8,13 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<!-- iOS has no manifest support for standalone display and no install prompt of its own:
+     it reads these two, and the user adds the app through Share > Add to Home Screen. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
 <meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <meta property="og:image" content="/static/og-image.png">
@@ -82,6 +89,10 @@
         <div class="actions">
           <button class="act lead" onclick="newDraft(this)">Begin a draft</button>
           <button class="act" onclick="location.href='/rooms'">Play with friends</button>
+          <!-- Hidden until `beforeinstallprompt` fires (or on iOS, where it never does and
+               the button explains the Share-sheet route instead). Shown unconditionally
+               would be a button that does nothing on a browser that cannot install. -->
+          <button class="act hide" data-install onclick="installApp(this)">Install app</button>
           <button class="act" onclick="location.href='/daily'"
             title="One scenario a day, the same squads for everyone, one attempt each.">Daily challenge</button>
         </div>
@@ -158,7 +169,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=b79043f827"></script>
+<script src="/static/common.js?v=9020edd1df"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script>
 // 'stat' shows a rating badge on every card and lets a name be clicked for his season

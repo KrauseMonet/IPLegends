@@ -228,6 +228,31 @@ def season_page() -> FileResponse:
     return FileResponse(STATIC / "season.html")
 
 
+@app.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    """Served from the ROOT, never from /static, and that is a requirement rather than a
+    preference: a service worker's scope is its own directory, so one served from /static
+    could only ever control /static and would never see a page request at all.
+
+    `no-cache` because a worker that cannot be replaced is the worst kind of bug to ship --
+    it would keep serving its own old rules to returning visitors indefinitely."""
+    return FileResponse(STATIC / "sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest() -> FileResponse:
+    return FileResponse(STATIC / "manifest.webmanifest",
+                        media_type="application/manifest+json")
+
+
+@app.get("/offline.html", include_in_schema=False)
+def offline_page() -> FileResponse:
+    """Only ever reached through the worker's own fallback -- but it has to be fetchable at
+    this path for the worker to precache it in the first place."""
+    return FileResponse(STATIC / "offline.html")
+
+
 @app.get("/daily", include_in_schema=False)
 def daily_page() -> FileResponse:
     """The page only. Whether this visitor may PLAY is decided by `/api/daily`, which 401s

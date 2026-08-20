@@ -8,6 +8,13 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<!-- iOS has no manifest support for standalone display and no install prompt of its own:
+     it reads these two, and the user adds the app through Share > Add to Home Screen. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
 <meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <meta property="og:image" content="/static/og-image.png">
@@ -155,7 +162,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=b79043f827"></script>
+<script src="/static/common.js?v=9020edd1df"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script src="/static/info.js?v=29305b2217"></script>
 </body>

@@ -403,3 +403,69 @@ function mountTipFooterLink(){
 }
 
 document.addEventListener('DOMContentLoaded', mountTipFooterLink);
+
+
+// --- installable app -----------------------------------------------------------------------
+//
+// Registered from `common.js` because every page loads it, so the worker is picked up
+// wherever a visitor happens to land rather than only on the home page.
+//
+// Registered at '/sw.js' and NOT '/static/sw.js', which is not a tidiness preference: a
+// worker's scope is its own directory, so one served from /static could only ever control
+// /static and would never see a page request at all.
+// iOS gets the button revealed on load, since the event that reveals it elsewhere never
+// arrives there -- and hidden once the app is actually running standalone, where offering
+// to install it again is nonsense.
+window.addEventListener('load', () => {
+  if (alreadyInstalled()) return;
+  if (isIOS()) document.querySelectorAll('[data-install]').forEach(el => el.classList.remove('hide'));
+});
+
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Not worth telling anyone about. Without a worker the site behaves exactly as it
+      // always has -- it simply cannot be installed.
+    });
+  });
+}
+
+// Chrome and Edge fire this instead of showing their own prompt, so the invitation has to
+// be ours. Captured rather than acted on: firing it unprompted is the pattern browsers
+// added this event to stop.
+let INSTALL_PROMPT = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  INSTALL_PROMPT = e;
+  document.querySelectorAll('[data-install]').forEach(el => el.classList.remove('hide'));
+});
+window.addEventListener('appinstalled', () => {
+  INSTALL_PROMPT = null;
+  document.querySelectorAll('[data-install]').forEach(el => el.classList.add('hide'));
+});
+
+// iOS never fires `beforeinstallprompt` and has no programmatic install at all -- the only
+// route is Share > Add to Home Screen, so there it is instructions or nothing.
+function isIOS(){
+  return /iP(hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function alreadyInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+async function installApp(btn){
+  if (INSTALL_PROMPT){
+    INSTALL_PROMPT.prompt();
+    try { await INSTALL_PROMPT.userChoice; } catch(e){ /* dismissed */ }
+    INSTALL_PROMPT = null;
+    return;
+  }
+  if (isIOS()){
+    slip('In Safari: tap Share, then "Add to Home Screen".');
+    return;
+  }
+  slip('Use your browser menu — look for "Install" or "Add to Home Screen".');
+}

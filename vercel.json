@@ -29,6 +29,10 @@
     },
     { "src": "/static/(.*)", "dest": "/web/static/$1" },
 
+    { "src": "/sw.js", "dest": "/web/static/sw.js", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/manifest.webmanifest", "dest": "/web/static/manifest.webmanifest", "headers": { "cache-control": "public, max-age=3600" } },
+    { "src": "/offline.html", "dest": "/web/static/offline.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+
     { "src": "/api/(.*)", "dest": "api/index.py" },
     { "src": "/docs", "dest": "api/index.py" },
     { "src": "/openapi.json", "dest": "api/index.py" },

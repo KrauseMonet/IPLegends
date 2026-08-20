@@ -1,0 +1,25 @@
+{
+  "name": "The Legends Almanack",
+  "short_name": "Almanack",
+  "description": "Draft an all-time IPL XI from nineteen seasons of the real archive, play a season, take on the daily challenge.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#050b1a",
+  "theme_color": "#050b1a",
+  "categories": ["games", "sports"],
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-384.png", "sizes": "384x384", "type": "image/png", "purpose": "any" },
+    { "src": "/static/favicon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Daily challenge", "short_name": "Daily", "url": "/daily",
+      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Play with friends", "short_name": "Rooms", "url": "/rooms",
+      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -255,3 +255,21 @@ def test_a_chase_target_is_the_score_the_opposition_actually_posted():
         if s.kind != DEFEND_BY:
             assert s.target == 178
             assert "179" in s.describe(), "the line must show the score to REACH, not to beat"
+
+
+def test_a_chase_needs_no_opposition_innings_at_all():
+    """The day fixes the target in advance -- the same number for everybody, which is what
+    makes two chases comparable -- so the opposition's innings is played once when the day
+    is created, not replayed per player. Nobody bowls at them."""
+    got = evaluate(_chase(), innings(runs=186, wickets=3, chased=True))
+    assert got.objective_met and got.margin == 7
+    assert FOUR_WICKET_HAUL not in got.bonuses_met, "a chase has no bowling card to read"
+
+
+def test_a_defence_without_the_oppositions_reply_is_refused_rather_than_assumed():
+    """Its objective IS the reply. Defaulting the missing side to zero would hand every
+    defender a win -- A23's rule about an unobserved value acquiring a plausible default,
+    in the place it would be most rewarding to get wrong."""
+    s = Scenario(DEFEND_BY, 1, "RCB 2016", "Final", runs_required=20)
+    with pytest.raises(ValueError):
+        evaluate(s, innings(runs=180))

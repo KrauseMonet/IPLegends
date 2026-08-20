@@ -147,12 +147,21 @@ def bonuses_earned(scenario: Scenario, mine: Innings, theirs: Innings | None) ->
     return tuple(earned)
 
 
-def evaluate(scenario: Scenario, mine: Innings, theirs: Innings) -> Outcome:
+def evaluate(scenario: Scenario, mine: Innings, theirs: Innings | None = None) -> Outcome:
     """Did the player do what today asked, by how much, and what did they pick up on the way.
 
-    `mine` is always the player's own innings and `theirs` the opposition's, whichever
-    batted first -- the caller resolves that from `scenario.player_bats_first`, so nothing
-    in here has to reason about home and away."""
+    `mine` is always the player's own innings; the caller resolves that from
+    `scenario.player_bats_first`, so nothing in here reasons about home and away.
+
+    `theirs` is None for a CHASE, and that is a real property of the format rather than a
+    missing argument. A chase is against a target the day fixed in advance -- the same
+    number for everybody, which is what makes two chases comparable at all -- so the
+    opposition's innings was played once when the day was created and is not replayed per
+    player. Nobody bowls at them, so there is no card to read a bowling bonus off. A
+    DEFEND_BY is the opposite: the opposition really does chase what the player set, so
+    both innings exist and both are the player's own doing."""
+    if scenario.kind == DEFEND_BY and theirs is None:
+        raise ValueError("defend_by is decided by the opposition's reply; it needs one")
     bonuses = bonuses_earned(scenario, mine, theirs)
     points = sum(BONUS_POINTS[b] for b in bonuses)
 

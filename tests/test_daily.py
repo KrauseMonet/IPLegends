@@ -183,3 +183,111 @@ def test_replay_day_actually_passes_the_fallback_and_the_zero_reroll_budget(monk
     assert seen["fallback"] is not None, "no fallback pool reached the draft"
     assert set(seen["fallback"]) == set(FULL.fs_ids), \
         "the fallback must be the whole archive, or it can strand too"
+
+
+# --- playing and marking a day ------------------------------------------------------------
+
+from tools.snapshot_deck import model_from
+
+MODEL = model_from(read_document())
+
+
+def _a_side(offset=0):
+    fs = FULL.fs_ids[10 + offset]
+    side = daily.side_for_fs(FULL, fs)
+    assert side is not None
+    return side
+
+
+def test_a_chase_plays_one_innings_and_a_defence_plays_two():
+    """Not a detail: a chase's target was fixed when the day was created, so replaying the
+    opposition per player would make the target differ by whoever happened to be bowling --
+    and two chases against different targets are not comparable, which is the whole point
+    of a shared daily."""
+    from game.scenarios import CHASE, DEFEND_BY, Scenario
+    mine, opp = _a_side(), _a_side(1)
+
+    chase = Scenario(CHASE, opp_fs := 1, "X 2013", "Final", target=170)
+    my_inn, their_inn = daily.play_day(MODEL, chase, mine, None, random.Random(1))
+    assert my_inn.balls > 0
+    assert their_inn is None, "a chase replayed the opposition"
+
+    defence = Scenario(DEFEND_BY, opp_fs, "X 2013", "Final", runs_required=20)
+    my_inn, their_inn = daily.play_day(MODEL, defence, mine, opp, random.Random(1))
+    assert their_inn is not None and their_inn.balls > 0
+
+
+def test_a_defence_without_an_opposition_side_is_refused():
+    from game.scenarios import DEFEND_BY, Scenario
+    s = Scenario(DEFEND_BY, 1, "X 2013", "Final", runs_required=20)
+    with pytest.raises(ValueError):
+        daily.play_day(MODEL, s, _a_side(), None, random.Random(1))
+
+
+def test_the_same_attempt_scores_the_same_every_time():
+    """The match is seeded from the day and the account, so a re-submission cannot re-roll
+    a bad result -- and a stored row can be re-verified later by replaying it."""
+    from game.scenarios import CHASE, Scenario
+    s = Scenario(CHASE, 1, "X 2013", "Final", target=170)
+    mine = _a_side()
+    a = daily.score_day(MODEL, s, mine, None, random.Random("fixed"))[0]
+    b = daily.score_day(MODEL, s, mine, None, random.Random("fixed"))[0]
+    assert (a.objective_met, a.margin, a.bonuses_met) == (b.objective_met, b.margin, b.bonuses_met)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_scoring_marks_the_very_innings_it_played(seed):
+    """`score_day` plays and marks in one call so the two cannot be done against different
+    innings -- the shape A116 had to repair once already.
+
+    Parametrised over several seeds deliberately: with a single seed, an implementation
+    that marked a DIFFERENT innings still passed, because two innings can happen to end on
+    the same number of wickets. One coincidence is likely; eight in a row is not."""
+    from game.scenarios import CHASE, Scenario
+    s = Scenario(CHASE, 1, "X 2013", "Final", target=170)
+    outcome, my_inn, _ = daily.score_day(MODEL, s, _a_side(), None, random.Random(seed))
+    assert outcome.margin == 10 - my_inn.wickets
+    assert outcome.objective_met == my_inn.chased
+
+
+# --- the integrity rule specific to a daily ------------------------------------------------
+
+def test_a_state_carrying_someone_elses_seed_is_refused():
+    """The seed is NOT the player's here -- it is derived from the date and the account. A
+    state with any other seed describes a deal nobody offered, and every other check in
+    `submit` would pass, because the draft it encodes is perfectly legal. Just not theirs."""
+    mine = daily.player_seed(DAY, 1)
+    ok = sess.encode(mine, ())
+    daily.decode_own_state(ok, DAY, 1)                      # their own deal: fine
+
+    with pytest.raises(daily.DailyError):
+        daily.decode_own_state(sess.encode(mine, ()), DAY, 2)      # another account's
+    with pytest.raises(daily.DailyError):
+        daily.decode_own_state(sess.encode(mine + 1, ()), DAY, 1)  # a hand-edited seed
+    with pytest.raises(daily.DailyError):
+        daily.decode_own_state(ok, DAY + datetime.timedelta(1), 1)  # yesterday's deal
+
+
+def test_side_for_fs_declines_a_squad_that_cannot_field_an_eleven():
+    """A property of the squad, not a failure -- which is why day generation redraws rather
+    than raising the first time it meets one."""
+    thin = daily.side_for_fs(
+        type(FULL)(cards_by_fs={999: FULL.cards_by_fs[FULL.fs_ids[0]][:3]}, fs_ids=[999]),
+        999)
+    assert thin is None
+
+
+
+def test_a_days_target_is_the_same_however_often_it_is_generated():
+    """Player-independence needs no test -- `opposition_total` has no access to the player,
+    so it is enforced by the signature rather than by a rule that could drift. What can
+    drift is DAY-determinism: if the opposition's innings were seeded from anything but the
+    date, two servers creating today at the same moment would store different targets and
+    the leaderboard would be comparing different challenges."""
+    a, _ = daily._generate_day(FULL, MODEL, DAY)
+    b, _ = daily._generate_day(FULL, MODEL, DAY)
+    assert a.scenario == b.scenario, "the same date generated two different challenges"
+    assert a.deck_fs_ids == b.deck_fs_ids
+
+    c, _ = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    assert (c.scenario, c.deck_fs_ids) != (a.scenario, a.deck_fs_ids)

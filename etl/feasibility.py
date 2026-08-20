@@ -65,6 +65,19 @@ OVERSEAS_CAP = 4
 # itself the finding, so it is generous rather than tight.
 REDRAW_CAP = 2_000
 
+# How many consecutive squads must offer NOBODY eligible before a caller that supplied a
+# fallback pool starts drawing from it instead. Only the daily challenge supplies one: it
+# deals from a deliberately small shared deck, and measured on the real deck a restricted
+# 16-squad pool strands a careless drafter 3.2% of the time where the full deck strands
+# 0%. On a one-shot daily that is not a rate worth wearing.
+#
+# A hundred rather than "once we have tried them all", because draws are WITH replacement:
+# seeing all sixteen squads takes about 16*H(16) ~= 54 draws, so a threshold equal to the
+# pool size would widen while most of it was still untried. A hundred is comfortably past
+# that and still far below REDRAW_CAP, so widening means "this deck genuinely cannot serve
+# this pick" rather than "the dice were unkind".
+WIDEN_AFTER_EMPTY = 100
+
 # A reroll is the opposite of the guarantee: the drafter REJECTING a deal that already has
 # eligible candidates, not the deck failing to offer one. Budget is for the whole draft,
 # not per pick (original SPEC 1.1), and enforcing the count is the session layer's job
@@ -577,10 +590,17 @@ class Result:
     impact: Card | None = None
     player_rerolls: int = 0        # total RerollRequested catches across the whole draft
     player_repositions: int = 0    # total RepositionRequested catches across the draft
+    # How many picks had to be served from `fallback_fs_ids` because the primary pool
+    # could not offer anybody eligible. Zero for every ordinary draft -- the daily
+    # challenge is the only caller that passes a fallback at all. Recorded rather than
+    # left silent for A107's reason: a fallback that works is exactly what hides the fact
+    # that a deck is too thin to serve its own drafters.
+    widened: int = 0
 
 
 def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
-              require_legal: bool = True, cap: int | None = OVERSEAS_CAP) -> Result:
+              require_legal: bool = True, cap: int | None = OVERSEAS_CAP,
+              fallback_fs_ids: tuple[int, ...] | None = None) -> Result:
     """With `guarantee` off, an unservable deal strands the drafter instead of
     re-drawing. With `require_legal` off, a pick is allowed even if it makes a legal
     twelve unreachable -- the ablation that shows how much work the forward check is
@@ -642,7 +662,13 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         for attempt in range(REDRAW_CAP if guarantee else 1):
             if fs_id is None:
                 fs_id = rng.choice(pool)
+            # Back to the primary pool for the next attempt -- unless this pick has now
+            # been refused by so many squads that the pool itself is the problem, in which
+            # case a caller that supplied a fallback gets widened to it. `deck.cards_by_fs`
+            # must already hold those squads; only which ids are DRAWN from changes.
             pool = deck.fs_ids
+            if fallback_fs_ids is not None and empty_attempts >= WIDEN_AFTER_EMPTY:
+                pool = fallback_fs_ids
             cards = deck.cards_by_fs.get(fs_id, ())
             if require_legal:
                 candidates = list(eligible(
@@ -730,6 +756,8 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         else:
             order[slot - 1] = card
         result.redraws.append(empty_attempts)
+        if fallback_fs_ids is not None and empty_attempts >= WIDEN_AFTER_EMPTY:
+            result.widened += 1
         result.fs_served.append(fs_id)
         picks.append(card)
 

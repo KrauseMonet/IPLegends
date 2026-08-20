@@ -257,7 +257,10 @@ def _validate_reposition(move: Reposition, state: DraftState) -> None:
             f"{from_card.name} cannot move to slot {move.to_slot}: not eligible there")
 
 
-def _policy(moves: tuple[Move, ...]):
+def _policy(moves: tuple[Move, ...], rerolls_allowed: int = REROLLS_ALLOWED):
+    """`rerolls_allowed` is a parameter rather than the module constant so a MODE can set
+    it. The daily challenge passes 0 -- its picks are meant to be final and from memory --
+    and every other caller keeps the default, so nothing about the ordinary draft moves."""
     remaining_moves = iter(moves)
     rerolls_used = 0
 
@@ -271,9 +274,10 @@ def _policy(moves: tuple[Move, ...]):
         if isinstance(move, Reroll):
             if move.kind not in REROLL_KINDS:
                 raise InvalidState(f"unknown reroll kind {move.kind!r}")
-            if rerolls_used >= REROLLS_ALLOWED:
+            if rerolls_used >= rerolls_allowed:
                 raise InvalidState(
-                    f"no rerolls remaining ({REROLLS_ALLOWED} allowed per draft)")
+                    "rerolls are not part of this draft" if rerolls_allowed == 0
+                    else f"no rerolls remaining ({rerolls_allowed} allowed per draft)")
             rerolls_used += 1
             raise RerollRequested(move.kind)
         if isinstance(move, Reposition):
@@ -293,7 +297,9 @@ def _policy(moves: tuple[Move, ...]):
     return policy
 
 
-def replay(deck: Deck, seed: int, moves: tuple[Move, ...]) -> Session:
+def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
+           rerolls_allowed: int = REROLLS_ALLOWED,
+           fallback_fs_ids: tuple[int, ...] | None = None) -> Session:
     """Rebuild a session from scratch on every request (SPEC 11.3).
 
     `Reposition` moves reach `run_draft` exactly like `Reroll` does -- as an exception
@@ -305,7 +311,8 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...]) -> Session:
     """
     rng = random.Random(seed)
     try:
-        result = run_draft(deck, _policy(moves), rng)
+        result = run_draft(deck, _policy(moves, rerolls_allowed), rng,
+                           fallback_fs_ids=fallback_fs_ids)
     except _NeedChoice as pause:
         state = pause.state
         candidates = pause.candidates

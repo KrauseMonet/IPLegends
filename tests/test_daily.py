@@ -330,3 +330,86 @@ def test_only_the_bonuses_today_can_actually_award_are_advertised():
         __import__("game.scenarios", fromlist=["x"]).bonuses_earned(chase, quick, None))
     assert set(daily.bonuses_on_offer(defence)) <= set(
         __import__("game.scenarios", fromlist=["x"]).bonuses_earned(defence, quick, reply))
+
+
+# --- the shareable line --------------------------------------------------------------------
+
+def _day(kind, **kw):
+    from game.scenarios import Scenario
+    return daily.Day(datetime.date(2026, 8, 20), 1,
+                     Scenario(kind, 1, "Sunrisers Hyderabad 2017", "Qualifier 1", **kw),
+                     [], 4)
+
+
+def test_a_shared_line_never_names_a_player():
+    """THE rule. Everybody gets the same deal, so naming the twelve would hand a reader
+    the answer instead of the question -- the opposite of what sharing is for. Checked
+    against real card names from the real deck rather than a hand-picked few, so a field
+    added to the line later cannot smuggle one in unnoticed."""
+    from game.scenarios import CHASE_WITH_WICKETS
+    text = daily.share_text(
+        _day(CHASE_WITH_WICKETS, target=151, wickets_required=5),
+        {"objective_met": True, "margin": 7, "bonuses": ["opener_century"]}, 3, 12)
+
+    names = {c.name for cards in FULL.cards_by_fs.values() for c in cards}
+    leaked = [n for n in names if len(n) > 6 and n in text]
+    assert not leaked, f"the shared line names players: {leaked}"
+
+
+def test_it_carries_the_challenge_the_outcome_and_where_to_play():
+    from game.scenarios import CHASE_WITH_WICKETS
+    text = daily.share_text(
+        _day(CHASE_WITH_WICKETS, target=151, wickets_required=5),
+        {"objective_met": True, "margin": 7, "bonuses": ["opener_century"]}, 3, 12)
+    assert "152" in text, "the score to REACH, so a reader knows what was asked"
+    assert "Sunrisers Hyderabad 2017" in text
+    assert "7 wickets in hand" in text
+    assert "#3 of 12" in text
+    assert daily.SHARE_URL in text
+
+
+def test_a_failed_chase_shares_how_close_it_came():
+    """Its margin is negative for exactly this reason, so the line must read it as runs
+    short rather than printing a minus sign at somebody."""
+    from game.scenarios import CHASE
+    text = daily.share_text(_day(CHASE, target=151),
+                            {"objective_met": False, "margin": -14, "bonuses": []}, 9, 12)
+    assert "fell 14 short" in text
+    assert "-14" not in text
+    assert "❌" in text
+
+
+def test_a_defence_shares_in_runs_and_a_chase_in_wickets():
+    """The unit is the scenario's, and mixing them would make two lines incomparable to
+    anyone reading both."""
+    from game.scenarios import CHASE, DEFEND_BY
+    won = daily.share_text(_day(DEFEND_BY, runs_required=20),
+                           {"objective_met": True, "margin": 31, "bonuses": []}, 1, 5)
+    assert "won by 31 runs" in won and "wicket" not in won
+
+    chased = daily.share_text(_day(CHASE, target=151),
+                              {"objective_met": True, "margin": 1, "bonuses": []}, 1, 5)
+    assert "1 wicket in hand" in chased, "singular, not '1 wickets'"
+
+
+def test_bonus_lines_appear_only_when_earned():
+    from game.scenarios import CHASE
+    none = daily.share_text(_day(CHASE, target=151),
+                            {"objective_met": True, "margin": 5, "bonuses": []}, 1, 5)
+    assert "⭐" not in none
+
+    two = daily.share_text(
+        _day(CHASE, target=151),
+        {"objective_met": True, "margin": 5,
+         "bonuses": ["opener_century", "finished_early"]}, 1, 5)
+    assert two.count("⭐") == 2
+
+
+def test_the_rank_line_is_omitted_when_there_is_no_rank_to_show():
+    """A result submitted before the board is readable, or shared by something that did
+    not ask for a rank, must not print '#None of None'."""
+    from game.scenarios import CHASE
+    text = daily.share_text(_day(CHASE, target=151),
+                            {"objective_met": True, "margin": 5, "bonuses": []})
+    assert "#" not in text and "None" not in text
+    assert daily.SHARE_URL in text

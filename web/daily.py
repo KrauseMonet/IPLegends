@@ -170,6 +170,65 @@ def bonuses_on_offer(scenario: Scenario) -> list[str]:
     return on
 
 
+# --- the shareable result ------------------------------------------------------------------
+
+# Where a shared line points people. Not derived from the request's own Host header: a
+# result pasted into a chat has to work for whoever reads it, and a link built from
+# whatever host the submitter happened to use would carry a preview deployment's URL into
+# other people's messages.
+SHARE_URL = "iplegends.vercel.app/daily"
+
+
+def share_text(day: "Day", result: dict, rank: int | None = None,
+               players: int | None = None) -> str:
+    """The one-tap line a player posts somewhere, and the rule that shapes it is that it
+    must be SPOILER-FREE.
+
+    It carries the challenge, whether they beat it and by how much -- and never a single
+    player they picked. Naming the twelve would ruin the day for whoever reads it, which
+    is the opposite of what sharing is for: everybody gets the same deal, so a reader can
+    go and answer the same question rather than being told the answer. Wordle's grid is
+    the same trick -- the pattern, never the word.
+
+    Built here rather than in the page for the reason `Scenario.describe` is: this is
+    wording that has to agree with the scoring, and a second copy in JavaScript would be a
+    second place for "7 wickets in hand" and "14 short" to drift from what actually
+    happened."""
+    from game.scenarios import BONUS_LABELS
+
+    sc = day.scenario
+    lines = [f"Legends Almanack — {day.challenge_date.day} {day.challenge_date:%b}"]
+
+    stage = sc.stage if sc.stage.startswith("Qualifier") else f"the {sc.stage}"
+    if sc.target is not None:
+        lines.append(f"Chase {sc.target + 1} · {sc.opposition_name} · {stage}")
+    else:
+        lines.append(f"Defend by {sc.runs_required}+ · {sc.opposition_name} · {stage}")
+
+    lines.append(("✅ " if result["objective_met"] else "❌ ")
+                 + _share_outcome(sc, result))
+    for b in result.get("bonuses") or []:
+        lines.append(f"⭐ {BONUS_LABELS.get(b, b)}")
+    if rank is not None and players:
+        lines.append(f"#{rank} of {players} today")
+    lines.append(SHARE_URL)
+    return "\n".join(lines)
+
+
+def _share_outcome(scenario: Scenario, result: dict) -> str:
+    """The same two-branch rule `evaluate` uses, in the words a reader wants: a failed
+    chase reports how close it came, because its margin is negative for exactly that
+    reason (game/scenarios.py has the why)."""
+    margin = result["margin"]
+    if scenario.margin_unit == "runs":
+        if margin > 0:
+            return f"won by {margin} runs"
+        return "tied" if margin == 0 else f"lost by {-margin} runs"
+    if result["objective_met"]:
+        return f"chased, {margin} wicket{'' if margin == 1 else 's'} in hand"
+    return f"fell {-margin} short"
+
+
 # --- the day, in the database ---------------------------------------------------------------
 
 class DailyError(ValueError):
@@ -354,6 +413,14 @@ def rank_of(conn, challenge_date, account_id: int) -> int | None:
         ) ranked where account_id = %s
         """, (challenge_date, account_id)).fetchone()
     return row[0] if row else None
+
+
+def players_today(conn, challenge_date) -> int:
+    """How many have finished today -- the denominator in "#3 of 12", which is what makes
+    a rank mean anything to somebody reading it in a chat."""
+    return conn.execute(
+        "select count(*) from daily_results where challenge_date = %s",
+        (challenge_date,)).fetchone()[0]
 
 
 def result_for(conn, challenge_date, account_id: int) -> dict | None:

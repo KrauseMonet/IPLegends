@@ -1767,6 +1767,17 @@ class DailyOut(BaseModel):
     bonuses: list[str] = Field(description="what today's bonuses are, in plain words")
     played: bool = Field(description="true once this account has used its one attempt")
     result: dict | None = Field(description="their own recorded attempt, once played")
+    rank: int | None = Field(
+        default=None, description="where this account stands today; null until played")
+    players_today: int = Field(
+        default=0, description="how many have finished today -- the rank's denominator")
+    share_text: str | None = Field(
+        default=None,
+        description="the one-tap line to post somewhere, built server-side so its wording "
+                    "cannot drift from the scoring. Deliberately SPOILER-FREE: it carries "
+                    "the challenge and the outcome and never a player who was picked, "
+                    "because everyone gets the same deal and a reader should get the "
+                    "question rather than the answer. Null until played.")
     state: str | None = Field(
         description="a fresh draft state for this account's own deal; null once played")
 
@@ -1787,6 +1798,19 @@ class DailyBoardRow(BaseModel):
 def _daily_out(conn, account_id: int, day) -> DailyOut:
     from game.scenarios import BONUS_LABELS
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
+    rank = players = None
+    share = None
+    if result is not None:
+        rank = daily_lib.rank_of(conn, day.challenge_date, account_id)
+        players = daily_lib.players_today(conn, day.challenge_date)
+        # Built BEFORE the labels are attached: `share_text` maps the raw keys itself, and
+        # handing it a dict already carrying labels would just be two spellings of the same
+        # mapping in flight at once.
+        share = daily_lib.share_text(day, result, rank, players)
+        # The page shows what was earned in words, not the storage key -- the result screen
+        # was reading "finished_early" straight out of the database at the player.
+        result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b)
+                                            for b in (result.get("bonuses") or [])])
     return DailyOut(
         challenge_date=str(day.challenge_date),
         scenario=day.scenario.describe(),
@@ -1800,6 +1824,9 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
         result=result,
         state=(None if result is not None
                else sess.encode(daily_lib.player_seed(day.challenge_date, account_id), ())),
+        rank=rank,
+        players_today=players or 0,
+        share_text=share,
     )
 
 

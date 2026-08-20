@@ -73,6 +73,28 @@ function outcomeLine(d){
                       : `Lost by ${Math.abs(r.margin)} runs`;
 }
 
+// Prefer the platform's own share sheet where there is one -- on a phone that is how
+// people actually send something to a friend, and it reaches WhatsApp or Messages in one
+// tap where a clipboard copy needs them to go and paste it. Falls back to the clipboard,
+// and then to showing the text, which is the same three-step ladder `copyLink` already
+// uses elsewhere in this app.
+//
+// The text itself is the SERVER's (`share_text`), never assembled here: its wording has to
+// agree with the scoring, and a second copy in this file would be a second place for
+// "7 wickets in hand" to drift from what actually happened.
+async function shareResult(btn){
+  const text = DAY && DAY.share_text;
+  if (!text){ slip('Nothing to share yet.'); return; }
+  if (navigator.share){
+    try { await navigator.share({text}); return; }
+    catch(e){ if (e && e.name === 'AbortError') return; }   // they closed the sheet: not an error
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    slip('Result copied — spoiler-free, so you can post it anywhere.');
+  } catch(e){ slip(text); }
+}
+
 async function showDone(){
   const d = DAY, r = d.result;
   $('#draft').classList.add('hide');
@@ -93,10 +115,12 @@ async function showDone(){
       <div class="over-line">Daily challenge · ${d.challenge_date}</div>
       <div class="call ${r.objective_met ? 'won' : ''}">${outcomeLine(d)}</div>
       <div class="margin">${d.scenario}</div>
+      ${d.rank ? `<div class="margin">You are <em>#${d.rank}</em> of ${d.players_today} today.</div>` : ''}
       ${r.bonuses.length
-        ? `<div class="margin">Bonus earned: ${r.bonuses.join(', ')} (+${r.bonus_points})</div>`
+        ? `<div class="margin">Bonus earned: ${(r.bonus_labels || r.bonuses).join(', ')} (+${r.bonus_points})</div>`
         : '<div class="margin">No bonus today.</div>'}
       <div class="foot-actions">
+        <button class="act lead" id="shareBtn" onclick="shareResult(this)">Share result</button>
         <a class="act" href="/">Home</a>
       </div>
     </div>

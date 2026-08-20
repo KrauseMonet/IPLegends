@@ -491,3 +491,106 @@ def test_a_real_streak_is_shared():
     # Still spoiler-free with the extra line on it.
     names = {c.name for cards in FULL.cards_by_fs.values() for c in cards}
     assert not [n for n in names if len(n) > 6 and n in text]
+
+
+# --- the played match, for watching and for the scorecard ------------------------------------
+
+def test_the_chase_branch_scores_without_the_opposition_and_still_shows_it():
+    from game.scenarios import CHASE_WITH_WICKETS, Scenario
+    day = daily.Day(DAY, 1,
+                    Scenario(CHASE_WITH_WICKETS, FULL.fs_ids[10], "X 2013", "Final",
+                             target=150, wickets_required=5),
+                    daily.build_day(FULL, DAY), 6)
+    # A real, finished draft for this day and account.
+    state = _finished_state(day, account_id=1)
+    play = daily.play_and_score(FULL, MODEL, day, 1, state)
+
+    assert play.first.balls > 0, "the opposition's innings was not produced for display"
+    assert play.second.balls > 0, "the player's own innings is missing"
+    assert play.first_label != "You" and play.second_label == "You", \
+        "in a chase the opposition bats first"
+
+
+def test_a_chase_is_scored_with_NO_opposition_innings(monkeypatch):
+    """Captured at the seam, because no assertion about the OUTCOME can establish this.
+
+    `theirs` changes a chase's result only through the four-wicket bonus, so an
+    implementation that wrongly passed the opposition's innings scores identically on every
+    day whose derived innings happens to contain no four-for -- which is most of them. Two
+    earlier versions of this test compared outcomes and both passed against a real break.
+    What is actually being asserted is the WIRING: that nothing but the player's own innings
+    ever reaches the evaluator on a chase."""
+    from game.scenarios import CHASE_WITH_WICKETS, Scenario
+    import game.scenarios as scen
+
+    day = daily.Day(DAY, 1,
+                    Scenario(CHASE_WITH_WICKETS, FULL.fs_ids[10], "X 2013", "Final",
+                             target=150, wickets_required=5),
+                    daily.build_day(FULL, DAY), 6)
+    seen = []
+    real = scen.evaluate
+
+    def spy(scenario, mine, theirs=None):
+        seen.append(theirs)
+        return real(scenario, mine, theirs)
+
+    monkeypatch.setattr(daily, "evaluate", spy)
+    daily.play_and_score(FULL, MODEL, day, 1, _finished_state(day, account_id=1))
+
+    assert seen, "the evaluator was never called"
+    assert all(t is None for t in seen), \
+        "a chase was scored against an innings nobody bowled"
+
+
+def _finished_state(day, account_id):
+    """Drive a real draft for this day to twelve picks and return its state string."""
+    from etl.feasibility import DraftState, IMPACT_SLOT, pick_rational
+    moves = ()
+    for _ in range(40):
+        s = daily.replay_day(FULL, day.challenge_date, account_id, day.deck_fs_ids, moves)
+        if s.deal is None:
+            return sess.encode(daily.player_seed(day.challenge_date, account_id), moves)
+        open_slots = frozenset(
+            [n for n in range(1, 12) if s.order[n - 1] is None]
+            + ([IMPACT_SLOT] if s.impact is None else []))
+        st = DraftState(tuple(s.picks), tuple(s.order), s.impact, open_slots,
+                        any(c.keeper_eligible for c in s.picks),
+                        sum(1 for c in s.picks if c.bowl is not None), 12 - len(s.picks))
+        card, slot = pick_rational(list(s.deal.options), st, random.Random(account_id))
+        i = next(n for n, c in enumerate(s.deal.options) if c.person_id == card.person_id)
+        moves = moves + (sess.Pick(i, slot),)
+    raise AssertionError("draft did not finish")
+
+
+@pytest.mark.parametrize("kind,margin,chased,first_label,second_label,expected", [
+    # A DEFENCE has the player batting FIRST. Reporting the second side as the winner
+    # handed a defence the player had just won by 77 runs to the opposition -- found by
+    # reading a real result, not by a test, which is why this table exists now.
+    ("defend_by", 77, False, "You", "CSK 2010", "You"),
+    ("defend_by", -30, False, "You", "CSK 2010", "CSK 2010"),
+    # A CHASE has them batting second.
+    ("chase", 7, True, "SRH 2017", "You", "You"),
+    ("chase", -3, False, "SRH 2017", "You", "SRH 2017"),
+])
+def test_the_winner_is_the_side_that_actually_won(kind, margin, chased, first_label,
+                                                   second_label, expected):
+    import web.app as app
+    from game.scenarios import Outcome, Scenario
+
+    scenario = (Scenario("defend_by", 1, "CSK 2010", "Final", runs_required=20)
+                if kind == "defend_by"
+                else Scenario("chase", 1, "SRH 2017", "Final", target=150))
+    first = _stub_innings(237 if kind == "defend_by" else 151)
+    second = _stub_innings((237 - margin) if kind == "defend_by" else 151 + margin,
+                           chased=chased)
+    play = daily.DayPlay(Outcome(margin > 0 if kind == "defend_by" else chased,
+                                 margin, 0, (), "s"),
+                         first, second, first_label, second_label)
+    assert app._daily_match_out(play, scenario)["winner"] == expected
+
+
+def _stub_innings(runs, chased=False):
+    """Only the fields the scorecard shape reads -- this is about which LABEL comes back,
+    not about cricket."""
+    from game.simulator import Innings
+    return Innings(batting=[], bowling=[], runs=runs, wickets=4, balls=120, chased=chased)

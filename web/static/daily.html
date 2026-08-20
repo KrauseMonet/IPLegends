@@ -185,6 +185,113 @@
     <div>The Legends Almanack · squads · selection · season</div>
     <div id="footStats"></div>
   </div>
+  <section id="reveal" class="hide">
+
+    <div id="overStepper" class="hide">
+      <!-- the innings already known, kept on screen for the whole second-innings reveal
+           so a target is never something the viewer has to remember -- hidden entirely
+           when this IS the first innings (nothing prior to recap). -->
+      <div class="report compact hide" id="overPrior">
+        <div class="over-line">First innings</div>
+        <div class="call" id="overPriorScore"></div>
+        <div class="margin" id="overPriorBest"></div>
+        <div class="margin" id="overTargetLine" style="font-style:normal;font-weight:700;color:var(--gold-2)"></div>
+      </div>
+      <div class="report">
+        <div class="over-line" id="overStage"></div>
+        <div class="call" id="overScoreLine"></div>
+        <div class="margin" id="overLastLine"></div>
+        <div class="over-gauge"><div class="gauge"><i id="overOversBar" style="width:0%"></i></div></div>
+        <div id="overChips"></div>
+      </div>
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip innings</button>
+        <button class="act" onclick="dailySkipMatch()">Skip to result</button>
+      </div>
+    </div>
+  </section>
+
+
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
+    <div class="scorecard-shell stat-frame">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="statSub"></div>
+          <div class="call" id="statName"></div>
+        </div>
+        <div class="colophon stat-tiles" id="statBody"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideStat()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="imprint">
+    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
 </div>
 
 <script src="/static/common.js?v=b79043f827"></script>
@@ -192,7 +299,8 @@
 <!-- Set BEFORE draft.js: it decides whether draft.js runs its own solo resume-from-hash
      boot. daily.js loads afterwards and cannot answer that question in time. -->
 <script>window.DAILY_PAGE = true;</script>
+<script src="/static/reveal.js?v=2be41a305e"></script>
 <script src="/static/draft.js?v=5aa00895cf"></script>
-<script src="/static/daily.js?v=54fa00597d"></script>
+<script src="/static/daily.js?v=01bd360187"></script>
 </body>
 </html>

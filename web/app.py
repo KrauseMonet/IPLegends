@@ -1776,6 +1776,14 @@ class DailyOut(BaseModel):
         description="consecutive days played. Alive rather than broken when today has not "
                     "been played yet -- a day is only missed once it has passed.")
     longest_streak: int = Field(default=0, description="the best run ever, not the current one")
+    match: dict | None = Field(
+        default=None,
+        description="the played match, shaped exactly like a ResultOut so the same "
+                    "reveal and scorecard the season and rooms use can render it "
+                    "unmodified. Null until played. Re-derived on every read rather than "
+                    "stored: the match is a pure function of the day, the account and the "
+                    "state, all of which are stored, so a reload reproduces the very "
+                    "innings the player watched.")
     share_text: str | None = Field(
         default=None,
         description="the one-tap line to post somewhere, built server-side so its wording "
@@ -1800,6 +1808,57 @@ class DailyBoardRow(BaseModel):
     bonuses: list[str]
 
 
+def _daily_innings_out(innings, *, bowled_by_a_player: bool) -> dict:
+    """An innings for the daily scorecard, with the bowling card dropped when nobody
+    actually bowled it.
+
+    A chase's first innings was played against the synthetic league-average attack that
+    fixes the day's target -- it has to be player-independent or the target is not shared.
+    Those bowlers are named "bowler 1".."bowler 5" and are not people; putting them on a
+    scorecard would credit wickets to somebody who does not exist. The batting is entirely
+    real and stays."""
+    out = _innings_out(innings).model_dump()
+    if not bowled_by_a_player:
+        out["bowling"] = []
+    return out
+
+
+def _daily_match_out(play, scenario) -> dict:
+    """A daily match in `ResultOut`'s own shape.
+
+    Deliberately the same shape rather than a new one: `renderScorecard` and the
+    over-by-over reveal already read it, and a second shape would mean a second renderer
+    for the same thing. `home` is simply whoever batted first, which is what it means
+    everywhere else in this engine."""
+    first, second = play.first, play.second
+    # WHICH SIDE IS THE PLAYER depends on the kind, and getting it from the outcome alone
+    # is what made this wrong: a defence has the player batting FIRST, so reporting the
+    # second side as the winner handed a defence the player had just won by 77 runs to the
+    # opposition. `DayPlay` already labels the innings; use that rather than re-deriving.
+    player_is_first = scenario.kind == "defend_by"
+    player_label = play.first_label if player_is_first else play.second_label
+    other_label = play.second_label if player_is_first else play.first_label
+    player_won = (play.outcome.margin > 0) if player_is_first else second.chased
+    return {
+        "stage": f"Daily · {scenario.stage}",
+        "home": play.first_label, "away": play.second_label,
+        "home_score": _score(first.runs, first.wickets),
+        "away_score": _score(second.runs, second.wickets),
+        "winner": (player_label if player_won else other_label)
+                  if first.runs != second.runs else None,
+        "margin": play.outcome.summary,
+        "yours": True,
+        # Exactly ONE innings in a daily is bowled by real players: the reply to a
+        # defence, where the opposition chases what the player set and the player's own
+        # attack is what they face. Everything else -- both innings of a chase, and the
+        # player's own innings in a defence -- is bowled by the synthetic league-average
+        # attack that keeps the target player-independent, so it has no bowling card.
+        "home_innings": _daily_innings_out(first, bowled_by_a_player=False),
+        "away_innings": _daily_innings_out(
+            second, bowled_by_a_player=(scenario.kind == "defend_by")),
+    }
+
+
 def _daily_out(conn, account_id: int, day) -> DailyOut:
     from game.scenarios import BONUS_LABELS
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
@@ -1808,7 +1867,7 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
     streak, longest = daily_lib.streaks(
         daily_lib.played_dates(conn, account_id), day.challenge_date)
     rank = players = None
-    share = None
+    share = match = None
     if result is not None:
         rank = daily_lib.rank_of(conn, day.challenge_date, account_id)
         players = daily_lib.players_today(conn, day.challenge_date)
@@ -1820,6 +1879,9 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
         # was reading "finished_early" straight out of the database at the player.
         result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b)
                                             for b in (result.get("bonuses") or [])])
+        play = daily_lib.play_and_score(STATE["deck"], STATE["model"], day,
+                                        account_id, result["state"])
+        match = _daily_match_out(play, day.scenario)
     return DailyOut(
         challenge_date=str(day.challenge_date),
         scenario=day.scenario.describe(),
@@ -1837,6 +1899,7 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
         players_today=players or 0,
         streak=streak,
         longest_streak=longest,
+        match=match,
         share_text=share,
     )
 

@@ -278,10 +278,10 @@ function scorecardInnings(short, score, inn){
         <th class="n">6s</th><th class="n">SR</th></tr>
       ${batting}
     </table>
-    <table>
+    ${bowling ? `<table>
       <tr><th>Bowling</th><th class="n">O</th><th class="n">R</th><th class="n">W</th><th class="n">Econ</th></tr>
       ${bowling}
-    </table>
+    </table>` : ''}
     ${fow}
   </div>`;
 }

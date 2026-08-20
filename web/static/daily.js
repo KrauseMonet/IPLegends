@@ -54,9 +54,55 @@ async function dailySubmit(ctrl){
       DAY = await api('/api/daily/submit', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({state: S.state})});
-      await showDone();
+      dailyReveal();
     } catch(e){ slip(e.message); }
   });
+}
+
+// The match plays out ball by ball, exactly as it does in a season and in a room --
+// `reveal.js`'s stepper, unmodified, fed this match instead of that one. The daily was
+// the only mode that resolved a match server-side and then just printed the answer.
+//
+// Both innings, in the order they were bowled. `home` is whoever batted first, which for a
+// CHASE is the opposition -- their innings is the one the target came from, so watching it
+// is what makes the target mean something rather than being a number in a banner.
+function dailyReveal(){
+  const m = DAY.match;
+  if (!m){ showDone(); return; }
+  // Toggled directly rather than through a `go()` of its own: season.js and room.js each
+  // define one over their own list of sections, and a third copy here would be a third
+  // list to keep in step with a page's markup.
+  $('#draft').classList.add('hide');
+  $('#dailyDone').classList.add('hide');
+  $('#reveal').classList.remove('hide');
+  window.scrollTo(0, 0);
+
+  const steps = [];
+  if (m.home_innings) steps.push([m.home_innings, `${m.stage} · ${m.home} batting`, null]);
+  if (m.away_innings) steps.push([m.away_innings, `${m.stage} · ${m.away} batting`,
+    m.home_innings ? {innings: m.home_innings, battingLabel: m.home} : null]);
+
+  let i = 0;
+  (function next(){
+    if (i >= steps.length){ dailyFinishReveal(); return; }
+    const [innings, label, prior] = steps[i++];
+    startOverStepper(innings, label, next, prior);
+  })();
+}
+
+// Straight to the result, abandoning whatever is still animating. The same escape hatch
+// solo and rooms offer, and for the same reason: the outcome is already decided, so this
+// only skips the telling of it.
+function dailySkipMatch(){
+  clearOverTimer();
+  OVER_STEP = null;
+  dailyFinishReveal();
+}
+
+function dailyFinishReveal(){
+  hideAllRevealScreens();
+  $('#reveal').classList.add('hide');
+  showDone();
 }
 
 // A raw margin is not readable on its own -- "-14" and "7" mean entirely different things
@@ -108,6 +154,10 @@ async function shareResult(btn){
   } catch(e){ slip(text); }
 }
 
+function dailyScorecard(){
+  if (DAY && DAY.match) renderScorecard(DAY.match);
+}
+
 async function showDone(){
   const d = DAY, r = d.result;
   $('#draft').classList.add('hide');
@@ -135,6 +185,8 @@ async function showDone(){
         : '<div class="margin">No bonus today.</div>'}
       <div class="foot-actions">
         <button class="act lead" id="shareBtn" onclick="shareResult(this)">Share result</button>
+        ${d.match ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
+        ${d.match ? '<button class="act" onclick="dailyReveal()">Watch again</button>' : ''}
         <a class="act" href="/">Home</a>
       </div>
     </div>

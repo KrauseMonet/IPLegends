@@ -147,6 +147,61 @@ def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | No
                         target=scenario.target), None
 
 
+@dataclass
+class DayPlay:
+    """A finished daily, in the two shapes it is needed in: SCORED, and SHOWN.
+
+    They are not the same thing and keeping them apart is the point of this class. A chase
+    is scored with no opposition innings at all (`evaluate(theirs=None)`) because nobody
+    bowled at them -- the target was fixed when the day was created. But the same match
+    still has to be WATCHED and read as a scorecard, which needs two innings. So the
+    opposition's is derived here for display and never handed to the evaluator: doing that
+    would award a four-wicket haul for balls the player never bowled, which is A101's
+    mistake in a place where it would look entirely reasonable."""
+
+    outcome: Outcome
+    first: Innings
+    second: Innings
+    first_label: str
+    second_label: str
+
+
+def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
+                   state: str) -> DayPlay:
+    """Rebuild one player's finished daily from what is stored -- the day, the account and
+    their state -- and both play it and mark it.
+
+    Nothing about the result is persisted beyond the state and the numbers the leaderboard
+    ranks on (A19): the match is a pure function of those three, so a page reload re-derives
+    exactly the same innings rather than reading a stored copy that could drift from the
+    scoring beside it."""
+    seed, moves = decode_own_state(state, day.challenge_date, account_id)
+    session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
+                          rerolls_allowed=DAILY_REROLLS,
+                          fallback_fs_ids=tuple(full.fs_ids))
+    if session.deal is not None:
+        raise DailyError("this draft is not finished")
+
+    mine = Side(name="You", short="YOU", xi=list(session.order),
+                impact=session.impact, you=True)
+    opposition = side_for_fs(full, day.scenario.opposition_fs_id)
+    # The match's own rng, seeded from the day and the account: the same attempt always
+    # plays out the same way, so a reload shows the innings the player already watched.
+    rng = random.Random(f"daily-match:{day.challenge_date}:{account_id}")
+
+    if day.scenario.kind == DEFEND_BY:
+        outcome, first, second = score_day(model, day.scenario, mine, opposition, rng)
+        return DayPlay(outcome, first, second, "You", opposition.name)
+
+    # A chase. The opposition's innings is re-derived from the DAY's own seed -- the same
+    # call `_generate_day` made to fix the target -- so every player watches the identical
+    # first innings and the total on screen is the one they are chasing.
+    their_innings = opposition_total(
+        model, opposition, random.Random(daily_seed(day.challenge_date)))
+    outcome, my_innings, _none = score_day(model, day.scenario, mine, None, rng)
+    return DayPlay(outcome, their_innings, my_innings, opposition.name, "You")
+
+
 def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
               rng: random.Random) -> tuple[Outcome, Innings, Innings | None]:
     """Play it and mark it in one call, so the two can never end up done against different
@@ -408,16 +463,7 @@ def submit(conn, challenge_date, account_id: int, state: str,
     if session.errors:
         raise DailyError(f"this twelve is not legal: {'; '.join(session.errors)}")
 
-    mine = Side(name="You", short="YOU", xi=list(session.order),
-                impact=session.impact, you=True)
-    opposition = (side_for_fs(full, day.scenario.opposition_fs_id)
-                  if day.scenario.kind == DEFEND_BY else None)
-    # Seeded from the day and the account, so the match is a property of the attempt rather
-    # than of when it was submitted -- the same result comes back on a re-submission, and
-    # nobody can re-roll a bad match by sending it again.
-    outcome, _mine_inn, _their_inn = score_day(
-        model, day.scenario, mine, opposition,
-        random.Random(f"daily-match:{challenge_date}:{account_id}"))
+    outcome = play_and_score(full, model, day, account_id, state).outcome
 
     written = conn.execute(
         """

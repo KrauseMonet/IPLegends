@@ -23,6 +23,13 @@ figure matches an external source, check the figure being claimed, not a neighbo
 Python 3.11 pinned via `uv`. No Homebrew, no Docker, no local Postgres. Database is
 Neon (managed), so no Postgres extension may be used.
 
+**`grep` on this machine is `ugrep`, not GNU or BSD grep**, and its regex engine is
+stricter: `grep -c '\?v=' file` fails outright with "empty (sub)expression" where the
+other two would treat the escape as a literal `?`. It exits 2, which reads as a failing
+command in a `&&` chain and can make a passing gate run look broken -- that is exactly how
+one deploy-gate run reported failure when nothing was wrong. Write the pattern without the
+backslash, or quote it as a fixed string.
+
 `.env` needs **both** Neon endpoints. `DATABASE_URL` is pooled (application);
 `DIRECT_URL` is unpooled and is what migrations and every bulk load use, because
 PgBouncer transaction mode breaks DDL and `COPY FROM STDIN`.

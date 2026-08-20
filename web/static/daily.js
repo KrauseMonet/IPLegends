@@ -17,8 +17,21 @@ DRAFT_API = '/api/daily/draft';
 function dailyBanner(d){
   $('#dailyDate').textContent = 'Daily challenge · ' + d.challenge_date;
   $('#dailyScenario').textContent = d.scenario;
-  $('#dailyBonuses').innerHTML = d.bonuses.length
-    ? 'Bonus: ' + d.bonuses.map(b => `<em>${b}</em>`).join(' · ') : '';
+  $('#dailyBonuses').innerHTML = (d.bonuses.length
+      ? 'Bonus: ' + d.bonuses.map(b => `<em>${b}</em>`).join(' · ') : '')
+    + streakLine(d, false);
+}
+
+// Shown BEFORE playing as something to keep, and after as something kept -- which is the
+// only moment either sentence is worth reading. A streak of one is not mentioned before
+// the day is played: telling a first-timer they are on a one-day streak they have not yet
+// extended is noise, and telling them they might lose it is worse.
+function streakLine(d, done){
+  if (!d.streak) return '';
+  const best = d.longest_streak > d.streak ? ` · best ${d.longest_streak}` : '';
+  if (done) return `<div class="margin">🔥 <em>${d.streak}-day streak</em>${best}</div>`;
+  if (d.streak < 2) return '';
+  return `<div class="margin">🔥 <em>${d.streak}-day streak</em>${best} — play today to keep it.</div>`;
 }
 
 // draft.js calls this instead of its own "Play the season" behaviour once the twelve is
@@ -116,6 +129,7 @@ async function showDone(){
       <div class="call ${r.objective_met ? 'won' : ''}">${outcomeLine(d)}</div>
       <div class="margin">${d.scenario}</div>
       ${d.rank ? `<div class="margin">You are <em>#${d.rank}</em> of ${d.players_today} today.</div>` : ''}
+      ${streakLine(d, true)}
       ${r.bonuses.length
         ? `<div class="margin">Bonus earned: ${(r.bonus_labels || r.bonuses).join(', ')} (+${r.bonus_points})</div>`
         : '<div class="margin">No bonus today.</div>'}

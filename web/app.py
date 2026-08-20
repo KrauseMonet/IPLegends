@@ -1771,6 +1771,11 @@ class DailyOut(BaseModel):
         default=None, description="where this account stands today; null until played")
     players_today: int = Field(
         default=0, description="how many have finished today -- the rank's denominator")
+    streak: int = Field(
+        default=0,
+        description="consecutive days played. Alive rather than broken when today has not "
+                    "been played yet -- a day is only missed once it has passed.")
+    longest_streak: int = Field(default=0, description="the best run ever, not the current one")
     share_text: str | None = Field(
         default=None,
         description="the one-tap line to post somewhere, built server-side so its wording "
@@ -1798,6 +1803,10 @@ class DailyBoardRow(BaseModel):
 def _daily_out(conn, account_id: int, day) -> DailyOut:
     from game.scenarios import BONUS_LABELS
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
+    # Read whether or not today has been played: an unplayed day still has a streak to
+    # keep, and that is precisely when saying so is worth anything.
+    streak, longest = daily_lib.streaks(
+        daily_lib.played_dates(conn, account_id), day.challenge_date)
     rank = players = None
     share = None
     if result is not None:
@@ -1806,7 +1815,7 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
         # Built BEFORE the labels are attached: `share_text` maps the raw keys itself, and
         # handing it a dict already carrying labels would just be two spellings of the same
         # mapping in flight at once.
-        share = daily_lib.share_text(day, result, rank, players)
+        share = daily_lib.share_text(day, result, rank, players, streak)
         # The page shows what was earned in words, not the storage key -- the result screen
         # was reading "finished_early" straight out of the database at the player.
         result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b)
@@ -1826,6 +1835,8 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
                else sess.encode(daily_lib.player_seed(day.challenge_date, account_id), ())),
         rank=rank,
         players_today=players or 0,
+        streak=streak,
+        longest_streak=longest,
         share_text=share,
     )
 

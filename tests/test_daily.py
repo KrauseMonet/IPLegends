@@ -413,3 +413,81 @@ def test_the_rank_line_is_omitted_when_there_is_no_rank_to_show():
                             {"objective_met": True, "margin": 5, "bonuses": []})
     assert "#" not in text and "None" not in text
     assert daily.SHARE_URL in text
+
+
+# --- streaks --------------------------------------------------------------------------------
+
+DAY_BEFORE = datetime.timedelta(days=1)
+
+
+def _days(*offsets):
+    """Dates relative to DAY, oldest first -- `_days(2, 1, 0)` is the three days ending
+    today."""
+    return [DAY - datetime.timedelta(days=n) for n in sorted(offsets, reverse=True)]
+
+
+def test_a_streak_survives_a_day_not_yet_played():
+    """THE rule the feature turns on. Playing yesterday and not yet today has lost nothing
+    -- today is still there to be played -- so the streak is alive and merely unextended.
+
+    Counting only runs that REACH today would tell somebody at breakfast their streak was
+    broken and then, after they played, that it was intact: wrong, and wrong at exactly the
+    moment the streak is supposed to be doing its work."""
+    assert daily.streaks(_days(3, 2, 1), DAY) == (3, 3), "yesterday's run read as broken"
+    assert daily.streaks(_days(2, 1, 0), DAY) == (3, 3), "and it extends when today lands"
+
+
+def test_a_streak_ends_once_a_day_has_actually_been_missed():
+    """The other side of it: older than yesterday means a day really was missed."""
+    assert daily.streaks(_days(2), DAY) == (0, 1)
+    assert daily.streaks(_days(9, 8, 7), DAY) == (0, 3)
+
+
+def test_the_longest_streak_survives_the_current_one_breaking():
+    """What it is for -- the best run ever, not the run in progress."""
+    current, longest = daily.streaks(_days(9, 8, 7, 6, 1, 0), DAY)
+    assert (current, longest) == (2, 4)
+
+
+def test_never_played_is_zero_and_not_an_error():
+    assert daily.streaks([], DAY) == (0, 0)
+
+
+def test_one_day_is_a_streak_of_one():
+    assert daily.streaks(_days(0), DAY) == (1, 1)
+
+
+def test_the_order_and_any_repeats_of_the_input_do_not_matter():
+    """The primary key makes a repeat impossible today, so this is defensive rather than a
+    live case -- but a streak silently doubling because a row arrived twice is the kind of
+    thing nobody would question on a leaderboard."""
+    jumbled = [DAY, DAY - DAY_BEFORE, DAY, DAY - 2 * DAY_BEFORE, DAY - DAY_BEFORE]
+    assert daily.streaks(jumbled, DAY) == (3, 3)
+
+
+def test_a_run_spanning_a_month_boundary_is_still_a_run():
+    """Consecutive means the calendar's own next day, not an arithmetic trick on the day
+    number -- 31 August to 1 September is one day apart and 31 to 1 is not."""
+    end = datetime.date(2026, 9, 1)
+    days = [datetime.date(2026, 8, 30), datetime.date(2026, 8, 31), end]
+    assert daily.streaks(days, end) == (3, 3)
+
+
+def test_a_one_day_streak_is_not_worth_sharing():
+    """Every first-time player has one, and the line above it already says they played
+    today -- so it would be noise on the most-shared result there is."""
+    from game.scenarios import CHASE
+    r = {"objective_met": True, "margin": 5, "bonuses": []}
+    assert "streak" not in daily.share_text(_day(CHASE, target=151), r, 1, 5, streak=1)
+    assert "streak" not in daily.share_text(_day(CHASE, target=151), r, 1, 5, streak=0)
+
+
+def test_a_real_streak_is_shared():
+    from game.scenarios import CHASE
+    text = daily.share_text(_day(CHASE, target=151),
+                            {"objective_met": True, "margin": 5, "bonuses": []},
+                            1, 5, streak=4)
+    assert "4-day streak" in text
+    # Still spoiler-free with the extra line on it.
+    names = {c.name for cards in FULL.cards_by_fs.values() for c in cards}
+    assert not [n for n in names if len(n) > 6 and n in text]

@@ -170,6 +170,58 @@ def bonuses_on_offer(scenario: Scenario) -> list[str]:
     return on
 
 
+# --- streaks ------------------------------------------------------------------------------
+
+def streaks(played: list, today) -> tuple[int, int]:
+    """(current, longest) run of consecutive days played, from the dates alone.
+
+    Computed in Python rather than as a gaps-and-islands query, for the usual reason: this
+    is a rule about evidence, and a rule is worth being able to test without a database.
+    The data is tiny — one row per day per account — so there is nothing to gain by pushing
+    it into SQL.
+
+    **A streak is not broken until a day has actually been MISSED, which is the rule the
+    whole feature turns on.** Playing yesterday and not yet today leaves it alive: nothing
+    has been lost, it simply has not been extended, and today is still there to be played.
+    Counting only runs that reach today would report a broken streak to somebody at
+    breakfast and then an intact one after they played, which is both wrong and the exact
+    moment the streak is supposed to be doing its work.
+
+    So the current run is counted back from TODAY if today has been played, and from
+    YESTERDAY otherwise. Anything older than that is a genuinely missed day and ends it.
+    """
+    import datetime
+
+    days = sorted(set(played))
+    if not days:
+        return 0, 0
+
+    longest = run = 1
+    for prev, day in zip(days, days[1:]):
+        run = run + 1 if (day - prev).days == 1 else 1
+        longest = max(longest, run)
+
+    one_day = datetime.timedelta(days=1)
+    last = days[-1]
+    if last != today and last != today - one_day:
+        return 0, longest          # the most recent play is older than yesterday
+
+    current = 1
+    for prev, day in zip(reversed(days[:-1]), reversed(days[1:])):
+        if (day - prev).days != 1:
+            break
+        current += 1
+    return current, longest
+
+
+def played_dates(conn, account_id: int) -> list:
+    """Every day this account has finished, oldest first. One small column -- the whole
+    point of computing the streak in Python is that this is all it needs."""
+    return [r[0] for r in conn.execute(
+        "select challenge_date from daily_results where account_id = %s "
+        "order by challenge_date", (account_id,)).fetchall()]
+
+
 # --- the shareable result ------------------------------------------------------------------
 
 # Where a shared line points people. Not derived from the request's own Host header: a
@@ -180,7 +232,7 @@ SHARE_URL = "iplegends.vercel.app/daily"
 
 
 def share_text(day: "Day", result: dict, rank: int | None = None,
-               players: int | None = None) -> str:
+               players: int | None = None, streak: int = 0) -> str:
     """The one-tap line a player posts somewhere, and the rule that shapes it is that it
     must be SPOILER-FREE.
 
@@ -211,6 +263,10 @@ def share_text(day: "Day", result: dict, rank: int | None = None,
         lines.append(f"⭐ {BONUS_LABELS.get(b, b)}")
     if rank is not None and players:
         lines.append(f"#{rank} of {players} today")
+    # Only from two days up: "1 day streak" says nothing a reader cannot already see from
+    # the line above it, and every first-time player would post one.
+    if streak >= 2:
+        lines.append(f"🔥 {streak}-day streak")
     lines.append(SHARE_URL)
     return "\n".join(lines)
 

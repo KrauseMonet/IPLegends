@@ -25,12 +25,12 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from etl.feasibility import Deck
 from game.scenarios import (
-    DAILY_DECK_SIZE, DEFEND_BY, Outcome, Scenario, choose_deck, daily_seed, evaluate,
-    generate, rank_key,
+    DAILY_DECK_SIZE, Outcome, Scenario, bonuses_on_offer, choose_deck, daily_seed,
+    evaluate, generate, overs_words, rank_key,
 )
 from game.season import Side
 from game.simulator import Innings, Model, Player, play_innings
@@ -124,27 +124,70 @@ def opposition_total(model: Model, side: Side, rng: random.Random) -> Innings:
     return play_innings(model, lineup(list(side.xi), model), _average_attack(model), rng)
 
 
+def with_bowling_depth(side: Side) -> Side:
+    """The side that actually takes the field, with the Impact Player locked in where the
+    eleven alone cannot field five bowlers.
+
+    A twelve is legal with five bowling options across all TWELVE (`order_errors` counts
+    them there, not over the eleven), so a perfectly legal eleven can hold four and rely on
+    the Impact Player for the fifth. `attack()` then returns four, five bowlers' worth of
+    overs runs out around the seventeenth, and `choose_bowler` raises on an empty sequence
+    -- a 500 on somebody's single attempt of the day, and one this only became likely
+    enough to hit because every kind generated today makes the player bowl. It was
+    reachable on a defence before that and simply never came up.
+
+    `game.season` settled this already (A78): where the eleven falls short the Impact
+    Player bowls, full stop -- not a situational call. Reused rather than reimplemented,
+    because a second copy of a legality floor is a second place for it to drift."""
+    from game.season import _apply_bowling_impact, _bowling_depth_shortfall
+
+    forced = _bowling_depth_shortfall(side)
+    if forced is None:
+        return side
+    return replace(side, xi=_apply_bowling_impact(list(side.xi), forced, side.impact))
+
+
 def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
              rng: random.Random) -> tuple[Innings, Innings | None]:
     """The player's own innings, and the opposition's where one is really played.
 
-    A chase returns `(mine, None)`: the target was fixed when the day was created, so the
-    opposition is not replayed per player and nobody bowls at them. A defence returns both,
-    because the opposition genuinely chases what this player set -- that reply is the
-    player's own bowling and belongs to them."""
+    Every kind generated today is a FULL MATCH: the opposition bats against the player's
+    own five bowlers and the player bats against the opposition's real attack, so both
+    halves of a drafted twelve are on the field. Which innings comes first is the kind's
+    (`player_bats_first`), and nothing here branches on a kind name.
+
+    A LEGACY chase returns `(mine, None)`: its target was fixed when the day was created,
+    so the opposition is not replayed per player and nobody bowls at them. That path is
+    left byte-for-byte as it was -- including the order in which it draws from `rng` --
+    because a stored day has to replay exactly as it was scored."""
     from game.__main__ import attack, lineup
 
-    batting = lineup(list(mine.xi), model, mine.impact)
-    if scenario.kind == DEFEND_BY:
-        if opposition is None:
-            raise ValueError("a defence needs the side that will chase")
-        first = play_innings(model, batting, _average_attack(model), rng)
-        reply = play_innings(model, lineup(list(opposition.xi), model),
-                             attack(list(mine.xi), model, mine.impact), rng,
-                             target=first.runs)
+    # Before anything is played, and for BOTH sides: whether a side can field five bowlers
+    # at all is a property of the eleven, and it decides the batting order too.
+    mine = with_bowling_depth(mine)
+    my_batting = lineup(list(mine.xi), model, mine.impact)
+    if scenario.spec.fixed_target:
+        return play_innings(model, my_batting, _average_attack(model), rng,
+                            target=scenario.target), None
+
+    if opposition is None:
+        raise ValueError("a full match is decided by both sides; it needs the opposition")
+    opposition = with_bowling_depth(opposition)
+    their_batting = lineup(list(opposition.xi), model, opposition.impact)
+    my_attack = attack(list(mine.xi), model, mine.impact)
+    # The one thing a legacy DEFEND_BY still does differently: its own first innings faced
+    # the synthetic five. Reading that off the scenario rather than the kind keeps the old
+    # day scoring as it always did without a special case here.
+    their_attack = (attack(list(opposition.xi), model, opposition.impact)
+                    if scenario.opposition_bowls else _average_attack(model))
+
+    if scenario.player_bats_first:
+        first = play_innings(model, my_batting, their_attack, rng)
+        reply = play_innings(model, their_batting, my_attack, rng, target=first.runs)
         return first, reply
-    return play_innings(model, batting, _average_attack(model), rng,
-                        target=scenario.target), None
+
+    theirs = play_innings(model, their_batting, my_attack, rng)
+    return play_innings(model, my_batting, their_attack, rng, target=theirs.runs), theirs
 
 
 @dataclass
@@ -164,6 +207,15 @@ class DayPlay:
     second: Innings
     first_label: str
     second_label: str
+    # Whether each innings was bowled by REAL, named players. Decided HERE, where the two
+    # innings are actually constructed and which attack bowled each is known for certain,
+    # rather than re-derived from the kind by whoever renders a scorecard -- a synthetic
+    # league-average five has no people in it, and putting "bowler 3" on a card credits a
+    # wicket to somebody who does not exist.
+    first_real_bowling: bool = True
+    second_real_bowling: bool = True
+    # Carried so a caller never has to ask the kind again which side is the player's.
+    player_bats_first: bool = False
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
@@ -189,17 +241,26 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
     # plays out the same way, so a reload shows the innings the player already watched.
     rng = random.Random(f"daily-match:{day.challenge_date}:{account_id}")
 
-    if day.scenario.kind == DEFEND_BY:
-        outcome, first, second = score_day(model, day.scenario, mine, opposition, rng)
-        return DayPlay(outcome, first, second, "You", opposition.name)
+    sc = day.scenario
+    if sc.spec.fixed_target:
+        # A LEGACY chase. The opposition's innings is re-derived from the DAY's own seed --
+        # the same call `_generate_day` made to fix the target -- so every player watches
+        # the identical first innings and the total on screen is the one they are chasing.
+        # It is shown and never scored: handing it to the evaluator would award a bowling
+        # bonus for balls the player never bowled.
+        their_innings = opposition_total(
+            model, opposition, random.Random(daily_seed(day.challenge_date)))
+        outcome, my_innings, _none = score_day(model, sc, mine, None, rng)
+        return DayPlay(outcome, their_innings, my_innings, opposition.name, "You",
+                       first_real_bowling=False, second_real_bowling=False)
 
-    # A chase. The opposition's innings is re-derived from the DAY's own seed -- the same
-    # call `_generate_day` made to fix the target -- so every player watches the identical
-    # first innings and the total on screen is the one they are chasing.
-    their_innings = opposition_total(
-        model, opposition, random.Random(daily_seed(day.challenge_date)))
-    outcome, my_innings, _none = score_day(model, day.scenario, mine, None, rng)
-    return DayPlay(outcome, their_innings, my_innings, opposition.name, "You")
+    outcome, my_innings, their_innings = score_day(model, sc, mine, opposition, rng)
+    if sc.player_bats_first:
+        return DayPlay(outcome, my_innings, their_innings, "You", opposition.name,
+                       first_real_bowling=sc.opposition_bowls, second_real_bowling=True,
+                       player_bats_first=True)
+    return DayPlay(outcome, their_innings, my_innings, opposition.name, "You",
+                   first_real_bowling=True, second_real_bowling=sc.opposition_bowls)
 
 
 def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
@@ -211,18 +272,10 @@ def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | N
     return evaluate(scenario, my_innings, their_innings), my_innings, their_innings
 
 
-def bonuses_on_offer(scenario: Scenario) -> list[str]:
-    """Which bonuses today's kind can actually award.
-
-    Not all three are available on every day, and that is a consequence of the format
-    rather than an oversight: a chase is one innings, so nobody bowls and there is no
-    four-wicket haul to take; a defence is not a chase, so there is nothing to finish
-    early. Listed so the page can state what is on offer rather than promising a bonus
-    that cannot be earned today."""
-    from game.scenarios import FINISHED_EARLY, FOUR_WICKET_HAUL, OPENER_CENTURY
-    on = [OPENER_CENTURY]
-    on.append(FOUR_WICKET_HAUL if scenario.kind == DEFEND_BY else FINISHED_EARLY)
-    return on
+# `bonuses_on_offer` is re-exported from `game.scenarios` rather than reimplemented here.
+# It used to be a hand-written `if kind == DEFEND_BY` branch, which was right for three
+# kinds and would have gone quietly stale on the fourth -- availability is now derived
+# from which innings each bonus reads, beside the bonuses themselves.
 
 
 # --- streaks ------------------------------------------------------------------------------
@@ -307,10 +360,7 @@ def share_text(day: "Day", result: dict, rank: int | None = None,
     lines = [f"Legends Almanack — {day.challenge_date.day} {day.challenge_date:%b}"]
 
     stage = sc.stage if sc.stage.startswith("Qualifier") else f"the {sc.stage}"
-    if sc.target is not None:
-        lines.append(f"Chase {sc.target + 1} · {sc.opposition_name} · {stage}")
-    else:
-        lines.append(f"Defend by {sc.runs_required}+ · {sc.opposition_name} · {stage}")
+    lines.append(f"{sc.short()} · {sc.opposition_name} · {stage}")
 
     lines.append(("✅ " if result["objective_met"] else "❌ ")
                  + _share_outcome(sc, result))
@@ -335,9 +385,14 @@ def _share_outcome(scenario: Scenario, result: dict) -> str:
         if margin > 0:
             return f"won by {margin} runs"
         return "tied" if margin == 0 else f"lost by {-margin} runs"
-    if result["objective_met"]:
-        return f"chased, {margin} wicket{'' if margin == 1 else 's'} in hand"
-    return f"fell {-margin} short"
+    # Both remaining units share one failure convention -- a negative margin is runs short,
+    # never the unit named above (game/scenarios.py explains why ranking a failure on
+    # wickets in hand would reward blocking out).
+    if margin < 0:
+        return f"fell {-margin} short"
+    if scenario.margin_unit == "balls":
+        return f"chased with {overs_words(margin)} overs to spare"
+    return f"chased, {margin} wicket{'' if margin == 1 else 's'} in hand"
 
 
 # --- the day, in the database ---------------------------------------------------------------
@@ -360,6 +415,7 @@ def _scenario_row(sc: Scenario, opposition_wickets: int) -> str:
         "opposition_fs_id": sc.opposition_fs_id, "opposition_name": sc.opposition_name,
         "stage": sc.stage, "target": sc.target,
         "wickets_required": sc.wickets_required, "runs_required": sc.runs_required,
+        "overs_required": sc.overs_required,
         "opposition_wickets": opposition_wickets,
     })
 
@@ -368,7 +424,8 @@ def _scenario_from_row(kind: str, row: dict) -> Scenario:
     return Scenario(kind, row["opposition_fs_id"], row["opposition_name"], row["stage"],
                     target=row.get("target"),
                     wickets_required=row.get("wickets_required"),
-                    runs_required=row.get("runs_required"))
+                    runs_required=row.get("runs_required"),
+                    overs_required=row.get("overs_required"))
 
 
 def _generate_day(full: Deck, model: Model, challenge_date):
@@ -377,17 +434,20 @@ def _generate_day(full: Deck, model: Model, challenge_date):
     The opposition is drawn from the day's own deck rather than the whole archive, so the
     squads you are dealt and the side you are up against come from one coherent pool -- and
     it is redrawn until one can actually field a legal eleven, which `side_for_fs` decides
-    and which is a property of the squad rather than a failure here."""
+    and which is a property of the squad rather than a failure here.
+
+    Nothing is simulated here any more. A live kind has no target to fix in advance -- the
+    opposition makes whatever the player's own bowlers allow them -- so the day is decided
+    from the date alone. `model` is kept in the signature because `ensure_day` has it and
+    a future kind may want it, and because the legacy path below still reads one."""
     rng = random.Random(daily_seed(challenge_date))
     deck_fs_ids = choose_deck(rng, full.fs_ids, DAILY_DECK_SIZE)
     for fs_id in rng.sample(deck_fs_ids, len(deck_fs_ids)):
         side = side_for_fs(full, fs_id)
         if side is None:
             continue
-        posted = opposition_total(model, side, random.Random(daily_seed(challenge_date)))
-        sc = generate(rng, fs_id, side.name, posted.runs)
-        return Day(challenge_date, daily_seed(challenge_date), sc, deck_fs_ids,
-                   posted.wickets), posted
+        sc = generate(rng, fs_id, side.name)
+        return Day(challenge_date, daily_seed(challenge_date), sc, deck_fs_ids)
     raise DailyError("no squad in today's deck can field a legal eleven")
 
 
@@ -402,7 +462,7 @@ def ensure_day(conn, challenge_date, full: Deck, model: Model) -> Day:
         "select seed, scenario_kind, scenario, deck_fs_ids from daily_challenges "
         "where challenge_date = %s", (challenge_date,)).fetchone()
     if row is None:
-        day, _posted = _generate_day(full, model, challenge_date)
+        day = _generate_day(full, model, challenge_date)
         conn.execute(
             """
             insert into daily_challenges

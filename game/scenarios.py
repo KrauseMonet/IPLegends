@@ -6,18 +6,33 @@ both of which the caller already has. That is what lets every rule in this file 
 without a fixture more elaborate than a hand-built innings, and it is why scoring can be
 re-checked against a stored result later without replaying anything.
 
+**Every day generated today is a FULL two-innings match, and the kind is the WIN
+CONDITION.** Win by more than N runs; win with at least N wickets in hand; chase inside N
+overs. That is the whole point of the shape: both innings are real, so the five bowlers in
+a drafted twelve are on the field every single day rather than on two days in three.
+
+**This reverses the target rule the first three kinds were built on, deliberately.** Those
+kinds fixed a chase's target when the day was created, against a synthetic league-average
+attack, so that everybody chased the same number -- and the price was that nobody ever
+bowled. A live kind's target is set by the opposition batting against the PLAYER'S OWN
+attack, so it differs from player to player. Comparability survives because the objective
+is now RELATIVE rather than absolute: everyone faces the same historical side and is asked
+for the same margin over it. It also compounds the right way round -- a good attack sets a
+lower target, which is easier to chase both quickly and with wickets intact.
+
 **The margin unit is fixed by the scenario, so it is homogeneous within a day.** This is
-the thing that makes ranking tractable: if today is "chase 187" everyone qualifying is
-ranked on wickets in hand, and if today is "win by more than 20" everyone is ranked on
-runs. There is never a runs-against-wickets comparison to fudge, because everybody is
+the thing that makes ranking tractable: if today is "win by 20" everyone qualifying is
+ranked on runs, and if today is "chase inside 17 overs" everyone is ranked on balls to
+spare. There is never a runs-against-wickets comparison to fudge, because everybody is
 answering the same question. Ranking is therefore `objective_met`, then `margin`, then
 `bonus_points` -- the order ratified for the leaderboard.
 
-Three scenario kinds ship first. `chase` and `chase_with_wickets` differ only in whether a
-wickets-in-hand floor is part of the OBJECTIVE or merely the margin, and `defend_by` is the
-bat-first inversion. The opposition franchise-season and the stage label ("Final") are
-PARAMETERS on all three rather than a fourth kind, so "chase 187 against CSK 2013 in a
-final" is a `chase` with three fields set.
+**The first three kinds stay readable and playable, and are no longer generated.** A stored
+day must keep replaying exactly as it was scored, which is the entire reason migration 032
+stores a scenario rather than deriving it; deleting a kind would move every past
+leaderboard. `DEFEND_BY` in particular is kept alongside the nearly-identical
+`WIN_BY_RUNS` rather than renamed into it, because the two differ in which attack the
+player's own innings faces -- collapsing them would silently re-score old days.
 """
 
 from __future__ import annotations
@@ -30,11 +45,60 @@ from game.simulator import BALLS_PER_OVER, Innings
 WICKETS_PER_INNINGS = 10
 # A full twenty overs, used to express "balls to spare" for a chase.
 BALLS_PER_INNINGS = 20 * BALLS_PER_OVER
+# The powerplay, from game.analysis's own constant rather than a number invented here --
+# a bonus that reads a phase must read the same phase every other screen does.
+POWERPLAY_OVERS = 6
 
+# Legacy: generated up to 2026-08-21, still stored on past days, still scored exactly as
+# they were. A chase against a target fixed at day creation; the player never bowls.
 CHASE = "chase"
 CHASE_WITH_WICKETS = "chase_with_wickets"
 DEFEND_BY = "defend_by"
-SCENARIO_KINDS = (CHASE, CHASE_WITH_WICKETS, DEFEND_BY)
+
+# Live: a full match, both innings real.
+WIN_BY_RUNS = "win_by_runs"
+WIN_BY_WICKETS = "win_by_wickets"
+CHASE_IN_OVERS = "chase_in_overs"
+
+RUNS = "runs"
+WICKETS = "wickets"
+BALLS = "balls"
+
+
+@dataclass(frozen=True)
+class _Kind:
+    """What a kind IS, as data rather than as a branch repeated at every call site.
+
+    Every behavioural question the rest of the app asks about a day -- which innings is the
+    player's, whether their bowlers take the field, whose attack they bat against, what the
+    margin is measured in -- is answered from this table. A new kind is a row here plus a
+    line of wording, and nothing downstream has to grow another `if kind == ...`."""
+
+    bats_first: bool
+    # The target was fixed when the day was created and the opposition is not replayed per
+    # player. True only for the two legacy chases; it is also exactly the condition under
+    # which the player does not bowl, since a fixed target means nobody bowled at them.
+    fixed_target: bool
+    # Whether the player's own innings faces the opposition's REAL attack. False on the
+    # legacy kinds, which used the synthetic league-average five for both sides.
+    real_opposition_attack: bool
+    margin_unit: str
+    requires: tuple[str, ...]
+
+
+KINDS: dict[str, _Kind] = {
+    CHASE: _Kind(False, True, False, WICKETS, ("target",)),
+    CHASE_WITH_WICKETS: _Kind(False, True, False, WICKETS, ("target", "wickets_required")),
+    DEFEND_BY: _Kind(True, False, False, RUNS, ("runs_required",)),
+    WIN_BY_RUNS: _Kind(True, False, True, RUNS, ("runs_required",)),
+    WIN_BY_WICKETS: _Kind(False, False, True, WICKETS, ("wickets_required",)),
+    CHASE_IN_OVERS: _Kind(False, False, True, BALLS, ("overs_required",)),
+}
+
+SCENARIO_KINDS = tuple(KINDS)
+# What a new day may be. A strict subset of the above, and the gap between the two is the
+# point: a retired kind stays constructible so a stored day still replays.
+GENERATED_KINDS = (WIN_BY_RUNS, WIN_BY_WICKETS, CHASE_IN_OVERS)
 
 
 @dataclass(frozen=True)
@@ -43,13 +107,13 @@ class Scenario:
 
     `target` is the score to BEAT, exactly as `play_innings`'s own `target` argument means
     it -- the opposition's total, not the total plus one -- so nothing here has to remember
-    an off-by-one the engine has already settled.
+    an off-by-one the engine has already settled. It is set only on the legacy chases,
+    where the number was fixed in advance; a live kind's target is whatever the opposition
+    makes on the day, so it is not a property of the scenario at all.
 
-    `wickets_required` is meaningful only for CHASE_WITH_WICKETS and `runs_required` only
-    for DEFEND_BY; each is None on the kinds that do not use it rather than carrying a
-    zero, so a scenario that forgot to set one fails loudly instead of silently asking for
-    nothing (A23's rule about an unobserved value never acquiring a plausible default).
-    """
+    Each floor is None on the kinds that do not use it rather than carrying a zero, so a
+    scenario that forgot to set one fails loudly instead of silently asking for nothing
+    (A23's rule about an unobserved value never acquiring a plausible default)."""
 
     kind: str
     opposition_fs_id: int
@@ -58,39 +122,79 @@ class Scenario:
     target: int | None = None
     wickets_required: int | None = None
     runs_required: int | None = None
+    overs_required: int | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in SCENARIO_KINDS:
+        spec = KINDS.get(self.kind)
+        if spec is None:
             raise ValueError(f"unknown scenario kind {self.kind!r}")
-        if self.kind in (CHASE, CHASE_WITH_WICKETS) and self.target is None:
-            raise ValueError(f"{self.kind} needs a target")
-        if self.kind == CHASE_WITH_WICKETS and self.wickets_required is None:
-            raise ValueError("chase_with_wickets needs wickets_required")
-        if self.kind == DEFEND_BY and self.runs_required is None:
-            raise ValueError("defend_by needs runs_required")
+        for field_name in spec.requires:
+            if getattr(self, field_name) is None:
+                raise ValueError(f"{self.kind} needs {field_name}")
+
+    @property
+    def spec(self) -> _Kind:
+        return KINDS[self.kind]
 
     @property
     def player_bats_first(self) -> bool:
-        """Which innings is the player's. A chase is by definition second."""
-        return self.kind == DEFEND_BY
+        """Which innings is the player's."""
+        return self.spec.bats_first
+
+    @property
+    def player_bowls(self) -> bool:
+        """Whether the player's own attack takes the field at all.
+
+        False exactly on the legacy chases: their target was fixed at day creation against
+        a synthetic attack, so the opposition's innings is not the player's doing and
+        carries no bowling of theirs to read."""
+        return not self.spec.fixed_target
+
+    @property
+    def opposition_bowls(self) -> bool:
+        """Whether the player bats against the opposition's real attack, rather than the
+        league-average five the legacy kinds used on both sides."""
+        return self.spec.real_opposition_attack
 
     @property
     def margin_unit(self) -> str:
-        return "runs" if self.kind == DEFEND_BY else "wickets"
+        return self.spec.margin_unit
+
+    def _against(self) -> str:
+        # "the Final" and "the Eliminator" take an article; "Qualifier 1" does not.
+        # Player-facing copy, so it is worth the one conditional.
+        stage = self.stage if self.stage.startswith("Qualifier") else f"the {self.stage}"
+        return f"{self.opposition_name} in {stage}"
 
     def describe(self) -> str:
         """The one line shown before a ball is bowled. Written here rather than in the
         page so the wording cannot drift from the rule it describes."""
-        # "the Final" and "the Eliminator" take an article; "Qualifier 1" does not.
-        # Player-facing copy, so it is worth the one conditional.
-        stage = self.stage if self.stage.startswith("Qualifier") else f"the {self.stage}"
-        against = f"{self.opposition_name} in {stage}"
+        against = self._against()
         if self.kind == CHASE:
             return f"Chase {self.target + 1} against {against}."
         if self.kind == CHASE_WITH_WICKETS:
             return (f"Chase {self.target + 1} against {against} "
                     f"with at least {self.wickets_required} wickets in hand.")
-        return f"Bat first against {against} and win by more than {self.runs_required} runs."
+        if self.kind in (DEFEND_BY, WIN_BY_RUNS):
+            return (f"Bat first against {against} and win by more than "
+                    f"{self.runs_required} runs.")
+        if self.kind == WIN_BY_WICKETS:
+            return (f"Bowl first against {against}, then chase their total with at least "
+                    f"{self.wickets_required} wickets in hand.")
+        return (f"Bowl first against {against}, then chase their total "
+                f"inside {self.overs_required} overs.")
+
+    def short(self) -> str:
+        """The same challenge in a few words, for a shared line and a board header. One
+        function rather than a second branch in `web.daily.share_text`, which is where the
+        wording would otherwise drift from the rule."""
+        if self.target is not None:
+            return f"Chase {self.target + 1}"
+        if self.margin_unit == RUNS:
+            return f"Win by {self.runs_required}+ runs"
+        if self.margin_unit == WICKETS:
+            return f"Win by {self.wickets_required}+ wickets"
+        return f"Chase inside {self.overs_required} overs"
 
 
 @dataclass(frozen=True)
@@ -102,25 +206,35 @@ class Outcome:
     summary: str
 
 
+def overs_words(balls: int) -> str:
+    """Balls as cricket writes them: 20 balls is 3.2 overs."""
+    return f"{balls // BALLS_PER_OVER}.{balls % BALLS_PER_OVER}"
+
+
 # --- bonuses ---------------------------------------------------------------------------
 #
-# Each is a pure question about the player's own innings (and, for a bowling one, the
-# innings they bowled at). Points are declared game-design values, not measurements --
-# the same category as REPUTATION and ALLROUNDER_RUNS (A57/A59).
+# Each is a pure question about one of the two innings. Points are declared game-design
+# values, not measurements -- the same category as REPUTATION and ALLROUNDER_RUNS
+# (A57/A59) -- and every test is a cricket landmark rather than a calibrated threshold, so
+# none of them needs a number swept out of the engine's own distribution.
+#
+# WHICH INNINGS a bonus reads is declared beside it, and availability is DERIVED from that
+# rather than branched on the kind. The old rule was a hand-written `if kind == DEFEND_BY`,
+# which was correct when there were three kinds and would have gone quietly stale on the
+# fourth -- a promise of a bonus that cannot be earned is the A70 shape.
+
+MINE = "mine"
+THEIRS = "theirs"
 
 OPENER_CENTURY = "opener_century"
-FOUR_WICKET_HAUL = "four_wicket_haul"
+TEN_SIXES = "ten_sixes"
+NO_POWERPLAY_WICKET = "no_powerplay_wicket"
+LOWER_ORDER_FIFTY = "lower_order_fifty"
 FINISHED_EARLY = "finished_early"
-
-BONUS_POINTS = {OPENER_CENTURY: 25, FOUR_WICKET_HAUL: 15, FINISHED_EARLY: 10}
-BONUS_LABELS = {
-    OPENER_CENTURY: "An opener scored a century",
-    FOUR_WICKET_HAUL: "A bowler took four wickets",
-    FINISHED_EARLY: "Chased with two overs to spare",
-}
-# "Two overs to spare" in balls -- expressed from the constant rather than written as 12,
-# so it stays two overs if an over ever stops being six balls.
-EARLY_FINISH_BALLS = 2 * BALLS_PER_OVER
+FOUR_WICKET_HAUL = "four_wicket_haul"
+BOWLED_THEM_OUT = "bowled_them_out"
+THREE_IN_AN_OVER = "three_in_an_over"
+MAIDEN_OVER = "maiden_over"
 
 
 def _openers(innings: Innings) -> list:
@@ -129,7 +243,102 @@ def _openers(innings: Innings) -> list:
     return innings.batting[:2]
 
 
-def bonuses_earned(scenario: Scenario, mine: Innings, theirs: Innings | None) -> tuple[str, ...]:
+def _wickets_after_powerplay(innings: Innings) -> int:
+    """Wickets down at the end of the sixth over.
+
+    `over_log` holds fully completed overs only, so an innings that ended inside the
+    powerplay has no sixth entry -- in which case the innings total IS the answer, because
+    nothing more can fall."""
+    log = innings.over_log
+    if len(log) >= POWERPLAY_OVERS:
+        return log[POWERPLAY_OVERS - 1].wickets
+    return innings.wickets
+
+
+BONUS_TESTS = {
+    OPENER_CENTURY: (MINE, lambda i: any(b.runs >= 100 for b in _openers(i))),
+    TEN_SIXES: (MINE, lambda i: i.sixes >= 10),
+    NO_POWERPLAY_WICKET: (MINE, lambda i: _wickets_after_powerplay(i) == 0),
+    # Position seven and lower: index 6 onward, and `faced_any` because a man who never
+    # came out has not made a fifty from anywhere.
+    LOWER_ORDER_FIFTY: (MINE, lambda i: any(b.runs >= 50 and b.faced_any
+                                            for b in i.batting[6:])),
+    FINISHED_EARLY: (MINE, lambda i: i.chased
+                     and BALLS_PER_INNINGS - i.balls >= EARLY_FINISH_BALLS),
+    FOUR_WICKET_HAUL: (THEIRS, lambda i: any(b.wickets >= 4 for b in i.bowling)),
+    BOWLED_THEM_OUT: (THEIRS, lambda i: i.wickets >= WICKETS_PER_INNINGS),
+    THREE_IN_AN_OVER: (THEIRS, lambda i: any(o.over_wickets >= 3 for o in i.over_log)),
+    MAIDEN_OVER: (THEIRS, lambda i: any(o.over_runs == 0 for o in i.over_log)),
+}
+
+# Measured hit rates, same two sweeps, in the BOWL-FIRST orientation (rational / random):
+# opener_century 0.8/2.4, ten_sixes 5.2/8.0, no_powerplay_wicket 22.0/18.8,
+# lower_order_fifty 0.0/0.4, finished_early 35.2/19.6, four_wicket_haul 17.5/13.6,
+# bowled_them_out 16.2/8.0, three_in_an_over 8.0/4.4, maiden_over 12.2/10.0. Batting first
+# plays the full twenty rather than ending on a chase, so the tail bats more often there
+# and the two batting rarities are floors rather than estimates.
+#
+# LOWER_ORDER_FIFTY is priced at a century's 25 for its rarity rather than trimmed to a
+# reachable 30: thirty from a number eight is a useful cameo and not a landmark, and a
+# calibrated bar is exactly what every other bonus here avoids. A rare bonus that pays well
+# is a fine thing; a rare bonus that pays middling is just decoration.
+BONUS_POINTS = {
+    OPENER_CENTURY: 25,
+    LOWER_ORDER_FIFTY: 25,
+    THREE_IN_AN_OVER: 20,
+    TEN_SIXES: 15,
+    FOUR_WICKET_HAUL: 15,
+    BOWLED_THEM_OUT: 15,
+    NO_POWERPLAY_WICKET: 10,
+    MAIDEN_OVER: 10,
+    FINISHED_EARLY: 10,
+}
+
+BONUS_LABELS = {
+    OPENER_CENTURY: "An opener scored a century",
+    THREE_IN_AN_OVER: "Three wickets in one over",
+    TEN_SIXES: "Ten sixes in the innings",
+    LOWER_ORDER_FIFTY: "A number 7 or lower made fifty",
+    FOUR_WICKET_HAUL: "A bowler took four wickets",
+    BOWLED_THEM_OUT: "Bowled them out",
+    NO_POWERPLAY_WICKET: "No wicket lost in the powerplay",
+    MAIDEN_OVER: "A maiden over",
+    FINISHED_EARLY: "Chased with two overs to spare",
+}
+
+# A stable order, so two players earning the same set list it the same way.
+BONUS_ORDER = (OPENER_CENTURY, TEN_SIXES, NO_POWERPLAY_WICKET, LOWER_ORDER_FIFTY,
+               FINISHED_EARLY, FOUR_WICKET_HAUL, BOWLED_THEM_OUT, THREE_IN_AN_OVER,
+               MAIDEN_OVER)
+
+# "Two overs to spare" in balls -- expressed from the constant rather than written as 12,
+# so it stays two overs if an over ever stops being six balls.
+EARLY_FINISH_BALLS = 2 * BALLS_PER_OVER
+
+
+def bonus_available(scenario: Scenario, bonus: str) -> bool:
+    """Whether today's kind can award this bonus at all.
+
+    Two rules, both derived. A bonus reading the opposition's innings needs the player to
+    have bowled it. And FINISHED_EARLY is withheld on a CHASE_IN_OVERS day because finishing
+    early IS the objective there -- paying a bonus for the thing already being marked is
+    paying twice for one piece of cricket."""
+    reads, _test = BONUS_TESTS[bonus]
+    if reads is THEIRS and not scenario.player_bowls:
+        return False
+    if bonus is FINISHED_EARLY:
+        return not scenario.player_bats_first and scenario.kind != CHASE_IN_OVERS
+    return True
+
+
+def bonuses_on_offer(scenario: Scenario) -> list[str]:
+    """What today can award, in `BONUS_ORDER`. Listed so the page states what is on offer
+    rather than promising something unearnable."""
+    return [b for b in BONUS_ORDER if bonus_available(scenario, b)]
+
+
+def bonuses_earned(scenario: Scenario, mine: Innings,
+                   theirs: Innings | None) -> tuple[str, ...]:
     """Which bonuses this performance earned, in a stable order.
 
     `theirs` is the innings the player BOWLED at, so a bowling bonus reads the opposition's
@@ -137,14 +346,24 @@ def bonuses_earned(scenario: Scenario, mine: Innings, theirs: Innings | None) ->
     every side's bowling figures to its opponent), so the two are named rather than
     positional at every call site."""
     earned = []
-    if any(b.runs >= 100 for b in _openers(mine)):
-        earned.append(OPENER_CENTURY)
-    if theirs is not None and any(b.wickets >= 4 for b in theirs.bowling):
-        earned.append(FOUR_WICKET_HAUL)
-    if not scenario.player_bats_first and mine.chased:
-        if BALLS_PER_INNINGS - mine.balls >= EARLY_FINISH_BALLS:
-            earned.append(FINISHED_EARLY)
+    for bonus in BONUS_ORDER:
+        if not bonus_available(scenario, bonus):
+            continue
+        reads, test = BONUS_TESTS[bonus]
+        innings = mine if reads is MINE else theirs
+        if innings is not None and test(innings):
+            earned.append(bonus)
     return tuple(earned)
+
+
+# --- marking a day ----------------------------------------------------------------------
+
+def _target_of(scenario: Scenario, theirs: Innings | None) -> int:
+    """The score the player had to beat. Stored on the scenario for a legacy chase, and
+    simply whatever the opposition made for a live one."""
+    if scenario.spec.fixed_target:
+        return scenario.target
+    return theirs.runs
 
 
 def evaluate(scenario: Scenario, mine: Innings, theirs: Innings | None = None) -> Outcome:
@@ -153,45 +372,53 @@ def evaluate(scenario: Scenario, mine: Innings, theirs: Innings | None = None) -
     `mine` is always the player's own innings; the caller resolves that from
     `scenario.player_bats_first`, so nothing in here reasons about home and away.
 
-    `theirs` is None for a CHASE, and that is a real property of the format rather than a
-    missing argument. A chase is against a target the day fixed in advance -- the same
-    number for everybody, which is what makes two chases comparable at all -- so the
-    opposition's innings was played once when the day was created and is not replayed per
-    player. Nobody bowls at them, so there is no card to read a bowling bonus off. A
-    DEFEND_BY is the opposite: the opposition really does chase what the player set, so
-    both innings exist and both are the player's own doing."""
-    if scenario.kind == DEFEND_BY and theirs is None:
-        raise ValueError("defend_by is decided by the opposition's reply; it needs one")
+    `theirs` may be None ONLY for a legacy chase, and that is a real property of that
+    format rather than a missing argument: its target was fixed when the day was created,
+    so the opposition was not replayed per player and nobody bowled at them. Every kind
+    generated today plays both innings for real, so both are always present."""
+    if theirs is None and not scenario.spec.fixed_target:
+        raise ValueError(f"{scenario.kind} is decided by both innings; it needs the other")
     bonuses = bonuses_earned(scenario, mine, theirs)
     points = sum(BONUS_POINTS[b] for b in bonuses)
+    unit = scenario.margin_unit
 
-    if scenario.kind == DEFEND_BY:
+    if unit == RUNS:
         margin = mine.runs - theirs.runs
         met = margin > scenario.runs_required
         summary = (f"Won by {margin} runs" if margin > 0
                    else f"Lost by {-margin} runs" if margin < 0 else "Tied")
-    else:
-        chased = mine.chased
-        in_hand = WICKETS_PER_INNINGS - mine.wickets
-        met = chased and (scenario.kind == CHASE
-                          or in_hand >= scenario.wickets_required)
-        if chased:
-            # The conventional way a chase is reported, and the only unit in which two
-            # successful chases compare.
-            margin = in_hand
-        else:
-            # A FAILED chase is ranked on how close it came, as a negative number, and
-            # this is a correction rather than a flourish: ranking a failure on wickets in
-            # hand rewards not losing any, so a side that blocked out twenty overs for
-            # 100/1 would place above one that fell two runs short at 149/9. Nothing is
-            # compared across the two, because `objective_met` tiers them first -- margin
-            # only ever orders successes against successes and failures against failures.
-            margin = -(scenario.target + 1 - mine.runs)
-        summary = (f"Chased with {in_hand} wickets in hand" if chased
-                   else f"Fell {-margin} short")
+        return Outcome(met, margin, points, bonuses, summary)
 
-    return Outcome(objective_met=met, margin=margin, bonus_points=points,
-                   bonuses_met=bonuses, summary=summary)
+    chased = mine.chased
+    in_hand = WICKETS_PER_INNINGS - mine.wickets
+    short = _target_of(scenario, theirs) + 1 - mine.runs
+
+    if unit == WICKETS:
+        met = chased and (scenario.wickets_required is None
+                          or in_hand >= scenario.wickets_required)
+        # A FAILED chase is ranked on how close it came, as a negative number, and this is
+        # a correction rather than a flourish: ranking a failure on wickets in hand rewards
+        # not losing any, so a side that blocked out twenty overs for 100/1 would place
+        # above one that fell two runs short at 149/9. Nothing is compared across the two,
+        # because `objective_met` tiers them first -- margin only ever orders successes
+        # against successes and failures against failures.
+        margin = in_hand if chased else -short
+        summary = (f"Chased with {in_hand} wickets in hand" if chased
+                   else f"Fell {short} short")
+        return Outcome(met, margin, points, bonuses, summary)
+
+    # CHASE_IN_OVERS. Two DIFFERENT failures live in the same tier here -- a chase
+    # completed too slowly, and a chase not completed at all -- and ordering the second
+    # above the first would be wrong. Balls to spare is always >= 0 when the target is
+    # hit and the runs-short fallback is always <= -1, so within the failed tier every
+    # slow winner sits above every loser without needing a fourth key. Same trick the
+    # wickets branch above already uses, one tier down.
+    spare = BALLS_PER_INNINGS - mine.balls
+    met = chased and mine.balls <= scenario.overs_required * BALLS_PER_OVER
+    margin = spare if chased else -short
+    summary = (f"Chased with {overs_words(spare)} overs to spare" if chased
+               else f"Fell {short} short")
+    return Outcome(met, margin, points, bonuses, summary)
 
 
 def rank_key(objective_met: bool, margin: int, bonus_points: int) -> tuple:
@@ -249,33 +476,57 @@ def player_order(deck_fs_ids, account_id: int, challenge_date) -> list[int]:
     return seq
 
 
-# Plausible floors for the two kinds that carry one. Declared game-design values, in the
-# same category as BONUS_POINTS: the range is what makes a day feel different from the last
-# one, not a measurement of anything.
-WICKET_FLOORS = (5, 6, 7)
-RUN_MARGINS = (15, 20, 25, 30)
+# The floors each live kind asks for. The RANGE is a declared game-design value in the same
+# category as BONUS_POINTS -- what makes one day feel different from the last -- but which
+# values are IN it was measured rather than chosen to look plausible, by
+# `tools/daily_calibration.py` over real drafted twelves against real historical sides.
+# Re-run it if the ratings or the engine move.
+#
+# Share of matches meeting the floor, `rational` drafter (400 matches, seed 11) against
+# `random` (250, seed 3) -- an upper and a lower bound on a real player, who sees no
+# ratings while drafting and so sits between the two:
+#
+#     win by >    10     15     20     25     30      (won at all: 62.0% / 36.0%)
+#              48.8%  43.0%  39.0%  34.0%  29.2%      rational
+#              24.8%  21.6%  18.0%  16.0%  14.4%      random
+#     wickets      3      4      5      6             (chased at all: 57.8% / 39.2%)
+#              55.8%  51.7%  46.2%  40.2%             rational
+#              36.8%  35.6%  30.0%  22.4%             random
+#     inside      16     17     18     19
+#              17.2%  27.0%  35.2%  47.0%             rational
+#               8.0%  10.4%  19.6%  28.0%             random
+#
+# Two values measured and then EXCLUDED, named so the question is cheap to revisit rather
+# than re-asked from scratch. A 3-wicket floor is not a floor: at 55.8% against 57.8% who
+# chase at all, it rules out two points and asks for nothing beyond winning. And 16 overs
+# is met by 8.0% of careless drafts -- a day almost nobody wins still produces a full
+# board, since margin ranks the failures too, but three such days a fortnight is a worse
+# game than three merely hard ones.
+RUN_MARGINS = (10, 15, 20, 25, 30)
+WICKET_FLOORS = (4, 5, 6)
+OVERS_LIMITS = (17, 18, 19)
 STAGES = ("Final", "Qualifier 1", "Eliminator", "Qualifier 2")
 
+# How often each live kind comes up. A dict rather than a bare `rng.choice` over
+# GENERATED_KINDS so the mix is one edit rather than a restructure -- the shape of the day
+# is a game-design dial, and the three are not equally hard.
+KIND_WEIGHTS = {WIN_BY_RUNS: 1, WIN_BY_WICKETS: 1, CHASE_IN_OVERS: 1}
 
-def generate(rng, opposition_fs_id: int, opposition_name: str,
-             opposition_score: int) -> Scenario:
-    """One day's scenario, given an opposition and the score they posted.
 
-    `opposition_score` is passed IN rather than invented here, so the target a chase asks
-    for is a total that side really made against this engine rather than a number picked
-    from a plausible-looking band. That keeps this function pure and testable, and it keeps
-    the challenge honest: the target is a real innings.
+def generate(rng, opposition_fs_id: int, opposition_name: str) -> Scenario:
+    """One day's scenario, given the side it is played against.
 
-    A DEFEND_BY day ignores the score, since the player bats first and the opposition's
-    total is whatever they manage in reply."""
-    kind = rng.choice(SCENARIO_KINDS)
+    No opposition score is passed in any more, and its absence is the reversal this module
+    documents at the top: a live kind has no target to fix, because the target is whatever
+    the opposition makes against the player's own bowling on the day."""
+    kinds = list(KIND_WEIGHTS)
+    kind = rng.choices(kinds, weights=[KIND_WEIGHTS[k] for k in kinds])[0]
     stage = rng.choice(STAGES)
-    if kind == CHASE:
+    if kind == WIN_BY_RUNS:
         return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                        target=opposition_score)
-    if kind == CHASE_WITH_WICKETS:
+                        runs_required=rng.choice(RUN_MARGINS))
+    if kind == WIN_BY_WICKETS:
         return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                        target=opposition_score,
                         wickets_required=rng.choice(WICKET_FLOORS))
     return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                    runs_required=rng.choice(RUN_MARGINS))
+                    overs_required=rng.choice(OVERS_LIMITS))

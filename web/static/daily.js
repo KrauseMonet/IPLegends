@@ -63,9 +63,10 @@ async function dailySubmit(ctrl){
 // `reveal.js`'s stepper, unmodified, fed this match instead of that one. The daily was
 // the only mode that resolved a match server-side and then just printed the answer.
 //
-// Both innings, in the order they were bowled. `home` is whoever batted first, which for a
-// CHASE is the opposition -- their innings is the one the target came from, so watching it
-// is what makes the target mean something rather than being a number in a banner.
+// Both innings, in the order they were bowled. `home` is whoever batted first, which on a
+// "bowl first" day is the opposition -- their innings is the one your own five bowlers
+// held down, and it is what makes the target mean something rather than being a number in
+// a banner.
 function dailyReveal(){
   const m = DAY.match;
   if (!m){ showDone(); return; }
@@ -105,31 +106,41 @@ function dailyFinishReveal(){
   showDone();
 }
 
+// Balls as cricket writes them. `overs_words` in game/scenarios.py is the same rule; two
+// copies of one formatting convention is the least of the things that could drift here,
+// and the alternative is a round trip to render a number the page already has.
+function oversWords(balls){ return `${Math.floor(balls / 6)}.${balls % 6}`; }
+
 // A raw margin is not readable on its own -- "-14" and "7" mean entirely different things
-// and neither says which. The unit is today's, from the scenario, and a NEGATIVE margin on
-// a chase means runs short rather than wickets (game/scenarios.py has the why).
+// and neither says which. The unit is today's, from the scenario.
+//
+// The SIGN carries the failure, not `met`, and that distinction is load-bearing on two of
+// the three units: a chase completed with too few wickets in hand, or a beat too slowly,
+// MISSES the objective while still carrying a perfectly good positive margin. Reading
+// "not met" as "fell short" would have printed "-2 short" at somebody who chased it.
 function marginWords(met, margin, unit){
   if (unit === 'runs'){
     if (margin > 0) return `by ${margin} runs`;
     if (margin < 0) return `lost by ${-margin}`;
     return 'tied';
   }
-  return met ? `${margin} wkt${margin === 1 ? '' : 's'} in hand` : `${-margin} short`;
+  if (margin < 0) return `${-margin} short`;
+  return unit === 'balls' ? `${oversWords(margin)} ov to spare`
+                          : `${margin} wkt${margin === 1 ? '' : 's'} in hand`;
 }
 
 function outcomeLine(d){
-  const r = d.result;
-  const unit = d.margin_unit;
-  if (r.objective_met){
-    return unit === 'runs'
-      ? `Challenge met — won by ${r.margin} runs`
-      : `Challenge met — chased with ${r.margin} wickets in hand`;
+  const r = d.result, unit = d.margin_unit;
+  const verdict = r.objective_met ? 'Challenge met' : 'Challenge missed';
+  if (unit === 'runs'){
+    const what = r.margin > 0 ? `won by ${r.margin} runs`
+               : r.margin < 0 ? `lost by ${-r.margin} runs` : 'tied';
+    return `${verdict} — ${what}`;
   }
-  // A failed chase carries a NEGATIVE margin: how close it came, not wickets in hand
-  // (game/scenarios.py explains why ranking a failure on wickets rewards blocking out).
-  if (unit === 'wickets') return `Fell ${Math.abs(r.margin)} short`;
-  return r.margin > 0 ? `Won by ${r.margin} runs, short of the target margin`
-                      : `Lost by ${Math.abs(r.margin)} runs`;
+  if (r.margin < 0) return `${verdict} — fell ${-r.margin} short`;
+  return `${verdict} — ` + (unit === 'balls'
+    ? `chased with ${oversWords(r.margin)} overs to spare`
+    : `chased with ${r.margin} wicket${r.margin === 1 ? '' : 's'} in hand`);
 }
 
 // Prefer the platform's own share sheet where there is one -- on a phone that is how

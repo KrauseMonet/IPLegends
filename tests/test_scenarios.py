@@ -9,11 +9,14 @@ from __future__ import annotations
 import pytest
 
 from game.scenarios import (
-    BONUS_POINTS, CHASE, CHASE_WITH_WICKETS, DEFEND_BY, EARLY_FINISH_BALLS,
-    FINISHED_EARLY, FOUR_WICKET_HAUL, OPENER_CENTURY, SCENARIO_KINDS, Scenario,
-    bonuses_earned, evaluate, rank_key,
+    BALLS_PER_INNINGS, BONUS_ORDER, BONUS_POINTS, BOWLED_THEM_OUT, CHASE,
+    CHASE_IN_OVERS, CHASE_WITH_WICKETS, DEFEND_BY, EARLY_FINISH_BALLS, FINISHED_EARLY,
+    FOUR_WICKET_HAUL, GENERATED_KINDS, LOWER_ORDER_FIFTY, MAIDEN_OVER,
+    NO_POWERPLAY_WICKET, OPENER_CENTURY, SCENARIO_KINDS, Scenario, TEN_SIXES,
+    THREE_IN_AN_OVER, WIN_BY_RUNS, WIN_BY_WICKETS, bonuses_earned, bonuses_on_offer,
+    evaluate, rank_key,
 )
-from game.simulator import BatterCard, BowlerCard, Innings, Player
+from game.simulator import BatterCard, BowlerCard, Innings, OverSnapshot, Player
 
 
 def _player(name="P"):
@@ -23,20 +26,42 @@ def _player(name="P"):
 
 
 def innings(runs=150, wickets=5, balls=120, openers=(30, 30), bowler_wickets=(),
-            chased=False):
+            chased=False, sixes=0, overs=None):
     """A minimal but LEGAL innings: `batting` in batting order (index is position, A110),
-    `bowling` belonging to the side that bowled at it."""
+    `bowling` belonging to the side that bowled at it.
+
+    `overs` is a list of (over_runs, over_wickets) and builds the `over_log` the phase and
+    per-over bonuses read. Cumulative wickets are ACCUMULATED here rather than stated, so a
+    fixture cannot claim a log that disagrees with itself -- the shape A116 had to repair
+    once, where a fixture described an innings no real one could be."""
     bats = [BatterCard(player=_player(f"b{i}"), runs=r, balls=20, faced_any=True)
             for i, r in enumerate(openers)]
     bats += [BatterCard(player=_player(f"b{i}"), runs=0, balls=0) for i in range(len(openers), 11)]
     bowls = [BowlerCard(player=_player(f"w{i}"), wickets=w, balls=24, runs=30)
              for i, w in enumerate(bowler_wickets)]
+    log, cum_runs, cum_wkts, cum_balls = [], 0, 0, 0
+    for over_no, (over_runs, over_wickets) in enumerate(overs or ()):
+        cum_runs += over_runs
+        cum_wkts += over_wickets
+        cum_balls += 6
+        log.append(OverSnapshot(over=over_no, bowler="w0", runs=cum_runs,
+                                wickets=cum_wkts, balls=cum_balls,
+                                over_runs=over_runs, over_wickets=over_wickets))
     return Innings(batting=bats, bowling=bowls, runs=runs, wickets=wickets,
-                   balls=balls, chased=chased)
+                   balls=balls, chased=chased, sixes=sixes, over_log=log)
 
 
 def _chase(**kw):
+    """A LEGACY chase: target fixed at day creation, nobody bowls. Still generated for no
+    new day, still scored for every old one."""
     return Scenario(CHASE, 1, "CSK 2013", "Final", target=185, **kw)
+
+
+def _bowl_first(**kw):
+    """A live "win by N wickets" day -- the player bowls, then chases what that earned
+    them. Both innings are real, which is what every kind generated today looks like."""
+    kw.setdefault("wickets_required", 4)
+    return Scenario(WIN_BY_WICKETS, 1, "CSK 2013", "Final", **kw)
 
 
 # --- the objective ----------------------------------------------------------------------
@@ -96,10 +121,10 @@ def test_the_bowling_bonus_reads_the_opposition_innings_not_the_players_own():
     Here the player's four-wicket haul lives on the innings they BOWLED at."""
     mine = innings(bowler_wickets=(4, 0))       # would be the OPPOSITION's bowlers
     theirs = innings(bowler_wickets=(4, 1))     # the player's own bowlers
-    assert FOUR_WICKET_HAUL in bonuses_earned(_chase(), mine, theirs)
+    assert FOUR_WICKET_HAUL in bonuses_earned(_bowl_first(), mine, theirs)
 
     theirs_thin = innings(bowler_wickets=(3, 1))
-    assert FOUR_WICKET_HAUL not in bonuses_earned(_chase(), mine, theirs_thin)
+    assert FOUR_WICKET_HAUL not in bonuses_earned(_bowl_first(), mine, theirs_thin)
 
 
 def test_finishing_early_is_only_available_to_a_chase_and_only_if_it_succeeded():
@@ -116,9 +141,9 @@ def test_finishing_early_is_only_available_to_a_chase_and_only_if_it_succeeded()
 
 
 def test_bonus_points_are_summed_from_the_bonuses_actually_earned():
-    got = evaluate(_chase(), innings(runs=186, wickets=1, openers=(101, 40), chased=True,
-                                     balls=100),
-                   innings(bowler_wickets=(4,)))
+    got = evaluate(_bowl_first(), innings(runs=186, wickets=1, openers=(101, 40),
+                                          chased=True, balls=100),
+                   innings(runs=185, bowler_wickets=(4,)))
     assert set(got.bonuses_met) == {OPENER_CENTURY, FOUR_WICKET_HAUL, FINISHED_EARLY}
     assert got.bonus_points == sum(BONUS_POINTS[b] for b in got.bonuses_met)
 
@@ -241,20 +266,32 @@ def test_a_generated_scenario_is_always_complete_for_its_own_kind():
     thousand days is itself the assertion that the generator never builds one."""
     kinds = set()
     for i in range(1000):
-        s = generate(random.Random(i), 1, "CSK 2013", 178)
+        s = generate(random.Random(i), 1, "CSK 2013")
         kinds.add(s.kind)
-        assert s.describe()
-    assert kinds == set(SCENARIO_KINDS), f"generator never produced {set(SCENARIO_KINDS)-kinds}"
+        assert s.describe() and s.short()
+    assert kinds == set(GENERATED_KINDS), \
+        f"generator never produced {set(GENERATED_KINDS) - kinds}"
 
 
-def test_a_chase_target_is_the_score_the_opposition_actually_posted():
-    """Passed in rather than invented, so the target is a real innings against this engine
-    rather than a plausible-looking number."""
-    for i in range(50):
-        s = generate(random.Random(i), 1, "CSK 2013", 178)
-        if s.kind != DEFEND_BY:
-            assert s.target == 178
-            assert "179" in s.describe(), "the line must show the score to REACH, not to beat"
+def test_no_generated_day_is_batting_only():
+    """The whole point of the live kinds. A day the player cannot bowl in is a day where
+    five of their twelve picks never take the field, which is what made the bowling half of
+    a draft pointless two days in three."""
+    for i in range(200):
+        s = generate(random.Random(i), 1, "CSK 2013")
+        assert s.player_bowls, f"{s.kind} does not put the player's bowlers on the field"
+        assert s.opposition_bowls, f"{s.kind} bats against a synthetic attack"
+        assert s.target is None, "a live kind's target is whatever they make on the day"
+
+
+def test_a_retired_kind_is_still_constructible_so_a_stored_day_still_replays():
+    """Migration 032 stores the scenario precisely so a past leaderboard cannot move. A
+    kind dropped from the generator must therefore stay READABLE -- deleting it would
+    re-score, or fail to load, every day that was played under it."""
+    for kind in (CHASE, CHASE_WITH_WICKETS, DEFEND_BY):
+        assert kind in SCENARIO_KINDS and kind not in GENERATED_KINDS
+    assert Scenario(CHASE, 1, "X", "Final", target=170).describe()
+    assert Scenario(DEFEND_BY, 1, "X", "Final", runs_required=20).describe()
 
 
 def test_a_chase_needs_no_opposition_innings_at_all():
@@ -295,3 +332,169 @@ def test_a_successful_chase_still_outranks_every_failure_however_narrow():
     scraped = evaluate(s, innings(runs=186, wickets=9, chased=True), innings(runs=185))
     agonising = evaluate(s, innings(runs=185, wickets=0, chased=False), innings(runs=185))
     assert rank_key(True, scraped.margin, 0) > rank_key(False, agonising.margin, 999)
+
+
+# --- the live kinds -------------------------------------------------------------------------
+#
+# Every kind generated today is a full match, so `theirs` is always real and the player's
+# own bowlers are always on the field. These pin the three win conditions, and in
+# particular the two places where MISSING the objective does not mean falling short.
+
+def _win_by_runs(n=20):
+    return Scenario(WIN_BY_RUNS, 1, "MI 2019", "Final", runs_required=n)
+
+
+def _in_overs(n=17):
+    return Scenario(CHASE_IN_OVERS, 1, "MI 2019", "Final", overs_required=n)
+
+
+def test_win_by_runs_is_strict_and_reports_the_run_margin():
+    s = _win_by_runs(20)
+    assert evaluate(s, innings(runs=180), innings(runs=159)).objective_met      # by 21
+    got = evaluate(s, innings(runs=180), innings(runs=160))                     # by exactly 20
+    assert not got.objective_met and got.margin == 20
+
+
+def test_a_live_kind_takes_its_target_from_what_the_opposition_actually_made():
+    """The reversal this shape rests on. A legacy chase carried its target on the scenario;
+    a live one has none, because the target is whatever the player's own bowlers allowed --
+    which is the entire reason picking bowlers means anything."""
+    s = _bowl_first()
+    assert s.target is None
+    got = evaluate(s, innings(runs=161, wickets=3, chased=True), innings(runs=160))
+    assert got.objective_met and got.margin == 7
+
+    # Same batting, a tighter spell: 40 fewer conceded and the chase is the same one, but
+    # it was a chase of 121 rather than 161 -- so falling on 161 would have been a win.
+    missed = evaluate(s, innings(runs=118, wickets=9, chased=False), innings(runs=120))
+    assert not missed.objective_met and missed.margin == -3
+
+
+def test_missing_a_wickets_floor_is_not_the_same_as_falling_short():
+    """The case that would have printed "-2 short" at somebody who chased it. A chase
+    completed with too few in hand MISSES the objective while keeping a perfectly good
+    positive margin, so nothing downstream may read `not objective_met` as "failed to
+    chase" -- the SIGN of the margin is what carries that."""
+    s = _bowl_first(wickets_required=6)
+    scraped = evaluate(s, innings(runs=161, wickets=8, chased=True), innings(runs=160))
+    assert not scraped.objective_met
+    assert scraped.margin == 2 and "Chased with 2 wickets in hand" in scraped.summary
+
+    lost = evaluate(s, innings(runs=150, wickets=10, chased=False), innings(runs=160))
+    assert lost.margin < 0, "only a chase that did NOT finish reports a negative margin"
+
+
+def test_chase_in_overs_is_ranked_on_balls_to_spare():
+    s = _in_overs(17)
+    quick = evaluate(s, innings(runs=161, balls=17 * 6, chased=True), innings(runs=160))
+    assert quick.objective_met, "exactly 17 overs is inside 17 overs"
+    assert quick.margin == BALLS_PER_INNINGS - 17 * 6 == 18
+    assert "3.0 overs to spare" in quick.summary
+
+    quicker = evaluate(s, innings(runs=161, balls=15 * 6, chased=True), innings(runs=160))
+    assert rank_key(True, quicker.margin, 0) > rank_key(True, quick.margin, 0)
+
+
+def test_a_slow_winner_outranks_a_loser_within_the_failed_tier():
+    """Two DIFFERENT failures share one tier here -- a chase completed too slowly and a
+    chase not completed at all -- and ordering the loser above the winner would be plainly
+    wrong. Balls to spare is never negative and runs short never positive, so the two
+    separate without needing a fourth ranking key."""
+    s = _in_overs(16)
+    slow = evaluate(s, innings(runs=161, balls=19 * 6, chased=True), innings(runs=160))
+    lost = evaluate(s, innings(runs=158, wickets=10, chased=False), innings(runs=160))
+
+    assert not slow.objective_met and not lost.objective_met
+    assert slow.margin == 6 and lost.margin == -3
+    assert rank_key(False, slow.margin, 0) > rank_key(False, lost.margin, 0), \
+        "a side that chased it slowly ranked below one that never chased it"
+
+
+@pytest.mark.parametrize("scenario", [_win_by_runs(), _bowl_first(), _in_overs()])
+def test_a_live_kind_without_the_other_innings_is_refused_rather_than_assumed(scenario):
+    """Both innings decide it. Defaulting the missing side to zero would hand everybody a
+    win -- A23's rule about an unobserved value acquiring a plausible default, in the place
+    it would be most rewarding to get wrong."""
+    with pytest.raises(ValueError):
+        evaluate(scenario, innings(runs=180))
+
+
+# --- which bonuses a day can award ----------------------------------------------------------
+
+def test_every_bonus_is_on_offer_on_a_full_match_day():
+    """The problem this replaced: `bonuses_on_offer` returned exactly TWO bonuses every
+    single day, one of which was on every day, so there were two menus in the whole
+    feature. Both innings being real is what opens the rest."""
+    offered = set(bonuses_on_offer(_win_by_runs()))
+    assert offered == set(BONUS_ORDER) - {FINISHED_EARLY}, "batting first, nothing to finish"
+    assert set(bonuses_on_offer(_bowl_first())) == set(BONUS_ORDER)
+
+
+def test_a_legacy_chase_offers_no_bowling_bonus_because_nobody_bowled():
+    """Availability is DERIVED from which innings a bonus reads, not branched on the kind.
+    A legacy chase's opposition batted against a synthetic attack when the day was made, so
+    there is no bowling card of the player's to read."""
+    offered = set(bonuses_on_offer(_chase()))
+    assert not offered & {FOUR_WICKET_HAUL, BOWLED_THEM_OUT, THREE_IN_AN_OVER, MAIDEN_OVER}
+    assert OPENER_CENTURY in offered and FINISHED_EARLY in offered
+
+
+def test_finishing_early_is_withheld_when_finishing_early_is_the_objective():
+    """Paying a bonus for the thing already being marked is paying twice for one piece of
+    cricket."""
+    assert FINISHED_EARLY not in bonuses_on_offer(_in_overs())
+    early = innings(balls=BALLS_PER_INNINGS - EARLY_FINISH_BALLS, chased=True)
+    assert FINISHED_EARLY not in bonuses_earned(_in_overs(), early, innings(runs=100))
+    assert FINISHED_EARLY in bonuses_earned(_bowl_first(), early, innings(runs=100))
+
+
+# --- the new bonuses themselves --------------------------------------------------------------
+
+def test_ten_sixes_reads_the_innings_total_not_a_single_batter():
+    assert TEN_SIXES in bonuses_earned(_bowl_first(), innings(sixes=10), innings())
+    assert TEN_SIXES not in bonuses_earned(_bowl_first(), innings(sixes=9), innings())
+
+
+def test_a_powerplay_wicket_anywhere_in_the_first_six_overs_costs_the_bonus():
+    clean = innings(overs=[(8, 0)] * 6 + [(8, 1)] * 4)
+    assert NO_POWERPLAY_WICKET in bonuses_earned(_bowl_first(), clean, innings())
+
+    # The wicket falls in the sixth over -- the last one that counts.
+    late = innings(overs=[(8, 0)] * 5 + [(8, 1)] + [(8, 0)] * 4)
+    assert NO_POWERPLAY_WICKET not in bonuses_earned(_bowl_first(), late, innings())
+
+
+def test_an_innings_that_ended_inside_the_powerplay_falls_back_to_its_own_total():
+    """`over_log` holds completed overs only, so a four-over innings has no sixth entry --
+    and nothing more can fall, so the innings total IS the answer. Without the fallback a
+    collapse would silently qualify."""
+    collapse = innings(wickets=10, balls=24, overs=[(4, 3), (2, 3), (5, 2), (1, 2)])
+    assert NO_POWERPLAY_WICKET not in bonuses_earned(_bowl_first(), collapse, innings())
+
+
+def test_a_lower_order_fifty_means_seven_or_lower_and_someone_who_actually_batted():
+    late = innings()
+    late.batting[6].runs, late.batting[6].faced_any = 55, True
+    assert LOWER_ORDER_FIFTY in bonuses_earned(_bowl_first(), late, innings())
+
+    # Number six is not the lower order, however many he made.
+    six = innings()
+    six.batting[5].runs, six.batting[5].faced_any = 80, True
+    assert LOWER_ORDER_FIFTY not in bonuses_earned(_bowl_first(), six, innings())
+
+
+def test_the_over_bonuses_read_the_innings_the_player_bowled_at():
+    """The A101 shape again, in the two newest places it could occur: a maiden and a
+    three-wicket over belong to the side that BOWLED them, so both read `theirs`."""
+    theirs = innings(overs=[(0, 0), (12, 3), (9, 0)])
+    assert {MAIDEN_OVER, THREE_IN_AN_OVER} <= set(
+        bonuses_earned(_bowl_first(), innings(overs=[(0, 0), (12, 3)]), theirs))
+
+    quiet = innings(overs=[(4, 1), (7, 2)])
+    assert not {MAIDEN_OVER, THREE_IN_AN_OVER} & set(
+        bonuses_earned(_bowl_first(), innings(overs=[(0, 0), (12, 3)]), quiet))
+
+
+def test_bowling_them_out_needs_all_ten():
+    assert BOWLED_THEM_OUT in bonuses_earned(_bowl_first(), innings(), innings(wickets=10))
+    assert BOWLED_THEM_OUT not in bonuses_earned(_bowl_first(), innings(), innings(wickets=9))

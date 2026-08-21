@@ -9,6 +9,7 @@ can serve a real drafter, and whether the fallback fires when they cannot.
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 import random
 
 import pytest
@@ -199,29 +200,106 @@ def _a_side(offset=0):
     return side
 
 
-def test_a_chase_plays_one_innings_and_a_defence_plays_two():
-    """Not a detail: a chase's target was fixed when the day was created, so replaying the
-    opposition per player would make the target differ by whoever happened to be bowling --
-    and two chases against different targets are not comparable, which is the whole point
-    of a shared daily."""
-    from game.scenarios import CHASE, DEFEND_BY, Scenario
+def test_a_legacy_chase_plays_one_innings_and_every_live_kind_plays_two():
+    """A legacy chase's target was fixed when the day was created, so replaying the
+    opposition per player would have made it differ by whoever happened to be bowling.
+    Every kind generated today plays both innings instead -- which is exactly what puts a
+    drafted twelve's five bowlers on the field."""
+    from game.scenarios import CHASE, GENERATED_KINDS, Scenario
     mine, opp = _a_side(), _a_side(1)
 
-    chase = Scenario(CHASE, opp_fs := 1, "X 2013", "Final", target=170)
+    chase = Scenario(CHASE, 1, "X 2013", "Final", target=170)
     my_inn, their_inn = daily.play_day(MODEL, chase, mine, None, random.Random(1))
     assert my_inn.balls > 0
     assert their_inn is None, "a chase replayed the opposition"
 
-    defence = Scenario(DEFEND_BY, opp_fs, "X 2013", "Final", runs_required=20)
-    my_inn, their_inn = daily.play_day(MODEL, defence, mine, opp, random.Random(1))
-    assert their_inn is not None and their_inn.balls > 0
+    for s in _one_of_each_live_kind():
+        my_inn, their_inn = daily.play_day(MODEL, s, mine, opp, random.Random(1))
+        assert their_inn is not None and their_inn.balls > 0, f"{s.kind} played one innings"
+        assert my_inn.balls > 0
+    assert len(_one_of_each_live_kind()) == len(GENERATED_KINDS)
 
 
-def test_a_defence_without_an_opposition_side_is_refused():
+def _one_of_each_live_kind():
+    from game.scenarios import (
+        CHASE_IN_OVERS, Scenario, WIN_BY_RUNS, WIN_BY_WICKETS,
+    )
+    return [Scenario(WIN_BY_RUNS, 1, "X 2013", "Final", runs_required=20),
+            Scenario(WIN_BY_WICKETS, 1, "X 2013", "Final", wickets_required=4),
+            Scenario(CHASE_IN_OVERS, 1, "X 2013", "Final", overs_required=17)]
+
+
+def test_the_players_own_bowlers_are_the_ones_the_opposition_faces():
+    """The point of the whole shape. If the opposition batted against anything else, the
+    target would not be the player's own doing and picking bowlers would not matter."""
+    from game.scenarios import Scenario, WIN_BY_WICKETS
+    mine, opp = _a_side(), _a_side(1)
+    s = Scenario(WIN_BY_WICKETS, 1, "X 2013", "Final", wickets_required=4)
+    _my_inn, their_inn = daily.play_day(MODEL, s, mine, opp, random.Random(1))
+
+    bowled = {b.player.person_id for b in their_inn.bowling}
+    assert bowled, "nobody bowled at the opposition"
+    mine_ids = {c.person_id for c in daily.with_bowling_depth(mine).xi}
+    assert bowled <= mine_ids, "the opposition faced somebody who is not in the player's XI"
+
+
+def test_a_full_match_without_an_opposition_side_is_refused():
+    """Restored after a slice-based edit of this file quietly deleted it, and widened while
+    it was being put back: every LIVE kind needs the opposition too, not just the legacy
+    defence it was originally written for. Both innings decide the result, so a missing
+    side must raise rather than acquire a default (A23)."""
     from game.scenarios import DEFEND_BY, Scenario
-    s = Scenario(DEFEND_BY, 1, "X 2013", "Final", runs_required=20)
+    for s in [Scenario(DEFEND_BY, 1, "X 2013", "Final", runs_required=20)] + \
+             _one_of_each_live_kind():
+        with pytest.raises(ValueError):
+            daily.play_day(MODEL, s, _a_side(), None, random.Random(1))
+
+
+def _four_bowler_side():
+    """An eleven with EXACTLY four bowling options and a fifth on the bench.
+
+    Built deliberately rather than found: the first squad that came to hand had six
+    bowlers, so thinning it by one still left five and the fixture posed no question at all
+    -- it passed against a `with_bowling_depth` that did nothing. Real cards, so `has_bowl`
+    and the batting ratings are the engine's own."""
+    from game.season import Side
+    for fs in FULL.fs_ids:
+        squad = list(FULL.cards_by_fs[fs])
+        bowlers = [c for c in squad if c.has_bowl]
+        others = [c for c in squad if not c.has_bowl]
+        if len(bowlers) >= 5 and len(others) >= 7:
+            return Side(name="short", short="SH", xi=bowlers[:4] + others[:7],
+                        impact=bowlers[4])
+    pytest.fail("no squad in the deck can pose the four-bowler question")
+
+
+def test_a_side_that_needs_its_impact_player_to_bowl_can_still_bowl_twenty_overs():
+    """A twelve is legal with five bowling options across all TWELVE, so a legal ELEVEN can
+    hold four -- and `attack()` then returns four, five bowlers' worth of overs runs out
+    around the seventeenth, and `choose_bowler` raises on an empty sequence. That is a 500
+    on somebody's single attempt of the day.
+
+    Found by a calibration sweep crashing, not by a test, and reachable on a defence long
+    before every kind started needing the player to bowl. Asserted on the CONSEQUENCE --
+    whether twenty overs can actually be bowled -- rather than on a bowler count, because
+    the count is the mechanism and the crash is the thing that matters."""
+    from etl.feasibility import BOWLERS_IN_TWELVE
+    from game.__main__ import attack, lineup
+    from game.simulator import play_innings
+
+    posed = _four_bowler_side()
+    batting = lineup(list(posed.xi), MODEL, posed.impact)
+    assert len(attack(list(posed.xi), MODEL, posed.impact)) == BOWLERS_IN_TWELVE - 1
+
     with pytest.raises(ValueError):
-        daily.play_day(MODEL, s, _a_side(), None, random.Random(1))
+        play_innings(MODEL, batting, attack(list(posed.xi), MODEL, posed.impact),
+                     random.Random(4))
+
+    fixed = daily.with_bowling_depth(posed)
+    assert len(attack(list(fixed.xi), MODEL, fixed.impact)) == BOWLERS_IN_TWELVE
+    innings = play_innings(MODEL, lineup(list(fixed.xi), MODEL, fixed.impact),
+                           attack(list(fixed.xi), MODEL, fixed.impact), random.Random(4))
+    assert innings.balls > 0
 
 
 def test_the_same_attempt_scores_the_same_every_time():
@@ -285,51 +363,64 @@ def test_side_for_fs_declines_a_squad_that_cannot_field_an_eleven():
 
 
 
-def test_a_days_target_is_the_same_however_often_it_is_generated():
-    """Player-independence needs no test -- `opposition_total` has no access to the player,
-    so it is enforced by the signature rather than by a rule that could drift. What can
-    drift is DAY-determinism: if the opposition's innings were seeded from anything but the
-    date, two servers creating today at the same moment would store different targets and
-    the leaderboard would be comparing different challenges."""
-    a, _ = daily._generate_day(FULL, MODEL, DAY)
-    b, _ = daily._generate_day(FULL, MODEL, DAY)
+def test_a_day_is_the_same_however_often_it_is_generated():
+    """DAY-determinism. If a day were seeded from anything but the date, two servers
+    creating today at the same moment would store different challenges and the leaderboard
+    would be ranking answers to two different questions."""
+    a = daily._generate_day(FULL, MODEL, DAY)
+    b = daily._generate_day(FULL, MODEL, DAY)
     assert a.scenario == b.scenario, "the same date generated two different challenges"
     assert a.deck_fs_ids == b.deck_fs_ids
 
-    c, _ = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    c = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
     assert (c.scenario, c.deck_fs_ids) != (a.scenario, a.deck_fs_ids)
 
 
 def test_only_the_bonuses_today_can_actually_award_are_advertised():
-    """Not all three are available on every day, and that is a consequence of the format
-    rather than an oversight: a chase is one innings, so nobody bowls and there is no
-    four-wicket haul to take; a defence is not a chase, so there is nothing to finish
-    early. Promising a bonus that cannot be earned would be the page lying about the rules.
+    """Promising a bonus that cannot be earned would be the page lying about the rules.
 
     Asserted against what `bonuses_earned` can actually return for that kind, not against a
-    hand-written list -- otherwise the two could drift and this would still pass."""
+    hand-written list -- otherwise the two could drift and this would still pass. That is
+    the whole reason availability is derived from which innings a bonus reads rather than
+    branched on the kind: the branch was correct for three kinds and would have gone stale
+    on the fourth."""
     from game.scenarios import (
-        CHASE, DEFEND_BY, FINISHED_EARLY, FOUR_WICKET_HAUL, OPENER_CENTURY, Scenario,
+        CHASE, FOUR_WICKET_HAUL, OPENER_CENTURY, Scenario, WIN_BY_WICKETS, bonuses_earned,
     )
-    chase = Scenario(CHASE, 1, "X", "Final", target=170)
-    defence = Scenario(DEFEND_BY, 1, "X", "Final", runs_required=20)
+    chase = Scenario(CHASE, 1, "X", "Final", target=170)          # legacy: nobody bowls
+    live = Scenario(WIN_BY_WICKETS, 1, "X", "Final", wickets_required=4)
 
-    assert set(daily.bonuses_on_offer(chase)) == {OPENER_CENTURY, FINISHED_EARLY}
-    assert set(daily.bonuses_on_offer(defence)) == {OPENER_CENTURY, FOUR_WICKET_HAUL}
+    assert FOUR_WICKET_HAUL not in daily.bonuses_on_offer(chase)
+    assert FOUR_WICKET_HAUL in daily.bonuses_on_offer(live)
+    assert OPENER_CENTURY in daily.bonuses_on_offer(chase)
 
-    # And each advertised bonus is one the evaluator really can hand out for that kind.
-    from game.simulator import BatterCard, BowlerCard, Innings, Player
+    # And each advertised bonus is one the evaluator really can hand out for that kind: a
+    # performance that earns EVERY one of them must come back with exactly that set.
+    from game.simulator import BatterCard, BowlerCard, Innings, OverSnapshot, Player
     def _p(n): return Player(name=n, bat=0.0, bowl=None, person_id=n)
-    ton = [BatterCard(player=_p("a"), runs=120, balls=50, faced_any=True)] + \
-          [BatterCard(player=_p(f"b{i}"), runs=0, balls=0) for i in range(10)]
-    haul = [BowlerCard(player=_p("w"), wickets=4, balls=24, runs=20)]
+    bats = [BatterCard(player=_p("a"), runs=120, balls=50, faced_any=True),
+            BatterCard(player=_p("b"), runs=10, balls=8, faced_any=True)]
+    bats += [BatterCard(player=_p(f"c{i}"), runs=0, balls=0) for i in range(2, 6)]
+    bats += [BatterCard(player=_p("tail"), runs=55, balls=20, faced_any=True)]
+    bats += [BatterCard(player=_p(f"d{i}"), runs=0, balls=0) for i in range(7, 11)]
+    clean = [OverSnapshot(over=i, bowler="x", runs=8 * (i + 1), wickets=0,
+                          balls=6 * (i + 1), over_runs=8, over_wickets=0)
+             for i in range(6)]
+    theirs_log = [OverSnapshot(over=0, bowler="w", runs=0, wickets=0, balls=6,
+                               over_runs=0, over_wickets=0),
+                  OverSnapshot(over=1, bowler="w", runs=9, wickets=3, balls=12,
+                               over_runs=9, over_wickets=3)]
 
-    quick = Innings(batting=ton, bowling=[], runs=180, wickets=2, balls=90, chased=True)
-    reply = Innings(batting=ton, bowling=haul, runs=140, wickets=8, balls=120)
-    assert set(daily.bonuses_on_offer(chase)) <= set(
-        __import__("game.scenarios", fromlist=["x"]).bonuses_earned(chase, quick, None))
-    assert set(daily.bonuses_on_offer(defence)) <= set(
-        __import__("game.scenarios", fromlist=["x"]).bonuses_earned(defence, quick, reply))
+    everything = Innings(batting=bats, bowling=[], runs=180, wickets=0, balls=90,
+                         chased=True, sixes=12, over_log=clean)
+    reply = Innings(batting=bats, bowling=[BowlerCard(player=_p("w"), wickets=4, balls=24,
+                                                      runs=20)],
+                    runs=140, wickets=10, balls=120, over_log=theirs_log)
+
+    for scenario, other in ((chase, None), (live, reply)):
+        earned = set(bonuses_earned(scenario, everything, other))
+        assert earned == set(daily.bonuses_on_offer(scenario)), \
+            f"{scenario.kind} advertises a bonus its own evaluator cannot award"
 
 
 # --- the shareable line --------------------------------------------------------------------
@@ -562,30 +653,42 @@ def _finished_state(day, account_id):
     raise AssertionError("draft did not finish")
 
 
-@pytest.mark.parametrize("kind,margin,chased,first_label,second_label,expected", [
-    # A DEFENCE has the player batting FIRST. Reporting the second side as the winner
-    # handed a defence the player had just won by 77 runs to the opposition -- found by
-    # reading a real result, not by a test, which is why this table exists now.
-    ("defend_by", 77, False, "You", "CSK 2010", "You"),
-    ("defend_by", -30, False, "You", "CSK 2010", "CSK 2010"),
-    # A CHASE has them batting second.
-    ("chase", 7, True, "SRH 2017", "You", "You"),
-    ("chase", -3, False, "SRH 2017", "You", "SRH 2017"),
-])
-def test_the_winner_is_the_side_that_actually_won(kind, margin, chased, first_label,
-                                                   second_label, expected):
-    import web.app as app
-    from game.scenarios import Outcome, Scenario
+def _scenario_for(kind):
+    from game.scenarios import Scenario
+    fields = {"defend_by": dict(runs_required=20), "win_by_runs": dict(runs_required=20),
+              "chase": dict(target=150), "win_by_wickets": dict(wickets_required=6),
+              "chase_in_overs": dict(overs_required=16)}[kind]
+    return Scenario(kind, 1, "CSK 2010", "Final", **fields)
 
-    scenario = (Scenario("defend_by", 1, "CSK 2010", "Final", runs_required=20)
-                if kind == "defend_by"
-                else Scenario("chase", 1, "SRH 2017", "Final", target=150))
-    first = _stub_innings(237 if kind == "defend_by" else 151)
-    second = _stub_innings((237 - margin) if kind == "defend_by" else 151 + margin,
-                           chased=chased)
-    play = daily.DayPlay(Outcome(margin > 0 if kind == "defend_by" else chased,
-                                 margin, 0, (), "s"),
-                         first, second, first_label, second_label)
+
+@pytest.mark.parametrize("kind,first_runs,second_runs,chased,met,expected", [
+    # A side batting FIRST wins by outscoring the reply. Reporting the second side as the
+    # winner handed a defence the player had just won by 77 runs to the opposition -- found
+    # by reading a real result, not by a test, which is why this table exists now.
+    ("defend_by", 237, 160, False, True, "You"),
+    ("defend_by", 200, 230, True, False, "CSK 2010"),
+    ("win_by_runs", 237, 160, False, True, "You"),
+    ("win_by_runs", 150, 151, True, False, "CSK 2010"),
+    # Batting SECOND, the player wins by chasing it down -- whatever the objective said.
+    ("chase", 150, 157, True, True, "You"),
+    ("chase", 150, 147, False, False, "CSK 2010"),
+    # The case that matters most here: chased it, MISSED the objective, still won the
+    # match. Nothing may read `objective_met` -- or the margin's sign -- as "who won".
+    ("win_by_wickets", 150, 157, True, False, "You"),
+    ("chase_in_overs", 150, 157, True, False, "You"),
+])
+def test_the_winner_is_the_side_that_actually_won(kind, first_runs, second_runs, chased,
+                                                  met, expected):
+    import web.app as app
+    from game.scenarios import Outcome
+
+    scenario = _scenario_for(kind)
+    bats_first = scenario.player_bats_first
+    labels = ("You", "CSK 2010") if bats_first else ("CSK 2010", "You")
+    play = daily.DayPlay(Outcome(met, 0, 0, (), "s"),
+                         _stub_innings(first_runs),
+                         _stub_innings(second_runs, chased=chased),
+                         labels[0], labels[1], player_bats_first=bats_first)
     assert app._daily_match_out(play, scenario)["winner"] == expected
 
 

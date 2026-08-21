@@ -1785,10 +1785,13 @@ class DailyOut(BaseModel):
     challenge_date: str
     scenario: str = Field(description="the one line shown before a ball is bowled")
     kind: str
-    margin_unit: str = Field(description="'runs' or 'wickets' -- what today ranks on")
+    margin_unit: str = Field(
+        description="'runs', 'wickets' or 'balls' -- what today ranks on")
     opposition: str
     stage: str
-    target: int | None = Field(description="the score to REACH; null for a defence")
+    target: int | None = Field(
+        description="the score to REACH; null on every kind generated today, whose target "
+                    "is whatever the opposition make against the player's own bowlers")
     bonuses: list[str] = Field(description="what today's bonuses are, in plain words")
     played: bool = Field(description="true once this account has used its one attempt")
     result: dict | None = Field(description="their own recorded attempt, once played")
@@ -1837,11 +1840,11 @@ def _daily_innings_out(innings, *, bowled_by_a_player: bool) -> dict:
     """An innings for the daily scorecard, with the bowling card dropped when nobody
     actually bowled it.
 
-    A chase's first innings was played against the synthetic league-average attack that
-    fixes the day's target -- it has to be player-independent or the target is not shared.
-    Those bowlers are named "bowler 1".."bowler 5" and are not people; putting them on a
-    scorecard would credit wickets to somebody who does not exist. The batting is entirely
-    real and stays."""
+    A LEGACY chase's innings were played against the synthetic league-average attack that
+    fixed the day's target. Those bowlers are named "bowler 1".."bowler 5" and are not
+    people; putting them on a scorecard would credit wickets to somebody who does not
+    exist. The batting is entirely real and stays. Every kind generated today plays both
+    innings with real attacks, so both cards are shown in full."""
     out = _innings_out(innings).model_dump()
     if not bowled_by_a_player:
         out["bowling"] = []
@@ -1854,16 +1857,20 @@ def _daily_match_out(play, scenario) -> dict:
     Deliberately the same shape rather than a new one: `renderScorecard` and the
     over-by-over reveal already read it, and a second shape would mean a second renderer
     for the same thing. `home` is simply whoever batted first, which is what it means
-    everywhere else in this engine."""
+    everywhere else in this engine.
+
+    Everything kind-specific is read off `DayPlay`, which knows it for certain because it
+    built the innings. This used to re-derive `kind == "defend_by"` here, and that is what
+    made it wrong once already -- reporting the second side as the winner handed a defence
+    the player had just won by 77 runs to the opposition. It is also what would have gone
+    stale the moment a fourth kind existed."""
     first, second = play.first, play.second
-    # WHICH SIDE IS THE PLAYER depends on the kind, and getting it from the outcome alone
-    # is what made this wrong: a defence has the player batting FIRST, so reporting the
-    # second side as the winner handed a defence the player had just won by 77 runs to the
-    # opposition. `DayPlay` already labels the innings; use that rather than re-deriving.
-    player_is_first = scenario.kind == "defend_by"
+    player_is_first = play.player_bats_first
     player_label = play.first_label if player_is_first else play.second_label
     other_label = play.second_label if player_is_first else play.first_label
-    player_won = (play.outcome.margin > 0) if player_is_first else second.chased
+    # From the innings themselves rather than from the margin: a margin is in the day's own
+    # unit, and "balls to spare" being positive says nothing about who won.
+    player_won = first.runs > second.runs if player_is_first else second.chased
     return {
         "stage": f"Daily · {scenario.stage}",
         "home": play.first_label, "away": play.second_label,
@@ -1873,19 +1880,13 @@ def _daily_match_out(play, scenario) -> dict:
                   if first.runs != second.runs else None,
         "margin": play.outcome.summary,
         "yours": True,
-        # Exactly ONE innings in a daily is bowled by real players: the reply to a
-        # defence, where the opposition chases what the player set and the player's own
-        # attack is what they face. Everything else -- both innings of a chase, and the
-        # player's own innings in a defence -- is bowled by the synthetic league-average
-        # attack that keeps the target player-independent, so it has no bowling card.
-        "home_innings": _daily_innings_out(first, bowled_by_a_player=False),
-        "away_innings": _daily_innings_out(
-            second, bowled_by_a_player=(scenario.kind == "defend_by")),
+        "home_innings": _daily_innings_out(first, bowled_by_a_player=play.first_real_bowling),
+        "away_innings": _daily_innings_out(second, bowled_by_a_player=play.second_real_bowling),
     }
 
 
 def _daily_out(conn, account_id: int, day) -> DailyOut:
-    from game.scenarios import BONUS_LABELS
+    from game.scenarios import BONUS_LABELS, bonuses_on_offer
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
     # Read whether or not today has been played: an unplayed day still has a streak to
     # keep, and that is precisely when saying so is worth anything.
@@ -1915,7 +1916,7 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
         opposition=day.scenario.opposition_name,
         stage=day.scenario.stage,
         target=(None if day.scenario.target is None else day.scenario.target + 1),
-        bonuses=[BONUS_LABELS[b] for b in daily_lib.bonuses_on_offer(day.scenario)],
+        bonuses=[BONUS_LABELS[b] for b in bonuses_on_offer(day.scenario)],
         played=result is not None,
         result=result,
         state=(None if result is not None

@@ -17,9 +17,14 @@ DRAFT_API = '/api/daily/draft';
 function dailyBanner(d){
   $('#dailyDate').textContent = 'Daily challenge · ' + d.challenge_date;
   $('#dailyScenario').textContent = d.scenario;
-  $('#dailyBonuses').innerHTML = (d.bonuses.length
-      ? 'Bonus: ' + d.bonuses.map(b => `<em>${b}</em>`).join(' · ') : '')
-    + streakLine(d, false);
+  // A day carries ONE bonus, rotated, so this reads as a thing to chase rather than a
+  // list header. The plural form is kept for the stored days generated before the
+  // rotation, which really do offer several.
+  const bs = d.bonuses;
+  $('#dailyBonuses').innerHTML = (bs.length
+      ? (bs.length === 1 ? `Today's bonus: <em>${bs[0]}</em>`
+                         : 'Bonus: ' + bs.map(b => `<em>${b}</em>`).join(' · '))
+      : '') + streakLine(d, false);
 }
 
 // Shown BEFORE playing as something to keep, and after as something kept -- which is the

@@ -9,6 +9,7 @@ can serve a real drafter, and whether the fallback fires when they cannot.
 from __future__ import annotations
 
 import datetime
+import json
 from dataclasses import replace
 import random
 
@@ -363,6 +364,27 @@ def test_side_for_fs_declines_a_squad_that_cannot_field_an_eleven():
 
 
 
+def test_a_real_generated_day_advertises_one_bonus_and_it_is_the_days_own():
+    """Through the real generator against the real deck, not a hand-built scenario -- the
+    rotation is pinned in tests/test_scenarios.py, and what this checks is that a day
+    actually built and stored carries it through."""
+    from game.scenarios import daily_bonus
+    for i in range(12):
+        date = DAY + datetime.timedelta(i)
+        day = daily._generate_day(FULL, MODEL, date)
+        assert day.scenario.bonus == daily_bonus(date)
+        assert daily.bonuses_on_offer(day.scenario) == [daily_bonus(date)]
+
+
+def test_a_days_bonus_survives_being_stored_and_read_back():
+    """It lives in the scenario jsonb, so it goes through `_scenario_row` and back. A field
+    the writer forgets is a day that silently reverts to offering all nine."""
+    day = daily._generate_day(FULL, MODEL, DAY)
+    row = json.loads(daily._scenario_row(day.scenario, 0))
+    assert row["bonus"] == day.scenario.bonus
+    assert daily._scenario_from_row(day.scenario.kind, row).bonus == day.scenario.bonus
+
+
 def test_a_day_is_the_same_however_often_it_is_generated():
     """DAY-determinism. If a day were seeded from anything but the date, two servers
     creating today at the same moment would store different challenges and the leaderboard
@@ -393,6 +415,11 @@ def test_only_the_bonuses_today_can_actually_award_are_advertised():
     assert FOUR_WICKET_HAUL not in daily.bonuses_on_offer(chase)
     assert FOUR_WICKET_HAUL in daily.bonuses_on_offer(live)
     assert OPENER_CENTURY in daily.bonuses_on_offer(chase)
+
+    # A real day carries ONE, and it is the only thing advertised.
+    today = Scenario(WIN_BY_WICKETS, 1, "X", "Final", wickets_required=4,
+                     bonus=FOUR_WICKET_HAUL)
+    assert daily.bonuses_on_offer(today) == [FOUR_WICKET_HAUL]
 
     # And each advertised bonus is one the evaluator really can hand out for that kind: a
     # performance that earns EVERY one of them must come back with exactly that set.

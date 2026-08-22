@@ -415,7 +415,7 @@ def _scenario_row(sc: Scenario, opposition_wickets: int) -> str:
         "opposition_fs_id": sc.opposition_fs_id, "opposition_name": sc.opposition_name,
         "stage": sc.stage, "target": sc.target,
         "wickets_required": sc.wickets_required, "runs_required": sc.runs_required,
-        "overs_required": sc.overs_required,
+        "overs_required": sc.overs_required, "bonus": sc.bonus,
         "opposition_wickets": opposition_wickets,
     })
 
@@ -425,7 +425,8 @@ def _scenario_from_row(kind: str, row: dict) -> Scenario:
                     target=row.get("target"),
                     wickets_required=row.get("wickets_required"),
                     runs_required=row.get("runs_required"),
-                    overs_required=row.get("overs_required"))
+                    overs_required=row.get("overs_required"),
+                    bonus=row.get("bonus"))
 
 
 def _generate_day(full: Deck, model: Model, challenge_date):
@@ -446,7 +447,7 @@ def _generate_day(full: Deck, model: Model, challenge_date):
         side = side_for_fs(full, fs_id)
         if side is None:
             continue
-        sc = generate(rng, fs_id, side.name)
+        sc = generate(rng, fs_id, side.name, challenge_date)
         return Day(challenge_date, daily_seed(challenge_date), sc, deck_fs_ids)
     raise DailyError("no squad in today's deck can field a legal eleven")
 

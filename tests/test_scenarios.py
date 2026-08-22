@@ -59,7 +59,10 @@ def _chase(**kw):
 
 def _bowl_first(**kw):
     """A live "win by N wickets" day -- the player bowls, then chases what that earned
-    them. Both innings are real, which is what every kind generated today looks like."""
+    them. Both innings are real, which is what every kind generated today looks like.
+
+    No `bonus` unless a test names one, so the bonus PREDICATES can each be exercised on
+    their own; the rotation itself is pinned separately."""
     kw.setdefault("wickets_required", 4)
     return Scenario(WIN_BY_WICKETS, 1, "CSK 2013", "Final", **kw)
 
@@ -193,8 +196,10 @@ import random
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 from game.scenarios import (
-    DAILY_DECK_SIZE, choose_deck, daily_seed, generate, player_order,
+    DAILY_DECK_SIZE, choose_deck, daily_bonus, daily_seed, generate, player_order,
 )
+
+_DAY0 = datetime.date(2026, 8, 22)
 
 
 def test_the_date_alone_decides_the_day():
@@ -266,7 +271,7 @@ def test_a_generated_scenario_is_always_complete_for_its_own_kind():
     thousand days is itself the assertion that the generator never builds one."""
     kinds = set()
     for i in range(1000):
-        s = generate(random.Random(i), 1, "CSK 2013")
+        s = generate(random.Random(i), 1, "CSK 2013", _DAY0 + datetime.timedelta(i))
         kinds.add(s.kind)
         assert s.describe() and s.short()
     assert kinds == set(GENERATED_KINDS), \
@@ -278,7 +283,7 @@ def test_no_generated_day_is_batting_only():
     five of their twelve picks never take the field, which is what made the bowling half of
     a draft pointless two days in three."""
     for i in range(200):
-        s = generate(random.Random(i), 1, "CSK 2013")
+        s = generate(random.Random(i), 1, "CSK 2013", _DAY0 + datetime.timedelta(i))
         assert s.player_bowls, f"{s.kind} does not put the player's bowlers on the field"
         assert s.opposition_bowls, f"{s.kind} bats against a synthetic attack"
         assert s.target is None, "a live kind's target is whatever they make on the day"
@@ -421,13 +426,45 @@ def test_a_live_kind_without_the_other_innings_is_refused_rather_than_assumed(sc
 
 # --- which bonuses a day can award ----------------------------------------------------------
 
-def test_every_bonus_is_on_offer_on_a_full_match_day():
-    """The problem this replaced: `bonuses_on_offer` returned exactly TWO bonuses every
-    single day, one of which was on every day, so there were two menus in the whole
-    feature. Both innings being real is what opens the rest."""
+def test_a_day_offers_exactly_one_bonus():
+    """One thing to chase, not nine things that might happen to land."""
+    for bonus in (OPENER_CENTURY, MAIDEN_OVER, TEN_SIXES):
+        assert bonuses_on_offer(_bowl_first(bonus=bonus)) == [bonus]
+
+
+def test_only_todays_bonus_can_be_earned_however_good_the_performance():
+    """A performance that would clear every landmark still collects the one on offer. This
+    is what makes a day's card comparable at all: everybody is chasing the same extra."""
+    everything = innings(openers=(120, 10), sixes=14, chased=True, balls=100,
+                         overs=[(8, 0)] * 6)
+    theirs = innings(wickets=10, bowler_wickets=(4, 2), overs=[(0, 0), (9, 3)])
+
+    assert bonuses_earned(_bowl_first(bonus=MAIDEN_OVER), everything, theirs) == (MAIDEN_OVER,)
+    assert bonuses_earned(_bowl_first(bonus=TEN_SIXES), everything, theirs) == (TEN_SIXES,)
+
+    # And one it did NOT earn stays unearned, however much else it did.
+    thin = innings(openers=(20, 10), chased=True)
+    assert bonuses_earned(_bowl_first(bonus=OPENER_CENTURY), thin, theirs) == ()
+
+
+def test_a_day_generated_before_a_day_carried_one_bonus_still_offers_all_of_them():
+    """A scenario with no bonus is a stored day from before the rotation, and it must go on
+    scoring the way it was scored -- migration 032's whole reason for storing a scenario."""
+    assert _win_by_runs().bonus is None
     offered = set(bonuses_on_offer(_win_by_runs()))
     assert offered == set(BONUS_ORDER) - {FINISHED_EARLY}, "batting first, nothing to finish"
     assert set(bonuses_on_offer(_bowl_first())) == set(BONUS_ORDER)
+
+
+def test_a_scenario_carrying_a_bonus_its_own_kind_cannot_award_is_refused():
+    """The one pairing that is not free. Nothing should be able to construct a day that
+    advertises something its own evaluator would never hand out."""
+    with pytest.raises(ValueError):
+        Scenario(CHASE_IN_OVERS, 1, "X", "Final", overs_required=17, bonus=FINISHED_EARLY)
+    with pytest.raises(ValueError):
+        Scenario(CHASE, 1, "X", "Final", target=170, bonus=FOUR_WICKET_HAUL)
+    with pytest.raises(ValueError):
+        Scenario(WIN_BY_RUNS, 1, "X", "Final", runs_required=20, bonus="scored_some_runs")
 
 
 def test_a_legacy_chase_offers_no_bowling_bonus_because_nobody_bowled():
@@ -498,3 +535,44 @@ def test_the_over_bonuses_read_the_innings_the_player_bowled_at():
 def test_bowling_them_out_needs_all_ten():
     assert BOWLED_THEM_OUT in bonuses_earned(_bowl_first(), innings(), innings(wickets=10))
     assert BOWLED_THEM_OUT not in bonuses_earned(_bowl_first(), innings(), innings(wickets=9))
+
+
+# --- the rotation -----------------------------------------------------------------------
+
+def test_the_bonus_rotates_one_step_a_day_and_never_repeats():
+    """A draw would land the same bonus three days running and leave another unseen for a
+    fortnight, which is the opposite of what makes a single bonus worth chasing. A rotation
+    advances by exactly one and nothing skips, so consecutive days can never match."""
+    days = [_DAY0 + datetime.timedelta(i) for i in range(400)]
+    seq = [daily_bonus(d) for d in days]
+    assert not [i for i in range(len(seq) - 1) if seq[i] == seq[i + 1]]
+
+    # One full cycle covers every bonus exactly once, and the next cycle repeats it.
+    cycle = seq[:len(BONUS_ORDER)]
+    assert set(cycle) == set(BONUS_ORDER)
+    assert seq[len(BONUS_ORDER):2 * len(BONUS_ORDER)] == cycle
+
+
+def test_the_rotation_is_the_date_and_nothing_else():
+    """Not drawn from the day's rng: the rotation has to be legible -- a player can see it
+    come round -- and a change to the scenario generator must not shift it out from under
+    an unfinished week."""
+    assert daily_bonus(_DAY0) == daily_bonus(datetime.date(_DAY0.year, _DAY0.month,
+                                                           _DAY0.day))
+
+
+def test_the_generated_kind_can_always_award_the_days_own_bonus():
+    """The bonus is chosen first and the kind accommodates it. Only `win_by_wickets` can
+    offer FINISHED_EARLY, so on that one day in nine the kind is forced -- and on no day may
+    a scenario be built that cannot award what the rotation asked for."""
+    from game.scenarios import kind_offers
+    forced = 0
+    for i in range(200):
+        day = _DAY0 + datetime.timedelta(i)
+        s = generate(random.Random(i), 1, "CSK 2013", day)
+        assert s.bonus == daily_bonus(day), "the day's scenario ignored the rotation"
+        assert kind_offers(s.kind, s.bonus)
+        if s.bonus == FINISHED_EARLY:
+            assert s.kind == WIN_BY_WICKETS
+            forced += 1
+    assert forced > 0, "the forced-kind branch was never exercised"

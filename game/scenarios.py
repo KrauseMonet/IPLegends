@@ -123,6 +123,9 @@ class Scenario:
     wickets_required: int | None = None
     runs_required: int | None = None
     overs_required: int | None = None
+    # THE day's one bonus. None only on a day generated before a day carried one, which
+    # keeps scoring every stored day exactly as it was scored.
+    bonus: str | None = None
 
     def __post_init__(self) -> None:
         spec = KINDS.get(self.kind)
@@ -131,6 +134,11 @@ class Scenario:
         for field_name in spec.requires:
             if getattr(self, field_name) is None:
                 raise ValueError(f"{self.kind} needs {field_name}")
+        if self.bonus is not None:
+            if self.bonus not in BONUS_TESTS:
+                raise ValueError(f"unknown bonus {self.bonus!r}")
+            if not kind_offers(self.kind, self.bonus):
+                raise ValueError(f"{self.kind} cannot award {self.bonus}")
 
     @property
     def spec(self) -> _Kind:
@@ -278,6 +286,11 @@ BONUS_TESTS = {
 # plays the full twenty rather than ending on a chase, so the tail bats more often there
 # and the two batting rarities are floors rather than estimates.
 #
+# Since a day now carries ONE bonus (`daily_bonus`), everybody on a given day is offered
+# the same one, so within a day the points are binary -- earned or not -- and the VALUE
+# cannot move the board. It is a statement of rarity to the player, and a way of comparing
+# one day's card with another's, and no longer a tiebreak weight.
+#
 # LOWER_ORDER_FIFTY is priced at a century's 25 for its rarity rather than trimmed to a
 # reachable 30: thirty from a number eight is a useful cameo and not a landmark, and a
 # calibrated bar is exactly what every other bonus here avoids. A rare bonus that pays well
@@ -316,25 +329,33 @@ BONUS_ORDER = (OPENER_CENTURY, TEN_SIXES, NO_POWERPLAY_WICKET, LOWER_ORDER_FIFTY
 EARLY_FINISH_BALLS = 2 * BALLS_PER_OVER
 
 
-def bonus_available(scenario: Scenario, bonus: str) -> bool:
-    """Whether today's kind can award this bonus at all.
+def kind_offers(kind: str, bonus: str) -> bool:
+    """Whether a KIND can award this bonus at all -- structural, and asked before any day
+    has chosen one.
 
     Two rules, both derived. A bonus reading the opposition's innings needs the player to
     have bowled it. And FINISHED_EARLY is withheld on a CHASE_IN_OVERS day because finishing
     early IS the objective there -- paying a bonus for the thing already being marked is
     paying twice for one piece of cricket."""
+    spec = KINDS[kind]
     reads, _test = BONUS_TESTS[bonus]
-    if reads is THEIRS and not scenario.player_bowls:
+    if reads is THEIRS and spec.fixed_target:
         return False
     if bonus is FINISHED_EARLY:
-        return not scenario.player_bats_first and scenario.kind != CHASE_IN_OVERS
+        return not spec.bats_first and kind != CHASE_IN_OVERS
     return True
 
 
 def bonuses_on_offer(scenario: Scenario) -> list[str]:
-    """What today can award, in `BONUS_ORDER`. Listed so the page states what is on offer
-    rather than promising something unearnable."""
-    return [b for b in BONUS_ORDER if bonus_available(scenario, b)]
+    """What today can award. ONE bonus, the day's own, so a card is worth chasing rather
+    than being one of nine things that might happen to land.
+
+    A scenario with no bonus is a day generated before a day carried one, and it falls back
+    to everything its kind could award -- which is exactly how it was scored, and a stored
+    day must go on scoring the way it did."""
+    if scenario.bonus is not None:
+        return [scenario.bonus]
+    return [b for b in BONUS_ORDER if kind_offers(scenario.kind, b)]
 
 
 def bonuses_earned(scenario: Scenario, mine: Innings,
@@ -346,9 +367,7 @@ def bonuses_earned(scenario: Scenario, mine: Innings,
     every side's bowling figures to its opponent), so the two are named rather than
     positional at every call site."""
     earned = []
-    for bonus in BONUS_ORDER:
-        if not bonus_available(scenario, bonus):
-            continue
+    for bonus in bonuses_on_offer(scenario):
         reads, test = BONUS_TESTS[bonus]
         innings = mine if reads is MINE else theirs
         if innings is not None and test(innings):
@@ -513,20 +532,44 @@ STAGES = ("Final", "Qualifier 1", "Eliminator", "Qualifier 2")
 KIND_WEIGHTS = {WIN_BY_RUNS: 1, WIN_BY_WICKETS: 1, CHASE_IN_OVERS: 1}
 
 
-def generate(rng, opposition_fs_id: int, opposition_name: str) -> Scenario:
+def daily_bonus(challenge_date) -> str:
+    """Today's ONE bonus, by strict rotation over `BONUS_ORDER`.
+
+    Rotation rather than a draw, so the cycle is complete and even -- a random pick would
+    repeat one bonus three days running and leave another unseen for a fortnight, which is
+    the opposite of what makes a single bonus worth chasing. The period is
+    `len(BONUS_ORDER)` days and it never repeats on consecutive days, because the index
+    advances by exactly one each day and nothing skips.
+
+    Not seeded through the day's rng at all. The rotation IS the date, so it is legible --
+    a player can see it come round -- and a change to the scenario generator cannot shift
+    it out from under an unfinished week."""
+    return BONUS_ORDER[daily_seed(challenge_date) % len(BONUS_ORDER)]
+
+
+def generate(rng, opposition_fs_id: int, opposition_name: str,
+             challenge_date) -> Scenario:
     """One day's scenario, given the side it is played against.
 
-    No opposition score is passed in any more, and its absence is the reversal this module
-    documents at the top: a live kind has no target to fix, because the target is whatever
-    the opposition makes against the player's own bowling on the day."""
-    kinds = list(KIND_WEIGHTS)
+    No opposition score is passed in, and its absence is the reversal this module documents
+    at the top: a live kind has no target to fix, because the target is whatever the
+    opposition makes against the player's own bowling on the day.
+
+    **The BONUS is chosen first and the KIND accommodates it**, which is the one place these
+    two decisions are not independent. Only `win_by_wickets` can offer FINISHED_EARLY --
+    batting first there is nothing to finish, and on a `chase_in_overs` day it IS the
+    objective -- so on that one day in nine the kind is forced. Doing it the other way round
+    (kind first, then skip the rotation forward past a bonus it cannot award) would break
+    the rotation's own guarantee and let the same bonus land on two consecutive days."""
+    bonus = daily_bonus(challenge_date)
+    kinds = [k for k in KIND_WEIGHTS if kind_offers(k, bonus)]
     kind = rng.choices(kinds, weights=[KIND_WEIGHTS[k] for k in kinds])[0]
     stage = rng.choice(STAGES)
     if kind == WIN_BY_RUNS:
         return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                        runs_required=rng.choice(RUN_MARGINS))
+                        runs_required=rng.choice(RUN_MARGINS), bonus=bonus)
     if kind == WIN_BY_WICKETS:
         return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                        wickets_required=rng.choice(WICKET_FLOORS))
+                        wickets_required=rng.choice(WICKET_FLOORS), bonus=bonus)
     return Scenario(kind, opposition_fs_id, opposition_name, stage,
-                    overs_required=rng.choice(OVERS_LIMITS))
+                    overs_required=rng.choice(OVERS_LIMITS), bonus=bonus)

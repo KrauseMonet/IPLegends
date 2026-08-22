@@ -600,7 +600,8 @@ class Result:
 
 def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
               require_legal: bool = True, cap: int | None = OVERSEAS_CAP,
-              fallback_fs_ids: tuple[int, ...] | None = None) -> Result:
+              fallback_fs_ids: tuple[int, ...] | None = None,
+              unique_deals: bool = False) -> Result:
     """With `guarantee` off, an unservable deal strands the drafter instead of
     re-drawing. With `require_legal` off, a pick is allowed even if it makes a legal
     twelve unreachable -- the ablation that shows how much work the forward check is
@@ -617,6 +618,21 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
     an "attempt" on the same `for` loop, but are tallied separately: `result.redraws`
     stays exactly what it always measured (empty-candidate attempts the guarantee had to
     skip past), and `result.player_rerolls` is new.
+
+    `unique_deals` deals each franchise-season AT MOST ONCE per draft. Off by default,
+    and that default is not a style choice: turning it on changes which value `rng.choice`
+    returns, so every solo state string and every room seed already in circulation would
+    replay into a different draft (A62). It exists for the DAILY, whose pool is sixteen
+    squads rather than the whole 166 -- twelve draws with replacement out of sixteen
+    collide constantly, measured at 8.6 distinct squads per twelve-pick draft, with one
+    squad dealt three or more times in 19 drafts of 30. Out of 166 the same draw repeats
+    rarely enough that nobody noticed.
+
+    A squad joins the exclusion when it actually SERVES a pick, not when it is drawn: a
+    squad the guarantee silently skips for having nothing eligible was never shown to
+    anybody, so excluding it would spend the pool on deals the player never saw. And if
+    every squad in the pool has already been dealt the draw falls back to the full pool
+    rather than stranding -- a repeat is a worse deal, a dead end is no deal at all.
 
     A `RerollRequested(kind="season")` narrows the POOL for the very next draw to
     franchise-seasons sharing the rejected deal's own franchise, excluding the fs just
@@ -636,7 +652,16 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
     relies on, or the guarantee re-drawing around it.
     """
     taken: set[str] = set()
+    dealt: set[int] = set()
     overseas_taken = 0
+
+    def draw(from_pool):
+        if unique_deals:
+            fresh = [f for f in from_pool if f not in dealt]
+            if fresh:
+                return rng.choice(fresh)
+        return rng.choice(from_pool)
+
     open_slots: set[int] = set(ALL_SLOTS)
     keeper_have = False
     bowl_have = 0
@@ -661,7 +686,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
         fs_id = None
         for attempt in range(REDRAW_CAP if guarantee else 1):
             if fs_id is None:
-                fs_id = rng.choice(pool)
+                fs_id = draw(pool)
             # Back to the primary pool for the next attempt -- unless this pick has now
             # been refused by so many squads that the pool itself is the problem, in which
             # case a caller that supplied a fallback gets widened to it. `deck.cards_by_fs`
@@ -728,6 +753,7 @@ def run_draft(deck: Deck, policy, rng: random.Random, guarantee: bool = True,
                     open_slots.add(from_slot)
                 continue
             served = (fs_id, card, slot)
+            dealt.add(fs_id)
             break
         if served is None:
             # Preserve progress on the way out: a stranded Result should say how far the

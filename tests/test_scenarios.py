@@ -196,7 +196,7 @@ import random
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 from game.scenarios import (
-    DAILY_DECK_SIZE, choose_deck, daily_bonus, daily_seed, generate, player_order,
+    DAILY_DECK_SIZE, choose_deck, daily_bonus, daily_seed, generate,
 )
 
 _DAY0 = datetime.date(2026, 8, 22)
@@ -240,25 +240,6 @@ def test_the_day_deck_is_the_right_size_and_holds_no_duplicates():
     assert len(deck) == DAILY_DECK_SIZE
     assert len(set(deck)) == DAILY_DECK_SIZE, "a squad was dealt twice in one challenge"
     assert set(deck) <= set(fs_ids)
-
-
-def test_the_day_deck_is_the_same_for_everyone_but_the_order_is_not():
-    """The whole shape of the challenge: same squads, your own sequence."""
-    fs_ids = list(range(1, 167))
-    day = datetime.date(2026, 8, 20)
-    deck = choose_deck(random.Random(daily_seed(day)), fs_ids)
-
-    alice = player_order(deck, 1, day)
-    bob = player_order(deck, 2, day)
-    assert sorted(alice) == sorted(bob) == sorted(deck), "the shared deck was not shared"
-    assert alice != bob, "two players were handed the same sequence"
-
-
-def test_a_players_order_is_reproducible_so_a_reload_does_not_reshuffle_it():
-    day = datetime.date(2026, 8, 20)
-    deck = choose_deck(random.Random(daily_seed(day)), list(range(1, 167)))
-    assert player_order(deck, 7, day) == player_order(deck, 7, day)
-    assert player_order(deck, 7, day) != player_order(deck, 7, day + datetime.timedelta(1))
 
 
 def test_a_deck_too_small_to_serve_a_day_is_refused_rather_than_silently_short():

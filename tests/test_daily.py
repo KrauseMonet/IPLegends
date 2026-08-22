@@ -160,7 +160,8 @@ def test_an_ordinary_draft_is_completely_unaffected_by_the_new_parameter():
     assert a.widened == 0 and b.widened == 0
 
 
-def test_replay_day_actually_passes_the_fallback_and_the_zero_reroll_budget(monkeypatch):
+def test_replay_day_actually_passes_the_fallback_the_reroll_budget_and_the_deal_rule(
+        monkeypatch):
     """A wiring test, and it exists because the tests above cannot serve as one: they call
     `run_draft` directly with a fallback, so every one of them still passed when
     `replay_day` was changed to pass `fallback_fs_ids=None`. The rescue was proven and the
@@ -172,19 +173,26 @@ def test_replay_day_actually_passes_the_fallback_and_the_zero_reroll_budget(monk
     seen = {}
     real = sess.replay
 
-    def spy(deck, seed, moves, rerolls_allowed=None, fallback_fs_ids=None):
+    def spy(deck, seed, moves, rerolls_allowed=None, fallback_fs_ids=None,
+            unique_deals=None):
         seen["rerolls_allowed"] = rerolls_allowed
         seen["fallback"] = fallback_fs_ids
+        seen["unique_deals"] = unique_deals
         return real(deck, seed, moves, rerolls_allowed=rerolls_allowed,
-                    fallback_fs_ids=fallback_fs_ids)
+                    fallback_fs_ids=fallback_fs_ids, unique_deals=unique_deals)
 
     monkeypatch.setattr(daily.sess, "replay", spy)
-    daily.replay_day(FULL, DAY, 1, _deck(), ())
+    daily.replay_day(FULL, DAY, 1, _deck(), (), unique_deals=True)
 
     assert seen["rerolls_allowed"] == 0, "a daily draft was given a reroll budget"
     assert seen["fallback"] is not None, "no fallback pool reached the draft"
     assert set(seen["fallback"]) == set(FULL.fs_ids), \
         "the fallback must be the whole archive, or it can strand too"
+    assert seen["unique_deals"] is True, "the day's deal rule never reached the draft"
+
+    daily.replay_day(FULL, DAY, 1, _deck(), (), unique_deals=False)
+    assert seen["unique_deals"] is False, \
+        "a day generated before unique dealing must still deal the way it was drafted"
 
 
 # --- playing and marking a day ------------------------------------------------------------
@@ -661,11 +669,17 @@ def test_a_chase_is_scored_with_NO_opposition_innings(monkeypatch):
 
 
 def _finished_state(day, account_id):
-    """Drive a real draft for this day to twelve picks and return its state string."""
+    """Drive a real draft for this day to twelve picks and return its state string.
+
+    Under the DAY'S OWN deal rule, not the default. A state is a list of indexes into the
+    deals it was shown, so drafting under one rule and replaying under another decodes to a
+    different twelve -- the state would still be perfectly valid and would simply describe
+    somebody else's team."""
     from etl.feasibility import DraftState, IMPACT_SLOT, pick_rational
     moves = ()
     for _ in range(40):
-        s = daily.replay_day(FULL, day.challenge_date, account_id, day.deck_fs_ids, moves)
+        s = daily.replay_day(FULL, day.challenge_date, account_id, day.deck_fs_ids, moves,
+                             unique_deals=day.scenario.deal_unique)
         if s.deal is None:
             return sess.encode(daily.player_seed(day.challenge_date, account_id), moves)
         open_slots = frozenset(
@@ -724,3 +738,125 @@ def _stub_innings(runs, chased=False):
     not about cricket."""
     from game.simulator import Innings
     return Innings(batting=[], bowling=[], runs=runs, wickets=4, balls=120, chased=chased)
+
+
+# --- the rules a day was generated under -----------------------------------------------------
+#
+# Both of these change what a stored state decodes to, or what the match does with it. A day
+# has to go on replaying under the rules it was drafted under, so they are RECORDED on the
+# scenario rather than inferred from the kind -- and the reason they cannot be inferred is a
+# real case, not a hypothetical: a day generated the day before they landed carries a current
+# kind under the old rules, so the kind cannot tell the two apart.
+
+def test_a_generated_day_records_both_of_the_rules_it_was_generated_under():
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    assert day.scenario.deal_unique and day.scenario.impact_plays
+
+
+def test_the_rules_survive_being_stored_and_read_back():
+    """They live in the scenario jsonb. A flag the writer forgets is a day that silently
+    reverts to dealing with replacement and benching its own Impact Player."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    row = json.loads(daily._scenario_row(day.scenario, 0))
+    assert (row["deal_unique"], row["impact_plays"]) == (True, True)
+    back = daily._scenario_from_row(day.scenario.kind, row)
+    assert (back.deal_unique, back.impact_plays) == (True, True)
+
+
+def test_a_day_stored_before_the_rules_existed_reads_as_false_not_missing():
+    """The stored days really do lack these keys, so the reader has to answer for them
+    rather than raise -- and it must answer FALSE, because that is how they were played."""
+    legacy = {"opposition_fs_id": 1, "opposition_name": "X", "stage": "Final",
+              "target": 170, "wickets_required": 7}
+    sc = daily._scenario_from_row("chase_with_wickets", legacy)
+    assert sc.deal_unique is False and sc.impact_plays is False
+
+
+def test_a_daily_deals_each_franchise_season_at_most_once():
+    """Twelve draws with replacement out of sixteen collide constantly -- measured at 8.6
+    distinct squads per draft before this, with one squad dealt five times in the worst of
+    400. The pool is only small because a daily is shared; solo draws from all 166, which is
+    why nobody saw it there."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    deck = daily.deck_for_day(FULL, day.deck_fs_ids)
+    for acct in range(1, 16):
+        r = run_draft(deck, pick_rational,
+                      random.Random(daily.player_seed(day.challenge_date, acct)),
+                      fallback_fs_ids=tuple(FULL.fs_ids), unique_deals=True)
+        assert r.completed, "unique dealing stranded a drafter"
+        seasons = [(c.franchise, c.season_year) for c in r.picks]
+        assert len(set(seasons)) == len(seasons), f"repeated a squad: {seasons}"
+
+
+def test_dealing_with_replacement_is_the_DEFAULT_and_what_an_older_day_gets():
+    """Not a preference, and the DEFAULT is the load-bearing half.
+
+    An older day's stored state is a list of INDEXES into the deals it was actually shown,
+    so changing the draw changes which players those indexes select. The same is true of
+    every solo state string and every room seed in circulation -- and nothing else in this
+    suite would notice a flipped default, because both sides of every comparison it makes
+    would move together. Hence a test that passes no argument at all: an earlier version
+    of this one always passed `unique_deals=False` explicitly and so could not fail when
+    the default was flipped to True.
+    """
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    deck = daily.deck_for_day(FULL, day.deck_fs_ids)
+
+    def repeats(**kw):
+        n = 0
+        for acct in range(1, 16):
+            r = run_draft(deck, pick_rational,
+                          random.Random(daily.player_seed(day.challenge_date, acct)),
+                          fallback_fs_ids=tuple(FULL.fs_ids), **kw)
+            seasons = [(c.franchise, c.season_year) for c in r.picks]
+            n += len(seasons) - len(set(seasons))
+        return n
+
+    assert repeats() > 0, "run_draft's default has become unique dealing"
+    assert repeats(unique_deals=False) > 0, "asked for replacement and did not get it"
+
+
+# --- the Impact Player actually takes the field ------------------------------------------------
+
+def _impact_took_the_field(play):
+    """Whether the drafted Impact Player appears in either innings the player owns.
+    `Player.is_impact` is set by `lineup`/`attack` only for the card that was really
+    substituted in, so this reads the played innings rather than the drafted twelve."""
+    mine = play.first if play.player_bats_first else play.second
+    theirs = play.second if play.player_bats_first else play.first
+    return (any(b.player.is_impact for b in mine.batting)
+            or any(w.player.is_impact for w in theirs.bowling))
+
+
+def test_the_impact_player_can_actually_play_on_a_day_generated_today():
+    """He never did. `decide_impact` is called from `game.season` alone, and the daily
+    passed its Impact card to `lineup` -- which its own docstring says "changes no
+    arithmetic" and expects to have been substituted in already. Twelve were drafted and
+    eleven played.
+
+    He is not guaranteed to play: A78 lets `decide_impact` decline when the gain does not
+    clear its bar, and declining is a decision rather than a failure. What is asserted is
+    that he CAN, across a spread of real days and accounts."""
+    played = 0
+    for i in range(1, 5):
+        day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(i))
+        assert day.scenario.impact_plays
+        for acct in (1, 2, 3):
+            play = daily.play_and_score(FULL, MODEL, day, acct,
+                                        _finished_state(day, acct))
+            played += _impact_took_the_field(play)
+    assert played > 0, "the Impact Player never took the field in twelve real dailies"
+
+
+def test_a_day_generated_before_the_rule_still_benches_its_impact_player():
+    """The pre-A134 path, kept because a day generated under it must replay under it. The
+    one thing that can still put him on is the bowling-depth floor, which is a legality
+    rule rather than the Impact rule."""
+    from dataclasses import replace as _replace
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    old = _replace(day, scenario=_replace(day.scenario, impact_plays=False))
+    state = _finished_state(day, 1)
+    play = daily.play_and_score(FULL, MODEL, old, 1, state)
+    mine = play.first if play.player_bats_first else play.second
+    batted = [b for b in mine.batting if b.player.is_impact]
+    assert not batted, "the old path substituted an Impact Player in to bat"

@@ -63,7 +63,7 @@ def player_seed(challenge_date, account_id: int) -> int:
 
 
 def replay_day(full: Deck, challenge_date, account_id: int, deck_fs_ids,
-               moves) -> sess.Session:
+               moves, unique_deals: bool = False) -> sess.Session:
     """One player's draft for one day, rebuilt from scratch (SPEC 11.3).
 
     The fallback pool is the whole archive, and it is what stops a one-shot challenge being
@@ -78,6 +78,7 @@ def replay_day(full: Deck, challenge_date, account_id: int, deck_fs_ids,
         moves,
         rerolls_allowed=DAILY_REROLLS,
         fallback_fs_ids=tuple(full.fs_ids),
+        unique_deals=unique_deals,
     )
 
 
@@ -128,6 +129,12 @@ def with_bowling_depth(side: Side) -> Side:
     """The side that actually takes the field, with the Impact Player locked in where the
     eleven alone cannot field five bowlers.
 
+    Only used on the pre-A134 path now: a day whose Impact Player really plays gets the
+    same floor from `game.season.play` itself, applied at the right MOMENT rather than
+    permanently -- forced before innings 1 for whoever bowls it, and at the break for the
+    other side. Substituting him in up front, as this does, would also rewrite the batting
+    order for an innings that has not been bowled in yet.
+
     A twelve is legal with five bowling options across all TWELVE (`order_errors` counts
     them there, not over the eleven), so a perfectly legal eleven can hold four and rely on
     the Impact Player for the fifth. `attack()` then returns four, five bowlers' worth of
@@ -161,9 +168,27 @@ def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | No
     left byte-for-byte as it was -- including the order in which it draws from `rng` --
     because a stored day has to replay exactly as it was scored."""
     from game.__main__ import attack, lineup
+    from game.season import play
 
-    # Before anything is played, and for BOTH sides: whether a side can field five bowlers
-    # at all is a property of the eleven, and it decides the batting order too.
+    if scenario.impact_plays:
+        if opposition is None:
+            raise ValueError("a full match is decided by both sides; it needs the opposition")
+        # `game.season.play` IS this match: two real elevens, the side batting first as
+        # `home`, the Impact Player decided at the break for both sides off the real first
+        # innings, and the bowling-depth floor forced for whoever bowls innings 1. Called
+        # rather than copied -- a second implementation of the Impact rule would be a
+        # second place for A78 to drift, which is the argument A123 already made about
+        # the step ladder.
+        home, away = ((mine, opposition) if scenario.player_bats_first
+                      else (opposition, mine))
+        result = play(model, home, away, rng)
+        first, second = result.home_innings, result.away_innings
+        return (first, second) if scenario.player_bats_first else (second, first)
+
+    # Everything below is the pre-A134 path, kept because a day generated under it must go
+    # on replaying under it. The Impact Player is a scorecard TAG here and is never
+    # substituted in -- `lineup`'s own docstring says it "changes no arithmetic" -- so the
+    # only thing that can put him on the field is the bowling-depth floor.
     mine = with_bowling_depth(mine)
     my_batting = lineup(list(mine.xi), model, mine.impact)
     if scenario.spec.fixed_target:
@@ -230,7 +255,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
     seed, moves = decode_own_state(state, day.challenge_date, account_id)
     session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
                           rerolls_allowed=DAILY_REROLLS,
-                          fallback_fs_ids=tuple(full.fs_ids))
+                          fallback_fs_ids=tuple(full.fs_ids),
+                          unique_deals=day.scenario.deal_unique)
     if session.deal is not None:
         raise DailyError("this draft is not finished")
 
@@ -416,6 +442,7 @@ def _scenario_row(sc: Scenario, opposition_wickets: int) -> str:
         "stage": sc.stage, "target": sc.target,
         "wickets_required": sc.wickets_required, "runs_required": sc.runs_required,
         "overs_required": sc.overs_required, "bonus": sc.bonus,
+        "deal_unique": sc.deal_unique, "impact_plays": sc.impact_plays,
         "opposition_wickets": opposition_wickets,
     })
 
@@ -426,7 +453,9 @@ def _scenario_from_row(kind: str, row: dict) -> Scenario:
                     wickets_required=row.get("wickets_required"),
                     runs_required=row.get("runs_required"),
                     overs_required=row.get("overs_required"),
-                    bonus=row.get("bonus"))
+                    bonus=row.get("bonus"),
+                    deal_unique=bool(row.get("deal_unique")),
+                    impact_plays=bool(row.get("impact_plays")))
 
 
 def _generate_day(full: Deck, model: Model, challenge_date):
@@ -518,7 +547,8 @@ def submit(conn, challenge_date, account_id: int, state: str,
 
     session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
                           rerolls_allowed=DAILY_REROLLS,
-                          fallback_fs_ids=tuple(full.fs_ids))
+                          fallback_fs_ids=tuple(full.fs_ids),
+                          unique_deals=day.scenario.deal_unique)
     if session.deal is not None:
         raise DailyError("this draft is not finished")
     if session.errors:

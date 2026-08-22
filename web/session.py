@@ -305,7 +305,8 @@ def _policy(moves: tuple[Move, ...], rerolls_allowed: int = REROLLS_ALLOWED):
 
 def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
            rerolls_allowed: int = REROLLS_ALLOWED,
-           fallback_fs_ids: tuple[int, ...] | None = None) -> Session:
+           fallback_fs_ids: tuple[int, ...] | None = None,
+           unique_deals: bool = False) -> Session:
     """Rebuild a session from scratch on every request (SPEC 11.3).
 
     `Reposition` moves reach `run_draft` exactly like `Reroll` does -- as an exception
@@ -318,7 +319,8 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
     rng = random.Random(seed)
     try:
         result = run_draft(deck, _policy(moves, rerolls_allowed), rng,
-                           fallback_fs_ids=fallback_fs_ids)
+                           fallback_fs_ids=fallback_fs_ids,
+                           unique_deals=unique_deals)
     except _NeedChoice as pause:
         state = pause.state
         candidates = pause.candidates

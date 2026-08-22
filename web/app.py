@@ -1947,7 +1947,8 @@ def _daily_session(conn, account_id: int, state: str, day) -> sess.Session:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         return daily_lib.replay_day(STATE["deck"], day.challenge_date, account_id,
-                                     day.deck_fs_ids, moves)
+                                     day.deck_fs_ids, moves,
+                                     unique_deals=day.scenario.deal_unique)
     except sess.InvalidState as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

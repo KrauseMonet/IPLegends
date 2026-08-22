@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=ba1709b068">
+<link rel="stylesheet" href="/static/style.css?v=15c41a8db0">
 </head>
 <body>
 <div class="sheet">
@@ -62,7 +62,17 @@
     <!-- Its own masthead slot, not a third line inside `.edition`. Sitting in that block
          it inherited caption styling and read as more metadata rather than as the one
          control up here. -->
-    <div id="authArea"></div>
+    <!-- Install sits BESIDE the account control, not among the play actions. It is a
+         browser utility, and in the home page's `.actions` row it read as a fourth game
+         mode -- on a phone a full-width button with the same weight as "Daily challenge",
+         which it also pushed down a line. Here it is on every page rather than only the
+         home one, which is the point: somebody decides they want the app while they are
+         playing, not before they have started. -->
+    <div class="masthead-actions">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add the Almanack to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
   </div>
 
   <!-- ============ TERMS ============ -->

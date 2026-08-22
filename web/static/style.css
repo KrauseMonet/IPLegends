@@ -1143,7 +1143,25 @@ body.has-ground{
    so "Sign in" alone asks for effort and names no return. "Save your career" is what the
    profile actually gives you -- runs, wickets, titles, the two caps. */
 
-.masthead #authArea{display:flex;align-items:center;gap:12px;flex:none}
+.masthead #authArea{display:flex;align-items:center;gap:12px}
+
+/* Install and the account control share one masthead slot, and the hierarchy between them
+   is the whole reason this is a pill and not a second CTA: signing in is the invitation,
+   installing is a convenience for somebody who has already decided. So it borrows the
+   quiet mono treatment of `.auth-out` rather than the gold of `.auth-cta`, and it never
+   competes for the eye with the one thing up here worth clicking.
+
+   A sibling of #authArea, never a child: `renderAuthArea` rewrites that element's whole
+   innerHTML on every `loadMe()`, so anything nested inside it would vanish the moment
+   somebody signed in. */
+.masthead-actions{display:flex;align-items:center;gap:14px;flex:none}
+
+.install-pill{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);background:none;cursor:pointer;
+  border:1px solid var(--line-strong);border-radius:999px;padding:8px 15px;
+  transition:border-color .16s,color .16s,background .16s}
+.install-pill:hover{border-color:var(--gold);color:var(--gold);background:var(--panel-2)}
+.install-pill:active{transform:translateY(1px)}
 
 .auth-cta{display:flex;flex-direction:column;align-items:flex-start;gap:2px;
   padding:9px 18px;border-radius:4px;cursor:pointer;
@@ -1178,7 +1196,9 @@ body.has-ground{
 .auth-out:hover{color:var(--red-2)}
 
 @media (max-width:820px){
-  .masthead #authArea{order:3;width:100%;justify-content:flex-start;margin-top:12px}
+  /* The wrapper takes the full-width row now, so install and the account control stay on
+     one line together instead of the install pill being orphaned onto a third. */
+  .masthead-actions{order:3;width:100%;justify-content:flex-start;margin-top:12px}
 }
 
 

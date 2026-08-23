@@ -29,8 +29,8 @@ from dataclasses import dataclass, replace
 
 from etl.feasibility import Deck
 from game.scenarios import (
-    DAILY_DECK_SIZE, Outcome, Scenario, bonuses_on_offer, choose_deck, daily_seed,
-    evaluate, generate, overs_words, rank_key,
+    DAILY_DECK_SIZE, RULES_FULL_MATCH, RULES_LEGACY, Outcome, Scenario, bonuses_on_offer,
+    choose_deck, daily_seed, evaluate, generate, overs_words, rank_key,
 )
 from game.season import Side
 from game.simulator import Innings, Model, Player, play_innings
@@ -263,9 +263,7 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
     mine = Side(name="You", short="YOU", xi=list(session.order),
                 impact=session.impact, you=True)
     opposition = side_for_fs(full, day.scenario.opposition_fs_id)
-    # The match's own rng, seeded from the day and the account: the same attempt always
-    # plays out the same way, so a reload shows the innings the player already watched.
-    rng = random.Random(f"daily-match:{day.challenge_date}:{account_id}")
+    rng = match_rng(day, account_id, session.order, session.impact)
 
     sc = day.scenario
     if sc.spec.fixed_target:
@@ -287,6 +285,39 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
                        player_bats_first=True)
     return DayPlay(outcome, their_innings, my_innings, opposition.name, "You",
                    first_real_bowling=True, second_real_bowling=sc.opposition_bowls)
+
+
+def team_key(order, impact) -> str:
+    """A stable identity for a drafted twelve: who, in what order, and who is the Impact
+    Player. Keyed on `person_id` and never on a name, per this project's standing rule --
+    two drafted seasons can legitimately share a registry name.
+
+    The ORDER is part of it because the order is a choice. Two players who arrange the same
+    eleven differently have made different decisions and should get different matches."""
+    return "|".join(c.person_id for c in order) + "||" + (impact.person_id if impact else "-")
+
+
+def match_rng(day: "Day", account_id: int, order, impact) -> random.Random:
+    """The dice for one attempt.
+
+    From version 2 the seed is the DAY and the TWELVE, so the result is a function of the
+    choices somebody made rather than of which account they happen to hold -- and two
+    players who draft the same twelve get the same match, which is what makes a shared
+    daily comparable at all.
+
+    **Measured, because the old rule looked harmless and was not.** Seeding from the date
+    and account id meant the draft fed nothing into the dice: one identical twelve, one
+    day, forty different account seeds returned margins from -5 to +96 and met the
+    objective 17 times in 40. Who you signed up as moved the result more than which
+    players you picked, and re-drafting could not escape a bad stream -- across fifteen
+    completely different twelves on one real account's seed, every margin landed between
+    -6 and +3.
+
+    Older days keep the old seed, because their stored result was scored under it and a
+    stored day must go on replaying the way it was played."""
+    if day.scenario.team_seeded_match:
+        return random.Random(f"daily-match:{day.challenge_date}:{team_key(order, impact)}")
+    return random.Random(f"daily-match:{day.challenge_date}:{account_id}")
 
 
 def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
@@ -442,9 +473,23 @@ def _scenario_row(sc: Scenario, opposition_wickets: int) -> str:
         "stage": sc.stage, "target": sc.target,
         "wickets_required": sc.wickets_required, "runs_required": sc.runs_required,
         "overs_required": sc.overs_required, "bonus": sc.bonus,
-        "deal_unique": sc.deal_unique, "impact_plays": sc.impact_plays,
+        "rules": sc.rules,
         "opposition_wickets": opposition_wickets,
     })
+
+
+def _rules_of(row: dict) -> int:
+    """Which rules a stored day was generated under.
+
+    Reads the recorded version, and falls back to the pair of booleans that recorded the
+    same thing before there was a version. Those rows are real -- four days were stored
+    that way -- so this is a live migration path rather than a defensive branch, and it
+    needs no data migration: the booleans already say exactly what version 1 means."""
+    if row.get("rules") is not None:
+        return int(row["rules"])
+    if row.get("deal_unique") and row.get("impact_plays"):
+        return RULES_FULL_MATCH
+    return RULES_LEGACY
 
 
 def _scenario_from_row(kind: str, row: dict) -> Scenario:
@@ -453,9 +498,7 @@ def _scenario_from_row(kind: str, row: dict) -> Scenario:
                     wickets_required=row.get("wickets_required"),
                     runs_required=row.get("runs_required"),
                     overs_required=row.get("overs_required"),
-                    bonus=row.get("bonus"),
-                    deal_unique=bool(row.get("deal_unique")),
-                    impact_plays=bool(row.get("impact_plays")))
+                    bonus=row.get("bonus"), rules=_rules_of(row))
 
 
 def _generate_day(full: Deck, model: Model, challenge_date):

@@ -750,7 +750,10 @@ def _stub_innings(runs, chased=False):
 
 def test_a_generated_day_records_both_of_the_rules_it_was_generated_under():
     day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    from game.scenarios import RULES
+    assert day.scenario.rules == RULES
     assert day.scenario.deal_unique and day.scenario.impact_plays
+    assert day.scenario.team_seeded_match
 
 
 def test_the_rules_survive_being_stored_and_read_back():
@@ -758,18 +761,33 @@ def test_the_rules_survive_being_stored_and_read_back():
     reverts to dealing with replacement and benching its own Impact Player."""
     day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
     row = json.loads(daily._scenario_row(day.scenario, 0))
-    assert (row["deal_unique"], row["impact_plays"]) == (True, True)
+    from game.scenarios import RULES
+    assert row["rules"] == RULES
     back = daily._scenario_from_row(day.scenario.kind, row)
-    assert (back.deal_unique, back.impact_plays) == (True, True)
+    assert back.rules == RULES
 
 
 def test_a_day_stored_before_the_rules_existed_reads_as_false_not_missing():
     """The stored days really do lack these keys, so the reader has to answer for them
     rather than raise -- and it must answer FALSE, because that is how they were played."""
-    legacy = {"opposition_fs_id": 1, "opposition_name": "X", "stage": "Final",
+    from game.scenarios import RULES_FULL_MATCH, RULES_LEGACY
+
+    oldest = {"opposition_fs_id": 1, "opposition_name": "X", "stage": "Final",
               "target": 170, "wickets_required": 7}
-    sc = daily._scenario_from_row("chase_with_wickets", legacy)
+    sc = daily._scenario_from_row("chase_with_wickets", oldest)
+    assert sc.rules == RULES_LEGACY
     assert sc.deal_unique is False and sc.impact_plays is False
+    assert sc.team_seeded_match is False
+
+    # And the four days stored under the BOOLEANS that preceded the version read as the
+    # version those booleans described. Real rows, not a defensive branch, so this is the
+    # migration path rather than a hypothetical.
+    boolean_era = dict(oldest, deal_unique=True, impact_plays=True)
+    older = daily._scenario_from_row("chase_with_wickets", boolean_era)
+    assert older.rules == RULES_FULL_MATCH
+    assert older.deal_unique and older.impact_plays
+    assert not older.team_seeded_match, \
+        "a day stored before the team-seeded match was given it retrospectively"
 
 
 def test_a_daily_deals_each_franchise_season_at_most_once():
@@ -853,9 +871,15 @@ def test_a_day_generated_before_the_rule_still_benches_its_impact_player():
     one thing that can still put him on is the bowling-depth floor, which is a legality
     rule rather than the Impact rule."""
     from dataclasses import replace as _replace
+    from game.scenarios import RULES_LEGACY
+
     day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
-    old = _replace(day, scenario=_replace(day.scenario, impact_plays=False))
-    state = _finished_state(day, 1)
+    old = _replace(day, scenario=_replace(day.scenario, rules=RULES_LEGACY))
+    # Drafted under the OLD day's own rules, not the new one's. A state is a list of
+    # indexes into the deals it was shown, so a twelve drafted against unique dealing and
+    # replayed against with-replacement selects different players -- and the mismatch is
+    # not subtle, it raises. That coupling is the reason the version is recorded on the day.
+    state = _finished_state(old, 1)
     play = daily.play_and_score(FULL, MODEL, old, 1, state)
     mine = play.first if play.player_bats_first else play.second
     batted = [b for b in mine.batting if b.player.is_impact]
@@ -985,3 +1009,82 @@ def test_the_reset_route_re_checks_and_never_reaches_the_database_for_the_wrong_
     with pytest.raises(app.HTTPException) as caught:
         app.daily_reset(request=None)
     assert caught.value.status_code == 401
+
+
+# --- the match dice --------------------------------------------------------------------------
+#
+# From version 2 they come from the DAY and the TWELVE. Before that they came from the day
+# and the ACCOUNT ID, which meant the draft fed nothing into the match at all: measured on
+# one real day, a single identical twelve played on forty different account seeds returned
+# margins from -5 to +96, so who you signed up as moved the result more than which players
+# you picked -- and no amount of re-drafting could escape a bad stream.
+
+def _twelve_from(day, account_id):
+    s = daily.replay_day(FULL, day.challenge_date, account_id, day.deck_fs_ids,
+                         sess.decode(_finished_state(day, account_id))[1],
+                         unique_deals=day.scenario.deal_unique)
+    return list(s.order), s.impact
+
+
+def test_two_accounts_that_draft_the_same_twelve_get_the_same_match():
+    """The property the whole fix exists for. Before it, the same twelve gave two players
+    entirely different matches, and the leaderboard was ranking partly on account id."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    order, impact = _twelve_from(day, 1)
+
+    a = daily.match_rng(day, 1, order, impact).random()
+    b = daily.match_rng(day, 999, order, impact).random()
+    assert a == b, "the same twelve on the same day still played two different matches"
+
+
+def test_a_different_twelve_gets_different_dice_so_a_replay_is_not_the_same_match():
+    """The other half, and the one that was reported: re-drafting used to change nothing
+    about the dice, so a reset replayed the identical stream."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    order, impact = _twelve_from(day, 1)
+
+    same = daily.match_rng(day, 1, order, impact).random()
+    reordered = daily.match_rng(day, 1, list(reversed(order)), impact).random()
+    one_swap = daily.match_rng(day, 1, order[:-1] + [impact], order[-1]).random()
+
+    assert reordered != same, "rearranging the batting order changed nothing"
+    assert one_swap != same, "changing who plays changed nothing"
+
+
+def test_the_batting_order_is_part_of_the_teams_identity():
+    """Two players who arrange the same eleven differently have made different decisions."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    order, impact = _twelve_from(day, 1)
+    assert daily.team_key(order, impact) != daily.team_key(list(reversed(order)), impact)
+
+
+def test_the_team_key_is_built_from_person_ids_never_names():
+    """This project's standing rule: two drafted seasons can share a registry name."""
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    order, impact = _twelve_from(day, 1)
+    key = daily.team_key(order, impact)
+    for card in order:
+        assert card.person_id in key
+    assert not any(c.name in key for c in order if c.name != c.person_id), \
+        "a player's NAME reached the team key"
+
+
+def test_a_day_stored_before_version_2_keeps_the_account_seeded_dice():
+    """Its stored result was scored under that seed, so it must go on replaying under it --
+    migration 032's whole reason for storing a scenario rather than deriving one."""
+    from dataclasses import replace as _replace
+    from game.scenarios import RULES_FULL_MATCH
+
+    day = daily._generate_day(FULL, MODEL, DAY + datetime.timedelta(1))
+    older = _replace(day, scenario=_replace(day.scenario, rules=RULES_FULL_MATCH))
+    order, impact = _twelve_from(day, 1)
+
+    assert not older.scenario.team_seeded_match
+    # Same account, different twelve -> the OLD rule gives the identical stream, which is
+    # exactly the bug, faithfully preserved for the days that were scored under it.
+    a = daily.match_rng(older, 7, order, impact).random()
+    b = daily.match_rng(older, 7, list(reversed(order)), impact).random()
+    assert a == b
+    # And two accounts differ, which is the half that was unfair.
+    assert daily.match_rng(older, 7, order, impact).random() != \
+           daily.match_rng(older, 8, order, impact).random()

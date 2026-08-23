@@ -204,6 +204,8 @@ async function showDone(){
         ${d.match ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
         ${d.match ? '<button class="act" onclick="dailyReveal()">Watch again</button>' : ''}
         <a class="act" href="/">Home</a>
+        ${d.can_reset ? `<button class="act quiet" onclick="dailyReset(this)"
+          title="Discard this attempt and play today again.">Reset attempt</button>` : ''}
       </div>
     </div>
     <div class="col-head" style="margin:20px 0 0"><span>Today's leaderboard</span></div>
@@ -230,10 +232,37 @@ boot().then(async () => {
   DAY = d;
   dailyBanner(d);
   if (d.played){ await showDone(); return; }
+  await dailyStartDraft(d);
+});
 
+
+// Open a fresh draft for a day this account has not played. Named rather than left inline
+// in `boot`, because the reset below needs exactly this and a second copy would be a
+// second place for the ON_COMPLETE wiring to be forgotten.
+async function dailyStartDraft(d){
   ON_COMPLETE = dailyOnComplete;
   $('#draft').classList.remove('hide');
   try {
     render(await api(`/api/daily/draft/${d.state}`));
   } catch(e){ slip(e.message); }
-});
+}
+
+
+// Discard your own attempt and play the day again. Drawn only when the API says this
+// caller may -- and that is presentation, not permission: the route checks again and
+// answers 404 to anybody else, because a button that is merely absent is not a gate.
+async function dailyReset(ctrl){
+  await busyClick(ctrl, 'Resetting…', async () => {
+    try {
+      DAY = await api('/api/daily/reset', {method: 'POST'});
+      // Straight back to a fresh draft of the same day rather than re-rendering the
+      // finished screen: the whole point of the reset is to play, and the day itself is
+      // unchanged -- same scenario, same sixteen squads, same bonus.
+      $('#dailyDone').classList.add('hide');
+      hideAllRevealScreens();
+      $('#reveal').classList.add('hide');
+      dailyBanner(DAY);
+      await dailyStartDraft(DAY);
+    } catch(e){ slip(e.message); }
+  });
+}

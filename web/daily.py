@@ -569,6 +569,25 @@ def submit(conn, challenge_date, account_id: int, state: str,
     return outcome, written is not None
 
 
+def reset_attempt(conn, challenge_date, account_id: int) -> bool:
+    """Discard ONE account's own attempt at one day. Returns whether there was one.
+
+    The deletion is self-scoped BY CONSTRUCTION: `account_id` is the caller's own, taken
+    from their session and never from anything they send, so this statement cannot reach
+    another player's row whatever the route above it gets wrong. Who is allowed to call it
+    at all is a separate question, answered in `web/app.py` -- and keeping the two apart is
+    the point, because it means a mistake in the privilege check costs somebody their own
+    attempt rather than costing everybody theirs.
+
+    The CHALLENGE is deliberately untouched. Deleting that would cascade into every other
+    player's result for the day, and there is nothing to regenerate: the scenario records
+    the rules it was made under, so replaying the same day is replaying the same question.
+    """
+    return conn.execute(
+        "delete from daily_results where challenge_date = %s and account_id = %s "
+        "returning 1", (challenge_date, account_id)).fetchone() is not None
+
+
 # The board's order, written once. `game.scenarios.rank_key` is the same rule in Python,
 # and the two must not drift -- a leaderboard that disagrees with the score it showed you
 # is worse than no leaderboard, so the SQL is kept adjacent to the function it mirrors and

@@ -860,3 +860,128 @@ def test_a_day_generated_before_the_rule_still_benches_its_impact_player():
     mine = play.first if play.player_bats_first else play.second
     batted = [b for b in mine.batting if b.player.is_impact]
     assert not batted, "the old path substituted an Impact Player in to bat"
+
+
+# --- resetting your own attempt ----------------------------------------------------------
+#
+# Two independent guards, and keeping them apart is the design. `_may_reset_daily` in
+# web/app.py decides WHO may call the route; `reset_attempt` scopes the statement itself to
+# the caller's own session account. So a mistake in the privilege check costs one person
+# their own attempt rather than costing everybody theirs.
+
+def test_a_reset_can_only_ever_delete_the_callers_own_row():
+    """The account is the SESSION's, never anything the caller sends, so this statement has
+    no way to reach another player's attempt whatever the route above it gets wrong."""
+    conn = _FakeResultsConn({("d1", 7): "mine", ("d1", 9): "somebody else's",
+                             ("d2", 7): "mine, another day"})
+    assert daily.reset_attempt(conn, "d1", 7) is True
+    assert conn.rows == {("d1", 9): "somebody else's", ("d2", 7): "mine, another day"}, \
+        "a reset reached beyond the caller's own row for the given day"
+
+
+def test_a_reset_reports_whether_there_was_anything_to_delete():
+    conn = _FakeResultsConn({("d1", 7): "mine"})
+    assert daily.reset_attempt(conn, "d1", 7) is True
+    assert daily.reset_attempt(conn, "d1", 7) is False, \
+        "a second reset claimed to have deleted an attempt that was already gone"
+
+
+def test_a_reset_never_touches_the_challenge_itself():
+    """Deleting the challenge would cascade into every other player's result for the day,
+    and there is nothing to regenerate -- the scenario records the rules it was made under,
+    so replaying the same day replays the same question."""
+    conn = _FakeResultsConn({("d1", 7): "mine"})
+    daily.reset_attempt(conn, "d1", 7)
+    assert all("daily_challenges" not in sql for sql in conn.seen), \
+        "a reset issued a statement against daily_challenges"
+
+
+def test_only_the_named_account_may_reset_and_nobody_may_when_it_is_unset(monkeypatch):
+    """Unset means the feature does not exist -- a fork, a preview deployment or a local
+    checkout has it off by default rather than on by accident, which is the direction a
+    privilege check should fail in."""
+    import web.app as app
+
+    monkeypatch.setenv("DAILY_RESET_ACCOUNT_ID", "7")
+    assert app._may_reset_daily(7)
+    for other in (1, 8, 70, 12):
+        assert not app._may_reset_daily(other), f"account {other} was allowed to reset"
+
+    # A MULTI-DIGIT id, because the obvious wrong implementations are substring ones and a
+    # single-digit fixture cannot tell them apart: `"7" in "17"` is true, and an id that
+    # merely appears inside the configured one must not be admitted.
+    monkeypatch.setenv("DAILY_RESET_ACCOUNT_ID", "17")
+    assert app._may_reset_daily(17)
+    for other in (1, 7, 71, 170, 117):
+        assert not app._may_reset_daily(other), f"account {other} was allowed to reset"
+
+    # And the comparison is on the VALUE, not on how it was typed -- whitespace in an
+    # environment variable is a configuration accident, not a different account.
+    monkeypatch.setenv("DAILY_RESET_ACCOUNT_ID", " 17 ")
+    assert app._may_reset_daily(17)
+    assert not app._may_reset_daily(1)
+
+    for unset in ("", "   "):
+        monkeypatch.setenv("DAILY_RESET_ACCOUNT_ID", unset)
+        assert not app._may_reset_daily(7), f"{unset!r} enabled the reset for somebody"
+    monkeypatch.delenv("DAILY_RESET_ACCOUNT_ID", raising=False)
+    assert not app._may_reset_daily(7), "an absent variable enabled the reset"
+
+
+class _FakeResultsConn:
+    """The `daily_results` table, as much of it as `reset_attempt` can see. A second
+    implementation keyed on the statement, so it establishes WHICH ROWS GO -- which is the
+    only property worth asserting here -- and deliberately not that the SQL is well formed,
+    which only the real database can answer (A124's own conclusion about `FakeConn`)."""
+
+    def __init__(self, rows):
+        self.rows = dict(rows)
+        self.seen = []
+
+    def execute(self, sql, params=()):
+        self.seen.append(sql)
+        assert "delete from daily_results" in sql
+        date, account_id = params
+        self._deleted = self.rows.pop((date, account_id), None)
+        return self
+
+    def fetchone(self):
+        return (1,) if self._deleted is not None else None
+
+
+def test_the_reset_route_re_checks_and_never_reaches_the_database_for_the_wrong_caller(
+        monkeypatch):
+    """The hidden button is presentation; THIS is the permission check.
+
+    Asserting the 404 alone would be half a test: what makes the gate worth anything is
+    that it refuses BEFORE the route does any work, so `_db` is stubbed to blow up and the
+    test fails if the route ever gets that far. A 404 raised after a database round trip is
+    a privileged route that merely declines to show its answer."""
+    import web.app as app
+
+    def _no_db():
+        raise AssertionError("the reset route reached the database for a caller it should "
+                             "have refused outright")
+
+    monkeypatch.setattr(app, "_db", _no_db)
+    monkeypatch.setattr(app, "_current_account_id", lambda request: 9)
+    monkeypatch.setenv("DAILY_RESET_ACCOUNT_ID", "7")
+
+    with pytest.raises(app.HTTPException) as caught:
+        app.daily_reset(request=None)
+    assert caught.value.status_code == 404, \
+        "a privileged route told an unprivileged caller that it exists"
+
+    # Unset: nobody at all, including the account that would otherwise be named.
+    monkeypatch.delenv("DAILY_RESET_ACCOUNT_ID", raising=False)
+    monkeypatch.setattr(app, "_current_account_id", lambda request: 7)
+    with pytest.raises(app.HTTPException) as caught:
+        app.daily_reset(request=None)
+    assert caught.value.status_code == 404
+
+    # And signed out is still 401 rather than 404 -- that is the ordinary auth answer every
+    # daily route gives, and it is not this feature's business to hide it.
+    monkeypatch.setattr(app, "_current_account_id", lambda request: None)
+    with pytest.raises(app.HTTPException) as caught:
+        app.daily_reset(request=None)
+    assert caught.value.status_code == 401

@@ -1774,6 +1774,30 @@ def _today():
     return datetime.datetime.now(datetime.timezone.utc).date()
 
 
+# Who, if anyone, may discard their own daily attempt and play the day again.
+#
+# An ENVIRONMENT VARIABLE rather than a constant, for two reasons. This repository is
+# public, so a hardcoded id would publish which account carries the privilege for no gain.
+# And unset means the route does not exist at all -- a fork, a preview deployment or a
+# local checkout has the feature switched off by default rather than switched on by
+# accident, which is the direction a privilege check should fail in.
+DAILY_RESET_ACCOUNT_ID = "DAILY_RESET_ACCOUNT_ID"
+
+
+def _may_reset_daily(account_id: int) -> bool:
+    """Read at CALL time, not captured into a module constant at import.
+
+    `load_dotenv()` runs inside `lifespan`, which is app startup and therefore after this
+    module is imported -- so a value read at import would see the real environment on
+    Vercel and miss `.env` entirely in local development. The failure mode is the quiet
+    kind: the control simply never appears, and nothing says why.
+
+    Compared as a stripped STRING against the id, never as a substring: `"7" in "17"` is
+    true, and an account that merely appears inside the configured one is a different
+    account."""
+    return os.environ.get(DAILY_RESET_ACCOUNT_ID, "").strip() == str(account_id)
+
+
 def _require_account(request: Request) -> int:
     account_id = _current_account_id(request)
     if account_id is None:
@@ -1804,6 +1828,12 @@ class DailyOut(BaseModel):
         description="consecutive days played. Alive rather than broken when today has not "
                     "been played yet -- a day is only missed once it has passed.")
     longest_streak: int = Field(default=0, description="the best run ever, not the current one")
+    can_reset: bool = Field(
+        default=False,
+        description="whether THIS caller may discard their own attempt and replay the day. "
+                    "False for everybody unless DAILY_RESET_ACCOUNT_ID names them, and the "
+                    "page only draws the control when it is true -- the route enforces it "
+                    "again regardless, since a hidden button is not a permission check.")
     match: dict | None = Field(
         default=None,
         description="the played match, shaped exactly like a ResultOut so the same "
@@ -1909,6 +1939,7 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
                                         account_id, result["state"])
         match = _daily_match_out(play, day.scenario)
     return DailyOut(
+        can_reset=_may_reset_daily(account_id),
         challenge_date=str(day.challenge_date),
         scenario=day.scenario.describe(),
         kind=day.scenario.kind,
@@ -2011,6 +2042,30 @@ def daily_submit(body: DailySubmitIn, request: Request) -> DailyOut:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except sess.InvalidState as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _daily_out(conn, account_id, day)
+
+
+@app.post("/api/daily/reset", response_model=DailyOut)
+def daily_reset(request: Request) -> DailyOut:
+    """Discard your OWN attempt at today and play it again.
+
+    Answers 404 rather than 403 to anyone not named by DAILY_RESET_ACCOUNT_ID, and 404
+    when the variable is unset at all: a privileged route should not advertise that it
+    exists to the people who may not use it.
+
+    The permission and the deletion are checked in two different places on purpose. Here
+    decides WHO may call it; `daily_lib.reset_attempt` scopes the statement itself to the
+    caller's own session account, so the worst a mistake in this function can do is let
+    somebody discard their own attempt. Nothing reachable from here can touch another
+    player's row, and nothing touches the challenge -- deleting that would cascade into
+    everybody else's result for the day.
+    """
+    account_id = _require_account(request)
+    if not _may_reset_daily(account_id):
+        raise HTTPException(status_code=404, detail="not found")
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+        daily_lib.reset_attempt(conn, day.challenge_date, account_id)
         return _daily_out(conn, account_id, day)
 
 

@@ -428,7 +428,27 @@ def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None) -> Bow
 
 
 def play_innings(model: Model, batting: list[Player], bowling: list[Player],
-                 rng: random.Random, target: int | None = None) -> Innings:
+                 rng: random.Random, target: int | None = None, *,
+                 overs: int = OVERS, max_wickets: int = WICKETS,
+                 state_over: int | None = None) -> Innings:
+    """One innings. The three keyword-only parameters exist for the super over and
+    nothing else; every one of them defaults to an ordinary twenty-over innings, so a
+    caller that does not name them gets exactly the behaviour this function has always
+    had.
+
+    `state_over` decouples WHICH state a ball is priced against from WHICH over of this
+    innings it is bowled in. A super over is one over, so the loop index is always 0 --
+    and pricing it as the first over of an innings would model six all-out slogging balls
+    as a cagey opening over. `SUPER_OVER_STATE_OVER` pins it to the twentieth instead:
+    the closest state the archive holds to an over where both sides are attacking with
+    nothing left to save.
+
+    Only the OVER is pinned and the wickets half is passed through untouched -- but for a
+    super over that half never varies either, because `bucket_of` puts 0 and 1 wickets in
+    the same bucket and the second one ends the innings. Every ball of every super over
+    therefore resolves to one single state. Said plainly because the code looks like the
+    wicket dimension is live and it is not.
+    """
     cards = [BatterCard(p) for p in batting]
     attack = [BowlerCard(p) for p in bowling]
     innings = Innings(cards, attack)
@@ -436,7 +456,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     striker, non_striker, next_in = cards[0], cards[1], 2
     previous: BowlerCard | None = None
 
-    for over in range(OVERS):
+    for over in range(overs):
         bowler = choose_bowler(attack, previous)
         previous = bowler
         over_start_runs, over_start_wickets = innings.runs, innings.wickets
@@ -454,7 +474,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                     innings.chased = True
                     return innings
 
-            probs, values = model.state(over, innings.wickets)
+            probs, values = model.state(
+                over if state_over is None else state_over, innings.wickets)
             baseline = sum(p * v for p, v in zip(probs, values))
             delta = striker.player.bat - (bowler.player.bowl or 0.0)
             outcome = draw(tilt(probs, values, baseline + delta), rng)
@@ -473,7 +494,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                     f"{striker.runs} ({striker.balls})  b {bowler.player.name}  "
                     f"-- {innings.runs}/{innings.wickets}"
                 )
-                if innings.wickets == WICKETS or next_in >= len(cards):
+                if innings.wickets >= max_wickets or next_in >= len(cards):
                     return innings
                 striker = cards[next_in]
                 next_in += 1

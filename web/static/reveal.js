@@ -221,7 +221,43 @@ function renderScorecard(r){
   $('#scInnings').innerHTML =
     scorecardInnings(r.home, r.home_score, r.home_innings) +
     scorecardInnings(r.away, r.away_score, r.away_innings);
+  $('#scSuperOver').innerHTML = superOverBlock(r.super_overs);
   $('#scorecardOverlay').classList.remove('hide');
+}
+
+// A super over is six balls, three batters and one bowler a side -- a full scorecard
+// table for that is mostly empty columns and "did not bat" rows, so it gets its own
+// compact form rather than being pushed through `scorecardInnings`. It sits BELOW the
+// two innings and outside `.cards2`: the match is what the two columns are, and the
+// super over is what happened after them.
+function superOverBlock(sos){
+  if (!sos || !sos.length) return '';
+  // The block's own label is dropped when there is only one -- the section heading right
+  // above it already says "Super over", and printing it twice reads as a mistake.
+  const rows = sos.map(so => `
+    <div class="so-block">
+      <div class="so-head"><span>${sos.length > 1 ? `Super over ${so.number}` : ''}</span>
+        <span class="so-verdict">${so.winner ? `${so.winner} win` : 'tied, played again'}</span></div>
+      ${superOverSide(so.first, so.first_score, so.first_innings)}
+      ${superOverSide(so.second, so.second_score, so.second_innings)}
+    </div>`).join('');
+  const head = sos.length > 1 ? `Super overs <em>${sos.length}</em>` : 'Super over';
+  return `<div class="so-wrap"><div class="col-head"><span>${head}</span></div>${rows}</div>`;
+}
+
+function superOverSide(short, score, inn){
+  if (!inn) return `<div class="so-row"><span class="so-team">${short}</span>
+    <span class="so-score">${score}</span><span class="so-detail"></span></div>`;
+  // Only the batters who actually faced. With three nominated and two dismissals ending
+  // the innings, the third man very often does not bat, and a "did not bat" line for him
+  // says nothing a reader needs.
+  const bats = inn.batting.filter(b => b.faced_any)
+    .map(b => `${b.name} ${b.runs}${b.out ? '' : '*'} (${b.balls})`).join(', ');
+  const bowl = inn.bowling.map(bo => `${bo.name} ${bo.wickets}-${bo.runs}`).join(', ');
+  return `<div class="so-row">
+    <span class="so-team">${short}</span>
+    <span class="so-score">${score} (${inn.overs})</span>
+    <span class="so-detail">${bats}${bowl ? ` &middot; b ${bowl}` : ''}</span></div>`;
 }
 
 function hideScorecard(e){

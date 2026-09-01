@@ -466,6 +466,26 @@ class StandingOut(BaseModel):
     nrr: float
 
 
+class SuperOverOut(BaseModel):
+    """One super over of a tied match. `first` batted SECOND in the match, which is the
+    IPL's own order -- the side that chased opens the super over.
+
+    Kept off `home_innings`/`away_innings` for the same reason `game.season` does: super
+    over runs decide the result and count towards nothing else, so anything reading a
+    match's innings for a statistic must not be able to reach these by accident."""
+
+    number: int = Field(description="1 for the first, 2 for a repeat, and so on")
+    first: str = Field(description="short name of the side batting first")
+    second: str
+    first_score: str
+    second_score: str
+    winner: str | None = Field(
+        default=None, description="null only if this super over was itself tied, in "
+                                   "which case another one follows it")
+    first_innings: InningsOut | None = None
+    second_innings: InningsOut | None = None
+
+
 class ResultOut(BaseModel):
     stage: str
     home: str
@@ -487,6 +507,11 @@ class ResultOut(BaseModel):
                                    "is no toss concept at all for one between two "
                                    "other historical sides")
     toss_elected: str | None = Field(default=None, description="'bat' | 'bowl' | null")
+    super_overs: list[SuperOverOut] = Field(
+        default_factory=list,
+        description="empty unless the match finished level -- then one entry per super "
+                    "over played, the decisive one last; `winner`/`margin` above already "
+                    "reflect it, so a caller only wanting the result never reads this")
 
 
 class JourneySquadEntryOut(BaseModel):
@@ -1276,6 +1301,22 @@ def _innings_out(innings) -> InningsOut:
     )
 
 
+def _super_overs_out(r) -> list[SuperOverOut]:
+    """A tied match's super overs, in order. Empty for every match that was decided in
+    its twenty overs, which is all but about one in a hundred and fifty."""
+    return [
+        SuperOverOut(
+            number=so.number, first=so.first.short, second=so.second.short,
+            first_score=_score(so.first_innings.runs, so.first_innings.wickets),
+            second_score=_score(so.second_innings.runs, so.second_innings.wickets),
+            winner=None if so.winner is None else so.winner.short,
+            first_innings=_innings_out(so.first_innings),
+            second_innings=_innings_out(so.second_innings),
+        )
+        for so in getattr(r, "super_overs", ())
+    ]
+
+
 def _result_out(r, you: Side) -> ResultOut:
     return ResultOut(
         stage=r.stage, home=r.home.short, away=r.away.short,
@@ -1286,6 +1327,7 @@ def _result_out(r, you: Side) -> ResultOut:
         home_innings=_innings_out(r.home_innings) if r.home_innings else None,
         away_innings=_innings_out(r.away_innings) if r.away_innings else None,
         toss_won_by_you=r.toss_won_by_you, toss_elected=r.toss_elected,
+        super_overs=_super_overs_out(r),
     )
 
 
@@ -1912,6 +1954,10 @@ def _daily_match_out(play, scenario) -> dict:
         "yours": True,
         "home_innings": _daily_innings_out(first, bowled_by_a_player=play.first_real_bowling),
         "away_innings": _daily_innings_out(second, bowled_by_a_player=play.second_real_bowling),
+        # A level daily still goes to a super over -- the day's own objective is a margin
+        # and is unmoved by one, so this is shown and never scored. `winner` above stays
+        # null on a level match for exactly that reason: the DAY was not won.
+        "super_overs": [so.model_dump() for so in _super_overs_out(play)],
     }
 
 
@@ -2227,6 +2273,7 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
             # No single "the human" in a room -- see game.season.play_open's own
             # docstring for why a peer-to-peer match records neither of these at all.
             toss_won_by_you=None, toss_elected=None,
+            super_overs=_super_overs_out(r),
         ),
     )
 
@@ -2250,6 +2297,7 @@ def _room_current_match_out(fs, display_names: dict, player_id: str | None) -> R
             home_innings=_innings_out(fs.result.home_innings) if fs.result.home_innings else None,
             away_innings=_innings_out(fs.result.away_innings) if fs.result.away_innings else None,
             toss_won_by_you=None, toss_elected=None,
+            super_overs=_super_overs_out(fs.result),
         ),
     )
 

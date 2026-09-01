@@ -2052,6 +2052,45 @@ overs**, which is the competition's own rule and not a rounding detail: without 
 out in 12 overs scores a better rate than 60 for 4 in 20, and a side could improve its net
 run rate by collapsing. Pinned by a test from both directions.
 
+The one-point tie is now **reachable only by a match that is still level after five super
+overs** (§12.3a). It is kept rather than deleted: the capped case is real, if vanishingly
+rare, and the table still has to score it.
+
+### 12.3a The super over
+
+**Every tied match goes to one, in the league and the playoffs alike** — the competition's
+own rule since 2019, and the reason it was worth changing: leaving a match drawn is the
+departure from the real game, not the safe default.
+
+One over a side, three nominated batters, the innings over on the second wicket, and the
+side that batted SECOND in the match bats first. A tied super over is replayed, up to
+`MAX_SUPER_OVERS` = 5; a match still level after that stays tied, which is the only way
+§12.3's one point can now be earned.
+
+**Super over runs count towards nothing but the result.** Net run rate, the journey card,
+the Orange and Purple Caps and Season Analysis all read the match's own two innings, and a
+super over's innings live somewhere else entirely (`Result.super_overs`) — so the IPL's own
+rule holds here by where the objects are kept rather than by a rule anyone has to remember.
+That is a silent property, so it has its own tests.
+
+**Nominated off the batting ORDER, never off a batting rating**, and that distinction was
+found by watching a real super over rather than by reading the code. `Card.bat` is
+`rated_per_ball`; A65 rates every season that faced a ball and A66 shrinks a per-ball figure
+on balls, so a man who scored one run off one ball can hold the highest batting number in a
+twelve — a live season sent in P Parameswaran and Mustafizur Rahman ahead of Shikhar Dhawan
+and Rinku Singh. The order already answers the question, with a decision the game has
+already made (§10.4/A76), and it holds no per-ball quantity to be fooled by. The bowler is
+the side's best by `attack()`'s own key, deliberately: a super over is bowled by the man who
+would have opened the bowling.
+
+**Priced as the twentieth over of an innings.** A super over's own loop index is always 0,
+so an unpinned state would model six all-out slogging balls as a cagey opening over. The
+archive's 34 real super over innings say 1.909 runs and 0.1771 wickets per ball against this
+state's 2.109 and 0.1134 — but at 165 legal balls that separates almost nothing (the other
+candidates in the same over are 4-5 wickets at 2.000 and 6+ at 1.620, 0.6 and well over one
+standard error away), so the gap is **recorded rather than tuned**, and `game --validate`
+carries a standing row for it. See A135.
+
 ### 12.4 The playoffs are the IPL's, not a bracket
 
 Top four. Qualifier 1 (1 v 2), Eliminator (3 v 4), then **Qualifier 1's loser drops into

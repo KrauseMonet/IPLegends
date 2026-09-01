@@ -218,12 +218,12 @@ def test_a_legacy_chase_plays_one_innings_and_every_live_kind_plays_two():
     mine, opp = _a_side(), _a_side(1)
 
     chase = Scenario(CHASE, 1, "X 2013", "Final", target=170)
-    my_inn, their_inn = daily.play_day(MODEL, chase, mine, None, random.Random(1))
+    my_inn, their_inn, _ = daily.play_day(MODEL, chase, mine, None, random.Random(1))
     assert my_inn.balls > 0
     assert their_inn is None, "a chase replayed the opposition"
 
     for s in _one_of_each_live_kind():
-        my_inn, their_inn = daily.play_day(MODEL, s, mine, opp, random.Random(1))
+        my_inn, their_inn, _ = daily.play_day(MODEL, s, mine, opp, random.Random(1))
         assert their_inn is not None and their_inn.balls > 0, f"{s.kind} played one innings"
         assert my_inn.balls > 0
     assert len(_one_of_each_live_kind()) == len(GENERATED_KINDS)
@@ -244,7 +244,7 @@ def test_the_players_own_bowlers_are_the_ones_the_opposition_faces():
     from game.scenarios import Scenario, WIN_BY_WICKETS
     mine, opp = _a_side(), _a_side(1)
     s = Scenario(WIN_BY_WICKETS, 1, "X 2013", "Final", wickets_required=4)
-    _my_inn, their_inn = daily.play_day(MODEL, s, mine, opp, random.Random(1))
+    _my_inn, their_inn, _ = daily.play_day(MODEL, s, mine, opp, random.Random(1))
 
     bowled = {b.player.person_id for b in their_inn.bowling}
     assert bowled, "nobody bowled at the opposition"
@@ -332,7 +332,7 @@ def test_scoring_marks_the_very_innings_it_played(seed):
     the same number of wickets. One coincidence is likely; eight in a row is not."""
     from game.scenarios import CHASE, Scenario
     s = Scenario(CHASE, 1, "X 2013", "Final", target=170)
-    outcome, my_inn, _ = daily.score_day(MODEL, s, _a_side(), None, random.Random(seed))
+    outcome, my_inn, _, _ = daily.score_day(MODEL, s, _a_side(), None, random.Random(seed))
     assert outcome.objective_met == my_inn.chased
     # The margin's own rule differs by whether the chase came off, so the assertion has to
     # follow it: wickets in hand on a success, how close it came on a failure. Asserting

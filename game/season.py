@@ -21,6 +21,9 @@ from game.simulator import BALLS_PER_OVER, Innings, OVERS, Model, play_innings
 TEAMS = 10                 # you and nine historical sides
 MATCHES_EACH = 14          # the IPL's own league length
 POINTS_WIN = 2
+# Reachable only when MAX_SUPER_OVERS is exhausted -- every tie now goes to a super over
+# (see the SUPER_OVER_* block below). Kept, not deleted: the capped case is a real, if
+# vanishingly rare, state the table still has to score correctly.
 POINTS_TIE = 1
 
 # Which pairs meet twice. On ten teams each side needs five double fixtures to reach
@@ -65,6 +68,61 @@ IMPACT_SITUATIONAL_K = 0.0025
 # check 20's own measured league-average first-innings total (170.4 runs), declared as a
 # round number in the same spirit as the other constants here.
 IMPACT_PAR_SCORE = 170
+
+# --- the super over ---------------------------------------------------------------------
+#
+# A tie used to be left as a tie here, on the reasoning that the archive holds sixteen of
+# them in nineteen years and the league awards a point each, so the rarer path was the one
+# needing the evidence. That is no longer true of the competition being modelled: the IPL
+# has taken every tied match to a super over since 2019, league fixtures included, so
+# leaving one drawn is now the departure from the real game rather than the safe default.
+#
+# What a super over is NOT allowed to touch is the arithmetic of the tournament, and that
+# falls out of where the innings are kept rather than from a rule anyone has to remember.
+# Net run rate, the journey card, the Orange and Purple Caps and Season Analysis all read
+# `Result.home_innings`/`away_innings`; a super over's own innings live on `Result.
+# super_overs` and are reached by none of them. That is the IPL's own rule -- super over
+# runs count for nothing but the result -- and it holds here by construction.
+SUPER_OVER_OVERS = 1
+SUPER_OVER_WICKETS = 2      # the innings ends on the second, not the tenth
+SUPER_OVER_BATTERS = 3      # three nominated, so two dismissals really do end it
+
+# Which state every super over ball is priced against. A super over is one over, so the
+# loop index inside `play_innings` is always 0 -- and pricing it as an innings' FIRST over
+# would model six all-out slogging balls as a cagey opening one. The twentieth is the
+# closest state the archive holds to an over bowled with nothing left to save.
+#
+# The wicket half of the state is not pinned and does not need to be: `bucket_of` puts 0
+# and 1 wickets in the same bucket and the second ends the innings, so every ball of every
+# super over resolves to (over 19, "0-1") and nothing else.
+#
+# **Measured against the archive's own 34 super over innings, and the answer is that they
+# cannot settle it.** Cricsheet carries them (`deliveries.is_super_over`, 16 matches, one
+# of which went to a second) and they read 1.909 runs and 0.1771 wickets per ball, against
+# this state's 2.109 and 0.1134. The other candidates in the same over are 4-5 wickets
+# (2.000 / 0.1220) and 6+ (1.620 / 0.1563). At 165 legal balls the archive's run rate
+# carries a standard error near 0.16, so 4-5 sits 0.6 SE away and this one 1.3 -- neither
+# is rejected, and picking the closer of the two would be choosing on less than one
+# standard error. That is the fit-to-noise A2 has refused twice. The engine runs slightly
+# hot here (about 13.1 runs an over at league average against the archive's 11.5) and that
+# is RECORDED rather than tuned, the same standing this file's `--validate` SD miss has.
+#
+# The wicket rate is the one number with a real signal in it: 0.1134 against 0.1771 is
+# about 2.2 SE, and it points at something the state model has no cell for -- a super over
+# is two brand-new batters facing a side's best bowler, and no over of an ordinary innings
+# is that. A super over is excluded from the fitting set (A15), so the grid could not hold
+# such a state even in principle.
+SUPER_OVER_STATE_OVER = OVERS - 1
+
+# A tied super over is replayed, as the real competition does. The cap is a bound on a
+# loop, NOT a rule about cricket: a tied super over is already uncommon and a run of five
+# is somewhere around one match in a hundred million, so what the cap really protects
+# against is a degenerate model (a test stub where every ball is a dot, say) spinning
+# forever. Reaching it leaves the match TIED, which is why `POINTS_TIE`, `Standing.tied`
+# and the "a tied semi falls to the higher seed" fallbacks below are kept rather than
+# deleted -- they are now a backstop nothing is expected to reach, and an unreachable
+# branch that stays correct costs less than one that was removed as impossible.
+MAX_SUPER_OVERS = 5
 
 
 def _bat_rating(c: Card) -> float:
@@ -273,6 +331,39 @@ class Result:
     # `_play_human_match` ever populates them.
     toss_won_by_you: bool | None = None
     toss_elected: str | None = None
+    # Empty for every match that was not tied. When it is not, the LAST entry is the
+    # decisive one and `winner`/`margin` above already reflect it -- a consumer that
+    # only wants to know who won never has to look in here at all.
+    #
+    # Kept separate from `home_innings`/`away_innings` rather than appended to them, and
+    # that separation is the whole mechanism behind super over runs staying out of net
+    # run rate and every tournament statistic (see the SUPER_OVER_* block above).
+    super_overs: list["SuperOver"] = field(default_factory=list)
+
+
+@dataclass
+class SuperOver:
+    """One super over. `first` is the side that batted SECOND in the match, which is the
+    IPL's own order -- the chasing side bats first when the scores finish level.
+
+    `winner` is None only when this super over was itself tied, in which case another one
+    follows it in `Result.super_overs` (up to `MAX_SUPER_OVERS`).
+    """
+
+    number: int                  # 1 for the first, 2 for a repeat, and so on
+    first: Side
+    second: Side
+    first_innings: Innings
+    second_innings: Innings
+    winner: Side | None = None
+
+    @property
+    def first_runs(self) -> int:
+        return self.first_innings.runs
+
+    @property
+    def second_runs(self) -> int:
+        return self.second_innings.runs
 
 
 @dataclass
@@ -493,13 +584,141 @@ def fixtures(n: int = TEAMS) -> list[tuple[int, int]]:
     return out
 
 
-def _finish_result(home: Side, away: Side, stage: str, first: Innings, second: Innings,
+def super_over_batters(side: Side, number: int = 1) -> list[Card]:
+    """The three a side sends in: the top of the arranged batting ORDER, in order.
+
+    **Not the three highest batting ratings, and that was found by watching a real super
+    over rather than by reading the code.** The first version sorted on `Card.bat`, and a
+    live season sent in P Parameswaran and Mustafizur Rahman ahead of Shikhar Dhawan and
+    Rinku Singh. The cause is not a sorting slip: `Card.bat` is `rated_per_ball`, A65 rates
+    every player-season that faced a ball, and A66 shrinks a per-ball figure on BALLS -- so
+    Mustafizur's best "batting season" is one run off one ball at +0.2612 per ball, the
+    highest batting number anywhere in that twelve, above every Dhawan season in nineteen
+    years. That is A54's own finding ("per BALL is right for the engine and wrong for a
+    CARD") arriving somewhere new, and no floor bolted on here would fix it as cleanly as
+    not asking the question.
+
+    The batting order already answers it, and answers it with a decision the game has
+    made rather than one invented here: `side.xi` is in batting order (A72/A73/A76), placed
+    by the drafter himself or by `opposition_order` for a historical side, and where a man
+    bats IS the statement about how well he bats. It also cannot be fooled by volume,
+    because it contains no per-ball quantity at all.
+
+    Taken from the ELEVEN, so the Impact Player is left out. His one substitution has
+    usually been spent by the time a match is tied, and this engine keeps no record of
+    whether it was, so admitting him would mean either threading that state through
+    `decide_impact` or occasionally fielding a man who had already been used.
+
+    `number` rotates the trio for a REPEATED super over -- the second takes the next three
+    down the order, the third the three after that, wrapping once the eleven runs out.
+    That is the playing condition's own intent (a batter dismissed in one super over may
+    not bat in the next) reached without tracking dismissals: with two of three dismissed
+    at most, moving the window past all three can never field someone ineligible.
+    """
+    order = list(side.xi)
+    start = ((number - 1) * SUPER_OVER_BATTERS) % len(order)
+    return [order[(start + i) % len(order)] for i in range(SUPER_OVER_BATTERS)]
+
+
+def super_over_bowler(side: Side, number: int = 1) -> Card:
+    """The one who bowls it, rotating down the order on a repeat, since a bowler may not
+    bowl two super overs in succession.
+
+    `-c.bowl` is `attack()`'s own key, deliberately and not by coincidence: whoever this
+    returns for `number = 1` is the same man `attack()` ranks first, so a side's super
+    over bowler is the one it would have opened the bowling with. It carries the same
+    thin-volume exposure the batting nomination above had to be rescued from -- but here
+    the answer is to stay consistent with the rest of the engine rather than to invent a
+    second, better ordering that only super overs would use. If that key is ever revisited
+    for `attack()`, this comes with it.
+
+    An eleven with nobody who bowls at all cannot arise from a legal twelve, but it can
+    from a hand-built one, and somebody still has to bowl the over -- the last man in the
+    order gets it, which is what a real side does with an over it has no bowler for. That
+    is a cricketing fallback, not an unobserved value being defaulted: the question "who
+    bowls" always has an answer, unlike "what is his style", which is why this may pick a
+    man with no bowling rating where A23 would refuse to invent one.
+    """
+    pool = sorted((c for c in side.xi if c.has_bowl), key=_bowl_rating, reverse=True)
+    if not pool:
+        pool = list(reversed(side.xi))
+    return pool[(number - 1) % len(pool)]
+
+
+def play_one_super_over(model: Model, first_side: Side, second_side: Side,
+                         rng: random.Random, number: int = 1) -> SuperOver:
+    """One super over: `first_side` bats, `second_side` replies chasing.
+
+    Reuses `play_innings` rather than hand-rolling six balls -- wides, extras, the tilt
+    and the chase's own early exit are all things a super over shares with any other
+    innings, and a second implementation of them would be a second place for them to
+    drift. The three keyword arguments are the entire difference.
+    """
+    from game.__main__ import lineup, to_player
+
+    def _innings(batting: Side, bowling: Side, target: int | None) -> Innings:
+        return play_innings(
+            model,
+            lineup(super_over_batters(batting, number), model),
+            [to_player(super_over_bowler(bowling, number), model)],
+            rng, target=target,
+            overs=SUPER_OVER_OVERS, max_wickets=SUPER_OVER_WICKETS,
+            state_over=SUPER_OVER_STATE_OVER,
+        )
+
+    first = _innings(first_side, second_side, None)
+    second = _innings(second_side, first_side, first.runs)
+    winner = (second_side if second.runs > first.runs
+              else first_side if first.runs > second.runs
+              else None)
+    return SuperOver(number=number, first=first_side, second=second_side,
+                      first_innings=first, second_innings=second, winner=winner)
+
+
+def play_super_overs(model: Model, home: Side, away: Side,
+                      rng: random.Random) -> list[SuperOver]:
+    """Every super over a tied match needs, in order, the decisive one last.
+
+    `away` bats first: it batted second in the match, and the side that chased opens the
+    super over. Repeats stop at the first decided one, or at `MAX_SUPER_OVERS` -- the
+    caller reads the last entry's `winner`, which is None only in that capped case.
+    """
+    played: list[SuperOver] = []
+    for number in range(1, MAX_SUPER_OVERS + 1):
+        so = play_one_super_over(model, away, home, rng, number)
+        played.append(so)
+        if so.winner is not None:
+            break
+    return played
+
+
+def _super_over_margin(played: list[SuperOver]) -> str:
+    decisive = played[-1]
+    if decisive.winner is None:
+        return f"tied after {len(played)} super overs"
+    won, lost = ((decisive.first_runs, decisive.second_runs)
+                 if decisive.winner is decisive.first
+                 else (decisive.second_runs, decisive.first_runs))
+    label = "the super over" if len(played) == 1 else f"super over {decisive.number}"
+    return f"{decisive.winner.short} won {label}, {won}-{lost}"
+
+
+def _finish_result(model: Model, rng: random.Random,
+                    home: Side, away: Side, stage: str, first: Innings, second: Innings,
                     toss_won_by_you: bool | None = None,
                     toss_elected: str | None = None) -> Result:
     """The winner/margin arithmetic every match needs, factored out once rather than
     duplicated between `play()` and `_play_human_match` -- the only difference between
     an ordinary match and one the human's own side played in is whether a toss actually
-    happened."""
+    happened.
+
+    This is also the single place a tie is resolved, which is why the super over is
+    reached from here and from nowhere else: all three ways a match can be played
+    (`play`, `_play_human_match`, `play_open`) already funnel their two innings through
+    this function, so one insertion point covers the solo season, every room fixture and
+    the daily alike. `model`/`rng` are taken only for that -- a match that is not tied
+    draws nothing and is byte-for-byte what it always was.
+    """
     r = Result(home=home, away=away, stage=stage,
                home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
                away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls,
@@ -510,7 +729,9 @@ def _finish_result(home: Side, away: Side, stage: str, first: Innings, second: I
     elif first.runs > second.runs:
         r.winner, r.margin = home, f"{home.short} by {first.runs - second.runs} runs"
     else:
-        r.margin = "tied"
+        r.super_overs = play_super_overs(model, home, away, rng)
+        r.winner = r.super_overs[-1].winner
+        r.margin = _super_over_margin(r.super_overs)
     return r
 
 
@@ -519,9 +740,8 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
          stats: JourneyAccumulator | None = None) -> Result:
     """One match. The side batting first is the home side, which is all `home` means here.
 
-    A tie is left as a tie rather than taken to a super over: the archive has sixteen of
-    them in nineteen years and the league awards a point each, so the rarer path is the
-    one that would need the evidence.
+    A tie is taken to a super over, in this and every other way a match can be played --
+    all three funnel through `_finish_result`, which is the only place it is reached from.
 
     [A72] `home.xi`/`away.xi` are already in batting order -- the human drafter's own
     arrangement, or `opposition_order`'s algorithmic one for a historical side -- so
@@ -574,7 +794,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    return _finish_result(home, away, stage, first, second)
+    return _finish_result(model, rng, home, away, stage, first, second)
 
 
 # --- the toss, and a human match that pauses for it -------------------------------------
@@ -766,7 +986,7 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    return _finish_result(home, away, stage, first, second,
+    return _finish_result(model, rng, home, away, stage, first, second,
                            toss_won_by_you=won_toss, toss_elected=elects)
 
 
@@ -863,7 +1083,7 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    return _finish_result(home, away, stage, first, second)
+    return _finish_result(model, rng, home, away, stage, first, second)
 
 
 def _credit(standing: Standing, runs: int, balls: int, wickets: int,

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from etl.feasibility import Deck
 from game.scenarios import (
@@ -155,8 +155,15 @@ def with_bowling_depth(side: Side) -> Side:
 
 
 def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
-             rng: random.Random) -> tuple[Innings, Innings | None]:
-    """The player's own innings, and the opposition's where one is really played.
+             rng: random.Random) -> tuple[Innings, Innings | None, list]:
+    """The player's own innings, the opposition's where one is really played, and any
+    super overs a level finish went to.
+
+    The super overs are for SHOWING and never for scoring, which is the same separation
+    `DayPlay` exists to keep. A day's objective is a margin -- win by more than N, chase
+    with N in hand -- and a match that finished level has a margin of zero however the
+    super over went, so nothing here can change what a stored day was marked. They are
+    carried out of this function only so a scorecard can show what actually happened.
 
     Every kind generated today is a FULL MATCH: the opposition bats against the player's
     own five bowlers and the player bats against the opposition's real attack, so both
@@ -183,7 +190,9 @@ def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | No
                       else (opposition, mine))
         result = play(model, home, away, rng)
         first, second = result.home_innings, result.away_innings
-        return (first, second) if scenario.player_bats_first else (second, first)
+        mine_inn, theirs = ((first, second) if scenario.player_bats_first
+                            else (second, first))
+        return mine_inn, theirs, list(result.super_overs)
 
     # Everything below is the pre-A134 path, kept because a day generated under it must go
     # on replaying under it. The Impact Player is a scorecard TAG here and is never
@@ -193,7 +202,7 @@ def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | No
     my_batting = lineup(list(mine.xi), model, mine.impact)
     if scenario.spec.fixed_target:
         return play_innings(model, my_batting, _average_attack(model), rng,
-                            target=scenario.target), None
+                            target=scenario.target), None, []
 
     if opposition is None:
         raise ValueError("a full match is decided by both sides; it needs the opposition")
@@ -209,10 +218,11 @@ def play_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | No
     if scenario.player_bats_first:
         first = play_innings(model, my_batting, their_attack, rng)
         reply = play_innings(model, their_batting, my_attack, rng, target=first.runs)
-        return first, reply
+        return first, reply, []
 
     theirs = play_innings(model, their_batting, my_attack, rng)
-    return play_innings(model, my_batting, their_attack, rng, target=theirs.runs), theirs
+    return (play_innings(model, my_batting, their_attack, rng, target=theirs.runs),
+            theirs, [])
 
 
 @dataclass
@@ -241,6 +251,9 @@ class DayPlay:
     second_real_bowling: bool = True
     # Carried so a caller never has to ask the kind again which side is the player's.
     player_bats_first: bool = False
+    # Empty unless the match finished level. Shown, never scored -- `outcome` above was
+    # marked on the two match innings alone (see `score_day`).
+    super_overs: list = field(default_factory=list)
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
@@ -274,17 +287,19 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
         # bonus for balls the player never bowled.
         their_innings = opposition_total(
             model, opposition, random.Random(daily_seed(day.challenge_date)))
-        outcome, my_innings, _none = score_day(model, sc, mine, None, rng)
+        outcome, my_innings, _none, _sos = score_day(model, sc, mine, None, rng)
         return DayPlay(outcome, their_innings, my_innings, opposition.name, "You",
                        first_real_bowling=False, second_real_bowling=False)
 
-    outcome, my_innings, their_innings = score_day(model, sc, mine, opposition, rng)
+    outcome, my_innings, their_innings, super_overs = score_day(
+        model, sc, mine, opposition, rng)
     if sc.player_bats_first:
         return DayPlay(outcome, my_innings, their_innings, "You", opposition.name,
                        first_real_bowling=sc.opposition_bowls, second_real_bowling=True,
-                       player_bats_first=True)
+                       player_bats_first=True, super_overs=super_overs)
     return DayPlay(outcome, their_innings, my_innings, opposition.name, "You",
-                   first_real_bowling=True, second_real_bowling=sc.opposition_bowls)
+                   first_real_bowling=True, second_real_bowling=sc.opposition_bowls,
+                   super_overs=super_overs)
 
 
 def team_key(order, impact) -> str:
@@ -321,12 +336,16 @@ def match_rng(day: "Day", account_id: int, order, impact) -> random.Random:
 
 
 def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
-              rng: random.Random) -> tuple[Outcome, Innings, Innings | None]:
+              rng: random.Random) -> tuple[Outcome, Innings, Innings | None, list]:
     """Play it and mark it in one call, so the two can never end up done against different
     innings -- the shape A116 had to repair once already, where a card and the scorecard
-    beside it were computed from different bases."""
-    my_innings, their_innings = play_day(model, scenario, mine, opposition, rng)
-    return evaluate(scenario, my_innings, their_innings), my_innings, their_innings
+    beside it were computed from different bases.
+
+    `evaluate` is handed the two match innings and NOT the super overs, deliberately: the
+    objective is a margin, and a super over does not move one."""
+    my_innings, their_innings, super_overs = play_day(model, scenario, mine, opposition, rng)
+    return (evaluate(scenario, my_innings, their_innings),
+            my_innings, their_innings, super_overs)
 
 
 # `bonuses_on_offer` is re-exported from `game.scenarios` rather than reimplemented here.

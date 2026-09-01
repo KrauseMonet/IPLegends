@@ -310,6 +310,40 @@ def archive_innings(conn) -> dict[str, float]:
             "fours": float(fours), "sixes": float(sixes)}
 
 
+def archive_super_overs(conn) -> dict[str, float]:
+    """What a real super over looks like, from the archive's own 34 of them.
+
+    A separate query from `archive_innings` and a separate population: the fitting set
+    excludes super overs outright (A15), so these balls are ones the state model has never
+    seen and cannot have been fitted to. That is what makes the comparison worth printing
+    -- it is the only row in `--validate` measured against a population the model was
+    never shown.
+
+    Per BALL rather than per innings, deliberately. A super over is truncated by two
+    wickets or by the chase far more often than a twenty-over innings is, so a mean total
+    conflates "how fast did they score" with "how long did they last", and the first is
+    the only one a state choice can be held responsible for.
+    """
+    n, matches, runs, balls, wkts, deliveries = conn.execute(
+        """
+        with per_innings as (
+            select match_id, innings_no
+            from deliveries where is_super_over group by 1, 2
+        )
+        select (select count(*) from per_innings),
+               (select count(distinct match_id) from per_innings),
+               sum(runs_batter + runs_extras),
+               count(*) filter (where legal_ball),
+               count(*) filter (where wicket_kind is not null),
+               count(*)
+        from deliveries where is_super_over
+        """
+    ).fetchone()
+    return {"innings": n, "matches": matches,
+            "runs_per_ball": runs / balls, "wickets_per_ball": wkts / deliveries,
+            "balls": balls}
+
+
 def validate(conn, model: Model, trials: int, seed: int) -> None:
     """Does the engine reproduce the archive it was fitted on?
 
@@ -360,6 +394,50 @@ def validate(conn, model: Model, trials: int, seed: int) -> None:
           f"{archive['all_out']:11.1%}")
     print(f"\n    simulated spread {min(totals)} to {max(totals)}, over "
           f"{archive['innings']:,} real innings for the archive column")
+
+    _validate_super_over(conn, model, trials, seed)
+
+
+def _validate_super_over(conn, model: Model, trials: int, seed: int) -> None:
+    """The super over's own row, and it is REPORTED rather than asserted.
+
+    Unlike everything above it, this one has a free parameter: `SUPER_OVER_STATE_OVER`
+    picks which state a super over ball is priced against, and picking it to hit this
+    target would be fitting. It is not fitted -- the twentieth over was chosen because it
+    is the closest state the archive holds to an over bowled with nothing left to save,
+    and the gap that leaves is printed here so it stays visible instead of being an
+    assertion nobody re-reads.
+
+    The gap is real and small on runs and real and larger on wickets: the model has no
+    cell for two brand-new batters facing a side's best bowler, because a super over is
+    excluded from the fitting set. At 165 archive balls the run-rate comparison carries a
+    standard error near 0.16 per ball, so it separates almost nothing -- which is itself
+    the reason this is a row and not a check.
+    """
+    from game.season import (
+        SUPER_OVER_BATTERS, SUPER_OVER_OVERS, SUPER_OVER_STATE_OVER, SUPER_OVER_WICKETS,
+    )
+
+    average = [Player(f"batter {i}", 0.0, 0.0) for i in range(SUPER_OVER_BATTERS)]
+    rng = random.Random(seed)
+    runs = balls = wkts = 0
+    for _ in range(trials):
+        i = play_innings(model, average, [Player("bowler", 0.0, 0.0)], rng,
+                         overs=SUPER_OVER_OVERS, max_wickets=SUPER_OVER_WICKETS,
+                         state_over=SUPER_OVER_STATE_OVER)
+        runs += i.runs
+        balls += i.balls
+        wkts += i.wickets
+    real = archive_super_overs(conn)
+
+    print(f"\n=== the super over, {trials} league-average ones, seed {seed} ===\n")
+    print(f"    {'':28}{'simulated':>12}{'archive':>12}")
+    print(f"    {'runs per ball':28}{runs / balls:12.3f}{real['runs_per_ball']:12.3f}")
+    print(f"    {'wickets per ball':28}{wkts / balls:12.4f}"
+          f"{real['wickets_per_ball']:12.4f}")
+    print(f"\n    reported, not asserted -- {real['innings']} real super over innings "
+          f"from {real['matches']} matches\n    ({real['balls']} legal balls) is too few "
+          "to separate the candidate states; see SUPER_OVER_STATE_OVER.")
 
 
 def main() -> None:
@@ -414,6 +492,14 @@ def main() -> None:
 
     print_scorecard(r.home_innings, f"{side_a} innings", chasing=False)
     print_scorecard(r.away_innings, f"{side_b} innings, chasing {r.home_runs + 1}", chasing=True)
+
+    for so in r.super_overs:
+        label = "super over" if len(r.super_overs) == 1 else f"super over {so.number}"
+        print(f"\n=== the {label}: {so.first.name} bat first ===")
+        print_scorecard(so.first_innings, f"{so.first.name} super over", chasing=False)
+        print_scorecard(so.second_innings,
+                        f"{so.second.name} super over, chasing {so.first_runs + 1}",
+                        chasing=True)
 
     print()
     print(f"  {r.margin}")

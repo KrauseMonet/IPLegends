@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
-from game import analysis
+from game import analysis, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -37,6 +37,7 @@ from web import accounts
 from web import auth
 from web import daily as daily_lib
 from web import db
+from web import flashback as flashback_lib
 from web import room_match as room_match_lib
 from web import rooms
 from tools import snapshot_deck
@@ -289,6 +290,16 @@ def profile_page() -> FileResponse:
     parameter, unlike /rooms/{code}, since a profile is always "mine", read from the
     cookie, never named in the URL."""
     return FileResponse(STATIC / "profile.html")
+
+
+@app.get("/records", include_in_schema=False)
+def records_page() -> FileResponse:
+    return FileResponse(STATIC / "records.html")
+
+
+@app.get("/flashback", include_in_schema=False)
+def flashback_page() -> FileResponse:
+    return FileResponse(STATIC / "flashback.html")
 
 
 @app.get("/about", include_in_schema=False)
@@ -957,6 +968,39 @@ class AnalysisLeaderOut(BaseModel):
     team: str = ""
 
 
+class RecordsOut(BaseModel):
+    """The archive-wide record book (`game.records`) -- five top-N boards over every
+    rated player-season in the deck, computed from the already-loaded `Deck` alone (no
+    database call). Reuses `AnalysisLeaderOut`'s shape rather than a new one: the
+    frontend's `leaderPanel()` already renders exactly this (name/team/value/detail)."""
+
+    top_rated: list[AnalysisLeaderOut]
+    top_batting: list[AnalysisLeaderOut]
+    top_bowling: list[AnalysisLeaderOut]
+    top_allrounder: list[AnalysisLeaderOut]
+    most_runs: list[AnalysisLeaderOut]
+    most_wickets: list[AnalysisLeaderOut]
+    best_strike_rate: list[AnalysisLeaderOut]
+    best_economy: list[AnalysisLeaderOut]
+
+
+class FlashbackOut(BaseModel):
+    """One `web.flashback` trivia round. The answer (`correct_year`) rides in the same
+    payload rather than a second reveal round trip -- there is no leaderboard or saved
+    result here to protect (unlike the daily challenge), so nothing is lost by sending
+    it up front; the frontend simply doesn't render it until a guess is made."""
+
+    franchise: str
+    correct_year: int
+    candidates: list[int]
+    top_scorer: str | None = None
+    top_scorer_runs: int | None = None
+    top_wicket_taker: str | None = None
+    top_wicket_taker_wickets: int | None = None
+    matches_played: int
+    matches_won: int
+
+
 class PhaseBowlerOut(BaseModel):
     name: str
     person_id: str
@@ -1183,6 +1227,42 @@ def meta() -> dict:
         "franchise_seasons": len(deck.fs_ids),
         "seasons": sorted(s for s in seasons if s),
     }
+
+
+@app.get("/api/records", response_model=RecordsOut)
+def records_route() -> RecordsOut:
+    """The record book, over the whole deck -- no session, no state, no database call.
+    Every board is a sort over `Card`s already sitting in memory (A107), the same figures
+    a draft screen already shows one card at a time."""
+    deck = STATE["deck"]
+    row = lambda r: AnalysisLeaderOut(name=r.name, value=r.value, detail=r.detail, team=r.team or "")
+    rows = lambda rs: [row(r) for r in rs]
+    return RecordsOut(
+        top_rated=rows(records.top_rated(deck, limit=20)),
+        top_batting=rows(records.top_rated(deck, limit=20, role="batter")),
+        top_bowling=rows(records.top_rated(deck, limit=20, role="bowler")),
+        top_allrounder=rows(records.top_rated(deck, limit=20, role="allrounder")),
+        most_runs=rows(records.most_runs(deck, limit=20)),
+        most_wickets=rows(records.most_wickets(deck, limit=20)),
+        best_strike_rate=rows(records.best_strike_rate(deck, limit=20)),
+        best_economy=rows(records.best_economy(deck, limit=20)),
+    )
+
+
+@app.get("/api/flashback", response_model=FlashbackOut)
+def flashback_route() -> FlashbackOut:
+    """A fresh guess-the-season round. Genuinely random each call -- there is no seed to
+    replay and nothing to save, so unlike the draft/season/daily routes this one has no
+    determinism contract at all. Touches the database directly (`matches`/`deliveries`
+    aren't in the deck snapshot, A107), same as rooms and accounts."""
+    with _db() as conn:
+        r = flashback_lib.random_round(conn)
+    return FlashbackOut(
+        franchise=r.franchise, correct_year=r.correct_year, candidates=r.candidates,
+        top_scorer=r.top_scorer, top_scorer_runs=r.top_scorer_runs,
+        top_wicket_taker=r.top_wicket_taker, top_wicket_taker_wickets=r.top_wicket_taker_wickets,
+        matches_played=r.matches_played, matches_won=r.matches_won,
+    )
 
 
 @app.post("/api/draft", response_model=SessionOut)

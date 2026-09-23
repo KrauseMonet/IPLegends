@@ -44,6 +44,8 @@
     { "src": "/rooms", "dest": "/web/static/rooms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/rooms/[^/]+", "dest": "/web/static/room.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/profile", "dest": "/web/static/profile.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/records", "dest": "/web/static/records.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/flashback", "dest": "/web/static/flashback.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/about", "dest": "/web/static/about.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/faq", "dest": "/web/static/faq.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/terms", "dest": "/web/static/terms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },

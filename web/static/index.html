@@ -29,7 +29,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=fdbd353118">
+<link rel="stylesheet" href="/static/style.css?v=38cde9e55c">
 </head>
 <body class="has-ground">
 <div class="sheet">
@@ -83,12 +83,12 @@
       <div>
         <div class="standfirst">Nineteen seasons · one XI · fourteen matches</div>
         <h2 class="headline">Build the XI<br>the IPL <i>never picked</i>.</h2>
-        <p class="deck"><span class="drop">Nineteen seasons</span> of the IPL, opened one
-          squad at a time. Chennai 2010, Kolkata 2008, Rajasthan 2022. Take one man from
-          each, into a batting position he actually filled. Twelve selections: eleven who
-          bat, one Impact Player, no more than four overseas. Then your XI plays a full
-          season. Fourteen matches against real franchise-sides, a points table, then the
-          playoffs.</p>
+        <p class="deck">Chennai 2010 gives up Dhoni. Kolkata 2012 gives up Narine. Mumbai
+          2019 gives up Bumrah. <span class="drop">Nineteen seasons</span> of the IPL,
+          opened one squad at a time — take one man from each, into a spot he actually
+          batted. Twelve selections: eleven who bat, one Impact Player, no more than four
+          overseas. Then your XI plays a season: fourteen matches against real
+          franchise-sides, a table, then the playoffs.</p>
         <div class="room-label" style="margin-top:22px">Draft by</div>
         <div class="room-choices" id="modeChoices">
           <button class="room-choice sel" data-mode="stat" onclick="setDraftMode('stat')"
@@ -98,9 +98,14 @@
         </div>
         <div class="actions">
           <button class="act lead" onclick="newDraft(this)">Begin a draft</button>
-          <button class="act" onclick="location.href='/rooms'">Play with friends</button>
-          <button class="act" onclick="location.href='/daily'"
+        </div>
+        <div class="actions minor-row">
+          <span class="minor-label">or</span>
+          <button class="act minor" onclick="location.href='/rooms'">Play with friends</button>
+          <button class="act minor" onclick="location.href='/daily'"
             title="One scenario a day, the same squads for everyone, one attempt each.">Daily challenge</button>
+          <button class="act minor" onclick="location.href='/flashback'"
+            title="Three real facts about a real season -- guess the year.">Flashback</button>
         </div>
         <div class="colophon" id="homeStats"></div>
       </div>
@@ -169,7 +174,7 @@
   </div>
 
   <div class="imprint">
-    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
+    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/records">Records</a> · <a href="/flashback">Flashback</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
     <div>The Legends Almanack · squads · selection · season</div>
     <div id="footStats"></div>
   </div>

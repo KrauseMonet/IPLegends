@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flashback · The Legends Almanack</title>
+<meta name="description" content="Guess the real IPL season from three real facts -- leading scorer, leading wicket-taker, match record. No login, no fabricated clues.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almanack">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="Guess the real IPL season from three real facts.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
+<link rel="stylesheet" href="/static/style.css?v=38cde9e55c">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.webp" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+    <div class="masthead-actions">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add the Almanack to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
+  </div>
+
+  <!-- ============ FLASHBACK ============ -->
+  <section id="flashback" class="prose-page">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">Flashback</div>
+    </div>
+    <p class="prose" style="padding-top:0;margin-bottom:26px;max-width:64ch">Three real
+      facts about one real IPL season -- guess the year. Every clue is a real archive
+      figure; nothing here is invented. Decoy years are always the same franchise, so
+      the clues have to do the work.</p>
+
+    <div class="an-panel" id="fbCard">
+      <div class="an-panel-head"><div>
+        <h3 id="fbFranchise">Loading…</h3>
+        <p>Which season produced this?</p>
+      </div></div>
+
+      <ul class="fb-clues" id="fbClues"></ul>
+
+      <div class="fb-choices" id="fbChoices"></div>
+
+      <div id="fbVerdict"></div>
+
+      <div class="foot-actions" style="padding-top:22px">
+        <button class="act lead" id="fbNext" onclick="fbNewRound()">New round</button>
+      </div>
+    </div>
+
+    <div class="foot-actions" style="justify-content:center;padding:20px 0 30px">
+      <a class="act" href="/">Home</a>
+    </div>
+  </section>
+
+  <div class="imprint">
+    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/records">Records</a> · <a href="/flashback">Flashback</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js?v=9020edd1df"></script>
+<script src="/static/auth.js?v=3699e815a6"></script>
+<script>
+let FB = null;
+let FB_ANSWERED = false;
+
+function fbClueLine(label, value){
+  return value == null ? '' : `<li><b>${label}:</b> ${value}</li>`;
+}
+
+function fbPaint(){
+  const d = FB;
+  $('#fbFranchise').textContent = d.franchise;
+  $('#fbClues').innerHTML = [
+    fbClueLine('Leading run-scorer', d.top_scorer ? `${d.top_scorer} (${d.top_scorer_runs} runs)` : null),
+    fbClueLine('Leading wicket-taker', d.top_wicket_taker ? `${d.top_wicket_taker} (${d.top_wicket_taker_wickets} wickets)` : null),
+    fbClueLine('Real match record that season', `Played ${d.matches_played}, won ${d.matches_won}`),
+  ].join('');
+  $('#fbChoices').innerHTML = d.candidates.map(y =>
+    `<button class="fb-choice" onclick="fbGuess(${y}, this)">${y}</button>`).join('');
+  $('#fbVerdict').innerHTML = '';
+  FB_ANSWERED = false;
+}
+
+function fbGuess(year, ctrl){
+  if (FB_ANSWERED) return;
+  FB_ANSWERED = true;
+  const right = year === FB.correct_year;
+  document.querySelectorAll('#fbChoices .fb-choice').forEach(b => {
+    b.disabled = true;
+    if (Number(b.textContent) === FB.correct_year) b.classList.add('correct');
+    else if (b === ctrl) b.classList.add('wrong');
+  });
+  $('#fbVerdict').innerHTML = `<div class="fb-verdict ${right ? 'good' : 'bad'}">
+    ${right ? 'Correct.' : 'Not quite.'} It was ${FB.franchise} ${FB.correct_year}.</div>`;
+}
+
+async function fbNewRound(){
+  await busyClick($('#fbNext'), 'Dealing…', async () => {
+    try {
+      $('#fbFranchise').textContent = 'Loading…';
+      $('#fbClues').innerHTML = '';
+      $('#fbChoices').innerHTML = '';
+      $('#fbVerdict').innerHTML = '';
+      FB = await api('/api/flashback');
+      fbPaint();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+async function boot(){
+  loadMe();
+  const m = await loadMeta();
+  renderDeckStats(m);
+  fbNewRound();
+}
+boot();
+</script>
+</body>
+</html>

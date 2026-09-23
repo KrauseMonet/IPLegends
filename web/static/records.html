@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Records · The Legends Almanack</title>
+<meta name="description" content="The archive's own record book -- highest-rated seasons, most runs, most wickets, best strike rate and economy, across nineteen seasons of the real IPL.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almanack">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="The archive's own record book, across nineteen seasons of the real IPL.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
+<link rel="stylesheet" href="/static/style.css?v=38cde9e55c">
+</head>
+<body>
+<div class="sheet">
+  <div class="rig" aria-hidden="true">
+    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
+        <line x1="380" y1="10" x2="60" y2="230"/>
+        <line x1="380" y1="10" x2="140" y2="260"/>
+        <line x1="380" y1="10" x2="230" y2="280"/>
+        <line x1="380" y1="10" x2="320" y2="285"/>
+      </g>
+      <g fill="var(--gold)">
+        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
+        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
+        <circle cx="380" cy="10" r="4.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="masthead">
+    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
+      <div class="crest"><img src="/static/logo-emblem.webp" alt="" width="220" height="235"></div>
+      <div>
+        <span class="the">The</span>
+        <h1>Legends <span class="leg">Almanack</span></h1>
+      </div>
+    </a>
+    <div class="edition">
+      <b>Indian Premier League</b><br>
+      <span id="deckPill">…</span>
+    </div>
+    <div class="masthead-actions">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add the Almanack to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
+  </div>
+
+  <!-- ============ RECORDS ============ -->
+  <section id="records" class="prose-page">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">Record book</div>
+    </div>
+    <p class="prose" style="padding-top:0;margin-bottom:26px;max-width:64ch">Every rated
+      player-season in the archive, ranked -- not one draft, not one squad. A count (runs,
+      wickets) carries no volume floor; a rate (strike rate, economy) is floored at the
+      same ball counts the draft's own rating gate uses, so a two-over spell can't win an
+      economy title.</p>
+
+    <div class="an-panel">
+      <div class="an-panel-head">
+        <div>
+          <h3>Highest-rated seasons</h3>
+          <p>By the card's own 70-99 rating -- batting and bowling already blended into
+            one number where a player did both.</p>
+        </div>
+        <div class="an-toggle" id="recRoleTabs">
+          <button class="an-tab sel" data-role="overall" onclick="recSetRole('overall')">Overall</button>
+          <button class="an-tab" data-role="batting" onclick="recSetRole('batting')">Batting</button>
+          <button class="an-tab" data-role="bowling" onclick="recSetRole('bowling')">Bowling</button>
+          <button class="an-tab" data-role="allrounder" onclick="recSetRole('allrounder')">All-rounders</button>
+        </div>
+      </div>
+      <div class="an-lists" id="recTopBoard"></div>
+    </div>
+
+    <div class="an-panel">
+      <div class="an-panel-head"><div>
+        <h3>Season records</h3>
+        <p>The archive's own extremes -- one board per measure, twenty seasons deep.</p>
+      </div></div>
+      <div class="an-lists" id="recBoards"></div>
+    </div>
+
+    <div class="foot-actions" style="justify-content:center;padding:10px 0 30px">
+      <a class="act lead" href="/">Begin a draft</a>
+    </div>
+  </section>
+
+  <div class="imprint">
+    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/records">Records</a> · <a href="/flashback">Flashback</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
+    <div>The Legends Almanack · squads · selection · season</div>
+    <div id="footStats"></div>
+  </div>
+</div>
+
+<script src="/static/common.js?v=9020edd1df"></script>
+<script src="/static/auth.js?v=3699e815a6"></script>
+<script src="/static/analysis.js?v=318fdf444f"></script>
+<script>
+let RECORDS = null;
+let REC_ROLE = 'overall';
+
+function recSetRole(role){
+  REC_ROLE = role;
+  document.querySelectorAll('#recRoleTabs .an-tab').forEach(b =>
+    b.classList.toggle('sel', b.dataset.role === role));
+  recPaintTop();
+}
+
+function recPaintTop(){
+  const byRole = {overall: RECORDS.top_rated, batting: RECORDS.top_batting,
+    bowling: RECORDS.top_bowling, allrounder: RECORDS.top_allrounder};
+  $('#recTopBoard').innerHTML = leaderPanel('Highest-rated seasons', 'card rating, 70-99',
+    byRole[REC_ROLE], 'rating', v => Math.round(v), 'rating');
+}
+
+function recPaintBoards(){
+  $('#recBoards').innerHTML = [
+    leaderPanel('Most runs in a season', 'Archive-wide', RECORDS.most_runs, 'orange', v => Math.round(v), 'runs'),
+    leaderPanel('Most wickets in a season', 'Archive-wide', RECORDS.most_wickets, 'purple', v => Math.round(v), 'wickets'),
+    leaderPanel('Best strike rate in a season', 'Runs per hundred balls', RECORDS.best_strike_rate, 'sr', v => v.toFixed(1), 'SR'),
+    leaderPanel('Best economy in a season', 'Runs per over conceded', RECORDS.best_economy, 'econ', v => v.toFixed(2), 'runs per over'),
+  ].join('');
+}
+
+async function boot(){
+  loadMe();
+  const m = await loadMeta();
+  renderDeckStats(m);
+  RECORDS = await api('/api/records');
+  recPaintTop();
+  recPaintBoards();
+}
+boot().catch(e => slip(e.message));
+</script>
+</body>
+</html>

@@ -99,6 +99,15 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
   border:1px solid var(--gold);box-shadow:0 10px 26px -12px rgba(245,184,61,.55)}
 .act.lead:hover{filter:brightness(1.06)}
 .act:disabled{opacity:.4;cursor:not-allowed}
+/* The two alternative entry points (a room, the daily) sit under the lead CTA rather than
+   beside it -- three equal-weight buttons in one row read as three equally valid front
+   doors, where "begin a draft" is meant to be the obvious one and the other two a
+   secondary offer once it's been seen. */
+.actions.minor-row{margin-top:10px;align-items:center;gap:10px}
+.minor-label{font-family:var(--mono);font-size:11px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3)}
+.act.minor{padding:9px 16px;font-size:11.5px;background:none;border-color:var(--line)}
+.act.minor:hover{border-color:var(--gold);background:var(--panel-2)}
 /* a screen mid network/engine call: the whole thing stops responding to clicks and dims
    slightly, so a multi-second wait (a full-tournament skip is ~3s, A63) reads as "working"
    rather than as the click having done nothing */
@@ -1409,6 +1418,24 @@ body.has-ground{
 .an-lead-purple{border-top-color:#9b5de5}
 .an-lead-econ{border-top-color:var(--mint)}
 .an-lead-sr{border-top-color:var(--gold)}
+.an-lead-rating{border-top-color:#4aa8ff}
+
+/* --- Flashback: a guess-the-season round -------------------------------------------- */
+.fb-clues{list-style:none;margin:0 0 22px;padding:0;display:flex;flex-direction:column;gap:10px}
+.fb-clues li{font-family:var(--sans);font-size:14.5px;color:var(--ink-2);
+  padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.018)}
+.fb-clues b{color:var(--ink);font-weight:700}
+.fb-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.fb-choice{font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:.03em;
+  padding:16px 10px;border-radius:8px;border:1px solid var(--line-strong);
+  background:var(--panel-2);color:var(--ink);transition:border-color .15s,background .15s}
+.fb-choice:hover:not(:disabled){border-color:var(--gold);background:var(--panel-3)}
+.fb-choice:disabled{cursor:not-allowed}
+.fb-choice.correct{border-color:var(--mint);color:var(--mint);background:rgba(61,220,151,.1)}
+.fb-choice.wrong{border-color:var(--hot);color:var(--hot);background:rgba(255,74,53,.1);opacity:.7}
+.fb-verdict{font-family:var(--display);font-size:clamp(22px,3.4vw,32px);margin:20px 0 4px}
+.fb-verdict.good{color:var(--mint)}
+.fb-verdict.bad{color:var(--hot)}
 .an-lead-head{margin-bottom:10px}
 .an-lead-head b{display:block;font-family:var(--display);font-size:19px;text-transform:uppercase;
   letter-spacing:.02em;color:var(--ink);font-weight:400}

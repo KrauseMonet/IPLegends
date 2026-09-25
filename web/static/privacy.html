@@ -98,7 +98,9 @@
       server ordinarily logs to run and keep the site working (request logs held by
       the hosting provider). A room seat you join anonymously is identified only by a
       random ID kept in your own browser's local storage, never sent anywhere else and
-      never linked to a real identity.</p>
+      never linked to a real identity. The daily challenge works the same way when you
+      play it signed out: a random ID in your browser decides your deal, your result is
+      worked out and shown to you, and nothing about it is stored.</p>
 
       <h2>If you create an account</h2>
       <p>Registering stores a <strong>username</strong>, an <strong>email
@@ -106,6 +108,10 @@
       as typed — it's run through a standard one-way hashing algorithm before it's
       saved, so even we can't read it back. Signing in sets one cookie that identifies
       your session; it carries no tracking purpose and isn't shared with anyone.</p>
+
+      <p>If you play the daily challenge while signed in, your result goes on that day's
+      public leaderboard under your <strong>username</strong>, which anyone visiting the
+      site can see. Your email address is never shown.</p>
 
       <h2>If you save a game while signed in</h2>
       <p>Saving is something you (or the site, on your behalf, once you've completed
@@ -204,7 +210,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=9020edd1df"></script>
+<script src="/static/common.js?v=b1bb131e29"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script src="/static/info.js?v=29305b2217"></script>
 </body>

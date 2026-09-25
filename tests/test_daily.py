@@ -1088,3 +1088,152 @@ def test_a_day_stored_before_version_2_keeps_the_account_seeded_dice():
     # And two accounts differ, which is the half that was unfair.
     assert daily.match_rng(older, 7, order, impact).random() != \
            daily.match_rng(older, 8, order, impact).random()
+
+
+# --- playing signed out --------------------------------------------------------------------
+
+ANON = daily.anon_key("0123456789abcdef0123456789abcdef")
+
+
+def test_account_deals_are_unchanged_by_opening_the_daily_to_anonymous_players():
+    """Literal values, computed from the committed formula before anonymous play existed.
+    Recomputing the formula here would pass even if it changed; a stored result is verified
+    against exactly these numbers, so a changed seed would orphan every attempt on record."""
+    assert daily.player_seed(DAY, 1) == 1151846400
+    assert daily.player_seed(DAY, 7) == 70906184
+    assert daily.player_seed(DAY, 42) == 1056190346
+
+
+@pytest.mark.parametrize("bad", [
+    None, "", "0123456789abcdef",                        # missing, empty, too short
+    "0123456789ABCDEF0123456789ABCDEF",                  # uppercase
+    "0123456789abcdef0123456789abcdeg",                  # not hex
+    "0123456789abcdef0123456789abcdef0",                 # too long
+    "7",                                                 # an account id, passed as a string
+])
+def test_an_anonymous_key_needs_exactly_a_32_character_hex_device_id(bad):
+    with pytest.raises(daily.DailyError):
+        daily.anon_key(bad)
+
+
+def test_an_anonymous_key_is_marked_as_one_and_an_account_is_not():
+    assert daily.is_anonymous(ANON)
+    assert not daily.is_anonymous(7)
+    assert not daily.is_anonymous("7")
+
+
+def test_an_anonymous_deal_and_an_account_deal_never_verify_as_each_other():
+    """An anonymous state presented as an account's is a deal that account was never
+    offered, and the other way round. (This holds because the seed strings differ; what the
+    prefix itself protects is `is_anonymous`, pinned by the test above.)"""
+    anon_state = sess.encode(daily.player_seed(DAY, ANON), ())
+    acct_state = sess.encode(daily.player_seed(DAY, 7), ())
+    daily.decode_own_state(anon_state, DAY, ANON)
+    daily.decode_own_state(acct_state, DAY, 7)
+    with pytest.raises(daily.DailyError):
+        daily.decode_own_state(anon_state, DAY, 7)
+    with pytest.raises(daily.DailyError):
+        daily.decode_own_state(acct_state, DAY, ANON)
+
+
+def test_an_anonymous_attempt_is_never_recorded():
+    """Refused before `submit` touches the database at all -- `conn` is None, so a guard
+    that moved below `ensure_day` would fail here with an AttributeError instead."""
+    with pytest.raises(daily.DailyError):
+        daily.submit(None, DAY, ANON, "1-", FULL, MODEL)
+
+
+def test_an_anonymous_player_can_finish_and_be_marked_like_anyone_else():
+    """`mark` is the whole of what an anonymous player gets, and it has to be the same
+    marking a ranked attempt gets -- so it is compared with `play_and_score` directly."""
+    day = daily.Day(DAY, 1, _scenario_for("win_by_runs"), daily.build_day(FULL, DAY), 6)
+    state = _finished_state(day, ANON)
+    outcome = daily.mark(FULL, MODEL, day, ANON, state)
+    assert outcome == daily.play_and_score(FULL, MODEL, day, ANON, state).outcome
+
+
+def test_mark_refuses_an_unfinished_draft():
+    day = daily.Day(DAY, 1, _scenario_for("win_by_runs"), daily.build_day(FULL, DAY), 6)
+    with pytest.raises(daily.DailyError):
+        daily.mark(FULL, MODEL, day, ANON, sess.encode(daily.player_seed(DAY, ANON), ()))
+
+
+# --- where an unrecorded result would stand: checked against the REAL board -------------------
+#
+# `would_rank` shortcuts the board's ordering with a row comparison. The only authority on
+# where a result stands is `_BOARD_ORDER` itself, so the check below inserts nothing: it
+# places a synthetic, latest-completed row among the real rows with the board's own window
+# and asserts the two agree.
+#
+# Opt-in with IPLEGENDS_LIVE_DB=1 rather than keyed on DATABASE_URL: `etl/db.py` loads
+# `.env` on import, so on a development machine DATABASE_URL is always present and a
+# DATABASE_URL skip would never skip. Read-only either way.
+
+needs_db = pytest.mark.skipif(not __import__("os").environ.get("IPLEGENDS_LIVE_DB"),
+                              reason="set IPLEGENDS_LIVE_DB=1 to run read-only checks on real rows")
+
+_PROBE_CAP = 40
+
+
+@needs_db
+def test_would_rank_agrees_with_the_boards_own_ordering_on_real_rows():
+    from game.scenarios import Outcome
+    from web.db import connection
+
+    with connection() as conn:
+        # The busiest day: the most rows, so the most ties and boundaries to get wrong.
+        row = conn.execute(
+            "select challenge_date from daily_results group by challenge_date "
+            "order by count(*) desc limit 1").fetchone()
+        assert row, "no recorded results to check against"
+        d = row[0]
+        rows = conn.execute(
+            "select objective_met, margin, bonus_points from daily_results "
+            "where challenge_date = %s", (d,)).fetchall()
+        # Every real score and its neighbours on each column, so ties and the boundaries
+        # either side of them are all exercised.
+        probes = set()
+        for met, margin, bonus in rows:
+            probes |= {(met, margin, bonus), (not met, margin, bonus),
+                       (met, margin + 1, bonus), (met, margin - 1, bonus),
+                       (met, margin, bonus + 5), (met, margin, max(bonus - 5, 0))}
+        probes = sorted(probes)[:_PROBE_CAP]
+
+        # All the expected positions in one round trip: each probe is placed among the
+        # real rows by the board's own window, as the latest-completed row.
+        expected = dict(conn.execute(
+            f"""
+            select p.i, x.pos
+              from unnest(%s::int[], %s::bool[], %s::int[], %s::int[])
+                   as p(i, met, margin, bonus)
+             cross join lateral (
+                select pos from (
+                    select synthetic, row_number() over (order by {daily._BOARD_ORDER}) pos
+                      from (select objective_met, margin, bonus_points, completed_at,
+                                   false as synthetic
+                              from daily_results where challenge_date = %s
+                            union all
+                            select p.met, p.margin, p.bonus,
+                                   now() + interval '1 day', true) t
+                ) ranked where synthetic) x
+            """,
+            (list(range(len(probes))), [p[0] for p in probes], [p[1] for p in probes],
+             [p[2] for p in probes], d)).fetchall())
+
+        for i, (met, margin, bonus) in enumerate(probes):
+            got = daily.would_rank(conn, d, Outcome(met, margin, bonus, (), ""))
+            assert got == expected[i], (d, met, margin, bonus, got, expected[i])
+
+
+@needs_db
+def test_every_recorded_attempt_still_verifies_under_the_account_it_was_played_by():
+    """The strongest backward-compatibility check there is: the real stored states, each
+    decoded under its own account exactly as the result screen does on every visit."""
+    from web.db import connection
+
+    with connection() as conn:
+        rows = conn.execute(
+            "select challenge_date, account_id, state from daily_results").fetchall()
+    assert rows
+    for d, account_id, state in rows:
+        daily.decode_own_state(state, d, account_id)

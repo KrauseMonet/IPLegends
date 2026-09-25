@@ -14,6 +14,39 @@ let DAY = null;
 DRAFT_MODE = 'memory';
 DRAFT_API = '/api/daily/draft';
 
+// Signed out, the day is played under a random id this browser keeps. It decides the deal
+// the same way an account id does, and it is all the server is ever told: nothing about an
+// anonymous player is stored, and their result is never ranked -- clearing the browser
+// deals a fresh hand, which is exactly why it cannot be. Sent on every call, and simply
+// ignored by the server whenever somebody is signed in.
+const DAILY_DEVICE_KEY = 'iplegends_daily_device';
+const DAILY_ANON_KEY = 'iplegends_daily_anon';
+
+function dailyDeviceId(){
+  let id = null;
+  try { id = localStorage.getItem(DAILY_DEVICE_KEY); } catch(e){ /* blocked storage */ }
+  if (!/^[0-9a-f]{32}$/.test(id || '')){
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    id = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(DAILY_DEVICE_KEY, id); } catch(e){ /* per-visit id then */ }
+  }
+  return id;
+}
+API_HEADERS = {'X-Daily-Device': dailyDeviceId()};
+
+// A signed-out attempt lives only here, so a reload shows the result instead of a fresh
+// draft. Keyed by date: yesterday's attempt is simply not today's.
+function keptAnonAttempt(date){
+  try {
+    const kept = JSON.parse(localStorage.getItem(DAILY_ANON_KEY) || 'null');
+    return kept && kept.date === date ? kept.state : null;
+  } catch(e){ return null; }
+}
+function keepAnonAttempt(date, state){
+  try { localStorage.setItem(DAILY_ANON_KEY, JSON.stringify({date, state})); } catch(e){}
+}
+
 function dailyBanner(d){
   $('#dailyDate').textContent = 'Daily challenge · ' + d.challenge_date;
   $('#dailyScenario').textContent = d.scenario;
@@ -59,6 +92,7 @@ async function dailySubmit(ctrl){
       DAY = await api('/api/daily/submit', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({state: S.state})});
+      if (DAY.anonymous) keepAnonAttempt(DAY.challenge_date, S.state);
       dailyReveal();
     } catch(e){ slip(e.message); }
   });
@@ -195,12 +229,17 @@ async function showDone(){
       <div class="call ${r.objective_met ? 'won' : ''}">${outcomeLine(d)}</div>
       <div class="margin">${d.scenario}</div>
       ${d.rank ? `<div class="margin">You are <em>#${d.rank}</em> of ${d.players_today} today.</div>` : ''}
+      ${d.anonymous && d.would_rank ? `<div class="margin">You'd have ranked
+        <em>#${d.would_rank}</em> of ${d.players_today + 1} today — not recorded, because
+        you're signed out.</div>` : ''}
       ${streakLine(d, true)}
       ${r.bonuses.length
         ? `<div class="margin">Bonus earned: ${(r.bonus_labels || r.bonuses).join(', ')} (+${r.bonus_points})</div>`
         : '<div class="margin">No bonus today.</div>'}
       <div class="foot-actions">
-        <button class="act lead" id="shareBtn" onclick="shareResult(this)">Share result</button>
+        ${d.anonymous ? `<a class="act lead" href="/profile?next=${encodeURIComponent('/daily')}"
+          title="Your own deal and one ranked attempt at today's challenge.">Sign in to be ranked</a>` : ''}
+        <button class="act ${d.anonymous ? '' : 'lead'}" id="shareBtn" onclick="shareResult(this)">Share result</button>
         ${d.match ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
         ${d.match ? '<button class="act" onclick="dailyReveal()">Watch again</button>' : ''}
         <a class="act" href="/">Home</a>
@@ -210,8 +249,10 @@ async function showDone(){
     </div>
     <div class="col-head" style="margin:20px 0 0"><span>Today's leaderboard</span></div>
     ${rows || '<div class="margin">Nobody has finished today yet.</div>'}
-    <div class="margin" style="margin-top:14px">One attempt a day. Come back tomorrow for a
-      new scenario and a new set of squads.</div>`;
+    <div class="margin" style="margin-top:14px">${d.anonymous
+      ? `Signed in, you get your own deal and one ranked attempt at today's challenge, and
+         every day you play counts toward a streak.`
+      : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</div>`;
 }
 
 boot().then(async () => {
@@ -232,19 +273,46 @@ boot().then(async () => {
   DAY = d;
   dailyBanner(d);
   if (d.played){ await showDone(); return; }
+  // Signed out, the server remembers nothing, so an attempt already made today is the one
+  // this browser kept -- scored again (the same state always plays the same match) rather
+  // than offering a fresh draft to somebody who has had their go.
+  const kept = d.anonymous && keptAnonAttempt(d.challenge_date);
+  if (kept){
+    try {
+      DAY = await api('/api/daily/submit', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({state: kept})});
+      await showDone();
+      return;
+    } catch(e){ /* unreadable or no longer valid: fall through to a fresh draft */ }
+  }
   await dailyStartDraft(d);
 });
 
 
-// Open a fresh draft for a day this account has not played. Named rather than left inline
-// in `boot`, because the reset below needs exactly this and a second copy would be a
-// second place for the ON_COMPLETE wiring to be forgotten.
+// The draft in the address bar, if it is this player's own deal for today. `render` writes
+// every pick there, so this is what a reload mid-draft still has -- and the server refuses
+// any seed that is not theirs regardless, so this only decides what to ASK for.
+function resumableState(d){
+  const [h] = location.hash.slice(1).split('?');
+  return h && d.state && h.split('-')[0] === d.state.split('-')[0] ? h : d.state;
+}
+
+// Open the draft for a day this player has not played -- resumed where the address bar
+// left it, or fresh. Named rather than left inline in `boot`, because the reset below
+// needs exactly this and a second copy would be a second place for the ON_COMPLETE wiring
+// to be forgotten.
 async function dailyStartDraft(d){
   ON_COMPLETE = dailyOnComplete;
   $('#draft').classList.remove('hide');
+  const resumed = resumableState(d);
   try {
-    render(await api(`/api/daily/draft/${d.state}`));
-  } catch(e){ slip(e.message); }
+    render(await api(`/api/daily/draft/${resumed}`));
+  } catch(e){
+    if (resumed === d.state){ slip(e.message); return; }
+    try { render(await api(`/api/daily/draft/${d.state}`)); }
+    catch(e2){ slip(e2.message); }
+  }
 }
 
 
@@ -262,6 +330,9 @@ async function dailyReset(ctrl){
       hideAllRevealScreens();
       $('#reveal').classList.add('hide');
       dailyBanner(DAY);
+      // The address bar still holds the finished twelve under the same seed, and resuming
+      // from it would hand back the attempt that was just discarded.
+      history.replaceState(null, '', location.pathname);
       await dailyStartDraft(DAY);
     } catch(e){ slip(e.message); }
   });

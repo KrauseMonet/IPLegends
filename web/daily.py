@@ -52,17 +52,47 @@ def deck_for_day(full: Deck, fs_ids) -> Deck:
     return Deck(cards_by_fs=full.cards_by_fs, fs_ids=list(fs_ids))
 
 
-def player_seed(challenge_date, account_id: int) -> int:
+def player_seed(challenge_date, player: int | str) -> int:
     """This player's own sequence through the shared deck.
 
-    Derived from the date and the account so it is reproducible: a reload deals the same
+    Derived from the date and the player so it is reproducible: a reload deals the same
     order, and a stored result can be re-verified later from nothing but the row. Built
     through `random.Random(str)` rather than `hash()` for the reason `daily_seed` documents
-    -- a salted hash would make two servers disagree about the same player's deal."""
-    return random.Random(f"daily:{challenge_date}:{account_id}").getrandbits(31)
+    -- a salted hash would make two servers disagree about the same player's deal.
+
+    `player` is an account id, or an `anon_key` for somebody playing signed out. The
+    format string is unchanged from when it only ever took an account id, so every stored
+    account state still decodes to the seed it was dealt under."""
+    return random.Random(f"daily:{challenge_date}:{player}").getrandbits(31)
 
 
-def replay_day(full: Deck, challenge_date, account_id: int, deck_fs_ids,
+ANON_PREFIX = "anon:"
+_ANON_ID_LEN = 32
+
+
+def anon_key(device_id: str | None) -> str:
+    """The player key for somebody playing signed out, from the random id their browser
+    keeps. Refused unless it is exactly 32 lowercase hex characters.
+
+    The prefix is what keeps the two kinds of player apart: an account id formats as
+    digits only, so no anonymous key can ever produce an account's seed, and the other
+    way round.
+
+    Nothing about an anonymous player is stored, so this key protects no leaderboard --
+    clearing the browser deals a new hand, which is exactly why an anonymous result is
+    never ranked. The format check exists so an arbitrary header cannot become part of a
+    seed string."""
+    if (not device_id or len(device_id) != _ANON_ID_LEN
+            or any(c not in "0123456789abcdef" for c in device_id)):
+        raise DailyError("a signed-out daily needs a valid device id")
+    return ANON_PREFIX + device_id
+
+
+def is_anonymous(player: int | str) -> bool:
+    return isinstance(player, str) and player.startswith(ANON_PREFIX)
+
+
+def replay_day(full: Deck, challenge_date, player: int | str, deck_fs_ids,
                moves, unique_deals: bool = False) -> sess.Session:
     """One player's draft for one day, rebuilt from scratch (SPEC 11.3).
 
@@ -74,7 +104,7 @@ def replay_day(full: Deck, challenge_date, account_id: int, deck_fs_ids,
     quietly papered over."""
     return sess.replay(
         deck_for_day(full, deck_fs_ids),
-        player_seed(challenge_date, account_id),
+        player_seed(challenge_date, player),
         moves,
         rerolls_allowed=DAILY_REROLLS,
         fallback_fs_ids=tuple(full.fs_ids),
@@ -256,16 +286,16 @@ class DayPlay:
     super_overs: list = field(default_factory=list)
 
 
-def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
+def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
                    state: str) -> DayPlay:
-    """Rebuild one player's finished daily from what is stored -- the day, the account and
+    """Rebuild one player's finished daily from what is stored -- the day, the player and
     their state -- and both play it and mark it.
 
     Nothing about the result is persisted beyond the state and the numbers the leaderboard
     ranks on (A19): the match is a pure function of those three, so a page reload re-derives
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it."""
-    seed, moves = decode_own_state(state, day.challenge_date, account_id)
+    seed, moves = decode_own_state(state, day.challenge_date, player)
     session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
                           rerolls_allowed=DAILY_REROLLS,
                           fallback_fs_ids=tuple(full.fs_ids),
@@ -276,7 +306,7 @@ def play_and_score(full: Deck, model: Model, day: "Day", account_id: int,
     mine = Side(name="You", short="YOU", xi=list(session.order),
                 impact=session.impact, you=True)
     opposition = side_for_fs(full, day.scenario.opposition_fs_id)
-    rng = match_rng(day, account_id, session.order, session.impact)
+    rng = match_rng(day, player, session.order, session.impact)
 
     sc = day.scenario
     if sc.spec.fixed_target:
@@ -312,7 +342,7 @@ def team_key(order, impact) -> str:
     return "|".join(c.person_id for c in order) + "||" + (impact.person_id if impact else "-")
 
 
-def match_rng(day: "Day", account_id: int, order, impact) -> random.Random:
+def match_rng(day: "Day", player: int | str, order, impact) -> random.Random:
     """The dice for one attempt.
 
     From version 2 the seed is the DAY and the TWELVE, so the result is a function of the
@@ -332,7 +362,7 @@ def match_rng(day: "Day", account_id: int, order, impact) -> random.Random:
     stored day must go on replaying the way it was played."""
     if day.scenario.team_seeded_match:
         return random.Random(f"daily-match:{day.challenge_date}:{team_key(order, impact)}")
-    return random.Random(f"daily-match:{day.challenge_date}:{account_id}")
+    return random.Random(f"daily-match:{day.challenge_date}:{player}")
 
 
 def score_day(model: Model, scenario: Scenario, mine: Side, opposition: Side | None,
@@ -575,20 +605,39 @@ def ensure_day(conn, challenge_date, full: Deck, model: Model) -> Day:
 
 # --- submitting a result, and the board -------------------------------------------------
 
-def decode_own_state(state: str, challenge_date, account_id: int):
+def decode_own_state(state: str, challenge_date, player: int | str):
     """Decode a submitted state, refusing one whose seed this player was never dealt.
 
     Lifted out of `submit` so it can be tested without a database, because it is the one
     integrity rule specific to a daily: elsewhere the seed IS the player's (they asked for
-    a draft and got one), but here it is derived from the date and the account. A state
+    a draft and got one), but here it is derived from the date and the player. A state
     carrying any other seed describes a deal nobody offered -- without this check a player
     could shop for a favourable draw by editing a single number, and every other check in
     `submit` would happily pass, because the resulting draft is perfectly legal. It is just
     not theirs."""
     seed, moves = sess.decode(state)
-    if seed != player_seed(challenge_date, account_id):
-        raise DailyError("this is not today's deal for this account")
+    if seed != player_seed(challenge_date, player):
+        raise DailyError("this is not today's deal for this player")
     return seed, moves
+
+
+def mark(full: Deck, model: Model, day: "Day", player: int | str,
+         state: str) -> Outcome:
+    """Verify a finished attempt and score it, writing nothing.
+
+    What `submit` records, and all an anonymous player ever gets: the same three checks
+    (their own deal, a finished draft, a legal twelve) and the same scoring, so an unranked
+    result can never be computed differently from a ranked one."""
+    seed, moves = decode_own_state(state, day.challenge_date, player)
+    session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
+                          rerolls_allowed=DAILY_REROLLS,
+                          fallback_fs_ids=tuple(full.fs_ids),
+                          unique_deals=day.scenario.deal_unique)
+    if session.deal is not None:
+        raise DailyError("this draft is not finished")
+    if session.errors:
+        raise DailyError(f"this twelve is not legal: {'; '.join(session.errors)}")
+    return play_and_score(full, model, day, player, state).outcome
 
 
 def submit(conn, challenge_date, account_id: int, state: str,
@@ -603,20 +652,14 @@ def submit(conn, challenge_date, account_id: int, state: str,
     the state's SEED is not the player's to choose. It is derived from the date and the
     account, so a state carrying any other seed is a deal this player was never offered --
     without this check somebody could shop for a favourable draw by editing one number.
+
+    Accounts only: an anonymous key would reach the insert below with a string where an
+    account id belongs, and an anonymous result is never recorded.
     """
+    if is_anonymous(account_id):
+        raise DailyError("a signed-out attempt is never recorded")
     day = ensure_day(conn, challenge_date, full, model)
-    seed, moves = decode_own_state(state, challenge_date, account_id)
-
-    session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
-                          rerolls_allowed=DAILY_REROLLS,
-                          fallback_fs_ids=tuple(full.fs_ids),
-                          unique_deals=day.scenario.deal_unique)
-    if session.deal is not None:
-        raise DailyError("this draft is not finished")
-    if session.errors:
-        raise DailyError(f"this twelve is not legal: {'; '.join(session.errors)}")
-
-    outcome = play_and_score(full, model, day, account_id, state).outcome
+    outcome = mark(full, model, day, account_id, state)
 
     written = conn.execute(
         """
@@ -687,6 +730,25 @@ def rank_of(conn, challenge_date, account_id: int) -> int | None:
         ) ranked where account_id = %s
         """, (challenge_date, account_id)).fetchone()
     return row[0] if row else None
+
+
+def would_rank(conn, challenge_date, outcome: Outcome) -> int:
+    """Where an UNRECORDED result would stand on today's board -- what an anonymous player
+    is shown in place of a real rank.
+
+    It counts every recorded row that ranks at or above this one, plus one. "At or above"
+    because a tie on all three scoring columns falls to `completed_at`, and a result that
+    was never recorded is, by definition, later than every result that was. The row
+    comparison is `_BOARD_ORDER` over the same three columns, and a test checks it against
+    `rank_key` on real rows."""
+    return conn.execute(
+        """
+        select count(*) from daily_results
+         where challenge_date = %s
+           and (objective_met, margin, bonus_points) >= (%s, %s, %s)
+        """,
+        (challenge_date, outcome.objective_met, outcome.margin,
+         outcome.bonus_points)).fetchone()[0] + 1
 
 
 def players_today(conn, challenge_date) -> int:

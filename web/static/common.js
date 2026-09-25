@@ -20,12 +20,18 @@ const $ = s => document.querySelector(s);
 // anything a user would sit through without assuming something broke.
 const API_TIMEOUT_MS = 15000;
 
+// Headers every request from this page carries, beneath any a caller passes itself. Empty
+// on every page but the daily, which sends a signed-out player's device id with each call
+// -- including the draft calls draft.js makes, which is why it lives here and not there.
+let API_HEADERS = {};
+
 async function api(path, opts){
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
   let r;
   try {
-    r = await fetch(path, {...opts, signal: ctrl.signal});
+    r = await fetch(path, {...opts, headers: {...API_HEADERS, ...(opts && opts.headers)},
+                           signal: ctrl.signal});
   } catch(e){
     if (e.name === 'AbortError'){
       throw new Error('That took too long to respond -- the server may be busy. Try again.');

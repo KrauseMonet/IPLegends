@@ -1927,6 +1927,27 @@ def _require_account(request: Request) -> int:
     return account_id
 
 
+DAILY_DEVICE_HEADER = "X-Daily-Device"
+
+
+def _daily_player(request: Request) -> int | str:
+    """Who is playing today's daily: the signed-in account if there is one, otherwise the
+    anonymous key for the device id the page sends.
+
+    The account always wins. Somebody who played signed out and then signs in gets their
+    account's own deal and a fresh, ranked attempt -- the anonymous one is never carried
+    over, because clearing the browser deals a new anonymous hand and a result that could
+    be claimed afterwards could be shopped for."""
+    account_id = _current_account_id(request)
+    if account_id is not None:
+        return account_id
+    try:
+        return daily_lib.anon_key(request.headers.get(DAILY_DEVICE_HEADER))
+    except daily_lib.DailyError as exc:
+        raise HTTPException(status_code=401,
+                            detail="sign in to play the daily challenge") from exc
+
+
 class DailyOut(BaseModel):
     challenge_date: str
     scenario: str = Field(description="the one line shown before a ball is bowled")
@@ -1972,7 +1993,15 @@ class DailyOut(BaseModel):
                     "because everyone gets the same deal and a reader should get the "
                     "question rather than the answer. Null until played.")
     state: str | None = Field(
-        description="a fresh draft state for this account's own deal; null once played")
+        description="a fresh draft state for this player's own deal; null once played")
+    anonymous: bool = Field(
+        default=False,
+        description="true when playing signed out: the result is scored exactly as a ranked "
+                    "one but never recorded, and nothing about the player is stored")
+    would_rank: int | None = Field(
+        default=None,
+        description="for an anonymous result only: where it WOULD stand on today's board, "
+                    "out of players_today + 1. Never a real rank -- nothing was recorded.")
 
 
 class DailySubmitIn(BaseModel):
@@ -2041,7 +2070,55 @@ def _daily_match_out(play, scenario) -> dict:
     }
 
 
-def _daily_out(conn, account_id: int, day) -> DailyOut:
+def _anon_daily_out(conn, player: str, day, finished_state: str | None) -> DailyOut:
+    """An anonymous player's view of today: a fresh deal, or -- when the page hands back
+    the finished state it kept -- that attempt scored, played and placed against the real
+    board, with nothing written anywhere.
+
+    The page holds the state and re-sends it on a reload, so the result survives a refresh
+    without a row; the server re-derives the same match every time for the reason the
+    ranked path does (the match is a pure function of the day and the state)."""
+    from game.scenarios import BONUS_LABELS, bonuses_on_offer
+    result = match = share = would = None
+    players = daily_lib.players_today(conn, day.challenge_date)
+    if finished_state is not None:
+        outcome = daily_lib.mark(STATE["deck"], STATE["model"], day, player, finished_state)
+        result = {"state": finished_state, "objective_met": outcome.objective_met,
+                  "margin": outcome.margin, "bonus_points": outcome.bonus_points,
+                  "bonuses": list(outcome.bonuses_met)}
+        # No rank and no streak in the shared line: neither exists for somebody who was
+        # never recorded, and a line claiming one would be a figure nothing backs.
+        share = daily_lib.share_text(day, result)
+        would = daily_lib.would_rank(conn, day.challenge_date, outcome)
+        result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b) for b in result["bonuses"]])
+        play = daily_lib.play_and_score(STATE["deck"], STATE["model"], day, player,
+                                        finished_state)
+        match = _daily_match_out(play, day.scenario)
+    return DailyOut(
+        challenge_date=str(day.challenge_date),
+        scenario=day.scenario.describe(),
+        kind=day.scenario.kind,
+        margin_unit=day.scenario.margin_unit,
+        opposition=day.scenario.opposition_name,
+        stage=day.scenario.stage,
+        target=(None if day.scenario.target is None else day.scenario.target + 1),
+        bonuses=[BONUS_LABELS[b] for b in bonuses_on_offer(day.scenario)],
+        played=result is not None,
+        result=result,
+        state=(None if result is not None
+               else sess.encode(daily_lib.player_seed(day.challenge_date, player), ())),
+        players_today=players,
+        match=match,
+        share_text=share,
+        anonymous=True,
+        would_rank=would,
+    )
+
+
+def _daily_out(conn, account_id: int | str, day,
+               finished_state: str | None = None) -> DailyOut:
+    if daily_lib.is_anonymous(account_id):
+        return _anon_daily_out(conn, account_id, day, finished_state)
     from game.scenarios import BONUS_LABELS, bonuses_on_offer
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
     # Read whether or not today has been played: an unplayed day still has a streak to
@@ -2089,14 +2166,14 @@ def _daily_out(conn, account_id: int, day) -> DailyOut:
 
 @app.get("/api/daily", response_model=DailyOut)
 def daily_today(request: Request) -> DailyOut:
-    account_id = _require_account(request)
+    account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         return _daily_out(conn, account_id, day)
 
 
-def _daily_session(conn, account_id: int, state: str, day) -> sess.Session:
-    """Replay one daily state against the day's own deck, refusing a seed this account was
+def _daily_session(conn, account_id: int | str, state: str, day) -> sess.Session:
+    """Replay one daily state against the day's own deck, refusing a seed this player was
     never dealt -- the check `web.daily.decode_own_state` exists for."""
     try:
         seed, moves = daily_lib.decode_own_state(state, day.challenge_date, account_id)
@@ -2112,7 +2189,7 @@ def _daily_session(conn, account_id: int, state: str, day) -> sess.Session:
 
 @app.get("/api/daily/draft/{state}", response_model=SessionOut)
 def daily_draft(state: str, request: Request) -> SessionOut:
-    account_id = _require_account(request)
+    account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         return _session_out(_daily_session(conn, account_id, state, day))
@@ -2124,7 +2201,7 @@ def daily_pick(state: str, body: PickIn, request: Request) -> SessionOut:
     reroll route here at all -- not merely a refusal, but no endpoint: today's picks are
     meant to be final and from memory, and everybody is answering the same question off the
     same squads."""
-    account_id = _require_account(request)
+    account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         current = _daily_session(conn, account_id, state, day)
@@ -2140,7 +2217,7 @@ def daily_pick(state: str, body: PickIn, request: Request) -> SessionOut:
 def daily_reposition(state: str, body: RepositionIn, request: Request) -> SessionOut:
     """Rearranging the order IS allowed here, unlike rerolling: it is skill applied to what
     you were dealt rather than an escape from it. Still bounded by A76 eligibility."""
-    account_id = _require_account(request)
+    account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         current = _daily_session(conn, account_id, state, day)
@@ -2157,11 +2234,16 @@ def daily_reposition(state: str, body: RepositionIn, request: Request) -> Sessio
 def daily_submit(body: DailySubmitIn, request: Request) -> DailyOut:
     """Mark the attempt and record it. The client sends a state and never a score --
     everything is recomputed here, so a fabricated submission either fails to replay or
-    replays into a real, played result."""
-    account_id = _require_account(request)
+    replays into a real, played result.
+
+    Signed out, the same checks and the same scoring run and nothing is written: the page
+    keeps the state and sends it again on a reload."""
+    account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         try:
+            if daily_lib.is_anonymous(account_id):
+                return _daily_out(conn, account_id, day, finished_state=body.state)
             daily_lib.submit(conn, day.challenge_date, account_id, body.state,
                              STATE["deck"], STATE["model"])
         except daily_lib.DailyError as exc:
@@ -2196,10 +2278,10 @@ def daily_reset(request: Request) -> DailyOut:
 
 
 @app.get("/api/daily/leaderboard", response_model=list[DailyBoardRow])
-def daily_board(request: Request, limit: int = 50) -> list[DailyBoardRow]:
-    """Public to anyone signed in. Not gated on having played: seeing what today asked and
-    who is doing well is most of the reason to come back tomorrow."""
-    _require_account(request)
+def daily_board(limit: int = 50) -> list[DailyBoardRow]:
+    """Public to everyone, signed in or not. Not gated on having played: seeing what today
+    asked and who is doing well is most of the reason to come back tomorrow, and for a
+    signed-out visitor it is most of the reason to make an account."""
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         rows = daily_lib.leaderboard(conn, day.challenge_date, limit)

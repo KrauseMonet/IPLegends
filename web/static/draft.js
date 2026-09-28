@@ -67,6 +67,24 @@ function take(i, ctrl){
   const card = S.deal.options[i];
   PENDING = (PENDING && PENDING.index === i) ? null : {index: i, card};
   render(S);   // the deal list's "pending" highlight lives here too, not just the order sheet
+  if (PENDING && STACKED_DRAFT.matches) openPickSheet();
+}
+
+// On a phone the order sheet is far below the list, so the choice comes to the bottom of
+// the screen instead (common.js). The same slots the order sheet would light up: open, and
+// ones this card may fill.
+function openPickSheet(){
+  const {index, card} = PENDING;
+  const slots = [...openSlots(S)].filter(s => eligibleForSlot(card, s)).sort((a, b) => a - b);
+  if (!slots.length) return;   // nothing to offer: leave the order sheet to say why
+  openSlotSheet({
+    name: card.name,
+    status: `${S.picks_made} of ${S.picks_total} chosen · `
+          + `${S.overseas_taken} of ${S.overseas_cap} overseas`,
+    slots,
+    onChoose: slot => submitPick(index, slot, null),
+    onCancel: () => { PENDING = null; render(S); },
+  });
 }
 
 function rowClick(slot, ctrl){

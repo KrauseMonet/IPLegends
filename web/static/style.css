@@ -1546,3 +1546,29 @@ body.has-ground{
 .an-team{font-family:var(--mono);font-style:normal;font-size:9.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);
   border-radius:3px;padding:1px 4px;margin-left:5px;white-space:nowrap}
+
+/* --- the slot picker: a draft pick placed from the bottom of a phone screen ----------------
+   Only ever opened when the draft's columns are stacked (<=900px); see common.js. Tap
+   targets are 52px, over the ~44px every mobile HIG asks for, because this is the single
+   most repeated action in the app -- twelve times a draft. */
+.slot-sheet{position:fixed;inset:0;z-index:65}
+.slot-sheet-back{position:absolute;inset:0;background:rgba(3,7,17,.62)}
+.slot-sheet-panel{position:absolute;left:0;right:0;bottom:0;background:var(--panel);
+  border-top:2px solid var(--gold);border-radius:14px 14px 0 0;
+  padding:16px 16px calc(18px + env(safe-area-inset-bottom));
+  box-shadow:0 -12px 32px -8px rgba(0,0,0,.6);animation:slotSheetUp .18s ease-out}
+@keyframes slotSheetUp{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.slot-sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.slot-sheet-head span{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-3)}
+.slot-sheet-head b{display:block;font-family:var(--display);font-size:24px;font-weight:400;
+  text-transform:uppercase;color:var(--ink);line-height:1.1;margin-top:2px}
+.slot-sheet-x{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-2);border:1px solid var(--line-strong);border-radius:7px;padding:9px 12px;flex:none}
+.slot-sheet-status{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--ink-3);
+  margin:6px 0 14px}
+.slot-sheet-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.slot-sheet-slot{min-height:52px;font-family:var(--mono);font-size:15px;font-weight:700;
+  border:1px solid var(--gold);border-radius:8px;background:rgba(245,184,61,.08);color:var(--gold-2)}
+.slot-sheet-slot:active{background:var(--gold);color:#17120a}
+.slot-sheet-slot.impact{grid-column:span 2}

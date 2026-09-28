@@ -58,6 +58,65 @@ function slip(msg){
   document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
 }
 
+// --- the slot picker, for a draft on a phone ------------------------------------------------
+//
+// On a phone the draft's columns stack, so the batting order a pick is placed into sits
+// ~1,300px below the player list -- tapping Take lit up rows nobody could see, twelve times
+// a draft. This panel brings the choice to the thumb instead: the slots the player can
+// actually fill, pinned to the bottom of the screen. Shared by the solo/daily draft and
+// the room draft so the two cannot drift; each supplies its own state and callbacks.
+//
+// Wide screens keep the order sheet beside the list, where the existing flow already works.
+
+const STACKED_DRAFT = window.matchMedia('(max-width:900px)');
+
+function slotLabel(slot){
+  return slot === 12 ? 'Impact' : `No. ${slot}`;
+}
+
+function closeSlotSheet(){
+  const el = document.getElementById('slotSheet');
+  if (el) el.remove();
+  document.removeEventListener('keydown', slotSheetKey);
+}
+
+let SLOT_SHEET_CANCEL = null;
+function slotSheetKey(e){ if (e.key === 'Escape' && SLOT_SHEET_CANCEL) SLOT_SHEET_CANCEL(); }
+
+// `slots` are the open slots this player may fill, in batting order with Impact last.
+// `onChoose(slot)` commits; `onCancel()` must clear the page's own pending selection.
+// Choosing never happens by itself -- even one legal slot is a tap, the same two-step
+// confirm the order sheet has always required.
+function openSlotSheet({name, status, slots, onChoose, onCancel}){
+  closeSlotSheet();
+  SLOT_SHEET_CANCEL = () => { closeSlotSheet(); onCancel(); };
+  const el = document.createElement('div');
+  el.id = 'slotSheet';
+  el.className = 'slot-sheet';
+  el.innerHTML = `
+    <div class="slot-sheet-back"></div>
+    <div class="slot-sheet-panel" role="dialog" aria-label="Choose where he bats">
+      <div class="slot-sheet-head">
+        <div><span>Place</span><b></b></div>
+        <button class="slot-sheet-x" aria-label="Cancel">Cancel</button>
+      </div>
+      <div class="slot-sheet-status"></div>
+      <div class="slot-sheet-grid">${slots.map(s =>
+        `<button class="slot-sheet-slot${s === 12 ? ' impact' : ''}" data-slot="${s}">${slotLabel(s)}</button>`
+      ).join('')}</div>
+    </div>`;
+  // Set as text, never interpolated: a player's name is data, not markup.
+  el.querySelector('.slot-sheet-head b').textContent = name;
+  el.querySelector('.slot-sheet-status').textContent = status || '';
+  el.querySelector('.slot-sheet-back').onclick = SLOT_SHEET_CANCEL;
+  el.querySelector('.slot-sheet-x').onclick = SLOT_SHEET_CANCEL;
+  el.querySelectorAll('.slot-sheet-slot').forEach(b => {
+    b.onclick = () => { closeSlotSheet(); onChoose(Number(b.dataset.slot)); };
+  });
+  document.body.appendChild(el);
+  document.addEventListener('keydown', slotSheetKey);
+}
+
 // Real feedback for a click that waits on the network (every request here is at least
 // one round trip to Neon through Vercel, never truly instant): freeze the entire screen
 // the control lives on so a second click can't fire a second request, and relabel the

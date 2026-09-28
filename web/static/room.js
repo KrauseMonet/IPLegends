@@ -397,8 +397,30 @@ function roomTake(i, ctrl){
   // to click it, the same as when there's a real choice among several rows.
   const me = ROOM.players.find(p => p.player_id === MY_PID);
   const card = me.deal.options[i];
-  ROOM_PENDING = (ROOM_PENDING && ROOM_PENDING.index === i) ? null : {index: i, card};
+  // `at` pins the selection to THIS deal. An index only means something against the deal
+  // it was read from, and a turn can end under the player -- the clock's auto-pick -- so
+  // renderRoomDraft drops any selection made at a different pick count.
+  ROOM_PENDING = (ROOM_PENDING && ROOM_PENDING.index === i)
+    ? null : {index: i, card, at: me.picks_made};
   renderRoom();
+  if (ROOM_PENDING && STACKED_DRAFT.matches) roomOpenPickSheet(me);
+}
+
+// The phone slot picker (common.js), fed this seat's own order.
+function roomOpenPickSheet(me){
+  const {index, card} = ROOM_PENDING;
+  const slots = [...roomOpenSlots(me)]
+    .filter(s => s === 12 || card.positions.includes(s)).sort((a, b) => a - b);
+  if (!slots.length) return;
+  const overseas = [...me.order, me.impact].filter(c => c && c.overseas).length;
+  const cap = META && META.overseas_cap;
+  openSlotSheet({
+    name: card.name,
+    status: `${me.picks_made} of 12 chosen` + (cap ? ` · ${overseas} of ${cap} overseas` : ''),
+    slots,
+    onChoose: slot => roomSubmitPick(index, slot, null),
+    onCancel: () => { ROOM_PENDING = null; renderRoom(); },
+  });
 }
 
 function roomRowClick(slot, ctrl){
@@ -524,6 +546,13 @@ function renderRoomDraft(r){
   const me = r.players.find(p => p.player_id === MY_PID);
   const active = r.players.find(p => p.player_id === r.active_player_id);
   const amActive = !!me && r.active_player_id === MY_PID;
+  // A selection outlives its deal if the turn ends under it (the clock's auto-pick), and
+  // its index would then name somebody in the NEXT deal -- a player never chosen. Dropped,
+  // and the phone picker closed with it, the moment it stops being this deal's.
+  if (ROOM_PENDING && (!amActive || !me.deal || me.picks_made !== ROOM_PENDING.at)){
+    ROOM_PENDING = null;
+    closeSlotSheet();
+  }
   $('#roomRoundNow').textContent = `round ${r.round + 1}/${r.rounds_total}`;
   tickRoomTimer();
   $('#roomCodeStamp').textContent = 'room ' + r.code;

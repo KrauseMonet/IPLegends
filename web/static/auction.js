@@ -151,10 +151,14 @@ async function stampAfterRtm(prev, next){
 
 async function animateFrom(prev, next){
   const lot = prev.lot;
-  const stillOpen = next.phase === 'bid' && next.lot && next.lot.lot === lot.lot
-                    && next.lot.round === lot.round;
+  const sameLot = next.lot && next.lot.lot === lot.lot && next.lot.round === lot.round;
+  const stillOpen = next.phase === 'bid' && sameLot;
   let bids, sale = null;
-  if (stillOpen){
+  if (isRtm(next.phase) && sameLot){
+    // The hammer came down and a Right to Match question followed: play the bidding that
+    // got there before the question opens, rather than jumping straight to the price.
+    bids = next.bids;
+  } else if (stillOpen){
     bids = next.bids;
   } else {
     sale = next.recent.find(s => s.lot === lot.lot && s.round === lot.round);

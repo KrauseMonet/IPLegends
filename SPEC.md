@@ -2397,6 +2397,7 @@ The 5% Right to Match premium was chosen here: at 25% cards were used ~17 times 
 and matched 88% of the time. Our top price runs lower because the franchises retain most of
 the 99-rated legends before the auction starts, and our squads buy eighteen, not twenty-five.
 
-**Not yet shown:** the bidding that led to a Right to Match question. The engine does not
-keep a lot's bids while it is still deciding it, so the prompt shows the hammer price alone.
-The addition is small (`Auction.current_bids`) and was deliberately set aside.
+**The prompt shows the bidding that led to it.** The engine keeps the lot's bids on
+`Auction.current_bids` while it decides the lot, so a replay paused at a Right to Match
+question can play the exchange before asking — the same bids recorded for the lot once it
+is answered, which a test pins.

@@ -1911,6 +1911,9 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
     )
     if r.phase in ("rtm_use", "rtm_match", "rtm_raise"):
         out.lot = _lot_out(r)
+        # The bidding that ended in the hammer this question is about.
+        out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price)
+                    for b in r.preview()]
         out.rtm = AuctionRtmOut(kind=r.phase, price=r.rtm_price, other=r.rtm_other.short,
                                 max_raise=you.max_bid() if r.phase == "rtm_raise" else None)
     elif r.phase == "bid":

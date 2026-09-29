@@ -708,6 +708,9 @@ class Auction:
     register: list[Card] = field(default_factory=list)  # drawn, never catalogued
     stranded: list[int] = field(default_factory=list)   # teams the fill round could not finish
     fills: int = 0                                      # players the fill round handed out
+    # The lot being decided, while a Right to Match is asked about it -- so a paused
+    # auction can still show the bidding that led to the question.
+    current_bids: list[Bid] = field(default_factory=list)
 
     @property
     def unsold(self) -> list[Lot]:
@@ -757,6 +760,7 @@ def _offer(auction: Auction, lot: Lot, round_name: str, human: Human | None) -> 
         return Sale(lot, round_name, None, 0, bids)
     buyer, price = bids[-1].team, bids[-1].price
     event = None
+    auction.current_bids = bids
     if auction.mega:
         buyer, price, event = _right_to_match(auction, lot, buyer, price, ceilings, human)
     team = auction.teams[buyer]

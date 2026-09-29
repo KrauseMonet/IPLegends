@@ -213,10 +213,13 @@ class Replay:
         return next(t for t in self.auction.teams if t.human)
 
     def preview(self) -> list[au.Bid]:
-        """The bidding to show on the lot in front of the human. Empty during a Right to
-        Match question: the engine does not yet keep the bids of a lot it is still
-        deciding, so the page shows the hammer price alone there."""
-        if self.lot is None or self.phase != "bid" or self.open_ceiling is None:
+        """The bidding to show on the lot in front of the human. During a Right to Match
+        question that is the bidding that just ended in the hammer being asked about."""
+        if self.lot is None:
+            return []
+        if self.phase in ("rtm_use", "rtm_match", "rtm_raise"):
+            return list(self.auction.current_bids)
+        if self.phase != "bid" or self.open_ceiling is None:
             return []
         return au.preview(self.auction, self.lot, au.ROUNDS[self.round_no], self.open_ceiling)
 

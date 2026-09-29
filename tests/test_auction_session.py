@@ -205,6 +205,20 @@ def test_a_right_to_match_question_is_about_your_own_franchise_s_player(deck):
     assert r.rtm_other.short != "RCB"
 
 
+def test_a_right_to_match_question_shows_the_bidding_that_led_to_it(deck):
+    """The bids shown with the question end at the hammer, in the winner's name, and are
+    exactly what is recorded for the lot once the question is answered."""
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    r = _walk_to(deck, start, "rtm_use")
+    shown = r.preview()
+    assert shown, "the bidding that led to the hammer is missing"
+    assert shown[-1].team == r.rtm_other.index and shown[-1].price == r.rtm_price
+    lot = r.lot
+    after = A.rtm(deck, r.state, False)
+    sale = next(s for s in after.auction.sales if s.lot.index == lot.index)
+    assert sale.bids == shown
+
+
 def test_using_and_matching_a_card_takes_the_player_and_spends_it(deck):
     start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
     r = _walk_to(deck, start, "rtm_use")

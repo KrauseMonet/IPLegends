@@ -2328,3 +2328,34 @@ far fewer than a real auction, because every team arrives with a full purse and 
 retentions. Also recorded for phase 2: a lot averages **31 bids**, which is fine when a
 maximum resolves it instantly and too long to click through one step at a time — the page
 must compress computer-only bidding.
+
+### 15.6 The page [A137]
+
+`/auction`, single player. The state is a string and the URL hash carries it, exactly like
+the draft (§11): `A{seed}-{SHORT}-{token}.{token}...`, one token per decision in the order
+the engine asks — a ceiling in lakh, `0` to pass (runs folded to `zN`), `pSET` / `pall` to
+pass a set or everything left, `fN` for a fill-round choice, `t…` for the twelve. Every
+request replays the auction from scratch (~0.3 s).
+
+**An open bid is a commitment.** Bidding without closing records `450o`: the human is shown
+the bidding that follows and may go on only by RAISING. A bid can never be lowered or
+withdrawn, so there is no way to see how far the computer teams would go without having bid
+that far oneself — the real auction's rule, and the only thing that stops the preview being
+a free look. Letting the lot go closes the open bid where it stands. A bid that would lead
+at the end closes itself. The computer teams' ceilings never leave the server.
+
+**Both bidding styles are presentation over one protocol.** Live mode posts the next price
+against an 8-second countdown that, on expiry, lets the lot go; limit mode posts a maximum
+and closes it in one request. The server cannot tell them apart and does not need to.
+
+**The season plays against the franchises you bid against**, not nine historical sides:
+`web.season_session.replay_season` recognises an auction state, builds your twelve and
+each computer team's best legal twelve, and hands them to the same league and playoff code.
+Its rng is seeded from the auction (`auction-season:{seed}`). The journey card, Season
+Analysis and saving all work unchanged; a saved auction season is recorded as `solo`, whose
+natural key (the state) already distinguishes it, so no migration was needed.
+
+**Skipping the whole auction is not an exploit**, which was measured rather than assumed
+once the fill round turned out to offer good leftovers (Malinga at 86, Smith at 84) for ₹30L:
+over 40 auctions a human who never bids averages a twelve of **79.6** against the computer
+teams' **84.8** and finishes **last of ten every time**.

@@ -581,22 +581,40 @@ class Auction:
         return arrange(chosen) if chosen else None
 
 
-def _offer(auction: Auction, lot: Lot, round_name: str, human: Human | None) -> Sale:
+def lot_ceilings(auction: Auction, lot: Lot, round_name: str,
+                 human_ceiling: int = 0) -> dict[int, int]:
+    """Every team's ceiling for this lot. The human's is whatever they asked for, clipped
+    to what the reserve rule lets them pay -- and never to the computer teams' cap."""
     round_no = ROUNDS.index(round_name)
     ceilings: dict[int, int] = {}
-    human_idx = None
     for team in auction.teams:
         if team.human:
-            human_idx = team.index
-            if human is not None and team.may_buy(lot.card):
-                wanted = human.ceiling(auction, team, lot, round_no)
-                cap = min(wanted, team.max_bid())
-                ceilings[team.index] = cap if cap >= lot.base else 0
-            else:
-                ceilings[team.index] = 0
+            cap = min(human_ceiling, team.max_bid()) if team.may_buy(lot.card) else 0
+            ceilings[team.index] = cap if cap >= lot.base else 0
         else:
             ceilings[team.index] = cpu_ceiling(team, lot, auction.seed, round_no)
-    bids = bid_log(lot, ceilings, auction.seed, round_no, human_idx)
+    return ceilings
+
+
+def human_index(auction: Auction) -> int | None:
+    return next((t.index for t in auction.teams if t.human), None)
+
+
+def preview(auction: Auction, lot: Lot, round_name: str, human_ceiling: int) -> list[Bid]:
+    """The bid log this lot WOULD produce at `human_ceiling`, changing nothing. What a
+    human who has bid, and may bid again, is shown."""
+    return bid_log(lot, lot_ceilings(auction, lot, round_name, human_ceiling), auction.seed,
+                   ROUNDS.index(round_name), human_index(auction))
+
+
+def _offer(auction: Auction, lot: Lot, round_name: str, human: Human | None) -> Sale:
+    round_no = ROUNDS.index(round_name)
+    wanted = 0
+    hi = human_index(auction)
+    if hi is not None and human is not None and auction.teams[hi].may_buy(lot.card):
+        wanted = human.ceiling(auction, auction.teams[hi], lot, round_no)
+    bids = bid_log(lot, lot_ceilings(auction, lot, round_name, wanted), auction.seed,
+                   round_no, hi)
     if not bids:
         return Sale(lot, round_name, None, 0, bids)
     last = bids[-1]
@@ -640,8 +658,9 @@ def _fill(auction: Auction, human: Human | None) -> None:
         team = min(short, key=lambda t: (len(t.squad), t.index))
         taken = {c.person_id for t in auction.teams for c in t.squad}
         pool = [lot.card for lot in auction.unsold] + auction.register
-        options = [c for c in pool if c.person_id not in taken
-                   and team.may_buy(c) and team.purse >= MIN_PRICE]
+        options = sorted((c for c in pool if c.person_id not in taken
+                          and team.may_buy(c) and team.purse >= MIN_PRICE),
+                         key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
         if not options:
             auction.stranded.append(team.index)
             continue

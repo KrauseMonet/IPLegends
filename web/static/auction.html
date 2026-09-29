@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
-<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<title>Auction · The Legends Almanack</title>
+<meta name="description" content="Run an IPL auction across nineteen seasons: ₹120 crore, eighteen players, then play the season you built.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:description" content="Run an IPL auction across nineteen seasons: ₹120 crore, eighteen players, then play the season you built.">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -75,53 +75,133 @@
     </div>
   </div>
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
+  <!-- ============ SETUP ============ -->
+  <section id="aucSetup" class="hide">
+    <div class="auc-hero">
+      <div class="auc-kicker">Mega auction · 19 seasons in one room</div>
+      <h2 class="auc-title">Pick your <span>franchise</span></h2>
+      <p class="auc-lede">₹120 crore. Eighteen players. Every lot is one real season of one
+        player, drawn at random, so the Kohli on offer might be 2016 or 2022. Nine franchises
+        bid against you, and then your twelve play the season against them.</p>
+    </div>
+    <div id="aucFranchises" class="auc-franchises"></div>
+    <div class="room-label" style="margin-top:26px">How you bid</div>
+    <div class="room-choices" id="aucStyleChoices">
+      <button class="room-choice" data-style="live" onclick="setBidStyle('live')"
+        title="Raise the paddle one step at a time against a countdown.">Live · click to bid</button>
+      <button class="room-choice" data-style="limit" onclick="setBidStyle('limit')"
+        title="Name the most you will pay; the auctioneer bids for you up to it.">Set my limit</button>
+    </div>
+    <div class="actions" style="margin-top:22px">
+      <button class="act lead" id="aucStartBtn" onclick="startAuction(this)" disabled>Start the auction</button>
+    </div>
+  </section>
+
+  <!-- ============ THE FLOOR ============ -->
+  <section id="aucFloor" class="hide">
+    <div class="auc-floor">
+      <div class="auc-stage-col">
+        <div class="auc-lotbar">
+          <span id="aucSetLabel">—</span>
+          <em id="aucLotNo"></em>
+        </div>
+        <div class="auc-stage" id="aucStage">
+          <div class="auc-card" id="aucCard"></div>
+          <div class="auc-stamp hide" id="aucStamp"></div>
+        </div>
+
+        <div class="auc-bidbox" id="aucBidBox">
+          <div class="auc-bidrow">
+            <div class="auc-price-wrap">
+              <div class="auc-price-label" id="aucPriceLabel">Base price</div>
+              <div class="auc-price" id="aucPrice">—</div>
+            </div>
+            <div class="auc-leader" id="aucLeader"></div>
+            <div class="auc-ring hide" id="aucRing">
+              <svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" class="track"/>
+                <circle cx="22" cy="22" r="19" class="fill" id="aucRingFill"/></svg>
+              <b id="aucRingNum"></b>
+            </div>
+          </div>
+
+          <div id="aucLive" class="hide">
+            <button class="act lead auc-bigbid" id="aucBidBtn" onclick="liveBid(this)">Bid</button>
+          </div>
+          <div id="aucLimit" class="hide">
+            <div class="auc-limit">
+              <button class="act minor" onclick="nudgeLimit(-1)" aria-label="Lower">−</button>
+              <div class="auc-limit-val"><span>My limit</span><b id="aucLimitVal">—</b></div>
+              <button class="act minor" onclick="nudgeLimit(1)" aria-label="Raise">+</button>
+            </div>
+            <div class="auc-limit-quick">
+              <button class="act minor" onclick="jumpLimit(100)">+₹1 cr</button>
+              <button class="act minor" onclick="jumpLimit(500)">+₹5 cr</button>
+              <button class="act minor" onclick="jumpLimit(1000)">+₹10 cr</button>
+            </div>
+            <button class="act lead auc-bigbid" id="aucLimitBtn" onclick="limitBid(this)">Bid up to —</button>
+          </div>
+
+          <div class="auc-note" id="aucNote"></div>
+          <div class="actions minor-row">
+            <button class="act minor" id="aucPassBtn" onclick="passLot('lot', this)">Not interested</button>
+            <button class="act minor" onclick="passLot('set', this)" title="Pass on every player left in this set">Skip set</button>
+            <button class="act minor" onclick="skipRest(this)" title="Pass on everything left; the fill round completes your squad">Skip to the end</button>
           </div>
         </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
+
+        <div class="auc-upnext" id="aucUpNext"></div>
       </div>
 
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
+      <div class="auc-side-col">
+        <div class="col-head"><span>Your purse</span><em id="aucYouShort"></em></div>
+        <div class="auc-purse">
+          <b id="aucPurse">—</b>
+          <span id="aucReserve"></span>
         </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
+        <div class="gauge"><i id="aucPurseBar" style="width:100%"></i></div>
+        <div class="col-head"><span>The room</span></div>
+        <div id="aucTeams" class="auc-teams"></div>
+        <div class="col-head"><span>Sold</span><em id="aucSoldCount"></em></div>
+        <div id="aucFeed" class="auc-feed"></div>
       </div>
+    </div>
 
+    <div class="auc-squad-wrap">
+      <div class="col-head"><span>Your squad</span><em id="aucSquadCount">0/18</em></div>
+      <div id="aucSquad" class="auc-squad"></div>
+    </div>
+  </section>
+
+  <!-- ============ FILL ROUND ============ -->
+  <section id="aucFill" class="hide">
+    <div class="auc-hero">
+      <div class="auc-kicker">Fill round</div>
+      <h2 class="auc-title">Complete your <span>eighteen</span></h2>
+      <p class="auc-lede" id="aucFillLede"></p>
+    </div>
+    <div id="aucFillList" class="auc-fill-list"></div>
+  </section>
+
+  <!-- ============ PICK YOUR TWELVE ============ -->
+  <section id="aucTwelve" class="hide">
+    <div class="auc-hero">
+      <div class="auc-kicker">The hammer has fallen</div>
+      <h2 class="auc-title">Pick your <span>twelve</span></h2>
+      <p class="auc-lede">We've suggested the strongest legal twelve. Tap a player in the twelve,
+        then tap anyone to swap them. A legal twelve needs a wicketkeeper, five bowling
+        options, eleven batting positions and no more than four overseas players.</p>
+    </div>
+    <div class="auc-twelve">
       <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
+        <div class="col-head"><span>Batting order</span><em id="aucTwelveRating"></em></div>
+        <div id="aucOrder"></div>
+      </div>
+      <div class="col">
+        <div class="col-head"><span>Bench</span><em>6</em></div>
+        <div id="aucBench"></div>
+        <div id="aucTwelveCheck" class="legality note"></div>
         <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
+          <button class="act lead" id="aucSeasonBtn" onclick="playSeason(this)">Play the season</button>
         </div>
       </div>
     </div>
@@ -187,6 +267,6 @@
 
 <script src="/static/common.js?v=26b8eacf93"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/draft.js?v=2e502a279d"></script>
+<script src="/static/auction.js?v=d558ee75e5"></script>
 </body>
 </html>

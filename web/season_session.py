@@ -28,6 +28,7 @@ from game.season import (
     JourneyStats, NeedImpact, NeedToss, Season, Side, TossElect, historical_sides,
     journey_stats, run_league, run_playoffs,
 )
+from web import auction_session
 from web import session as sess
 
 # Upper bound, not a measured fact: at most MATCHES_EACH league matches plus the three
@@ -191,6 +192,17 @@ def replay_season(deck, model, draft_state: str, cursor: MoveCursor) -> SeasonRe
     cannot yet answer. Mirrors `web/app.py`'s existing `_load`/`season()` for the draft
     half verbatim -- nothing about how the squad is rebuilt changes.
     """
+    if auction_session.is_auction_state(draft_state):
+        # [A136] An auction's season: your twelve against the nine computer franchises
+        # you bid against, not nine historical sides. Its own rng stream, seeded off the
+        # auction's -- nothing else consumed it, so there is no position to continue from.
+        try:
+            yours, opposition, auction_seed = auction_session.season_sides(deck, draft_state)
+        except auction_session.InvalidState as exc:
+            raise sess.InvalidState(str(exc)) from exc
+        return _play_season(model, [yours] + opposition, yours,
+                            random.Random(f"auction-season:{auction_seed}"), cursor)
+
     seed, draft_moves = sess.decode(draft_state)
 
     # `replay_stream` (below) assumes a COMPLETE draft -- an incomplete one makes
@@ -212,8 +224,11 @@ def replay_season(deck, model, draft_state: str, cursor: MoveCursor) -> SeasonRe
     opposition = historical_sides(deck, rng, TEAMS - 1)
     if len(opposition) < TEAMS - 1:
         raise sess.InvalidState("could not field a full league")
-    sides = [yours] + opposition
+    return _play_season(model, [yours] + opposition, yours, rng, cursor)
 
+
+def _play_season(model, sides: list[Side], yours: Side, rng: random.Random,
+                 cursor: MoveCursor) -> SeasonReplay:
     acc = JourneyAccumulator()
     try:
         league = run_league(model, sides, rng, track=yours, stats=acc, moves=cursor)

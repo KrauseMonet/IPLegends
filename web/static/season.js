@@ -11,6 +11,7 @@
 const DRAFT_MODE = 'stat';
 
 async function newDraft(ctrl){
+  if (isAuctionState(SEASON_STATE)){ location.href = '/auction'; return; }
   await busyClick(ctrl, 'Dealing…', async () => {
     try {
       const s = await api('/api/draft', {method:'POST'});
@@ -136,7 +137,7 @@ function renderTableAndForm(d){
 
 function renderVerdictAndBracket(d){
   SEASON_DATA = d;
-  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
+  $('#resSeed').textContent = stateLabel(d.state);
   const me = d.table.find(r => r.you);
   const won = d.you_champion;
   $('#resVerdict').textContent = won ? 'Champions'
@@ -163,7 +164,7 @@ function renderVerdictAndBracket(d){
 
 function showGroupStageChoice(d){
   const me = d.table.find(r => r.you);
-  $('#resSeed').textContent = 'Seed ' + d.state.split('-')[0];
+  $('#resSeed').textContent = stateLabel(d.state);
   $('#resVerdict').textContent = 'Group stage complete';
   $('#resVerdict').classList.remove('won');
   $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
@@ -402,7 +403,8 @@ function copyLink(){
   // The DRAFT half of SEASON_STATE only ('{draft_state}~{season_moves}') -- this
   // reproduces the same deals, not the same toss/Impact decisions, which is what
   // "copy THIS GAME" has always meant here (a link into /draft, not a season replay).
-  const url = location.origin + '/draft#' + SEASON_STATE.split('~')[0];
+  const page = isAuctionState(SEASON_STATE) ? '/auction#' : '/draft#';
+  const url = location.origin + page + SEASON_STATE.split('~')[0];
   navigator.clipboard.writeText(url)
     .then(() => slip('Copied. This link replays the same game.'))
     .catch(() => slip(url));
@@ -430,6 +432,9 @@ boot().then(async () => {
   const hash = location.hash.slice(1);
   if (!hash){ location.href = '/'; return; }
   SEASON_STATE = hash;
+  if (isAuctionState(hash)){
+    document.querySelectorAll('[onclick^="newDraft"]').forEach(b => b.textContent = 'Another auction');
+  }
   // The `?enter=` marker is a one-time navigation instruction (mirrors draft's own
   // `?mode=` convention) -- strip it immediately so a later reload of this exact URL
   // falls back to the plain, always-correct resume path below instead of re-running a

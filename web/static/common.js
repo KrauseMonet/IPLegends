@@ -52,6 +52,14 @@ async function api(path, opts){
   return body;
 }
 
+// [A136] A season can come from a draft ('7-3:4.0:12') or an auction ('A662026-KKR-...');
+// the season, journey card and copy-link all label and link it by where it came from.
+function isAuctionState(state){ return (state || '').startsWith('A'); }
+function stateLabel(state){
+  const head = (state || '').split('-')[0];
+  return isAuctionState(state) ? 'Auction ' + head.slice(1) : 'Seed ' + head;
+}
+
 function slip(msg){
   const t = document.createElement('div');
   t.className = 'slip'; t.textContent = msg;

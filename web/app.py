@@ -27,13 +27,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
-from game import analysis, records
+from game import analysis, auction, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
 )
 from game.simulator import load_model
 from web import accounts
+from web import auction_session
 from web import auth
 from web import daily as daily_lib
 from web import db
@@ -219,6 +220,12 @@ def draft_page() -> FileResponse:
     folded into the hash) -- this route always serves the same file; the client reads
     the hash itself to resume or bounce back home if there's nothing to resume."""
     return FileResponse(STATIC / "draft.html")
+
+
+@app.get("/auction", include_in_schema=False)
+def auction_page() -> FileResponse:
+    """[A136] The auction's state lives in the hash, exactly like /draft."""
+    return FileResponse(STATIC / "auction.html")
 
 
 @app.get("/season", include_in_schema=False)
@@ -1474,6 +1481,12 @@ def _replay_season_or_400(state: str, cursor: season_session.MoveCursor
     same convention every other `InvalidState` in this file already gets (the draft's
     own `pick()` route, for one), rather than a new one invented just for this route."""
     draft_state, _ = season_session.decode_full(state)
+    if auction_session.is_auction_state(draft_state):
+        try:
+            return season_session.replay_season(STATE["deck"], STATE["model"], draft_state,
+                                                 cursor)
+        except sess.InvalidState as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     player = _load(draft_state)
     if not player.squad_complete:
         raise HTTPException(status_code=409,
@@ -1734,6 +1747,206 @@ def _set_session_cookie(request: Request, response: Response, account_id: int) -
         max_age=auth.SESSION_MAX_AGE_S, httponly=True, samesite="lax",
         secure=(request.url.scheme == "https"), path="/",
     )
+
+
+# --- the auction [A136] -------------------------------------------------------------------
+#
+# Single player, stateless like the draft: the state string is the whole auction, and every
+# request replays it (~0.3s). The computer teams' ceilings never leave the server -- a
+# human sees only the bidding, exactly as much as a real auction room would show them.
+
+_SET_NAMES = {"M": "Marquee", "BA": "Batters", "AL": "All-rounders", "WK": "Wicketkeepers",
+              "FA": "Fast bowlers", "SP": "Spinners", "BO": "Bowlers"}
+
+
+def _set_label(code: str) -> str:
+    prefix = code.rstrip("0123456789")
+    return f"{_SET_NAMES.get(prefix, prefix)} · set {code[len(prefix):]}"
+
+
+class AuctionTeamOut(BaseModel):
+    short: str
+    franchise: str
+    purse: int = Field(description="lakh")
+    players: int
+    overseas: int
+    human: bool
+
+
+class AuctionBidOut(BaseModel):
+    team: str
+    price: int
+
+
+class AuctionSaleOut(BaseModel):
+    lot: int = Field(description="0-based catalogue index; -1 for a player from the register")
+    round: str
+    set_code: str
+    name: str
+    season_year: int | None
+    franchise: str | None
+    rating: int | None
+    base: int
+    team: str | None = Field(description="buyer's short name; null means unsold")
+    price: int
+    bids: list[AuctionBidOut]
+
+
+class AuctionLotOut(BaseModel):
+    lot: int
+    lots_total: int
+    round: str
+    set_code: str
+    set_label: str
+    base: int
+    card: CardOut
+    upcoming: list[str] = Field(description="the rest of this set, in order")
+
+
+class AuctionSquadOut(BaseModel):
+    card: CardOut
+    price: int
+
+
+class AuctionOut(BaseModel):
+    state: str
+    phase: Literal["bid", "fill", "twelve", "ready"]
+    you: str
+    franchise: str
+    lot: AuctionLotOut | None = None
+    bids: list[AuctionBidOut] = []
+    leader: str | None = None
+    price: int | None = None
+    next_price: int | None = None
+    your_bid: int | None = Field(default=None, description="your open ceiling on this lot")
+    max_bid: int
+    can_bid: bool = False
+    teams: list[AuctionTeamOut]
+    squad: list[AuctionSquadOut]
+    recent: list[AuctionSaleOut] = Field(description="the latest sales, newest last")
+    sold: int
+    fill_options: list[CardOut] = []
+    suggestion: list[int] | None = Field(
+        default=None, description="squad indexes: eleven in batting order, then Impact")
+    twelve: list[int] | None = None
+    squad_size: int = auction.SQUAD_SIZE
+    purse_total: int = auction.PURSE
+
+
+def _sale_out(r: auction_session.Replay, sale: auction.Sale) -> AuctionSaleOut:
+    teams = r.auction.teams
+    c = sale.lot.card
+    return AuctionSaleOut(
+        lot=sale.lot.index, round=sale.round, set_code=sale.lot.set_code, name=c.name,
+        season_year=c.season_year, franchise=c.franchise, rating=c.display,
+        base=sale.lot.base, team=teams[sale.winner].short if sale.winner is not None else None,
+        price=sale.price, bids=[AuctionBidOut(team=teams[b.team].short, price=b.price)
+                                for b in sale.bids])
+
+
+def _auction_out(r: auction_session.Replay) -> AuctionOut:
+    a, you = r.auction, r.you
+    out = AuctionOut(
+        state=r.state, phase=r.phase, you=you.short, franchise=you.franchise,
+        max_bid=you.max_bid(),
+        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
+                              players=len(t.squad), overseas=t.overseas, human=t.human)
+               for t in a.teams],
+        squad=[AuctionSquadOut(card=_card(c), price=p) for c, p in zip(you.squad, you.paid)],
+        recent=[_sale_out(r, s) for s in a.sales[-25:]],
+        sold=sum(1 for s in a.sales if s.winner is not None),
+    )
+    if r.phase == "bid":
+        lot = r.lot
+        same_set = [x for x in a.lots if x.set_code == lot.set_code and x.index > lot.index]
+        if r.round_no == 1:     # the accelerated round revisits the unsold, not a set
+            same_set = []
+        out.lot = AuctionLotOut(
+            lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
+            set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
+            card=_card(lot.card), upcoming=[x.card.name for x in same_set])
+        log = r.preview()
+        out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price) for b in log]
+        out.leader = a.teams[log[-1].team].short if log else None
+        out.price = log[-1].price if log else None
+        out.next_price = auction.next_price(out.price) if log else lot.base
+        out.your_bid = r.open_ceiling
+        out.can_bid = you.max_bid() >= out.next_price
+    elif r.phase == "fill":
+        out.fill_options = [_card(c) for c in r.fill_options[:40]]
+    if r.suggestion is not None:
+        order, impact = auction_session.twelve_indexes(r, r.suggestion)
+        out.suggestion = order + [impact]
+    if r.twelve is not None:
+        order, impact = auction_session.twelve_indexes(r, r.twelve)
+        out.twelve = order + [impact]
+    return out
+
+
+def _auction(fn, *args) -> AuctionOut:
+    try:
+        return _auction_out(fn(STATE["deck"], *args))
+    except auction_session.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class AuctionStartIn(BaseModel):
+    team: str
+    seed: int | None = None
+
+
+class AuctionBidIn(BaseModel):
+    ceiling: int = Field(ge=0, description="lakh; 0 = not interested")
+    done: bool = False
+
+
+class AuctionPassIn(BaseModel):
+    scope: Literal["lot", "set", "all"]
+
+
+class AuctionFillIn(BaseModel):
+    index: int = Field(ge=0)
+
+
+class AuctionTwelveIn(BaseModel):
+    order: list[int] = Field(min_length=XI_SIZE, max_length=XI_SIZE)
+    impact: int
+
+
+@app.post("/api/auction", response_model=AuctionOut)
+def auction_start(body: AuctionStartIn) -> AuctionOut:
+    seed = body.seed if body.seed is not None else sess.new_seed()
+    try:
+        state = auction_session.new_state(seed, body.team)
+    except auction_session.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _auction(auction_session.replay, state)
+
+
+@app.get("/api/auction/{state}", response_model=AuctionOut)
+def auction_get(state: str) -> AuctionOut:
+    return _auction(auction_session.replay, state)
+
+
+@app.post("/api/auction/{state}/bid", response_model=AuctionOut)
+def auction_bid(state: str, body: AuctionBidIn) -> AuctionOut:
+    return _auction(auction_session.bid, state, body.ceiling, body.done)
+
+
+@app.post("/api/auction/{state}/pass", response_model=AuctionOut)
+def auction_pass(state: str, body: AuctionPassIn) -> AuctionOut:
+    return _auction(auction_session.pass_lots, state, body.scope)
+
+
+@app.post("/api/auction/{state}/fill", response_model=AuctionOut)
+def auction_fill(state: str, body: AuctionFillIn) -> AuctionOut:
+    return _auction(auction_session.fill, state, body.index)
+
+
+@app.post("/api/auction/{state}/twelve", response_model=AuctionOut)
+def auction_twelve(state: str, body: AuctionTwelveIn) -> AuctionOut:
+    return _auction(auction_session.choose_twelve, state, body.order, body.impact)
+
 
 
 @app.post("/api/auth/register", response_model=AccountOut)

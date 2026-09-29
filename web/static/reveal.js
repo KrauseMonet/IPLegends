@@ -445,7 +445,7 @@ function drawJourneyCard(d, header){
   ctx.textAlign = 'center';
   ctx.fillStyle = ink3;
   ctx.font = `600 24px ${CARD_MONO}`;
-  ctx.fillText(header || 'SEED ' + d.state.split('-')[0], cx, 110);
+  ctx.fillText(header || stateLabel(d.state).toUpperCase(), cx, 110);
 
   // a soft glow behind the headline/score -- champion gets the warm one, an eliminated
   // side a duller red, so the two outcomes read apart even before the words register

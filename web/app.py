@@ -636,8 +636,9 @@ class CreateRoomIn(BaseModel):
         description="true lists this room publicly (GET /api/rooms/open) so anyone can "
                     "join without the code; false (default) is code-only, same as every "
                     "room before this field existed")
-    game: Literal["draft", "auction"] = Field(
-        default="draft", description="'auction' plays a live auction [A139]; league only")
+    game: Literal["draft", "auction", "mega"] = Field(
+        default="draft", description="'auction' plays a live auction [A139]; 'mega' adds "
+                                     "retentions and Right to Match [A140]; league only")
 
 
 class JoinRoomIn(BaseModel):
@@ -1831,15 +1832,17 @@ class AuctionPoolOut(BaseModel):
 
 class AuctionRtmOut(BaseModel):
     kind: Literal["rtm_use", "rtm_match", "rtm_raise"]
+    # (rtm_watch is the room phase for everyone NOT deciding; `kind` stays the real one)
     price: int = Field(description="the hammer (use, raise) or the winner's raise (match)")
     other: str = Field(description="the winner (use, match) or the card's holder (raise)")
     max_raise: int | None = Field(default=None, description="rtm_raise: your reserve limit")
+    deciding: str | None = Field(default=None, description="rooms: whose decision it is")
 
 
 class AuctionOut(BaseModel):
     state: str
-    phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "fill", "twelve",
-                   "ready", "wait", "complete"]
+    phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "rtm_watch", "fill",
+                   "twelve", "ready", "wait", "complete"]
     mega: bool = False
     you: str
     franchise: str
@@ -1857,6 +1860,8 @@ class AuctionOut(BaseModel):
     sold: int = 0
     rtm: AuctionRtmOut | None = None
     retention_pool: list[AuctionPoolOut] = []
+    retention_taken: list[str] = Field(default=[], description="rooms: person_ids another "
+                                       "franchise has already kept")
     retention_slabs: list[int] = list(auction.RETENTION_SLABS)
     rtm_places: int = auction.RTM_PLACES
     fill_options: list[CardOut] = []
@@ -2171,21 +2176,43 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         phase = "wait"
     if phase == "twelve" and (caller_id not in r.team_of or caller_id in r.twelves):
         phase = "wait"
+    if phase == "retain" and (you_idx is None or you_idx in r.retained):
+        phase = "wait"
+    if phase.startswith("rtm") and r.rtm_team != you_idx:
+        phase = "rtm_watch"
     names = {pid: room.players[pid].name for pid in room.players}
     out = AuctionOut(
         state=room.code, phase=phase, you=you.short if you else "",
         franchise=you.franchise if you else "",
         max_bid=you.max_bid() if you else 0,
+        mega=room.game == "mega",
         teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
                               players=len(t.squad), overseas=t.overseas, human=t.human,
-                              owner=owners.get(t.short))
+                              owner=owners.get(t.short), retained=t.retained, rtm=t.rtm)
                for t in a.teams],
-        squad=[AuctionSquadOut(card=_card(c), price=pr)
-               for c, pr in zip(you.squad, you.paid)] if you else [],
+        squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained)
+               for i, (c, pr) in enumerate(zip(you.squad, you.paid))] if you else [],
         recent=[_sale_out(r, x) for x in a.sales[-25:]],
         sold=sum(1 for x in a.sales if x.winner is not None),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
+    if r.phase == "retain" and phase == "retain":
+        pool = r.pools[you_idx]
+        out.retention_pool = [AuctionPoolOut(index=i, card=_card(c))
+                              for i, c in enumerate(pool[:RETENTION_POOL_SHOWN])]
+        out.retention_taken = sorted(r.retention_taken)
+        out.max_bid = auction.PURSE
+    if r.phase.startswith("rtm"):
+        lot = r.lot
+        out.lot = AuctionLotOut(
+            lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
+            set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
+            card=_card(lot.card), upcoming=[])
+        out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price) for b in r.bids]
+        out.rtm = AuctionRtmOut(
+            kind=r.phase, price=r.rtm_price, other=a.teams[r.rtm_other].short,
+            max_raise=you.max_bid() if (you is not None and r.phase == "rtm_raise") else None,
+            deciding=a.teams[r.rtm_team].short)
     if r.phase == "bid":
         lot = r.lot
         same_set = [x for x in a.lots if x.set_code == lot.set_code and x.index > lot.index]
@@ -2211,7 +2238,7 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
 
 
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
-    if room.game == "auction":
+    if room.game != "draft":
         return _auction_room_state_out(room, deck, caller_id)
     replay = rooms.replay_room(room, deck)
     remaining = 0
@@ -2829,6 +2856,17 @@ class RoomFillIn(BaseModel):
     index: int = Field(ge=0)
 
 
+class RoomRetainIn(BaseModel):
+    player_id: str
+    picks: list[int] = Field(default=[], max_length=auction.MAX_RETENTIONS)
+
+
+class RoomRtmIn(BaseModel):
+    player_id: str
+    yes: bool
+    price: int | None = None
+
+
 class RoomTwelveIn(BaseModel):
     player_id: str
     order: list[int] = Field(min_length=XI_SIZE, max_length=XI_SIZE)
@@ -2875,6 +2913,16 @@ def room_auction_pass(code: str, body: RoomPassIn) -> RoomStateOut:
 @app.post("/api/rooms/{code}/auction/fill", response_model=RoomStateOut)
 def room_auction_fill(code: str, body: RoomFillIn) -> RoomStateOut:
     return _auction_move(code, body.player_id, room_auction.fill, body.index)
+
+
+@app.post("/api/rooms/{code}/auction/retain", response_model=RoomStateOut)
+def room_auction_retain(code: str, body: RoomRetainIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.retain, body.picks)
+
+
+@app.post("/api/rooms/{code}/auction/rtm", response_model=RoomStateOut)
+def room_auction_rtm(code: str, body: RoomRtmIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price)
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)

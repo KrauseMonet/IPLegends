@@ -44,3 +44,19 @@ def test_every_status_the_room_code_sets_is_one_the_database_allows():
     assert {"lobby", "drafting", "auctioning", "complete", "failed"} <= assigned, \
         "the scan should find every status the rooms use; if not, the regex has drifted"
     assert assigned <= allowed_statuses()
+
+
+def allowed_games() -> set[str]:
+    found: set[str] | None = None
+    for path in sorted((ROOT / "migrations").glob("*.sql")):
+        for m in re.finditer(r"check\s*\(\s*game\s+in\s*\(([^)]*)\)\s*\)", path.read_text(), re.I):
+            found = set(re.findall(r"'([^']+)'", m.group(1)))
+    assert found, "no game constraint found in the migrations"
+    return found
+
+
+def test_every_game_a_room_can_be_created_with_is_one_the_database_allows():
+    """[A140] The same guard for `rooms.game`, written BEFORE migration 035 was applied --
+    the step 033 skipped for `status`."""
+    from web.rooms import GAMES
+    assert set(GAMES) <= allowed_games()

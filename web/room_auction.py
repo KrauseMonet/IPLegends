@@ -47,6 +47,14 @@ LOT_SECONDS = 15         # ratified by the user: fifteen seconds a lot...
 BID_EXTEND = 5           # ...and five more for every bid
 FILL_SECONDS = 20        # a fill-round choice
 TWELVE_SECONDS = 90      # choosing a twelve from eighteen
+RETAIN_SECONDS = 90      # [A140] choosing retentions, everybody at once
+RTM_SECONDS = 15         # [A140] each Right to Match decision: play, raise, match
+
+AUCTION_GAMES = ("auction", "mega")   # 'mega' adds retentions and Right to Match [A140]
+
+
+def is_auction(room) -> bool:
+    return room.game in AUCTION_GAMES
 
 
 class AuctionRoomError(ValueError):
@@ -57,7 +65,7 @@ class AuctionRoomError(ValueError):
 class RoomAuctionReplay:
     auction: au.Auction
     team_of: dict[str, int]                 # human player_id -> team index
-    phase: str                              # bid | fill | twelve | complete
+    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete
     lot: au.Lot | None = None
     round_no: int = 0
     bids: list[au.Bid] = field(default_factory=list)
@@ -66,6 +74,12 @@ class RoomAuctionReplay:
     fill_team: int | None = None
     fill_options: list[Card] = field(default_factory=list)
     twelves: dict[str, tuple[list[Card], Card]] = field(default_factory=dict)
+    # [A140] mega rooms: the retention phase, and a Right to Match being decided
+    pools: dict[int, list[Card]] = field(default_factory=dict)
+    retained: dict[int, list[Card]] = field(default_factory=dict)
+    rtm_team: int | None = None             # the human being asked
+    rtm_other: int | None = None            # the winner (use, match) or holder (raise)
+    rtm_price: int | None = None
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -88,6 +102,8 @@ class RoomAuctionReplay:
             return ("bid", self.round_no, self.lot.index)
         if self.phase == "fill":
             return ("fill", self.fill_team, len(self.auction.teams[self.fill_team].squad))
+        if self.phase.startswith("rtm"):
+            return (self.phase, self.round_no, self.lot.index)
         return (self.phase,)
 
     def can_bid(self, team: au.Team) -> bool:
@@ -107,7 +123,15 @@ class RoomAuctionReplay:
             return [self.pid_of[self.fill_team]] if self.fill_team in self.pid_of else []
         if self.phase == "twelve":
             return [pid for pid in self.team_of if pid not in self.twelves]
+        if self.phase == "retain":
+            return [pid for pid, i in self.team_of.items() if i not in self.retained]
+        if self.phase.startswith("rtm"):
+            return [self.pid_of[self.rtm_team]]
         return []
+
+    @property
+    def retention_taken(self) -> set[str]:
+        return {c.person_id for kept in self.retained.values() for c in kept}
 
 
 # --- replay --------------------------------------------------------------------------------
@@ -121,29 +145,105 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     log only ever grows, so that triple names one state exactly, and every seat polling
     the room once a second would otherwise rebuild the same auction over and over."""
     humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
-    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())))
+    mega = room.game == "mega"
+    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega)
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
         return hit
-    result = _replay(room.seed, humans, room.moves, deck)
+    result = _replay(room.seed, humans, room.moves, deck, mega)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
     return result
 
 
-def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck) -> RoomAuctionReplay:
+class _Pause(Exception):
+    def __init__(self, kind: str, team: int, other: int, price: int):
+        super().__init__(kind)
+        self.kind, self.team, self.other, self.price = kind, team, other, price
+
+
+class _RoomRtm(au.Human):
+    """The humans' side of a Right to Match, read from the room's log. Handed to the
+    engine's own `_right_to_match`, so the rule is the single-player one exactly -- only
+    where each human answer comes from differs."""
+
+    def __init__(self, moves, pos, team_of, flags):
+        self.moves, self.pos, self.pid_of = moves, pos, {i: p for p, i in team_of.items()}
+        self.flags = flags
+
+    def _take(self, kind, team, other, price):
+        if self.pos >= len(self.moves):
+            raise _Pause(kind, team.index, other.index, price)
+        mv = self.moves[self.pos]
+        if mv.get("k") != kind or mv.get("seat") != self.pid_of[team.index]:
+            raise AuctionRoomError(f"move {self.pos}: expected {team.short}'s {kind}")
+        self.pos += 1
+        return mv
+
+    def rtm_use(self, auction, team, lot, price, winner):
+        # Someone who skipped to the end is not held up by questions: exactly single
+        # player's `pall`, which declines every card without asking.
+        if "all" in self.flags.get(team.index, set()):
+            return False
+        return bool(self._take("rtm_use", team, winner, price)["use"])
+
+    def rtm_raise(self, auction, team, lot, price, holder):
+        return int(self._take("rtm_raise", team, holder, price)["price"])
+
+    def rtm_match(self, auction, team, lot, price, winner):
+        return bool(self._take("rtm_match", team, winner, price)["yes"])
+
+
+def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
+            mega: bool = False) -> RoomAuctionReplay:
     teams = au.make_teams(seed, humans=frozenset(humans.values()))
     by_short = {t.short: t.index for t in teams}
     team_of = {pid: by_short[short] for pid, short in humans.items()}
-    lots = au.build_catalogue(deck, seed)
-    listed = {lot.card.person_id for lot in lots}
-    register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = au.Auction(seed, lots, teams, register=register)
     human_idx = set(team_of.values())
-    flags: dict[int, set] = {i: set() for i in human_idx}
     pos = 0
+
+    kept: set[str] = set()
+    if mega:
+        # [A140] Retentions, everybody at once. A human's picks are checked against the
+        # humans who submitted BEFORE them, so a legend two franchises share goes to
+        # whoever asked first; the computer teams then keep theirs from what is left.
+        pools = {t.index: au.retention_pool(deck, t.franchise) for t in teams}
+        retained: dict[int, list[Card]] = {}
+        while len(retained) < len(human_idx):
+            if pos >= len(moves):
+                return RoomAuctionReplay(au.Auction(seed, [], teams), team_of, "retain",
+                                         pools=pools, retained=dict(retained))
+            mv = moves[pos]
+            pos += 1
+            h = team_of.get(mv.get("seat"))
+            if mv.get("k") != "retain" or h is None or h in retained:
+                raise AuctionRoomError(f"move {pos - 1}: expected a retention")
+            if any(not 0 <= i < len(pools[h]) for i in mv["picks"]):
+                raise AuctionRoomError("no such player to retain")
+            chosen = [pools[h][i] for i in mv["picks"]]
+            errors = au.retention_errors(teams[h], chosen)
+            if any(c.person_id in kept for c in chosen):
+                errors.append("already kept by another franchise")
+            if errors:
+                raise AuctionRoomError("; ".join(errors))
+            retained[h] = chosen
+            kept |= {c.person_id for c in chosen}
+        for h, chosen in retained.items():
+            au.retain(teams[h], chosen)
+        for t in teams:
+            if not t.human:
+                chosen = au.cpu_retain(t, [c for c in pools[t.index] if c.person_id not in kept],
+                                       kept)
+                au.retain(t, chosen)
+                kept |= {c.person_id for c in chosen}
+
+    lots = au.build_catalogue(deck, seed, frozenset(kept))
+    listed = {lot.card.person_id for lot in lots} | kept
+    register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
+    auction = au.Auction(seed, lots, teams, mega=mega, register=register)
+    flags: dict[int, set] = {i: set() for i in human_idx}
 
     for round_no, round_name in enumerate(au.ROUNDS):
         for lot in (auction.lots if round_no == 0 else auction.unsold):
@@ -188,7 +288,25 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck) ->
             if not closed and pos < len(moves) and moves[pos].get("k") == "close" \
                     and moves[pos].get("lot") == lot.index and moves[pos].get("r") == round_no:
                 pos += 1                      # a clock close that raced the last human
-            _commit(auction, lot, round_name, state.bids)
+            if not (mega and state.bids):
+                _commit(auction, lot, round_name, state.bids)
+                continue
+            policy = _RoomRtm(moves, pos, team_of, flags)
+            auction.current_bids = state.bids
+            try:
+                buyer, price, event = au._right_to_match(
+                    auction, lot, state.bids[-1].team, state.bids[-1].price,
+                    {**auto, **state.proxies}, policy)
+            except _Pause as p:
+                state.phase = p.kind
+                state.rtm_team, state.rtm_other, state.rtm_price = p.team, p.other, p.price
+                return state
+            pos = policy.pos
+            team = teams[buyer]
+            team.squad.append(lot.card)
+            team.paid.append(price)
+            team.purse -= price
+            auction.sales.append(au.Sale(lot, round_name, buyer, price, list(state.bids), event))
 
     # The fill round: every team still short takes a player at the minimum price,
     # fewest-players first, exactly as `game.auction._fill` does it.
@@ -279,7 +397,10 @@ def suggestion(auction: au.Auction, team_index: int) -> tuple[list[int], int] | 
 
 
 def _stage_seconds(r: RoomAuctionReplay) -> int:
-    return {"bid": LOT_SECONDS, "fill": FILL_SECONDS, "twelve": TWELVE_SECONDS}.get(r.phase, 0)
+    if r.phase.startswith("rtm"):
+        return RTM_SECONDS
+    return {"bid": LOT_SECONDS, "fill": FILL_SECONDS, "twelve": TWELVE_SECONDS,
+            "retain": RETAIN_SECONDS}.get(r.phase, 0)
 
 
 def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctionReplay:
@@ -360,6 +481,54 @@ def twelve(room, deck: Deck, player_id: str, order: list[int], impact: int) -> R
                                "impact": impact})
 
 
+def retain(room, deck: Deck, player_id: str, picks: list[int]) -> RoomAuctionReplay:
+    r = replay(room, deck)
+    team = _seat(r, player_id)
+    if r.phase != "retain":
+        raise AuctionRoomError("retentions are chosen before the auction opens")
+    if team.index in r.retained:
+        raise AuctionRoomError("your retentions are already in")
+    pool = r.pools[team.index]
+    if any(not 0 <= i < len(pool) for i in picks) or len(set(picks)) != len(picks):
+        raise AuctionRoomError("no such player to retain")
+    chosen = [pool[i] for i in picks]
+    clash = [c.name for c in chosen if c.person_id in r.retention_taken]
+    if clash:
+        raise AuctionRoomError(f"already kept by another franchise: {', '.join(clash)}")
+    errors = au.retention_errors(team, chosen)
+    if errors:
+        raise AuctionRoomError("; ".join(errors))
+    return record(room, deck, {"k": "retain", "seat": player_id, "picks": list(picks)})
+
+
+def rtm(room, deck: Deck, player_id: str, yes: bool, price: int | None = None
+        ) -> RoomAuctionReplay:
+    """Answer whichever Right to Match question is being asked of this seat."""
+    r = replay(room, deck)
+    team = _seat(r, player_id)
+    if not r.phase.startswith("rtm") or r.rtm_team != team.index:
+        raise AuctionRoomError("no Right to Match is waiting on you")
+    if r.phase == "rtm_use":
+        move = {"k": "rtm_use", "seat": player_id, "use": bool(yes)}
+    elif r.phase == "rtm_match":
+        move = {"k": "rtm_match", "seat": player_id, "yes": bool(yes)}
+    else:
+        raised = r.rtm_price if (not yes or price is None) else price
+        if raised < r.rtm_price:
+            raise AuctionRoomError("a raise cannot be lower than the hammer price")
+        move = {"k": "rtm_raise", "seat": player_id, "price": raised}
+    return record(room, deck, move)
+
+
+def retention_suggestion(r: RoomAuctionReplay, team_index: int) -> list[int]:
+    """What a computer team would keep for this franchise: the timeout's answer."""
+    team = r.auction.teams[team_index]
+    pool = r.pools[team_index]
+    taken = r.retention_taken
+    chosen = au.cpu_retain(team, [c for c in pool if c.person_id not in taken], set(taken))
+    return [pool.index(c) for c in chosen]
+
+
 def resolve(room, deck: Deck, now: float | None = None) -> bool:
     """Catch the room up with the clock: close a lot whose time ran out, make an absent
     player's fill choice (the best option), submit an absent player's suggested twelve.
@@ -373,6 +542,19 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
             record(room, deck, {"k": "close", "lot": r.lot.index, "r": r.round_no}, now)
         elif r.phase == "fill":
             record(room, deck, {"k": "fill", "seat": r.pid_of[r.fill_team], "i": 0}, now)
+        elif r.phase == "retain":
+            for pid in r.waiting_on():
+                rr = replay(room, deck)
+                record(room, deck, {"k": "retain", "seat": pid,
+                                    "picks": retention_suggestion(rr, rr.team_of[pid])}, now)
+        elif r.phase == "rtm_use":
+            record(room, deck, {"k": "rtm_use", "seat": r.pid_of[r.rtm_team], "use": False}, now)
+        elif r.phase == "rtm_raise":
+            record(room, deck, {"k": "rtm_raise", "seat": r.pid_of[r.rtm_team],
+                                "price": r.rtm_price}, now)
+        elif r.phase == "rtm_match":
+            record(room, deck, {"k": "rtm_match", "seat": r.pid_of[r.rtm_team], "yes": False},
+                   now)
         elif r.phase == "twelve":
             for pid in r.waiting_on():
                 order, impact = suggestion(r.auction, r.team_of[pid])
@@ -391,7 +573,7 @@ def submit(conn, code: str, deck: Deck, action, player_id: str, *args):
     written; the clock catch-up it skipped is simply redone by the next request."""
     from web import rooms
     room = rooms._load_room(conn, code)
-    if room.game != "auction":
+    if not is_auction(room):
         raise AuctionRoomError("this is not an auction room")
     resolve(room, deck)
     if room.status != "auctioning":

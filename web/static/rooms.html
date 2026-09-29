@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=24941455c2">
+<link rel="stylesheet" href="/static/style.css?v=e1e875c125">
 </head>
 <body>
 <div class="sheet">
@@ -162,6 +162,14 @@
                 <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
               </div>
 
+              <div class="room-label auction-only hide">Retentions &amp; Right to Match</div>
+              <div class="room-choices auction-only hide" id="megaChoices">
+                <button class="room-choice sel" data-mega="on" onclick="pickMega(true)"
+                  title="Each franchise keeps up to five of its own legends first; unused places become Right to Match cards.">Mega auction</button>
+                <button class="room-choice" data-mega="off" onclick="pickMega(false)"
+                  title="Every franchise starts from nothing with ₹120 crore.">Open auction</button>
+              </div>
+
               <div class="room-label">Visibility</div>
               <div class="room-choices" id="visibilityChoices">
                 <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
@@ -242,6 +250,6 @@
 
 <script src="/static/common.js?v=5b0d2dca5e"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/rooms-setup.js?v=5c3f22fe8c"></script>
+<script src="/static/rooms-setup.js?v=da2cde52fd"></script>
 </body>
 </html>

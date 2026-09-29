@@ -7,6 +7,13 @@
 // game for anyone who skimmed past the list.
 let CHOSEN_FORMAT = null, CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
+let CHOSEN_MEGA = true;          // auction rooms: retentions and Right to Match [A140]
+
+function pickMega(on){
+  CHOSEN_MEGA = on;
+  document.querySelectorAll('#megaChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', (b.dataset.mega === 'on') === on));
+}
 let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab is showing
 
 // The format list is `.pick` rows now, not `.room-choice` buttons -- it is the screen's
@@ -25,6 +32,8 @@ function pickFormat(f){
   // and draft-mode settings do not apply to it [A139].
   document.querySelectorAll('#roomConfig .draft-only')
     .forEach(el => el.classList.toggle('hide', f === 'auction'));
+  document.querySelectorAll('#roomConfig .auction-only')
+    .forEach(el => el.classList.toggle('hide', f !== 'auction'));
   document.querySelectorAll('#formatChoices .pick')
     .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
   $('#formatChoices').classList.add('picked');   // retires the "choose one" prompt
@@ -197,7 +206,7 @@ async function createRoom(ctrl){
         body: JSON.stringify({
           // An auction room plays the ten-team league afterwards [A139].
           format: CHOSEN_FORMAT === 'auction' ? 'league' : CHOSEN_FORMAT,
-          game: CHOSEN_FORMAT === 'auction' ? 'auction' : 'draft',
+          game: CHOSEN_FORMAT !== 'auction' ? 'draft' : (CHOSEN_MEGA ? 'mega' : 'auction'),
           timer_seconds: CHOSEN_TIMER, host_name: name,
           draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY})});
       enterRoom(r.room.code, r.player_id);

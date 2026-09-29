@@ -2440,3 +2440,23 @@ which is all the league, playoffs, squad review and journey card ever read.
 
 Migration 034 widened `rooms_status_check` to allow `'auctioning'`, which 033 missed — see
 A139 for how, and `tests/test_room_schema.py` for the guard that now stops it recurring.
+
+### 15.9 Mega auction rooms [A140]
+
+`rooms.game = 'mega'` (migration 035) is an auction room with §15.7's retentions and Right to
+Match. The host chooses Mega or Open when creating an auction room; Mega is the default.
+
+**Retentions, everybody at once, 90 seconds.** Each human keeps up to five of their own
+franchise's seasons at the slabs. A legend two franchises share goes to **whoever submitted
+first** — refused for the second, and marked on their screen as kept by another franchise —
+and the computer teams then keep theirs from what is left. Running out of time keeps **what
+a computer team would keep for that franchise** (`cpu_retain`), not nobody: a player who
+steps away should still get their legends.
+
+**Right to Match, 15 seconds a decision.** The engine's own `_right_to_match` runs unchanged;
+a room only supplies where each human answer comes from (the log), and pauses when one is
+missing. Who is asked follows §15.7 exactly: the franchise the lot's season was played for
+decides whether to play a card, the winner makes the one final raise, the holder matches or
+not. Running out means no card, no raise, no match. Everyone else keeps watching the floor
+(`rtm_watch`), with the bidding that led to the hammer and whose decision it is. A human who
+skipped to the end is never asked, as single player's `pall` declines every card.

@@ -370,7 +370,7 @@ function roomOnline(ok){
 }
 
 async function startRoomDraft(ctrl){
-  await busyClick(ctrl, ROOM && ROOM.game === 'auction' ? 'Opening the auction…' : 'Starting…', async () => {
+  await busyClick(ctrl, ROOM && ROOM.game !== 'draft' ? 'Opening the auction…' : 'Starting…', async () => {
     const myGen = ++ROOM_GEN;
     try {
       const room = await roomApi(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
@@ -470,10 +470,11 @@ function renderRoomFailed(r){
 }
 
 function renderRoomLobby(r){
-  const auction = r.game === 'auction';
+  const auction = r.game !== 'draft';
   $('#lobbyCode').textContent = r.code;
   $('#lobbySeats').textContent = `${r.players.length} of ${r.seats}`;
-  $('#lobbyFormat').textContent = auction ? 'AUCTION · LEAGUE' : r.format.toUpperCase();
+  $('#lobbyFormat').textContent = !auction ? r.format.toUpperCase()
+    : (r.game === 'mega' ? 'MEGA AUCTION · RETENTIONS & RTM' : 'AUCTION · LEAGUE');
   $('#lobbyTimer').textContent = auction ? '15s a lot, +5s a bid' : r.timer_seconds + 's per pick';
   $('#lobbyMode').textContent = auction ? '₹120 crore each'
                                         : (r.draft_mode === 'memory' ? 'Memory' : 'Stat');

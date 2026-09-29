@@ -1796,3 +1796,4 @@ body.has-ground{
    under the player list squeezed the list to nothing. A lobby is short; let it grow. */
 #roomLobby .col{max-height:none}
 #roomLobby #lobbyPlayers{flex:none}
+.auc-retain-row.taken{opacity:.45}

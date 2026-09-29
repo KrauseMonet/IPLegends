@@ -275,3 +275,144 @@ def test_replaying_the_log_from_scratch_gives_the_same_auction(deck, clock):
     assert [(s.lot.index, s.winner, s.price) for s in cached.auction.sales] == \
         [(s.lot.index, s.winner, s.price) for s in fresh.auction.sales]
     assert (cached.lot.index, cached.bids) == (fresh.lot.index, fresh.bids)
+
+
+# --- mega rooms: retentions and Right to Match [A140] -------------------------------------
+
+def mega_room(conn, deck, clock, a="RCB", b="KKR"):
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="mega")
+    room, guest = rooms.join_room(conn, room.code, "Ben", deck)
+    rooms.choose_franchise(conn, room.code, host, a)
+    rooms.choose_franchise(conn, room.code, guest, b)
+    rooms.start_room(conn, room.code, host, deck)
+    return room.code, host, guest
+
+
+def distinct(pool, n):
+    out, seen = [], set()
+    for i, c in enumerate(pool):
+        if c.person_id not in seen:
+            seen.add(c.person_id)
+            out.append(i)
+        if len(out) == n:
+            break
+    return out
+
+
+def test_a_mega_room_opens_on_retentions_for_every_human(deck, clock):
+    conn = FakeConn()
+    code, host, guest = mega_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase == "retain" and sorted(r.waiting_on()) == sorted([host, guest])
+    assert load(conn, code).turn_started_at == pytest.approx(clock.now + ra.RETAIN_SECONDS)
+    for pid in (host, guest):
+        team = r.auction.teams[r.team_of[pid]]
+        assert all(au.franchise_of(c) == team.franchise for c in r.pools[team.index])
+
+
+def test_a_legend_two_franchises_share_goes_to_whoever_asked_first(deck, clock):
+    conn = FakeConn()
+    code, host, guest = mega_room(conn, deck, clock)      # Gayle played for RCB and KKR
+    r = ra.replay(load(conn, code), deck)
+    rcb, kkr = r.team_of[host], r.team_of[guest]
+    gayle_rcb = next(i for i, c in enumerate(r.pools[rcb]) if c.name == "CH Gayle")
+    gayle_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name == "CH Gayle")
+    ra.submit(conn, code, deck, ra.retain, host, [gayle_rcb])
+    with pytest.raises(ra.AuctionRoomError, match="already kept"):
+        ra.submit(conn, code, deck, ra.retain, guest, [gayle_kkr])
+
+
+def test_retentions_charge_the_slabs_and_the_rest_become_cards(deck, clock):
+    conn = FakeConn()
+    code, host, guest = mega_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    ra.submit(conn, code, deck, ra.retain, host, distinct(r.pools[r.team_of[host]], 2))
+    ra.submit(conn, code, deck, ra.retain, guest, [])
+    r = ra.replay(load(conn, code), deck)
+    rcb, kkr = r.auction.teams[r.team_of[host]], r.auction.teams[r.team_of[guest]]
+    assert rcb.paid[:2] == list(au.RETENTION_SLABS[:2]) and rcb.rtm == au.RTM_PLACES - 2
+    assert kkr.retained == 0 and kkr.rtm == au.RTM_PLACES
+    assert not {c.person_id for c in rcb.squad} & {lot.card.person_id for lot in r.auction.lots}
+
+
+def test_a_retention_nobody_submits_is_what_a_computer_team_would_keep(deck, clock):
+    conn = FakeConn()
+    code, host, guest = mega_room(conn, deck, clock)
+    ra.submit(conn, code, deck, ra.retain, host, [])
+    before = ra.replay(load(conn, code), deck)
+    expected = ra.retention_suggestion(before, before.team_of[guest])
+    clock.now = load(conn, code).turn_started_at + 1
+    rooms.room_state(conn, code, deck)
+    assert load(conn, code).moves[-1] == {"k": "retain", "seat": guest, "picks": expected}
+
+
+def walk_to_rtm(conn, code, deck, host, guest, clock, kinds=("rtm_use",)):
+    """Both humans pass lot by lot until a Right to Match question in `kinds` appears."""
+    for _ in range(600):
+        r = ra.replay(load(conn, code), deck)
+        if r.phase in kinds:
+            return r
+        if r.phase != "bid":
+            return None
+        for pid in (host, guest):
+            rr = ra.replay(load(conn, code), deck)
+            if rr.phase == "bid" and (rr.lot.index, rr.round_no) == (r.lot.index, r.round_no) \
+                    and not rr.human_done(rr.team_of[pid], {}):
+                ra.submit(conn, code, deck, ra.pass_lot, pid, "lot")
+    return None
+
+
+def started_mega(conn, deck, clock):
+    code, host, guest = mega_room(conn, deck, clock)
+    for pid in (host, guest):
+        ra.submit(conn, code, deck, ra.retain, pid, [])
+    return code, host, guest
+
+
+def test_a_card_is_offered_to_the_franchise_the_season_was_played_for(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    r = walk_to_rtm(conn, code, deck, host, guest, clock)
+    assert r is not None, "no Right to Match question in the whole auction"
+    asked = r.auction.teams[r.rtm_team]
+    assert asked.human and asked.franchise == au.franchise_of(r.lot.card)
+    assert r.bids and r.bids[-1].team == r.rtm_other and r.bids[-1].price == r.rtm_price
+
+
+def test_using_and_matching_a_card_takes_the_player_and_spends_the_card(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    r = walk_to_rtm(conn, code, deck, host, guest, clock)
+    pid = r.pid_of[r.rtm_team]
+    lot, cards = r.lot, r.auction.teams[r.rtm_team].rtm
+    ra.submit(conn, code, deck, ra.rtm, pid, True)
+    r2 = ra.replay(load(conn, code), deck)
+    if r2.phase == "rtm_match":
+        ra.submit(conn, code, deck, ra.rtm, pid, True)
+    after = ra.replay(load(conn, code), deck)
+    team = after.auction.teams[after.team_of[pid]]
+    assert lot.card in team.squad and team.rtm == cards - 1
+
+
+def test_a_card_nobody_answers_is_not_played(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    r = walk_to_rtm(conn, code, deck, host, guest, clock)
+    pid = r.pid_of[r.rtm_team]
+    clock.now = load(conn, code).turn_started_at + 1
+    rooms.room_state(conn, code, deck)
+    assert load(conn, code).moves[-1] == {"k": "rtm_use", "seat": pid, "use": False}
+    after = ra.replay(load(conn, code), deck)
+    assert r.lot.card not in after.auction.teams[r.rtm_team].squad
+
+
+def test_someone_who_skipped_to_the_end_is_never_asked_about_a_card(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    for pid in (host, guest):
+        r = ra.replay(load(conn, code), deck)
+        if r.phase == "bid":
+            ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase in ("fill", "twelve")
+    assert not any(m["k"].startswith("rtm") for m in load(conn, code).moves)

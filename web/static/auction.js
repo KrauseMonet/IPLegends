@@ -132,10 +132,11 @@ async function apply(d, animate){
   if (!AUCTION_ROOM) history.replaceState(null, '', '#' + d.state);
   closeRtm();
   if (animate && prev && prev.phase === 'bid') await animateFrom(prev, d);
-  else if (animate && prev && isRtm(prev.phase)) await stampAfterRtm(prev, d);
+  else if (animate && prev && (isRtm(prev.phase) || prev.phase === 'rtm_watch'))
+    await stampAfterRtm(prev, d);
   A = d;
   if (d.phase === 'retain'){ renderRetain(); show('aucRetain'); }
-  else if (d.phase === 'bid' || isRtm(d.phase)){
+  else if (d.phase === 'bid' || isRtm(d.phase) || d.phase === 'rtm_watch'){
     const entering = $('#aucFloor').classList.contains('hide');
     show('aucFloor'); renderFloor();
     // On a phone the masthead fills the first screen; bring the lot itself into view.
@@ -171,7 +172,7 @@ async function animateFrom(prev, next){
   const sameLot = next.lot && next.lot.lot === lot.lot && next.lot.round === lot.round;
   const stillOpen = next.phase === 'bid' && sameLot;
   let bids, sale = null;
-  if (isRtm(next.phase) && sameLot){
+  if ((isRtm(next.phase) || next.phase === 'rtm_watch') && sameLot){
     // The hammer came down and a Right to Match question followed: play the bidding that
     // got there before the question opens, rather than jumping straight to the price.
     bids = next.bids;
@@ -258,10 +259,10 @@ function renderFloor(){
     <div class="colophon stat-tiles auc-stats">${cardStatHtml(c)}</div>
     <div class="auc-card-base">Base price <b>${cr(lot.base)}</b></div>`;
 
-  if (isRtm(d.phase)){
+  if (isRtm(d.phase) || d.phase === 'rtm_watch'){
     $('#aucPriceLabel').textContent = 'Hammer';
     $('#aucPrice').textContent = cr(d.rtm.price);
-    setLeader(d.rtm.kind === 'rtm_raise' ? d.you : d.rtm.other);
+    setLeader(d.rtm.kind === 'rtm_raise' ? d.rtm.deciding || d.you : d.rtm.other);
   } else if (d.bids.length){
     $('#aucPriceLabel').textContent = 'Current bid';
     $('#aucPrice').textContent = cr(d.price);
@@ -277,7 +278,13 @@ function renderFloor(){
     : '';
   renderSide();
   if (d.phase === 'bid') renderBidControls();
-  else { stopCountdown(); $('#aucNote').textContent = ''; }
+  else {
+    stopCountdown();
+    $('#aucNote').textContent = d.phase === 'rtm_watch'
+      ? `${d.rtm.deciding} are deciding on a Right to Match…` : '';
+    // In a room every decision runs on the server's clock; show it.
+    if (AUCTION_ROOM && (d.phase === 'rtm_watch' || isRtm(d.phase))) startRoomCountdown();
+  }
 }
 
 function roleLabel(c){
@@ -508,6 +515,12 @@ function renderRetain(){
     const cur = seasons.find(p => p.index === showing) || seasons[0];
     const kept = seasons.some(p => picked.has(p.index));
     const c = cur.card;
+    // [A140] In a room another franchise may already have kept him.
+    if ((A.retention_taken || []).includes(pid)){
+      return `<div class="auc-retain-row taken">${ICON[c.kind] || ''}
+        <span class="auc-retain-name">${c.name}</span>
+        <span class="auc-season-one">kept by another franchise</span></div>`;
+    }
     const choose = seasons.length > 1
       ? `<select class="auc-season" onchange="pickSeason('${pid}', +this.value)" ${kept ? 'disabled' : ''}>
            ${seasons.map(p => `<option value="${p.index}" ${p.index === cur.index ? 'selected' : ''}>
@@ -554,10 +567,11 @@ function toggleRetain(index){
 function confirmRetain(ctrl, nobody){
   busyClick(ctrl, 'Opening the auction…', async () => {
     try {
-      const d = await api(`/api/auction/${A.state}/retain`, {method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({picks: nobody ? [] : RETAIN})});
-      await apply(d, false);
+      const picks = nobody ? [] : RETAIN;
+      const d = AUCTION_ROOM ? await window.roomAuctionPost('retain', {picks})
+        : await api(`/api/auction/${A.state}/retain`, {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({picks})});
+      if (d) await apply(d, false);
     } catch(e){ slip(e.message); }
   });
 }

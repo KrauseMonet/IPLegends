@@ -85,7 +85,7 @@ OPEN_ROOMS_LIMIT = 30
 # his season stats, 'memory' shows neither. Chosen once by the host at creation and
 # binding on every seat (migration 023); the join flow gets no choice of its own.
 DRAFT_MODES = ("stat", "memory")
-GAMES = ("draft", "auction")
+GAMES = ("draft", "auction", "mega")   # 'mega' = retentions and Right to Match [A140]
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 6
 
@@ -339,7 +339,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  game: str = "draft") -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
-    if game == "auction" and fmt != "league":
+    if game != "draft" and fmt != "league":
         # Ten franchises bid, so ten sides play: ratified as league only [A139].
         raise RoomError("an auction room plays the ten-team league")
     if fmt not in ROOM_FORMATS:
@@ -377,7 +377,7 @@ def choose_franchise(conn, code: str, player_id: str, short: str) -> Room:
     case of two people choosing in the same instant (migration 033)."""
     from game.auction import FRANCHISES
     room = _load_room(conn, code)
-    if room.game != "auction":
+    if room.game == "draft":
         raise RoomError("only an auction room has franchises")
     if room.status != "lobby":
         raise RoomError("franchises are chosen in the lobby")
@@ -506,7 +506,7 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
     if room.status != "lobby":
         raise RoomError("this room has already started")
 
-    if room.game == "auction":
+    if room.game != "draft":
         _start_auction(room, deck)
         _save_room(conn, room)
         return room
@@ -930,7 +930,7 @@ def room_sides(room: Room, deck: Deck):
     the one place that override happens, so it shows up correctly everywhere downstream
     that reads a seat's name: the draft-lobby roster AND the match-phase `Side` naming
     used in scorecards and results alike."""
-    if room.game == "auction":
+    if room.game != "draft":
         from web import room_auction
         return room_auction.room_sides(room, deck)
     replay = replay_room(room, deck)

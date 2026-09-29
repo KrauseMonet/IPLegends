@@ -135,6 +135,9 @@ async function apply(d, animate){
   else if (animate && prev && (isRtm(prev.phase) || prev.phase === 'rtm_watch'))
     await stampAfterRtm(prev, d);
   A = d;
+  // [A141] A legend you claimed but another person's franchise had the better season of.
+  if (d.retention_lost && d.retention_lost.length && !(prev && prev.retention_lost
+      && prev.retention_lost.length)) d.retention_lost.forEach(m => slip(m));
   if (d.phase === 'retain'){ renderRetain(); show('aucRetain'); }
   else if (d.phase === 'bid' || isRtm(d.phase) || d.phase === 'rtm_watch'){
     const entering = $('#aucFloor').classList.contains('hide');
@@ -507,6 +510,14 @@ function retentionPeople(){
 
 function renderRetain(){
   const people = retentionPeople();
+  // [A141] In a room the picks are sealed; say how a shared legend is settled.
+  const note = $('#aucRetainRule');
+  if (AUCTION_ROOM && !note){
+    $('#aucRetain .auc-lede').insertAdjacentHTML('afterend', `<p class="auc-lede" id="aucRetainRule"
+      style="margin-top:10px">Picks are sealed. If someone else keeps a player you keep too, he
+      goes to the franchise that had his better season, and the place you lose becomes a
+      Right to Match card.</p>`);
+  }
   const picked = new Set(RETAIN);
   $('#aucRetainCount').textContent = `${people.length} players`;
   $('#aucRetainList').innerHTML = people.map(seasons => {
@@ -515,12 +526,6 @@ function renderRetain(){
     const cur = seasons.find(p => p.index === showing) || seasons[0];
     const kept = seasons.some(p => picked.has(p.index));
     const c = cur.card;
-    // [A140] In a room another franchise may already have kept him.
-    if ((A.retention_taken || []).includes(pid)){
-      return `<div class="auc-retain-row taken">${ICON[c.kind] || ''}
-        <span class="auc-retain-name">${c.name}</span>
-        <span class="auc-season-one">kept by another franchise</span></div>`;
-    }
     const choose = seasons.length > 1
       ? `<select class="auc-season" onchange="pickSeason('${pid}', +this.value)" ${kept ? 'disabled' : ''}>
            ${seasons.map(p => `<option value="${p.index}" ${p.index === cur.index ? 'selected' : ''}>

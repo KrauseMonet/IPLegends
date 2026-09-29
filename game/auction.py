@@ -725,6 +725,9 @@ class Auction:
     # The lot being decided, while a Right to Match is asked about it -- so a paused
     # auction can still show the bidding that led to the question.
     current_bids: list[Bid] = field(default_factory=list)
+    # [A141] Auction rooms only: legends a human claimed and lost to a better season,
+    # {team index: [(card, winning team index)]}. Empty everywhere else.
+    retention_lost: dict = field(default_factory=dict)
 
     @property
     def unsold(self) -> list[Lot]:

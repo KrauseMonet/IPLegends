@@ -130,8 +130,9 @@ class RoomAuctionReplay:
         return []
 
     @property
-    def retention_taken(self) -> set[str]:
-        return {c.person_id for kept in self.retained.values() for c in kept}
+    def retention_lost(self) -> dict[int, list[tuple[Card, int]]]:
+        """[A141] Legends each human claimed and lost to a better season elsewhere."""
+        return getattr(self.auction, "retention_lost", {})
 
 
 # --- replay --------------------------------------------------------------------------------
@@ -156,6 +157,43 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
     return result
+
+
+def settle_shared(retained: dict[int, list[Card]], pools: dict[int, list[Card]], seed: int):
+    """[A141] A legend two humans both claimed goes to the franchise with his BETTER
+    SEASON -- the higher-rated of that franchise's own seasons of him, whichever season
+    either side actually asked to keep. Ratified by the user in place of first-come, which
+    rewarded whoever clicked fastest.
+
+    Ties go to the higher-rated season actually claimed, then to a hash of the room's seed:
+    a tie is rare (it needs two franchises with equally rated best seasons of one man) and
+    must still be decided the same way on every replay.
+
+    Returns ({team: the retentions it keeps, in its own order}, {team: [(card, winner)]}).
+    A loser keeps the rest in the order they chose them, so their slabs close up and the
+    place they lost becomes a Right to Match card."""
+    claims: dict[str, list[tuple[int, Card]]] = {}
+    for t, cards in retained.items():
+        for c in cards:
+            claims.setdefault(c.person_id, []).append((t, c))
+    lost: dict[int, list[tuple[Card, int]]] = {}
+    for pid, contenders in claims.items():
+        if len(contenders) < 2:
+            continue
+
+        def best(team_index):
+            return max(((x.display or 0), x.rating)
+                       for x in pools[team_index] if x.person_id == pid)
+
+        winner = max(contenders, key=lambda tc: (best(tc[0]), ((tc[1].display or 0),
+                                                               tc[1].rating),
+                                                 au._mix(seed, au._pid(pid), tc[0], 7)))[0]
+        for t, c in contenders:
+            if t != winner:
+                lost.setdefault(t, []).append((c, winner))
+    settled = {t: [c for c in cards if not any(c is lc for lc, _ in lost.get(t, []))]
+               for t, cards in retained.items()}
+    return settled, lost
 
 
 class _Pause(Exception):
@@ -205,10 +243,12 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     pos = 0
 
     kept: set[str] = set()
+    lost: dict = {}
     if mega:
-        # [A140] Retentions, everybody at once. A human's picks are checked against the
-        # humans who submitted BEFORE them, so a legend two franchises share goes to
-        # whoever asked first; the computer teams then keep theirs from what is left.
+        # [A140, A141] Retentions, everybody at once and SEALED: nobody sees anyone
+        # else's picks, so speed decides nothing. Once every human is in, a legend two of
+        # them claimed goes to the franchise with his better season (`settle_shared`);
+        # the computer teams then keep theirs from what is left.
         pools = {t.index: au.retention_pool(deck, t.franchise) for t in teams}
         retained: dict[int, list[Card]] = {}
         while len(retained) < len(human_idx):
@@ -224,14 +264,13 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 raise AuctionRoomError("no such player to retain")
             chosen = [pools[h][i] for i in mv["picks"]]
             errors = au.retention_errors(teams[h], chosen)
-            if any(c.person_id in kept for c in chosen):
-                errors.append("already kept by another franchise")
             if errors:
                 raise AuctionRoomError("; ".join(errors))
             retained[h] = chosen
-            kept |= {c.person_id for c in chosen}
-        for h, chosen in retained.items():
+        settled, lost = settle_shared(retained, pools, seed)
+        for h, chosen in settled.items():
             au.retain(teams[h], chosen)
+            kept |= {c.person_id for c in chosen}
         for t in teams:
             if not t.human:
                 chosen = au.cpu_retain(t, [c for c in pools[t.index] if c.person_id not in kept],
@@ -243,6 +282,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
     auction = au.Auction(seed, lots, teams, mega=mega, register=register)
+    if mega:
+        auction.retention_lost = lost
     flags: dict[int, set] = {i: set() for i in human_idx}
 
     for round_no, round_name in enumerate(au.ROUNDS):
@@ -492,9 +533,8 @@ def retain(room, deck: Deck, player_id: str, picks: list[int]) -> RoomAuctionRep
     if any(not 0 <= i < len(pool) for i in picks) or len(set(picks)) != len(picks):
         raise AuctionRoomError("no such player to retain")
     chosen = [pool[i] for i in picks]
-    clash = [c.name for c in chosen if c.person_id in r.retention_taken]
-    if clash:
-        raise AuctionRoomError(f"already kept by another franchise: {', '.join(clash)}")
+    # No clash check here any more [A141]: retentions are sealed, and a legend two people
+    # both claim is settled by his better season once everyone is in.
     errors = au.retention_errors(team, chosen)
     if errors:
         raise AuctionRoomError("; ".join(errors))
@@ -524,8 +564,7 @@ def retention_suggestion(r: RoomAuctionReplay, team_index: int) -> list[int]:
     """What a computer team would keep for this franchise: the timeout's answer."""
     team = r.auction.teams[team_index]
     pool = r.pools[team_index]
-    taken = r.retention_taken
-    chosen = au.cpu_retain(team, [c for c in pool if c.person_id not in taken], set(taken))
+    chosen = au.cpu_retain(team, pool, set())      # sealed: nobody else's picks are known
     return [pool.index(c) for c in chosen]
 
 

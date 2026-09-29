@@ -310,16 +310,30 @@ def test_a_mega_room_opens_on_retentions_for_every_human(deck, clock):
         assert all(au.franchise_of(c) == team.franchise for c in r.pools[team.index])
 
 
-def test_a_legend_two_franchises_share_goes_to_whoever_asked_first(deck, clock):
+def test_a_shared_legend_goes_to_the_franchise_with_his_better_season(deck, clock):
+    """[A141] Gayle's best RCB season rates 99, his best KKR season 87. Ben (KKR) asks
+    FIRST and claims a season rated higher than the one Asha (RCB) claims -- so neither
+    first-come nor comparing the claimed seasons would give him to RCB. Only the rule as
+    ratified (each franchise's best season of him) does."""
     conn = FakeConn()
-    code, host, guest = mega_room(conn, deck, clock)      # Gayle played for RCB and KKR
+    code, host, guest = mega_room(conn, deck, clock)      # Asha RCB, Ben KKR
     r = ra.replay(load(conn, code), deck)
     rcb, kkr = r.team_of[host], r.team_of[guest]
-    gayle_rcb = next(i for i, c in enumerate(r.pools[rcb]) if c.name == "CH Gayle")
+    gayle_rcb_2014 = next(i for i, c in enumerate(r.pools[rcb])
+                          if c.name == "CH Gayle" and c.season_year == 2014)
     gayle_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name == "CH Gayle")
-    ra.submit(conn, code, deck, ra.retain, host, [gayle_rcb])
-    with pytest.raises(ra.AuctionRoomError, match="already kept"):
-        ra.submit(conn, code, deck, ra.retain, guest, [gayle_kkr])
+    other_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name != "CH Gayle")
+    assert r.pools[kkr][gayle_kkr].display > r.pools[rcb][gayle_rcb_2014].display
+    ra.submit(conn, code, deck, ra.retain, guest, [gayle_kkr, other_kkr])   # Ben first
+    ra.submit(conn, code, deck, ra.retain, host, [gayle_rcb_2014])          # sealed: accepted
+    after = ra.replay(load(conn, code), deck)
+    rcb_t, kkr_t = after.auction.teams[rcb], after.auction.teams[kkr]
+    assert "CH Gayle" in [c.name for c in rcb_t.squad[:rcb_t.retained]]
+    assert "CH Gayle" not in [c.name for c in kkr_t.squad]
+    # Ben keeps his other pick, at the FIRST slab now, and the lost place is a card.
+    assert kkr_t.retained == 1 and kkr_t.paid[0] == au.RETENTION_SLABS[0]
+    assert kkr_t.rtm == au.RTM_PLACES - 1
+    assert [(c.name, w) for c, w in after.retention_lost[kkr]] == [("CH Gayle", rcb)]
 
 
 def test_retentions_charge_the_slabs_and_the_rest_become_cards(deck, clock):

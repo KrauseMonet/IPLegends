@@ -1860,8 +1860,8 @@ class AuctionOut(BaseModel):
     sold: int = 0
     rtm: AuctionRtmOut | None = None
     retention_pool: list[AuctionPoolOut] = []
-    retention_taken: list[str] = Field(default=[], description="rooms: person_ids another "
-                                       "franchise has already kept")
+    retention_lost: list[str] = Field(default=[], description="rooms: legends you claimed "
+                                      "that went to a franchise with a better season of his")
     retention_slabs: list[int] = list(auction.RETENTION_SLABS)
     rtm_places: int = auction.RTM_PLACES
     fill_options: list[CardOut] = []
@@ -2200,8 +2200,11 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         pool = r.pools[you_idx]
         out.retention_pool = [AuctionPoolOut(index=i, card=_card(c))
                               for i, c in enumerate(pool[:RETENTION_POOL_SHOWN])]
-        out.retention_taken = sorted(r.retention_taken)
         out.max_bid = auction.PURSE
+    if you_idx is not None:
+        out.retention_lost = [
+            f"{c.name} went to {a.teams[w].short}, who had his better season"
+            for c, w in r.retention_lost.get(you_idx, [])]
     if r.phase.startswith("rtm"):
         lot = r.lot
         out.lot = AuctionLotOut(

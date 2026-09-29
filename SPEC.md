@@ -2446,10 +2446,14 @@ A139 for how, and `tests/test_room_schema.py` for the guard that now stops it re
 `rooms.game = 'mega'` (migration 035) is an auction room with §15.7's retentions and Right to
 Match. The host chooses Mega or Open when creating an auction room; Mega is the default.
 
-**Retentions, everybody at once, 90 seconds.** Each human keeps up to five of their own
-franchise's seasons at the slabs. A legend two franchises share goes to **whoever submitted
-first** — refused for the second, and marked on their screen as kept by another franchise —
-and the computer teams then keep theirs from what is left. Running out of time keeps **what
+**Retentions, everybody at once, SEALED, 90 seconds.** Each human keeps up to five of
+their own franchise's seasons at the slabs, without seeing anyone else's picks. A legend two
+people both claim goes to **the franchise with his better season** — the higher-rated of
+each franchise's own seasons of him, whichever season either side asked to keep; ties to
+the higher-rated season claimed, then a hash of the room's seed [A141]. The loser keeps the
+rest of their picks in order, so their slabs close up and the lost place becomes a Right to
+Match card; they are told who took him. The computer teams keep theirs only after every
+human is done, from what is left. (Until A141 the first to submit won, which rewarded speed.) Running out of time keeps **what
 a computer team would keep for that franchise** (`cpu_retain`), not nobody: a player who
 steps away should still get their legends.
 

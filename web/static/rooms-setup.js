@@ -21,6 +21,10 @@ function pickFormat(f){
   const wasOpen = CHOSEN_FORMAT !== null;
   const first = !wasOpen;
   CHOSEN_FORMAT = f;
+  // An auction room has a fixed lot clock and always shows ratings, so the draft's timer
+  // and draft-mode settings do not apply to it [A139].
+  document.querySelectorAll('#roomConfig .draft-only')
+    .forEach(el => el.classList.toggle('hide', f === 'auction'));
   document.querySelectorAll('#formatChoices .pick')
     .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
   $('#formatChoices').classList.add('picked');   // retires the "choose one" prompt
@@ -72,6 +76,7 @@ const WHEEL_NOTE = {
   final: 'seats · you and one more',
   cup: 'seats · you and three more',
   league: 'seats · a full field, you and nine',
+  auction: 'franchises · empty ones bid as computer teams',
 };
 
 function drawFormatWheel(){
@@ -189,8 +194,12 @@ async function createRoom(ctrl){
   await busyClick(ctrl, 'Creating…', async () => {
     try {
       const r = await api('/api/rooms', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({format: CHOSEN_FORMAT, timer_seconds: CHOSEN_TIMER,
-          host_name: name, draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY})});
+        body: JSON.stringify({
+          // An auction room plays the ten-team league afterwards [A139].
+          format: CHOSEN_FORMAT === 'auction' ? 'league' : CHOSEN_FORMAT,
+          game: CHOSEN_FORMAT === 'auction' ? 'auction' : 'draft',
+          timer_seconds: CHOSEN_TIMER, host_name: name,
+          draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY})});
       enterRoom(r.room.code, r.player_id);
     } catch(e){ slip(e.message); }
   });

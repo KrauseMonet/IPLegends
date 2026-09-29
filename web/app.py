@@ -35,6 +35,7 @@ from game.season import (
 from game.simulator import load_model
 from web import accounts
 from web import auction_session
+from web import room_auction
 from web import auth
 from web import daily as daily_lib
 from web import db
@@ -635,6 +636,8 @@ class CreateRoomIn(BaseModel):
         description="true lists this room publicly (GET /api/rooms/open) so anyone can "
                     "join without the code; false (default) is code-only, same as every "
                     "room before this field existed")
+    game: Literal["draft", "auction"] = Field(
+        default="draft", description="'auction' plays a live auction [A139]; league only")
 
 
 class JoinRoomIn(BaseModel):
@@ -660,6 +663,7 @@ class RoomPlayerOut(BaseModel):
     player_id: str
     name: str
     is_cpu: bool
+    franchise: str | None = Field(default=None, description="auction rooms only [A139]")
     picks_made: int
     done: bool
     deal: DealOut | None = Field(
@@ -682,7 +686,10 @@ class RoomStateOut(BaseModel):
     seats: int
     timer_seconds: int
     host_id: str
-    status: str = Field(description="lobby | drafting | complete | failed")
+    status: str = Field(description="lobby | drafting | auctioning | complete | failed")
+    game: str = Field(default="draft", description="'draft' or 'auction' [A139]")
+    auction: "AuctionOut | None" = Field(
+        default=None, description="auction rooms only: the floor as the CALLER sees it")
     round: int = Field(description="len(moves) // seats -- which snake wave we're in")
     rounds_total: int = TWELVE_SIZE
     seconds_remaining: int
@@ -713,7 +720,8 @@ class RoomStateOut(BaseModel):
                     "varied between polls.")
     turn_started_at: float = Field(
         description="when the current turn's clock started, epoch seconds on the same "
-                    "clock as `server_now`. 0.0 outside 'drafting'.")
+                    "clock as `server_now`. 0.0 outside 'drafting'. In an AUCTION room "
+                    "this is the current stage's DEADLINE instead (web/room_auction.py).")
 
 
 class OpenRoomOut(BaseModel):
@@ -1773,6 +1781,7 @@ class AuctionTeamOut(BaseModel):
     human: bool
     retained: int = 0
     rtm: int = Field(default=0, description="Right to Match cards left")
+    owner: str | None = Field(default=None, description="auction rooms: the person bidding")
 
 
 class AuctionBidOut(BaseModel):
@@ -1830,7 +1839,7 @@ class AuctionRtmOut(BaseModel):
 class AuctionOut(BaseModel):
     state: str
     phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "fill", "twelve",
-                   "ready"]
+                   "ready", "wait", "complete"]
     mega: bool = False
     you: str
     franchise: str
@@ -1851,6 +1860,10 @@ class AuctionOut(BaseModel):
     retention_slabs: list[int] = list(auction.RETENTION_SLABS)
     rtm_places: int = auction.RTM_PLACES
     fill_options: list[CardOut] = []
+    you_done: bool = Field(default=False, description="auction rooms: you have passed or "
+                           "set a limit on this lot, so the room is not waiting on you")
+    your_limit: int | None = Field(default=None, description="auction rooms: your limit")
+    waiting_on: list[str] = Field(default=[], description="auction rooms: who is deciding")
     suggestion: list[int] | None = Field(
         default=None, description="squad indexes: eleven in batting order, then Impact")
     twelve: list[int] | None = None
@@ -1858,7 +1871,11 @@ class AuctionOut(BaseModel):
     purse_total: int = auction.PURSE
 
 
-def _sale_out(r: auction_session.Replay, sale: auction.Sale) -> AuctionSaleOut:
+# `RoomStateOut` refers to `AuctionOut` before it is defined; resolve that now it exists.
+RoomStateOut.model_rebuild()
+
+
+def _sale_out(r, sale: auction.Sale) -> AuctionSaleOut:
     teams = r.auction.teams
     c = sale.lot.card
     return AuctionSaleOut(
@@ -2141,7 +2158,61 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
     )
 
 
+def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionOut:
+    """The auction floor as ONE seat sees it [A139]. Nobody else's limit is ever sent:
+    a room shows the bidding, exactly as much as a real auction room would."""
+    r = room_auction.replay(room, deck)
+    a = r.auction
+    owners = {p.franchise: p.name for p in room.players.values() if not p.is_cpu}
+    you_idx = r.team_of.get(caller_id)
+    you = a.teams[you_idx] if you_idx is not None else None
+    phase = r.phase
+    if phase == "fill" and r.fill_team != you_idx:
+        phase = "wait"
+    if phase == "twelve" and (caller_id not in r.team_of or caller_id in r.twelves):
+        phase = "wait"
+    names = {pid: room.players[pid].name for pid in room.players}
+    out = AuctionOut(
+        state=room.code, phase=phase, you=you.short if you else "",
+        franchise=you.franchise if you else "",
+        max_bid=you.max_bid() if you else 0,
+        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
+                              players=len(t.squad), overseas=t.overseas, human=t.human,
+                              owner=owners.get(t.short))
+               for t in a.teams],
+        squad=[AuctionSquadOut(card=_card(c), price=pr)
+               for c, pr in zip(you.squad, you.paid)] if you else [],
+        recent=[_sale_out(r, x) for x in a.sales[-25:]],
+        sold=sum(1 for x in a.sales if x.winner is not None),
+        waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
+    )
+    if r.phase == "bid":
+        lot = r.lot
+        same_set = [x for x in a.lots if x.set_code == lot.set_code and x.index > lot.index]
+        out.lot = AuctionLotOut(
+            lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
+            set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
+            card=_card(lot.card),
+            upcoming=[] if r.round_no == 1 else [x.card.name for x in same_set])
+        out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price) for b in r.bids]
+        out.leader = a.teams[r.leader].short if r.bids else None
+        out.price = r.bids[-1].price if r.bids else None
+        out.next_price = r.next_price
+        if you is not None:
+            out.can_bid = r.can_bid(you) and r.leader != you_idx
+            out.your_limit = r.proxies.get(you_idx)
+            out.you_done = you_idx in r.passed or you_idx in r.proxies
+    elif phase == "fill":
+        out.fill_options = [_card(c) for c in r.fill_options[:40]]
+    elif phase == "twelve":
+        sug = room_auction.suggestion(a, you_idx)
+        out.suggestion = (sug[0] + [sug[1]]) if sug else None
+    return out
+
+
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
+    if room.game == "auction":
+        return _auction_room_state_out(room, deck, caller_id)
     replay = rooms.replay_room(room, deck)
     remaining = 0
     if room.status == "drafting":
@@ -2166,6 +2237,40 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
         server_now=time.time(),
         turn_started_at=room.turn_started_at,
     )
+
+
+def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> RoomStateOut:
+    """An auction room's state. Seats carry their franchise; once the auction is over they
+    carry their twelve too, which is what the squad-review screen and the season read."""
+    sides = {}
+    if room.status == "complete":
+        sides = {pid: (order, impact) for pid, _p, order, impact
+                 in rooms.room_sides(room, deck)}
+    players = []
+    for pid, p in room.players.items():
+        order, impact = sides.get(pid, ([None] * XI_SIZE, None))
+        done = pid in sides
+        rating = team_rating(list(order) + [impact]) if done else None
+        players.append(RoomPlayerOut(
+            player_id=pid, name=p.name, is_cpu=p.is_cpu, franchise=p.franchise,
+            picks_made=TWELVE_SIZE if done else 0, done=done,
+            order=[_card(c) if c else None for c in order],
+            impact=_card(impact) if impact else None,
+            overall_rating=rating.overall if rating else None,
+            batting_rating=rating.batting if rating else None,
+            bowling_rating=rating.bowling if rating else None))
+    auction_view = None
+    if room.status in ("auctioning", "complete"):
+        auction_view = _room_auction_out(room, deck, caller_id)
+    return RoomStateOut(
+        code=room.code, format=room.format, seats=room.seats,
+        timer_seconds=room.timer_seconds, host_id=room.host_id, status=room.status,
+        round=0, seconds_remaining=max(0, round(room.turn_started_at - time.time()))
+        if room.status == "auctioning" else 0,
+        active_player_id=None, players=players, failure_reason=room.failure_reason,
+        draft_mode=room.draft_mode, is_open=room.is_open, version=room.version,
+        server_now=time.time(), turn_started_at=room.turn_started_at,
+        game=room.game, auction=auction_view)
 
 
 # --- the daily challenge ------------------------------------------------------------------
@@ -2582,7 +2687,7 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
         try:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
-                body.is_open)
+                body.is_open, body.game)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -2697,6 +2802,84 @@ def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+class FranchiseIn(BaseModel):
+    player_id: str
+    short: str
+
+
+class RoomBidIn(BaseModel):
+    player_id: str
+    price: int = Field(description="the price you raise to: must be the current next bid")
+
+
+class RoomLimitIn(BaseModel):
+    player_id: str
+    max: int = Field(description="lakh; the server bids for you up to this")
+
+
+class RoomPassIn(BaseModel):
+    player_id: str
+    scope: Literal["lot", "set", "all"]
+
+
+class RoomFillIn(BaseModel):
+    player_id: str
+    index: int = Field(ge=0)
+
+
+class RoomTwelveIn(BaseModel):
+    player_id: str
+    order: list[int] = Field(min_length=XI_SIZE, max_length=XI_SIZE)
+    impact: int
+
+
+@app.post("/api/rooms/{code}/franchise", response_model=RoomStateOut)
+def room_franchise(code: str, body: FranchiseIn) -> RoomStateOut:
+    with _db() as conn:
+        try:
+            room = rooms.choose_franchise(conn, code, body.player_id, body.short)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+def _auction_move(code: str, player_id: str, action, *args) -> RoomStateOut:
+    """Every auction-room move goes through `room_auction.submit`, under the row lock.
+    A refusal is a 409 -- the move was reasonable when sent, but the room moved on (most
+    often "outbid") -- so the page refetches rather than treating it as a mistake."""
+    with _db() as conn:
+        try:
+            room = room_auction.submit(conn, code, STATE["deck"], action, player_id, *args)
+        except (room_auction.AuctionRoomError, rooms.RoomError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=player_id)
+
+
+@app.post("/api/rooms/{code}/auction/bid", response_model=RoomStateOut)
+def room_auction_bid(code: str, body: RoomBidIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.bid, body.price)
+
+
+@app.post("/api/rooms/{code}/auction/limit", response_model=RoomStateOut)
+def room_auction_limit(code: str, body: RoomLimitIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.limit, body.max)
+
+
+@app.post("/api/rooms/{code}/auction/pass", response_model=RoomStateOut)
+def room_auction_pass(code: str, body: RoomPassIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope)
+
+
+@app.post("/api/rooms/{code}/auction/fill", response_model=RoomStateOut)
+def room_auction_fill(code: str, body: RoomFillIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.fill, body.index)
+
+
+@app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)
+def room_auction_twelve(code: str, body: RoomTwelveIn) -> RoomStateOut:
+    return _auction_move(code, body.player_id, room_auction.twelve, body.order, body.impact)
 
 
 def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:

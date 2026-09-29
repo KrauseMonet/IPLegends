@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=f9af5ebb81">
+<link rel="stylesheet" href="/static/style.css?v=24941455c2">
 </head>
 <body>
 <div class="sheet">
@@ -118,6 +118,12 @@
               <span class="pick-seats">10 seats</span>
               <span class="pick-desc">Fourteen matches each, a table, then the playoffs.</span>
             </button>
+            <button class="pick" data-format="auction" aria-label="Auction — 10 franchises" onclick="pickFormat('auction')">
+              <span class="pick-num">04</span>
+              <span class="pick-name">Auction</span>
+              <span class="pick-seats">10 franchises</span>
+              <span class="pick-desc">Bid live for players, ₹120 crore each, then a league season. Empty franchises bid as computer teams.</span>
+            </button>
             <div class="pick-prompt">Choose one to continue</div>
         </div>
 
@@ -143,15 +149,15 @@
 
             <div class="rule-head"><span>Settings</span><span>Defaults are fine</span></div>
             <div class="settings">
-              <div class="room-label">Seconds per pick</div>
-              <div class="room-choices" id="timerChoices">
+              <div class="room-label draft-only">Seconds per pick</div>
+              <div class="room-choices draft-only" id="timerChoices">
                 <button class="room-choice" data-timer="15" onclick="pickTimer(15)">15s</button>
                 <button class="room-choice sel" data-timer="30" onclick="pickTimer(30)">30s</button>
                 <button class="room-choice" data-timer="45" onclick="pickTimer(45)">45s</button>
               </div>
 
-              <div class="room-label">Draft by</div>
-              <div class="room-choices" id="roomModeChoices">
+              <div class="room-label draft-only">Draft by</div>
+              <div class="room-choices draft-only" id="roomModeChoices">
                 <button class="room-choice sel" data-mode="stat" onclick="pickRoomDraftMode('stat')">Stat</button>
                 <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
               </div>
@@ -234,8 +240,8 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=dd3e0bfc76"></script>
+<script src="/static/common.js?v=5b0d2dca5e"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/rooms-setup.js?v=fd19f62b67"></script>
+<script src="/static/rooms-setup.js?v=5c3f22fe8c"></script>
 </body>
 </html>

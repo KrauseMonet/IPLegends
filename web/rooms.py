@@ -85,6 +85,7 @@ OPEN_ROOMS_LIMIT = 30
 # his season stats, 'memory' shows neither. Chosen once by the host at creation and
 # binding on every seat (migration 023); the join flow gets no choice of its own.
 DRAFT_MODES = ("stat", "memory")
+GAMES = ("draft", "auction")
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 6
 
@@ -101,6 +102,7 @@ class RoomPlayer:
     player_id: str
     name: str
     is_cpu: bool
+    franchise: str | None = None    # migration 033 -- auction rooms only
 
 
 @dataclass
@@ -135,6 +137,8 @@ class Room:
     # this field, so the number a request serves is always the one the write produced
     # rather than an in-memory guess at it.
     version: int = 0
+    # migration 033 -- 'draft' or 'auction' (web/room_auction.py). Set once at creation.
+    game: str = "draft"
 
     @property
     def seats(self) -> int:
@@ -239,7 +243,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                r.turn_started_at, r.failure_reason, r.moves, r.match_moves,
                r.draft_mode, r.is_open, r.version,
                extract(epoch from (now() - r.updated_at)) as idle_seconds,
-               p.player_id, p.name, p.is_cpu
+               p.player_id, p.name, p.is_cpu, r.game, p.franchise
           from rooms r
           left join room_players p on p.room_code = r.code
          where r.code = %s
@@ -258,15 +262,15 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
                 moves=list(moves or []), match_moves=list(match_moves or []),
                 draft_mode=draft_mode, is_open=is_open, version=version,
-                idle_seconds=float(idle_seconds or 0.0))
+                idle_seconds=float(idle_seconds or 0.0), game=rows[0][17])
     for row in rows:
-        player_id, name, is_cpu = row[14], row[15], row[16]
+        player_id, name, is_cpu, franchise = row[14], row[15], row[16], row[18]
         # NULL on every column of the right-hand side means the outer join matched no
         # seat at all -- a room that exists with nobody in it, which is a real state
         # (`leave_room` can empty a lobby), not a missing row to guess at.
         if player_id is None:
             continue
-        room.players[player_id] = RoomPlayer(player_id, name, is_cpu)
+        room.players[player_id] = RoomPlayer(player_id, name, is_cpu, franchise)
     return room
 
 
@@ -284,8 +288,8 @@ def _save_room(conn, room: Room) -> None:
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode, is_open, version)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                            draft_mode, is_open, version, game)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
@@ -299,7 +303,7 @@ def _save_room(conn, room: Room) -> None:
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
-         Json(room.match_moves), room.draft_mode, room.is_open),
+         Json(room.match_moves), room.draft_mode, room.is_open, room.game),
     ).fetchone()[0]
     # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
     # separate `conn.execute` per player, but every existing player's row is a guaranteed
@@ -312,22 +316,32 @@ def _save_room(conn, room: Room) -> None:
     # was the earlier, separate fix -- A92). Values are still individually conflict-
     # checked/skipped exactly as before; only the round-trip count changes.
     if room.players:
-        values_sql = ", ".join(["(%s, %s, %s, %s, %s)"] * len(room.players))
+        values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s)"] * len(room.players))
         params = []
         for seat_order, (player_id, p) in enumerate(room.players.items()):
-            params.extend([room.code, player_id, seat_order, p.name, p.is_cpu])
+            params.extend([room.code, player_id, seat_order, p.name, p.is_cpu, p.franchise])
+        # The franchise is the one seat field that changes after a seat exists (chosen in
+        # an auction room's lobby, or assigned at start), so it alone is updated on
+        # conflict; everything else about a seat is still set once.
         conn.execute(
             f"""
-            insert into room_players (room_code, player_id, seat_order, name, is_cpu)
+            insert into room_players (room_code, player_id, seat_order, name, is_cpu,
+                                      franchise)
             values {values_sql}
-            on conflict (room_code, player_id) do nothing
+            on conflict (room_code, player_id) do update set franchise = excluded.franchise
             """,
             params,
         )
 
 
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
-                 draft_mode: str = "stat", is_open: bool = False) -> tuple[Room, str]:
+                 draft_mode: str = "stat", is_open: bool = False,
+                 game: str = "draft") -> tuple[Room, str]:
+    if game not in GAMES:
+        raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
+    if game == "auction" and fmt != "league":
+        # Ten franchises bid, so ten sides play: ratified as league only [A139].
+        raise RoomError("an auction room plays the ten-team league")
     if fmt not in ROOM_FORMATS:
         raise RoomError(f"unknown format {fmt!r}: choose one of {sorted(ROOM_FORMATS)}")
     if timer_seconds not in TIMER_CHOICES:
@@ -338,7 +352,8 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     room_seed = sess.new_seed()
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
-                seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open)
+                seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
+                game=game)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     _save_room(conn, room)
     return room, host_id
@@ -354,6 +369,27 @@ def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
     room.players[player_id] = RoomPlayer(player_id, name, is_cpu=False)
     _save_room(conn, room)
     return room, player_id
+
+
+def choose_franchise(conn, code: str, player_id: str, short: str) -> Room:
+    """An auction room's lobby: a seat claims a franchise. Refused if another seat holds
+    it -- checked here for a clear message, and by a unique index in the database for the
+    case of two people choosing in the same instant (migration 033)."""
+    from game.auction import FRANCHISES
+    room = _load_room(conn, code)
+    if room.game != "auction":
+        raise RoomError("only an auction room has franchises")
+    if room.status != "lobby":
+        raise RoomError("franchises are chosen in the lobby")
+    if player_id not in room.players:
+        raise RoomError("you are not seated in this room")
+    if short not in {s for s, _ in FRANCHISES}:
+        raise RoomError(f"unknown franchise {short!r}")
+    if any(p.franchise == short and pid != player_id for pid, p in room.players.items()):
+        raise RoomError(f"{short} is already taken")
+    room.players[player_id].franchise = short
+    _save_room(conn, room)
+    return room
 
 
 @dataclass
@@ -470,6 +506,11 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
     if room.status != "lobby":
         raise RoomError("this room has already started")
 
+    if room.game == "auction":
+        _start_auction(room, deck)
+        _save_room(conn, room)
+        return room
+
     n = 0
     while len(room.players) < room.seats:
         n += 1
@@ -480,6 +521,25 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
     room.turn_started_at = time.time()
     _save_room(conn, room)
     return room
+
+
+def _start_auction(room: Room, deck: Deck) -> None:
+    """Every human without a franchise is given the first one free; every franchise left
+    over becomes a computer seat that bids for real -- not a historical squad dropped in,
+    as a draft room's filler is, because in an auction the other teams are rivals for the
+    same players [A139]."""
+    from game.auction import FRANCHISES
+    from web import room_auction
+    held = {p.franchise for p in room.players.values() if p.franchise}
+    free = [s for s, _ in FRANCHISES if s not in held]
+    for p in room.players.values():
+        if not p.franchise:
+            p.franchise = free.pop(0)
+    for short, name in FRANCHISES:
+        if short in free:
+            cpu_id = f"__cpu_{short}__"
+            room.players[cpu_id] = RoomPlayer(cpu_id, name, is_cpu=True, franchise=short)
+    room_auction.start(room, deck)
 
 
 def play_again(conn, code: str, player_id: str) -> Room:
@@ -832,6 +892,15 @@ def room_state(conn, code: str, deck: Deck) -> Room:
     # case the idle sweep would otherwise delete out from under the people sitting in it.
     if room.idle_seconds > PRESENCE_HEARTBEAT_MINUTES * 60:
         _touch_room(conn, room)
+    if room.status == "auctioning":
+        # `turn_started_at` is a DEADLINE in an auction room, not a start time.
+        if time.time() <= room.turn_started_at:
+            return room
+        from web import room_auction
+        room = _load_room(conn, code, lock=True)
+        if room_auction.resolve(room, deck):
+            _save_room(conn, room)
+        return room
     if room.status != "drafting" or time.time() - room.turn_started_at <= room.timer_seconds:
         return room
     room = _load_room(conn, code, lock=True)
@@ -861,6 +930,9 @@ def room_sides(room: Room, deck: Deck):
     the one place that override happens, so it shows up correctly everywhere downstream
     that reads a seat's name: the draft-lobby roster AND the match-phase `Side` naming
     used in scorecards and results alike."""
+    if room.game == "auction":
+        from web import room_auction
+        return room_auction.room_sides(room, deck)
     replay = replay_room(room, deck)
     out = []
     for pid, p in room.players.items():

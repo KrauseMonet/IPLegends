@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=f9af5ebb81">
+<link rel="stylesheet" href="/static/style.css?v=24941455c2">
 </head>
 <body>
 <div class="sheet">
@@ -98,6 +98,11 @@
           </div>
           <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
           <div id="lobbyPlayers" class="col-scroll"></div>
+          <!-- [A139] An auction room's lobby: every seat claims a franchise. -->
+          <div id="lobbyFranchiseWrap" class="hide">
+            <div class="col-head" style="margin-bottom:0"><span>Your franchise</span><em>unchosen ones bid as computer teams</em></div>
+            <div id="lobbyFranchises" class="auc-franchises auc-lobby-franchises"></div>
+          </div>
           <div class="foot-actions">
             <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
             <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
@@ -156,6 +161,134 @@
       <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
         <button class="act lead hide" id="roomDoneBtn" onclick="leaveRoomAndGoHome()">Done</button>
       </div>
+    </div>
+
+    <!-- ============ AUCTION ROOM [A139] ============
+         The auction page's own floor, fill round and twelve, reused verbatim: auction.js
+         draws all three in room mode (window.AUCTION_ROOM), so there is one floor to keep
+         working, not two. -->
+    <div id="roomAuction" class="hide">
+    <!-- ============ THE FLOOR ============ -->
+    <section id="aucFloor" class="hide">
+      <div class="auc-floor">
+        <div class="auc-stage-col">
+          <div class="auc-lotbar">
+            <span id="aucSetLabel">—</span>
+            <em id="aucLotNo"></em>
+          </div>
+          <div class="auc-stage" id="aucStage">
+            <div class="auc-card" id="aucCard"></div>
+            <div class="auc-stamp hide" id="aucStamp"></div>
+          </div>
+
+          <div class="auc-bidbox" id="aucBidBox">
+            <div class="auc-bidrow">
+              <div class="auc-price-wrap">
+                <div class="auc-price-label" id="aucPriceLabel">Base price</div>
+                <div class="auc-price" id="aucPrice">—</div>
+              </div>
+              <div class="auc-leader" id="aucLeader"></div>
+              <div class="auc-ring hide" id="aucRing">
+                <svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" class="track"/>
+                  <circle cx="22" cy="22" r="19" class="fill" id="aucRingFill"/></svg>
+                <b id="aucRingNum"></b>
+              </div>
+            </div>
+
+            <div class="room-choices auc-style-switch">
+              <button class="room-choice" data-style="live" onclick="setBidStyle('live')">Click to bid</button>
+              <button class="room-choice" data-style="limit" onclick="setBidStyle('limit')">Set my limit</button>
+            </div>
+            <div id="aucLive" class="hide">
+              <button class="act lead auc-bigbid" id="aucBidBtn" onclick="liveBid(this)">Bid</button>
+            </div>
+            <div id="aucLimit" class="hide">
+              <div class="auc-limit">
+                <button class="act minor" onclick="nudgeLimit(-1)" aria-label="Lower">−</button>
+                <div class="auc-limit-val"><span>My limit</span><b id="aucLimitVal">—</b></div>
+                <button class="act minor" onclick="nudgeLimit(1)" aria-label="Raise">+</button>
+              </div>
+              <div class="auc-limit-quick">
+                <button class="act minor" onclick="jumpLimit(100)">+₹1 cr</button>
+                <button class="act minor" onclick="jumpLimit(500)">+₹5 cr</button>
+                <button class="act minor" onclick="jumpLimit(1000)">+₹10 cr</button>
+              </div>
+              <button class="act lead auc-bigbid" id="aucLimitBtn" onclick="limitBid(this)">Bid up to —</button>
+            </div>
+
+            <div class="auc-note" id="aucNote"></div>
+            <div class="actions minor-row">
+              <button class="act minor" id="aucPassBtn" onclick="passLot('lot', this)">Not interested</button>
+              <button class="act minor" onclick="passLot('set', this)" title="Pass on every player left in this set">Skip set</button>
+              <button class="act minor" onclick="skipRest(this)" title="Pass on everything left; the fill round completes your squad">Skip to the end</button>
+            </div>
+          </div>
+
+          <div class="auc-upnext" id="aucUpNext"></div>
+        </div>
+
+        <div class="auc-side-col">
+          <div class="col-head"><span>Your purse</span><em id="aucYouShort"></em></div>
+          <div class="auc-purse">
+            <b id="aucPurse">—</b>
+            <span id="aucReserve"></span>
+          </div>
+          <div class="gauge"><i id="aucPurseBar" style="width:100%"></i></div>
+          <div class="col-head"><span>The room</span></div>
+          <div id="aucTeams" class="auc-teams"></div>
+          <div class="col-head"><span>Sold</span><em id="aucSoldCount"></em></div>
+          <div id="aucFeed" class="auc-feed"></div>
+        </div>
+      </div>
+
+      <div class="auc-squad-wrap">
+        <div class="col-head"><span>Your squad</span><em id="aucSquadCount">0/18</em></div>
+        <div id="aucSquad" class="auc-squad"></div>
+      </div>
+    </section>
+
+    <!-- ============ FILL ROUND ============ -->
+    <section id="aucFill" class="hide">
+      <div class="auc-hero">
+        <div class="auc-kicker">Fill round</div>
+        <h2 class="auc-title">Complete your <span>eighteen</span></h2>
+        <p class="auc-lede" id="aucFillLede"></p>
+      </div>
+      <div id="aucFillList" class="auc-fill-list"></div>
+    </section>
+
+    <!-- ============ PICK YOUR TWELVE ============ -->
+    <section id="aucTwelve" class="hide">
+      <div class="auc-hero">
+        <div class="auc-kicker">The hammer has fallen</div>
+        <h2 class="auc-title">Pick your <span>twelve</span></h2>
+        <p class="auc-lede">We've suggested the strongest legal twelve. Tap a player in the twelve,
+          then tap anyone to swap them. A legal twelve needs a wicketkeeper, five bowling
+          options, eleven batting positions and no more than four overseas players.</p>
+      </div>
+      <div class="auc-twelve">
+        <div class="col">
+          <div class="col-head"><span>Batting order</span><em id="aucTwelveRating"></em></div>
+          <div id="aucOrder"></div>
+        </div>
+        <div class="col">
+          <div class="col-head"><span>Bench</span><em>6</em></div>
+          <div id="aucBench"></div>
+          <div id="aucTwelveCheck" class="legality note"></div>
+          <div class="foot-actions">
+            <button class="act lead" id="aucSeasonBtn" onclick="playSeason(this)">Play the season</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+      <section id="aucWait" class="hide">
+        <div class="auc-hero">
+          <div class="auc-kicker">Auction room</div>
+          <h2 class="auc-title">Hold <span>tight</span></h2>
+          <p class="auc-lede" id="aucWaitText"></p>
+        </div>
+      </section>
     </div>
 
     <div id="roomFailed" class="hide">
@@ -331,10 +464,12 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=dd3e0bfc76"></script>
+<script src="/static/common.js?v=5b0d2dca5e"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script src="/static/reveal.js?v=7e83b0e733"></script>
 <script src="/static/analysis.js?v=318fdf444f"></script>
-<script src="/static/room.js?v=5d979cc573"></script>
+<script>window.AUCTION_ROOM = true;</script>
+<script src="/static/room.js?v=0773f96d3c"></script>
+<script src="/static/auction.js?v=a3a3165af3"></script>
 </body>
 </html>

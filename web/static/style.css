@@ -1779,3 +1779,20 @@ body.has-ground{
   .auc-retain-name{flex:1 1 calc(100% - 60px)}
   .auc-retain-row .act.minor{margin-left:auto}
 }
+
+/* --- auction rooms [A139] --- */
+.auc-style-switch{margin:14px 0 0}
+.auc-style-switch .room-choice{padding:6px 12px;font-size:11px}
+.auc-owner{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--gold);
+  max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auc-team:has(.auc-owner){grid-template-columns:auto auto 1fr auto auto}
+.auc-lobby-franchises{grid-template-columns:repeat(5,1fr);padding:12px;margin-top:0;gap:8px}
+.auc-lobby-franchises .auc-fr{min-height:78px;padding:10px}
+.auc-lobby-franchises .auc-fr b{font-size:22px}
+.auc-fr.taken{opacity:.45;cursor:not-allowed}
+.auc-fr .auc-fr-owner{font-family:var(--mono);font-size:10px;color:var(--gold)}
+@media (max-width:900px){ .auc-lobby-franchises{grid-template-columns:repeat(3,1fr)} }
+/* The lobby column is height-capped like the draft's panels, so the franchise grid added
+   under the player list squeezed the list to nothing. A lobby is short; let it grow. */
+#roomLobby .col{max-height:none}
+#roomLobby #lobbyPlayers{flex:none}

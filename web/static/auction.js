@@ -9,7 +9,16 @@
 // LIMIT names a maximum and lets the auctioneer bid up to it. The server treats them
 // identically (a clicker's last bid is exactly a maximum), so switching mid-auction is safe.
 
-function effectiveDraftMode(){ return 'stat'; }   // ratings are always shown here
+// [A139] The same floor serves an auction ROOM: room.html sets window.AUCTION_ROOM before
+// loading this file, and room.js supplies `roomAuctionPost` (the network) and
+// `roomAuctionDeadline` (the server's clock). The differences are all here, behind this flag:
+// a room's moves go to /api/rooms/{code}/auction/*, its countdown is the server's deadline
+// and never passes a lot for you, and a room's floor waits on other people.
+const AUCTION_ROOM = !!window.AUCTION_ROOM;
+
+// Ratings are always shown on the auction floor. On the room page room.js already defines
+// `effectiveDraftMode` for the draft, so this one is only installed where it is alone.
+if (!AUCTION_ROOM) window.effectiveDraftMode = () => 'stat';
 
 const TEAM_COLOURS = {
   CSK: ['#f9cd05', '#1a1204'], MI: ['#1b5fc1', '#fff'], RCB: ['#d11d26', '#fff'],
@@ -84,7 +93,8 @@ function chooseTeam(s){
 function setBidStyle(style){
   BID_STYLE = style;
   try { localStorage.setItem(STYLE_KEY, style); } catch(e) {}
-  document.querySelectorAll('#aucStyleChoices .room-choice').forEach(b =>
+  // The setup screen's choice and the floor's own switch are the same setting.
+  document.querySelectorAll('.room-choice[data-style]').forEach(b =>
     b.classList.toggle('sel', b.dataset.style === style));
   if (A && A.phase === 'bid') renderBidControls();
 }
@@ -108,14 +118,18 @@ function startAuction(ctrl){
 // --- screens -------------------------------------------------------------------------------
 
 function show(id){
-  ['aucSetup', 'aucRetain', 'aucFloor', 'aucFill', 'aucTwelve'].forEach(s =>
-    $('#' + s).classList.toggle('hide', s !== id));
+  // A room page carries only the floor, the fill round, the twelve and the wait panel.
+  ['aucSetup', 'aucRetain', 'aucFloor', 'aucFill', 'aucTwelve', 'aucWait'].forEach(s => {
+    const el = $('#' + s);
+    if (el) el.classList.toggle('hide', s !== id);
+  });
 }
 
 async function apply(d, animate){
   const prev = A;
   stopCountdown();
-  history.replaceState(null, '', '#' + d.state);
+  // The address bar carries the single-player auction's state. A room's URL is the room.
+  if (!AUCTION_ROOM) history.replaceState(null, '', '#' + d.state);
   closeRtm();
   if (animate && prev && prev.phase === 'bid') await animateFrom(prev, d);
   else if (animate && prev && isRtm(prev.phase)) await stampAfterRtm(prev, d);
@@ -129,6 +143,7 @@ async function apply(d, animate){
     if (isRtm(d.phase)) openRtm();
   }
   else if (d.phase === 'fill'){ show('aucFill'); renderFill(); }
+  else if (d.phase === 'wait' || d.phase === 'complete'){ renderWait(); show('aucWait'); }
   else { renderTwelve(); show('aucTwelve'); }
 }
 
@@ -139,6 +154,8 @@ async function apply(d, animate){
 // could not buy) go straight into the feed rather than making you watch them.
 
 function saleKey(s){ return s.round + ':' + s.lot; }
+// Your own franchise's row. Not "the human team": in a room several teams are people.
+function yourTeam(d){ return d.teams.find(t => t.short === d.you) || d.teams.find(t => t.human); }
 function isRtm(phase){ return phase === 'rtm_use' || phase === 'rtm_match' || phase === 'rtm_raise'; }
 
 // Once a Right to Match question is answered the lot is decided: show its hammer, which
@@ -276,7 +293,7 @@ function bandOf(c){
 
 function renderSide(){
   const d = A;
-  const you = d.teams.find(t => t.human);
+  const you = yourTeam(d);
   $('#aucYouShort').innerHTML = chip(d.you);
   $('#aucPurse').textContent = cr(you.purse);
   const open = d.squad_size - you.players;
@@ -287,8 +304,8 @@ function renderSide(){
   $('#aucPurseBar').style.width = (100 * you.purse / d.purse_total) + '%';
 
   $('#aucTeams').innerHTML = d.teams.map(t => `
-    <div class="auc-team${t.human ? ' you' : ''}">
-      ${chip(t.short)}
+    <div class="auc-team${t.short === d.you ? ' you' : ''}">
+      ${chip(t.short)}${t.owner ? `<em class="auc-owner">${t.owner}</em>` : ''}
       <div class="auc-team-bar"><i style="width:${100 * t.purse / d.purse_total}%;background:${TEAM_COLOURS[t.short][0]}"></i></div>
       <b>${cr(t.purse)}</b>
       <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>
@@ -317,6 +334,8 @@ function renderSide(){
 
 function renderBidControls(){
   const d = A;
+  document.querySelectorAll('.room-choice[data-style]').forEach(b =>
+    b.classList.toggle('sel', b.dataset.style === BID_STYLE));
   const liveMode = BID_STYLE === 'live';
   $('#aucLive').classList.toggle('hide', !liveMode);
   $('#aucLimit').classList.toggle('hide', liveMode);
@@ -339,6 +358,15 @@ function renderBidControls(){
       : (d.bids.length ? '' : 'Bidding opens at the base price.');
   }
   $('#aucPassBtn').textContent = d.your_bid ? 'Let him go' : 'Not interested';
+  if (AUCTION_ROOM){
+    if (d.leader === d.you) note.textContent = 'You lead. Waiting on the room…';
+    else if (d.your_limit) note.textContent = `Your limit of ${cr(d.your_limit)} is bidding for you.`;
+    else if (d.you_done) note.textContent = 'You passed on this one.';
+    $('#aucPassBtn').disabled = d.you_done || d.leader === d.you;
+    // In a room the clock is everyone's, whichever way you bid.
+    startCountdown();
+    return;
+  }
 
   if (liveMode) startCountdown(); else stopCountdown();
 }
@@ -362,6 +390,13 @@ function jumpLimit(lakh){
   renderLimit();
 }
 
+// Room mode: what a single-player move means as a ROOM move.
+function roomMove(path, body){
+  if (path === 'bid' && body.done) return ['limit', {max: body.ceiling}];
+  if (path === 'bid') return ['bid', {price: body.ceiling}];
+  return [path, body];
+}
+
 async function send(path, body, ctrl){
   if (BUSY) return;
   BUSY = true;
@@ -374,9 +409,11 @@ async function send(path, body, ctrl){
   // Not busyClick: that dims the whole section, and the exchange that plays out next is
   // the one moment the floor most needs to be watched.
   try {
-    const d = await api(`/api/auction/${A.state}/${path}`, {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-    await apply(d, true);
+    const d = AUCTION_ROOM
+      ? await window.roomAuctionPost(...roomMove(path, body))
+      : await api(`/api/auction/${A.state}/${path}`, {method: 'POST',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (d) await apply(d, true);
   } catch(e){
     slip(e.message);
     if (A && A.phase === 'bid' && BID_STYLE === 'live') startCountdown();
@@ -400,6 +437,7 @@ function skipRest(ctrl){
 function startCountdown(){
   stopCountdown();
   if (!A || A.phase !== 'bid') return;
+  if (AUCTION_ROOM) return startRoomCountdown();
   const ring = $('#aucRing'), fill = $('#aucRingFill'), num = $('#aucRingNum');
   const total = LIVE_SECONDS * 1000, start = performance.now(), C = 2 * Math.PI * 19;
   ring.classList.remove('hide');
@@ -414,6 +452,23 @@ function startCountdown(){
   tick();
   COUNTDOWN = setInterval(tick, 100);
 }
+// A room's lot clock is the SERVER's deadline, the same for everybody; running out closes
+// the lot on the server, never here -- this only shows how long is left.
+function startRoomCountdown(){
+  const ring = $('#aucRing'), fill = $('#aucRingFill'), num = $('#aucRingNum');
+  const C = 2 * Math.PI * 19, total = 15;
+  ring.classList.remove('hide');
+  fill.style.strokeDasharray = C;
+  const tick = () => {
+    const left = Math.max(0, window.roomAuctionDeadline());
+    fill.style.strokeDashoffset = C * (1 - Math.min(1, left / total));
+    num.textContent = Math.ceil(left);
+    ring.classList.toggle('urgent', left < 4);
+  };
+  tick();
+  COUNTDOWN = setInterval(tick, 200);
+}
+
 function stopCountdown(){
   clearInterval(COUNTDOWN); COUNTDOWN = null;
   const ring = $('#aucRing');
@@ -553,7 +608,7 @@ function openRtm(){
 }
 
 function cardsLeft(d){
-  const n = d.teams.find(t => t.human).rtm;
+  const n = yourTeam(d).rtm;
   return `${n} card${n === 1 ? '' : 's'} left`;
 }
 
@@ -576,7 +631,7 @@ function answerRtm(yes, ctrl){
 
 function renderFill(){
   const d = A;
-  const you = d.teams.find(t => t.human);
+  const you = yourTeam(d);
   const need = d.squad_size - you.players;
   $('#aucFillLede').textContent = `The hammer has fallen with ${need} place${need === 1 ? '' : 's'} `
     + `still open in your squad. Take the players you want at ₹30L each, best first.`;
@@ -594,17 +649,31 @@ function renderFill(){
 function takeFill(i, ctrl){
   busyClick(ctrl, null, async () => {
     try {
-      const d = await api(`/api/auction/${A.state}/fill`, {method: 'POST',
-        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: i})});
-      await apply(d, false);
+      const d = AUCTION_ROOM ? await window.roomAuctionPost('fill', {index: i})
+        : await api(`/api/auction/${A.state}/fill`, {method: 'POST',
+            headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: i})});
+      if (d) await apply(d, false);
     } catch(e){ slip(e.message); }
   });
+}
+
+// --- a room waiting on other people [A139] ---------------------------------------------------
+
+function renderWait(){
+  const d = A, el = $('#aucWaitText');
+  if (!el) return;
+  const who = d.waiting_on && d.waiting_on.length ? d.waiting_on.join(', ') : 'the room';
+  el.textContent = d.phase === 'complete'
+    ? 'The auction is over. The season is about to start.'
+    : `Waiting on ${who}…`;
 }
 
 // --- pick your twelve ----------------------------------------------------------------------
 
 function renderTwelve(){
   const d = A;
+  // In a room the season waits for everybody's twelve, so the button only locks yours in.
+  if (AUCTION_ROOM) $('#aucSeasonBtn').textContent = 'Lock in my twelve';
   if (!TWELVE) TWELVE = (d.twelve || d.suggestion || []).slice();
   drawTwelve();
 }
@@ -662,6 +731,16 @@ function benchTap(si){
 }
 
 function playSeason(ctrl){
+  if (AUCTION_ROOM){
+    busyClick(ctrl, 'Sending your twelve…', async () => {
+      try {
+        const d = await window.roomAuctionPost('twelve',
+          {order: TWELVE.slice(0, 11), impact: TWELVE[11]});
+        if (d) await apply(d, false);
+      } catch(e){ slip(e.message); }
+    });
+    return;
+  }
   busyClick(ctrl, 'Playing the season…', async () => {
     try {
       const d = await api(`/api/auction/${A.state}/twelve`, {method: 'POST',
@@ -674,7 +753,7 @@ function playSeason(ctrl){
 
 // --- boot ----------------------------------------------------------------------------------
 
-async function boot(){
+async function auctionBoot(){
   loadMe();
   loadMeta().then(renderDeckStats).catch(() => {});
   const h = location.hash.slice(1);
@@ -682,4 +761,4 @@ async function boot(){
   try { await apply(await api('/api/auction/' + h), false); }
   catch(e){ slip(e.message); history.replaceState(null, '', location.pathname); renderSetup(); }
 }
-boot();
+if (!AUCTION_ROOM) auctionBoot();

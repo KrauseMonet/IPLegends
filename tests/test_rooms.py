@@ -100,16 +100,19 @@ class FakeConn:
             # updated_at)), not stored -- computed here too rather than kept as a column,
             # which is what lets a test move `updated_at` and see the effect.
             idle = max(0.0, time.time() - self.updated_at.get(code, time.time()))
-            row = tuple(row) + (idle,)
             seats = sorted(self.players.get(code, {}).values(), key=lambda r: r[0])
+            # `r.game` and `p.franchise` (migration 033) come last in the real SELECT,
+            # after the player columns; game is stored at row index 13.
+            game = row[13]
+            base = row[:13] + (idle,)
             if not seats:
                 # A room with no seats still returns exactly one row, with every column
                 # of the right-hand side NULL -- that is what an outer join does, and
                 # `_load_room` has an explicit branch for it.
-                return FakeCursor([row + (None, None, None)])
+                return FakeCursor([base + (None, None, None, game, None)])
             return FakeCursor([
-                row + (pid, name, is_cpu)
-                for (_seat, pid, name, is_cpu) in seats
+                base + (pid, name, is_cpu, game, franchise)
+                for (_seat, pid, name, is_cpu, franchise) in seats
             ])
 
         if sql_norm.startswith("set local lock_timeout"):
@@ -147,13 +150,18 @@ class FakeConn:
 
         if sql_norm.startswith("insert into room_players"):
             # One multi-row insert per call now (`_save_room`'s own docstring on why),
-            # so `params` is N*5 flat values, not always exactly 5 -- chunk back into
-            # per-row tuples the same way psycopg binds them against the repeated
-            # `(%s, %s, %s, %s, %s)` VALUES clause.
-            for k in range(0, len(params), 5):
-                code, player_id, seat_order, name, is_cpu = params[k:k + 5]
-                self.players.setdefault(code, {})[player_id] = (
-                    seat_order, player_id, name, is_cpu)
+            # so `params` is N*6 flat values -- chunk back into per-row tuples the same
+            # way psycopg binds them against the repeated VALUES clause. On conflict only
+            # the franchise is updated (migration 033), exactly like the real statement:
+            # a seat's order, name and CPU flag keep what the first insert wrote.
+            for k in range(0, len(params), 6):
+                code, player_id, seat_order, name, is_cpu, franchise = params[k:k + 6]
+                seats = self.players.setdefault(code, {})
+                if player_id in seats:
+                    old = seats[player_id]
+                    seats[player_id] = old[:4] + (franchise,)
+                else:
+                    seats[player_id] = (seat_order, player_id, name, is_cpu, franchise)
             return FakeCursor([])
 
         if sql_norm.startswith("delete from room_players"):
@@ -164,7 +172,7 @@ class FakeConn:
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
              turn_started_at, failure_reason, moves, match_moves, draft_mode,
-             is_open) = params
+             is_open, game) = params
             # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
             # code; unwrap to the plain list each wraps, exactly what a real jsonb
             # column reads back.
@@ -176,7 +184,7 @@ class FakeConn:
                 # that has been written once is at version 1, not 0.
                 self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, draft_mode, is_open, 1)
+                                     match_moves_value, draft_mode, is_open, 1, game)
             else:
                 # Mirrors the real `on conflict (code) do update set` clause exactly --
                 # only status/turn_started_at/failure_reason/moves/match_moves are ever
@@ -188,13 +196,13 @@ class FakeConn:
                 # `_save_room` call NOT actually changing the seed in real Postgres,
                 # silently papered over by a fake that changes it anyway.
                 (ecode, efmt, etimer, eseed, ehost, _estatus,
-                 _eturn, _efail, _emoves, _ematch, edraft, eopen, eversion) = existing
+                 _eturn, _efail, _emoves, _ematch, edraft, eopen, eversion, egame) = existing
                 # `version = rooms.version + 1` in the real ON CONFLICT clause: it
                 # increments on EVERY write, whatever changed, and is never reset --
                 # including by play_again, which resets everything else about the room.
                 self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, edraft, eopen, eversion + 1)
+                                     match_moves_value, edraft, eopen, eversion + 1, egame)
             # RETURNING version -- `_save_room` reads this back onto the Room object so
             # the response it serves carries the version its own write produced.
             self.updated_at[code] = time.time()

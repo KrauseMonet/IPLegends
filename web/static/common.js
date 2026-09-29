@@ -344,7 +344,7 @@ function hideStat(e){
    a field, filled when the seat is taken. Lives here rather than in rooms-setup.js because
    the same object serves the lobby at 300px and a room list row at 34px. */
 
-const FORMAT_SEATS = {final: 2, cup: 4, league: 10};
+const FORMAT_SEATS = {final: 2, cup: 4, league: 10, auction: 10};
 
 function fieldWheel(seats, filled, opts){
   const o = opts || {};

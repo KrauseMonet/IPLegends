@@ -2401,3 +2401,42 @@ the 99-rated legends before the auction starts, and our squads buy eighteen, not
 `Auction.current_bids` while it decides the lot, so a replay paused at a Right to Match
 question can play the exchange before asking — the same bids recorded for the lot once it
 is answered, which a test pins.
+
+### 15.8 Auction rooms [A139]
+
+A room can play an **auction** instead of a snake draft (`rooms.game = 'auction'`,
+migration 033). It is always the ten-franchise **league**: humans choose franchises in the
+lobby, and every franchise nobody chose is a computer team that bids for real — not a
+historical squad dropped in, as a draft room's filler is, because in an auction the other
+teams are rivals for the same players. Open auction only for now; retentions and Right to
+Match in rooms are phase 4b.
+
+**The same room machinery, a different resolve.** One shared move log, rebuilt from scratch
+on every request (`web/room_auction.py`, cached per room, seed and move count), with
+anything overdue resolved by whichever request arrives next. A lot is a sequence of events
+rather than one number, because several people bid against each other:
+
+- `bid` names the price it raises to, and a bid against a price already beaten is refused
+  as **outbid** (409) rather than applied to a room it no longer describes;
+- after every human event the automatic bidders reply at once — every computer team, from a
+  limit fixed when the lot opened, and every human who set a **limit** — so every person in
+  the room sees the same exchange;
+- `pass`, `pass_set` and `pass_all` take a human out of this lot, this set, or everything.
+
+**A lot closes the moment every human is done with it** — passed, set a limit, leading, or
+unable to buy — which the log alone decides, so it needs no recorded move. Only a close
+forced by the clock is recorded (`close`), because time is the one input the log lacks.
+Without the early close, 260 lots at fifteen seconds each is over an hour. Measured live:
+two humans passing on everything resolved the rest of the auction in one ~3 s request.
+
+**The clock, ratified by the user: 15 seconds a lot, plus 5 for every bid.** In an auction
+room `rooms.turn_started_at` holds the current stage's DEADLINE (epoch seconds), not a start
+time. The fill round gives each human 20 s a choice and the twelve 90 s; running out applies
+the suggestion (the best remaining player, the strongest legal twelve).
+
+After the auction the room is `complete` and the existing match phase takes over unchanged:
+`rooms.room_sides` returns each seat's twelve (a human's chosen one, a computer team's best),
+which is all the league, playoffs, squad review and journey card ever read.
+
+Migration 034 widened `rooms_status_check` to allow `'auctioning'`, which 033 missed — see
+A139 for how, and `tests/test_room_schema.py` for the guard that now stops it recurring.

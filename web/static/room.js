@@ -370,7 +370,7 @@ function roomOnline(ok){
 }
 
 async function startRoomDraft(ctrl){
-  await busyClick(ctrl, 'Starting…', async () => {
+  await busyClick(ctrl, ROOM && ROOM.game === 'auction' ? 'Opening the auction…' : 'Starting…', async () => {
     const myGen = ++ROOM_GEN;
     try {
       const room = await roomApi(`/api/rooms/${ROOM_CODE}/start`, {method:'POST',
@@ -451,11 +451,13 @@ function renderRoom(){
   if (!r) return;
   $('#roomLobby').classList.toggle('hide', r.status !== 'lobby');
   $('#roomDraft').classList.toggle('hide', r.status !== 'drafting');
+  $('#roomAuction').classList.toggle('hide', r.status !== 'auctioning');
   $('#roomResult').classList.toggle('hide', r.status !== 'complete');
   $('#roomFailed').classList.toggle('hide', r.status !== 'failed');
 
   if (r.status === 'lobby') renderRoomLobby(r);
   else if (r.status === 'drafting') renderRoomDraft(r);
+  else if (r.status === 'auctioning') renderRoomAuction(r);
   else if (r.status === 'failed') renderRoomFailed(r);
   else renderRoomResult(r);
 }
@@ -468,11 +470,16 @@ function renderRoomFailed(r){
 }
 
 function renderRoomLobby(r){
+  const auction = r.game === 'auction';
   $('#lobbyCode').textContent = r.code;
   $('#lobbySeats').textContent = `${r.players.length} of ${r.seats}`;
-  $('#lobbyFormat').textContent = r.format.toUpperCase();
-  $('#lobbyTimer').textContent = r.timer_seconds + 's per pick';
-  $('#lobbyMode').textContent = r.draft_mode === 'memory' ? 'Memory' : 'Stat';
+  $('#lobbyFormat').textContent = auction ? 'AUCTION · LEAGUE' : r.format.toUpperCase();
+  $('#lobbyTimer').textContent = auction ? '15s a lot, +5s a bid' : r.timer_seconds + 's per pick';
+  $('#lobbyMode').textContent = auction ? '₹120 crore each'
+                                        : (r.draft_mode === 'memory' ? 'Memory' : 'Stat');
+  $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
+  $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
+  if (auction) renderLobbyFranchises(r);
   const amHost = MY_PID === r.host_id;
   $('#lobbyPlayers').innerHTML = r.players.map(p => {
     const isHost = p.player_id === r.host_id;
@@ -481,11 +488,72 @@ function renderRoomLobby(r){
     const kickBtn = (amHost && !isHost)
       ? `<span class="picks"><button class="act" onclick="kickRoomPlayer('${p.player_id}', this)"
            >Kick</button></span>` : '';
+    const fr = p.franchise ? ` ${chip(p.franchise)}` : '';
     return `<div class="entry"><span class="nm">${p.name}${isHost
-      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}</span>${kickBtn}</div>`;
+      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}${fr}</span>${kickBtn}</div>`;
   }).join('');
   $('#lobbyStartBtn').classList.toggle('hide', !amHost);
 }
+
+// --- auction rooms [A139] --------------------------------------------------------------------
+
+function renderLobbyFranchises(r){
+  const held = {};
+  r.players.forEach(p => { if (p.franchise) held[p.franchise] = p; });
+  $('#lobbyFranchises').innerHTML = FRANCHISES.map(([s, name]) => {
+    const [bg, fg] = TEAM_COLOURS[s];
+    const owner = held[s];
+    const mine = owner && owner.player_id === MY_PID;
+    const taken = owner && !mine;
+    return `<button class="auc-fr${mine ? ' sel' : ''}${taken ? ' taken' : ''}" ${taken ? 'disabled' : ''}
+        onclick="chooseRoomFranchise('${s}', this)" style="--fr:${bg};--fr-ink:${fg}" title="${name}">
+      <b>${s}</b><span class="auc-fr-owner">${owner ? owner.name : ''}</span></button>`;
+  }).join('');
+}
+
+async function chooseRoomFranchise(short, ctrl){
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/franchise`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, short})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// auction.js draws the floor; this only feeds it. Updates are chained so an exchange that
+// is still animating is never cut off by the next poll's -- they play one after another.
+let AUCTION_CHAIN = Promise.resolve();
+let AUCTION_SEEN = 0;
+function renderRoomAuction(r){
+  if (!r.auction || r.version <= AUCTION_SEEN) return;
+  AUCTION_SEEN = r.version;
+  const view = r.auction, first = !A;
+  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, !first)).catch(e => slip(e.message));
+}
+
+// The two hooks auction.js calls in room mode.
+window.roomAuctionPost = async (path, body) => {
+  const myGen = ++ROOM_GEN;
+  const room = await roomApi(`/api/rooms/${ROOM_CODE}/auction/${path}`, {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({player_id: MY_PID, ...body})});
+  if (myGen !== ROOM_GEN) return null;
+  applyRoom(room);
+  AUCTION_SEEN = Math.max(AUCTION_SEEN, room.version);
+  if (room.status !== 'auctioning'){ renderRoom(); return null; }
+  // Through the same chain as a poll's update, so your own exchange never plays over the
+  // top of one still animating. Returns null: the chain has already drawn it.
+  const view = room.auction;
+  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, true)).catch(e => slip(e.message));
+  await AUCTION_CHAIN;
+  return null;
+};
+window.roomAuctionDeadline = () => (ROOM ? ROOM.turn_started_at - serverClock() : 0);
 
 async function kickRoomPlayer(targetId, ctrl){
   await busyClick(ctrl, 'Kicking…', async () => {

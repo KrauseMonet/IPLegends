@@ -422,11 +422,15 @@ class Team:
         return twelve_feasible(self.squad + [card], self.open_places - 1)
 
 
-def make_teams(seed: int, human_short: str | None = None) -> list[Team]:
+def make_teams(seed: int, human_short: str | None = None,
+               humans: frozenset[str] = frozenset()) -> list[Team]:
+    """The ten franchises. `human_short` is the single player's; `humans` is a room's,
+    where several franchises are people. A computer team's personality depends only on
+    the seed and its index, never on who else is human."""
     teams = []
     for i, (short, name) in enumerate(FRANCHISES):
         personality = PERSONALITIES[_mix(seed, i, 3) % len(PERSONALITIES)]
-        teams.append(Team(i, short, name, human=(short == human_short),
+        teams.append(Team(i, short, name, human=(short == human_short or short in humans),
                           personality=personality))
     return teams
 
@@ -646,9 +650,19 @@ def bid_log(lot: Lot, ceilings: dict[int, int], seed: int, round_no: int,
     price and is not already leading may bid; the human, if willing, goes first (they are
     the one clicking), otherwise the next bidder is a pure hash of where the lot stands.
     Ends when nobody but the leader is willing."""
-    bids: list[Bid] = []
-    leader: int | None = None
-    price = lot.base
+    return continue_bidding(lot, [], ceilings, seed, round_no, human)
+
+
+def continue_bidding(lot: Lot, bids: list[Bid], ceilings: dict[int, int], seed: int,
+                     round_no: int, human: int | None = None) -> list[Bid]:
+    """`bid_log`, resumed from wherever `bids` left the lot. A room needs this: several
+    humans bid by hand, so a lot is not one call but a series of them, each human bid
+    followed by whatever the automatic bidders (`ceilings`) do in reply. The tie-break is
+    the same hash of (lot, price, leader), so resuming never changes what would have
+    happened -- `bid_log` is exactly this from an empty log."""
+    bids = list(bids)
+    leader: int | None = bids[-1].team if bids else None
+    price = bids[-1].price if bids else lot.base
     while True:
         target = lot.base if leader is None else next_price(price)
         willing = sorted(t for t, cap in ceilings.items() if t != leader and cap >= target)

@@ -188,6 +188,7 @@ async function animateFrom(prev, next){
   const fresh = bids.slice(prev.bids.length);
   await playBids(fresh);
   if (sale) await stamp(sale);
+  else if (stillOpen && fresh.length) announceBid(next.leader, next.price);
 }
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
@@ -255,14 +256,17 @@ async function stamp(sale){
 // download, and a knock can be pitched per bidder. Browsers refuse to play sound before the
 // page has been interacted with, so the context is created on the first click and every
 // cue before that is simply silent -- never an error. The auctioneer's voice is the
-// browser's own speech synthesis, an Indian English voice where the device has one. Both
-// are switchable on the floor and remembered.
+// browser's own speech synthesis, in one of two styles [A144]: a classic British auction
+// room (the default) or the original Indian English announcer. Sound, voice and style are
+// all switchable on the floor and remembered.
 
 const SOUND_KEY = 'iplegends_auction_sound', VOICE_KEY = 'iplegends_auction_voice';
-let SOUND_ON = true, VOICE_ON = true, AUDIO = null;
+const VOICE_STYLE_KEY = 'iplegends_auction_voice_style';
+let SOUND_ON = true, VOICE_ON = true, AUDIO = null, VOICE_STYLE = 'british';
 try {
   SOUND_ON = localStorage.getItem(SOUND_KEY) !== 'off';
   VOICE_ON = localStorage.getItem(VOICE_KEY) !== 'off';
+  VOICE_STYLE = localStorage.getItem(VOICE_STYLE_KEY) === 'indian' ? 'indian' : 'british';
 } catch(e) {}
 
 function audio(){
@@ -330,22 +334,98 @@ function priceWords(lakh){
   return `${crore} crore`;
 }
 
+// --- the auctioneer's voice [A144] -------------------------------------------------------
+//
+// Only the browser's own voices: nothing recorded, nothing cloned, no speech service. The
+// British style asks for a British male voice where the device has one (Daniel on Apple,
+// Google UK English Male in Chrome, Ryan or George on Windows) and speaks lower and more
+// deliberately, in short phrases with a beat between them -- the rhythm is what makes it an
+// auction room, since the device decides the timbre. A device with no British voice gets
+// any British one, then any English one, so the patter still runs in whatever voice exists.
+
+const BRITISH_MALE = /daniel|arthur|oliver|george|ryan|thomas|uk english male|male/i;
+let VOICES = [];
+function refreshVoices(){ try { VOICES = speechSynthesis.getVoices(); } catch(e) {} }
+if ('speechSynthesis' in window){
+  refreshVoices();
+  // Chrome fills the list asynchronously; the first getVoices() is usually empty.
+  speechSynthesis.addEventListener && speechSynthesis.addEventListener('voiceschanged', refreshVoices);
+}
+
+function pickVoice(){
+  if (!VOICES.length) refreshVoices();
+  const lang = v => (v.lang || '').replace('_', '-');
+  if (VOICE_STYLE === 'british'){
+    const gb = VOICES.filter(v => lang(v) === 'en-GB');
+    return gb.find(v => BRITISH_MALE.test(v.name) && !/female/i.test(v.name))
+        || gb[0] || VOICES.find(v => lang(v).startsWith('en')) || null;
+  }
+  return VOICES.find(v => lang(v) === 'en-IN') || VOICES.find(v => lang(v).startsWith('en')) || null;
+}
+
+// A line is a list of phrases, queued as separate utterances so each gets its own beat.
 function speak(text){
   if (!VOICE_ON || !('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();              // never queue behind a stale announcement
-    const u = new SpeechSynthesisUtterance(text);
-    const voices = speechSynthesis.getVoices();
-    u.voice = voices.find(v => v.lang === 'en-IN') || voices.find(v => v.lang.startsWith('en')) || null;
-    u.rate = 1.05;
-    speechSynthesis.speak(u);
+    const voice = pickVoice();
+    const british = VOICE_STYLE === 'british';
+    for (const phrase of [].concat(text)){
+      const u = new SpeechSynthesisUtterance(phrase);
+      u.voice = voice;
+      if (voice) u.lang = voice.lang;
+      u.rate = british ? 0.9 : 1.05;
+      u.pitch = british ? 0.85 : 1;
+      speechSynthesis.speak(u);
+    }
   } catch(e) {}
 }
 
+function franchiseName(short){
+  const team = A && A.teams.find(t => t.short === short);
+  return team ? team.franchise : short;
+}
+
+// An auctioneer says "two crore, forty lakh", not "two point four crore".
+function priceSpoken(lakh){
+  const crore = Math.floor(lakh / 100), rest = lakh % 100;
+  if (!crore) return `${rest} lakh`;
+  return rest ? `${crore} crore, ${rest} lakh` : `${crore} crore`;
+}
+
 function announceSale(sale){
-  if (!sale.team){ speak(`${sale.name}. Unsold.`); return; }
-  const team = A && A.teams.find(t => t.short === sale.team);
-  speak(`Sold! ${sale.name}, to ${team ? team.franchise : sale.team}, for ${priceWords(sale.price)}.`);
+  if (VOICE_STYLE !== 'british'){
+    if (!sale.team){ speak(`${sale.name}. Unsold.`); return; }
+    speak(`Sold! ${sale.name}, to ${franchiseName(sale.team)}, for ${priceWords(sale.price)}.`);
+    return;
+  }
+  if (!sale.team){ speak([`${sale.name}.`, 'No bid. Passed.']); return; }
+  const mine = sale.team === (A && A.you);
+  speak(['Sold!', `${sale.name}.`,
+         mine ? 'To you,' : `To ${franchiseName(sale.team)},`,
+         `at ${priceSpoken(sale.price)}.`]);
+}
+
+// British only: where the bidding stands once an exchange settles and the lot is still
+// open, the way an auctioneer tells the room whose bid it is.
+function announceBid(short, price){
+  if (VOICE_STYLE !== 'british' || !short) return;
+  speak(short === (A && A.you)
+    ? [`With you, at ${priceSpoken(price)}.`]
+    : [`${priceSpoken(price)}.`, `With ${franchiseName(short)}.`]);
+}
+
+// British only: the classic close on the countdown's last three seconds.
+const CLOSING = {3: 'Fair warning.', 2: 'Going once.', 1: 'Going twice.'};
+function announceClosing(whole){
+  if (VOICE_STYLE === 'british' && CLOSING[whole]) speak(CLOSING[whole]);
+}
+
+function setVoiceStyle(style){
+  VOICE_STYLE = style === 'indian' ? 'indian' : 'british';
+  try { localStorage.setItem(VOICE_STYLE_KEY, VOICE_STYLE); } catch(e) {}
+  renderSoundControls();
+  if (VOICE_ON) speak(VOICE_STYLE === 'british' ? ['Good evening.', 'Lot one.'] : 'Welcome to the auction.');
 }
 
 function setSound(on){
@@ -374,7 +454,11 @@ function renderSoundControls(){
     <button class="auc-sound-btn${SOUND_ON ? ' on' : ''}" onclick="setSound(${!SOUND_ON})"
       title="Gavel, bids and countdown">${SOUND_ON ? 'Sound on' : 'Sound off'}</button>
     <button class="auc-sound-btn${VOICE_ON ? ' on' : ''}" onclick="setVoice(${!VOICE_ON})"
-      title="The auctioneer announces each sale">${VOICE_ON ? 'Voice on' : 'Voice off'}</button>`;
+      title="The auctioneer announces each sale">${VOICE_ON ? 'Voice on' : 'Voice off'}</button>
+    <button class="auc-sound-btn${VOICE_ON ? ' on' : ''}" ${VOICE_ON ? '' : 'disabled'}
+      onclick="setVoiceStyle('${VOICE_STYLE === 'british' ? 'indian' : 'british'}')"
+      title="The auctioneer's style: a British auction room or an Indian English announcer">${
+      VOICE_STYLE === 'british' ? 'British' : 'Indian'}</button>`;
 }
 
 // --- the floor ---------------------------------------------------------------------------
@@ -597,7 +681,7 @@ function startCountdown(){
     fill.style.strokeDashoffset = C * (1 - left / total);
     num.textContent = Math.ceil(left / 1000);
     const whole = Math.ceil(left / 1000);
-    if (whole !== lastWhole && whole > 0 && whole <= 3) play('tick');
+    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); }
     lastWhole = whole;
     ring.classList.toggle('urgent', left < 3000);
     if (left <= 0){ stopCountdown(); passLot('lot', null); }
@@ -618,7 +702,7 @@ function startRoomCountdown(){
     fill.style.strokeDashoffset = C * (1 - Math.min(1, left / total));
     num.textContent = Math.ceil(left);
     const whole = Math.ceil(left);
-    if (whole !== lastWhole && whole > 0 && whole <= 3) play('tick');
+    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); }
     lastWhole = whole;
     ring.classList.toggle('urgent', left < 4);
   };

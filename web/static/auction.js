@@ -198,9 +198,16 @@ async function playBids(bids){
   // it is, a quick patter for a long war and a readable beat for a short one.
   const step = Math.max(55, Math.min(320, 2200 / bids.length));
   $('#aucPriceLabel').textContent = 'Current bid';
+  let lastSound = 0;
   for (const b of bids){
     setPrice(b.price);
     setLeader(b.team);
+    // A long war would machine-gun the speaker; a knock every ~90ms reads as a rattle.
+    const now = performance.now();
+    if (now - lastSound > 90 || b.team === (A && A.you)){
+      play('bid', b.team === (A && A.you));
+      lastSound = now;
+    }
     await sleep(step);
   }
 }
@@ -235,14 +242,146 @@ async function stamp(sale){
     el.classList.add('unsold');
   }
   el.classList.remove('hide', 'go'); void el.offsetWidth; el.classList.add('go');
+  play(sale.team ? 'sold' : 'unsold', sale.team === (A && A.you));
+  announceSale(sale);
   await sleep(sale.team === (A && A.you) ? 1700 : 1150);
   el.classList.add('hide');
+}
+
+
+// --- sound [A143] -------------------------------------------------------------------------
+//
+// Synthesised with the Web Audio API rather than recorded: nothing to license, nothing to
+// download, and a knock can be pitched per bidder. Browsers refuse to play sound before the
+// page has been interacted with, so the context is created on the first click and every
+// cue before that is simply silent -- never an error. The auctioneer's voice is the
+// browser's own speech synthesis, an Indian English voice where the device has one. Both
+// are switchable on the floor and remembered.
+
+const SOUND_KEY = 'iplegends_auction_sound', VOICE_KEY = 'iplegends_auction_voice';
+let SOUND_ON = true, VOICE_ON = true, AUDIO = null;
+try {
+  SOUND_ON = localStorage.getItem(SOUND_KEY) !== 'off';
+  VOICE_ON = localStorage.getItem(VOICE_KEY) !== 'off';
+} catch(e) {}
+
+function audio(){
+  if (!SOUND_ON) return null;
+  if (!AUDIO){
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    AUDIO = new Ctx();
+  }
+  if (AUDIO.state === 'suspended') AUDIO.resume();
+  return AUDIO.state === 'running' ? AUDIO : null;
+}
+document.addEventListener('pointerdown', () => { if (SOUND_ON) audio(); }, {once: true});
+
+function tone(freq, dur, {type = 'sine', gain = 0.18, at = 0, slide = null} = {}){
+  const ctx = audio();
+  if (!ctx) return;
+  const t = ctx.currentTime + at;
+  const osc = ctx.createOscillator(), amp = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (slide) osc.frequency.exponentialRampToValueAtTime(slide, t + dur);
+  amp.gain.setValueAtTime(gain, t);
+  amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(amp).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+
+function knock(at = 0, pitch = 1){
+  const ctx = audio();
+  if (!ctx) return;
+  // A wooden knock: a short noise burst through a band-pass, over a falling low tone.
+  const t = ctx.currentTime + at;
+  const len = Math.floor(ctx.sampleRate * 0.06);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
+  const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), amp = ctx.createGain();
+  src.buffer = buf;
+  band.type = 'bandpass'; band.frequency.value = 900 * pitch; band.Q.value = 1.4;
+  amp.gain.value = 0.9;
+  src.connect(band).connect(amp).connect(ctx.destination);
+  src.start(t);
+  tone(220 * pitch, 0.12, {type: 'triangle', gain: 0.25, at, slide: 110 * pitch});
+}
+
+const SOUNDS = {
+  bid: mine => tone(mine ? 880 : 520, 0.07, {type: 'triangle', gain: mine ? 0.16 : 0.09}),
+  tick: () => tone(1250, 0.05, {gain: 0.07}),
+  sold: mine => {
+    knock(0); knock(0.17);
+    tone(70, 0.35, {gain: 0.3, at: 0.17});
+    if (mine){ tone(880, 0.5, {gain: 0.12, at: 0.35}); tone(1320, 0.6, {gain: 0.1, at: 0.45}); }
+  },
+  unsold: () => knock(0, 0.7),
+  attention: () => { tone(660, 0.18, {gain: 0.14}); tone(990, 0.3, {gain: 0.12, at: 0.16}); },
+};
+
+function play(name, arg){ try { SOUNDS[name](arg); } catch(e) {} }
+
+function priceWords(lakh){
+  if (lakh < 100) return `${lakh} lakh`;
+  const crore = (lakh / 100).toFixed(2).replace(/\.?0+$/, '');
+  return `${crore} crore`;
+}
+
+function speak(text){
+  if (!VOICE_ON || !('speechSynthesis' in window)) return;
+  try {
+    speechSynthesis.cancel();              // never queue behind a stale announcement
+    const u = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    u.voice = voices.find(v => v.lang === 'en-IN') || voices.find(v => v.lang.startsWith('en')) || null;
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch(e) {}
+}
+
+function announceSale(sale){
+  if (!sale.team){ speak(`${sale.name}. Unsold.`); return; }
+  const team = A && A.teams.find(t => t.short === sale.team);
+  speak(`Sold! ${sale.name}, to ${team ? team.franchise : sale.team}, for ${priceWords(sale.price)}.`);
+}
+
+function setSound(on){
+  SOUND_ON = on;
+  try { localStorage.setItem(SOUND_KEY, on ? 'on' : 'off'); } catch(e) {}
+  if (on) audio();
+  renderSoundControls();
+}
+function setVoice(on){
+  VOICE_ON = on;
+  try { localStorage.setItem(VOICE_KEY, on ? 'on' : 'off'); } catch(e) {}
+  if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+  renderSoundControls();
+}
+
+// Drawn into the floor's own header, on both the single-player page and a room.
+function renderSoundControls(){
+  const bar = $('.auc-lotbar');
+  if (!bar) return;
+  let box = $('#aucSoundCtl');
+  if (!box){
+    bar.insertAdjacentHTML('beforeend', '<span class="auc-sound" id="aucSoundCtl"></span>');
+    box = $('#aucSoundCtl');
+  }
+  box.innerHTML = `
+    <button class="auc-sound-btn${SOUND_ON ? ' on' : ''}" onclick="setSound(${!SOUND_ON})"
+      title="Gavel, bids and countdown">${SOUND_ON ? 'Sound on' : 'Sound off'}</button>
+    <button class="auc-sound-btn${VOICE_ON ? ' on' : ''}" onclick="setVoice(${!VOICE_ON})"
+      title="The auctioneer announces each sale">${VOICE_ON ? 'Voice on' : 'Voice off'}</button>`;
 }
 
 // --- the floor ---------------------------------------------------------------------------
 
 function renderFloor(){
   const d = A, lot = d.lot, c = lot.card;
+  renderSoundControls();
   $('#aucSetLabel').textContent = lot.round === 'accelerated' ? 'Accelerated round · the unsold, again'
                                                                : lot.set_label;
   $('#aucLotNo').textContent = `Lot ${lot.lot + 1} of ${lot.lots_total}`;
@@ -452,10 +591,14 @@ function startCountdown(){
   const total = LIVE_SECONDS * 1000, start = performance.now(), C = 2 * Math.PI * 19;
   ring.classList.remove('hide');
   fill.style.strokeDasharray = C;
+  let lastWhole = null;
   const tick = () => {
     const left = Math.max(0, total - (performance.now() - start));
     fill.style.strokeDashoffset = C * (1 - left / total);
     num.textContent = Math.ceil(left / 1000);
+    const whole = Math.ceil(left / 1000);
+    if (whole !== lastWhole && whole > 0 && whole <= 3) play('tick');
+    lastWhole = whole;
     ring.classList.toggle('urgent', left < 3000);
     if (left <= 0){ stopCountdown(); passLot('lot', null); }
   };
@@ -469,10 +612,14 @@ function startRoomCountdown(){
   const C = 2 * Math.PI * 19, total = 15;
   ring.classList.remove('hide');
   fill.style.strokeDasharray = C;
+  let lastWhole = null;
   const tick = () => {
     const left = Math.max(0, window.roomAuctionDeadline());
     fill.style.strokeDashoffset = C * (1 - Math.min(1, left / total));
     num.textContent = Math.ceil(left);
+    const whole = Math.ceil(left);
+    if (whole !== lastWhole && whole > 0 && whole <= 3) play('tick');
+    lastWhole = whole;
     ring.classList.toggle('urgent', left < 4);
   };
   tick();
@@ -587,6 +734,7 @@ let RAISE = null;
 
 function openRtm(){
   const d = A, r = d.rtm, c = d.lot.card;
+  play('attention');
   const who = `<b>${c.name}</b> <em>${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</em>`;
   let body;
   if (r.kind === 'rtm_use'){

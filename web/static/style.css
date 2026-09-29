@@ -1797,3 +1797,12 @@ body.has-ground{
 #roomLobby .col{max-height:none}
 #roomLobby #lobbyPlayers{flex:none}
 .auc-retain-row.taken{opacity:.45}
+
+/* --- auction sound switches [A143] --- */
+.auc-lotbar{flex-wrap:wrap;gap:8px}
+.auc-lotbar em{margin-left:auto}
+.auc-sound{display:inline-flex;gap:6px;margin-left:10px}
+.auc-sound-btn{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  padding:4px 9px;border-radius:5px;border:1px solid var(--line-strong);background:none;
+  color:var(--ink-3);cursor:pointer}
+.auc-sound-btn.on{color:var(--gold);border-color:rgba(245,184,61,.5)}

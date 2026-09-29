@@ -2491,3 +2491,15 @@ and the money, so its curve is steeper to bring the top back to ₹27 cr.
 out differently now (different computer prices behind the same human decisions), and an
 auction room in progress could find a recorded bid no longer matches the price. Accepted:
 auctions are hours old at most and none is stored beyond its room's 24-hour life.
+
+### 15.11 Sound [A143]
+
+The auction floor has sound, on both the single-player page and a room: a paddle knock for
+each bid (higher for your own, throttled so a long war rattles rather than stutters), a
+soft tick at 3, 2 and 1 seconds of any countdown, a double gavel knock and a low thump for
+SOLD (with a chime when you are the buyer), a dull knock for UNSOLD, and an attention chime
+when a Right to Match question is yours. All synthesised with the Web Audio API: nothing to
+license or download. An auctioneer's voice announces each sale ("Sold! Rashid Khan, to
+Chennai Super Kings, for 29 crore") through the browser's own speech synthesis, preferring
+an Indian English voice. Sound and voice are separate switches on the floor, remembered per
+browser; browsers allow no sound before the first click, so nothing plays until then.

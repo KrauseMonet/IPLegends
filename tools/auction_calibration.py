@@ -152,15 +152,18 @@ def main() -> None:
     parser.add_argument("--mega", action="store_true",
                         help="retentions and Right to Match (A138)")
     parser.add_argument("--sweep", action="store_true",
-                        help="grid over VALUE_AT_70 x VALUE_GROWTH")
+                        help="grid over the value curve (A, K) of the chosen format")
     args = parser.parse_args()
     deck = snapshot_deck.deck_from(snapshot_deck.read_document())
 
     if args.sweep:
         for a70 in (80, 110, 140, 180):
             for k in (0.08, 0.09, 0.10, 0.11):
-                au.VALUE_AT_70, au.VALUE_GROWTH = a70, k
-                m = measure(deck, args.trials, args.seed)
+                if args.mega:
+                    au.MEGA_VALUE = (a70, k)
+                else:
+                    au.OPEN_VALUE = (a70, k)
+                m = measure(deck, args.trials, args.seed, mega=args.mega)
                 print(f"A={a70:>3} K={k:.2f}  " + "  ".join(
                     f"{key}={m[key]}" for key in ("teams_stranded", "fills_per_auction",
                                                   "spend_mean", "spend_p10", "top_price",

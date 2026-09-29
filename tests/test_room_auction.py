@@ -112,7 +112,7 @@ def test_the_computer_teams_answer_a_human_bid_at_once(deck, clock):
     code, host, guest = two_human_room(conn, deck, clock)
     for _ in range(40):
         r = ra.replay(load(conn, code), deck)
-        auto = {t.index: au.cpu_ceiling(t, r.lot, r.auction.seed, r.round_no)
+        auto = {t.index: au.cpu_ceiling(t, r.lot, r.auction.seed, r.round_no, r.auction.mega)
                 for t in r.auction.teams if not t.human}
         if r.can_bid(r.auction.teams[r.team_of[host]]) \
                 and max(auto.values()) > au.next_price(r.next_price):

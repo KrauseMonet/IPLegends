@@ -423,12 +423,15 @@ def _find_rtm(deck, human_short, role):
         def ceiling(self, auction, team, lot, round_no):
             return team.max_bid() if role == "winner" and (lot.card.display or 0) >= 88 else 0
 
+        # Each probe counts only its OWN kind of question: the first version marked a hit
+        # on either, so a "winner" search could return a seed where the human only ever
+        # HELD a card, and the test then waited for a raise that never came.
         def rtm_use(self, *a):
-            Probe.hit = True
+            Probe.hit = Probe.hit or role == "holder"
             return False
 
         def rtm_raise(self, auction, team, lot, price, holder):
-            Probe.hit = True
+            Probe.hit = Probe.hit or role == "winner"
             return price
 
     for seed in range(40):

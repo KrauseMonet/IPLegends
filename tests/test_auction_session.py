@@ -256,6 +256,9 @@ def test_as_the_winner_your_final_raise_is_recorded_and_cannot_undercut_the_hamm
             r = A.pass_lots(deck, r.state, "lot")
         guard = 0
         while r.phase == "bid" and guard < 40:
+            if r.you.max_bid() < r.lot.base:          # the purse is spent; nothing to win
+                r = A.pass_lots(deck, r.state, "all")
+                break
             r = A.bid(deck, r.state, r.you.max_bid(), done=True)
             guard += 1
             while r.phase == "bid" and (r.lot.card.display or 0) < 90:

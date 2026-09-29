@@ -2296,7 +2296,8 @@ it (letting a CPU tie-break see the human's ceiling) fails it.
 
 Ceiling = value(rating) × need × money-per-place pressure × personality × loyalty × noise,
 capped by the purse reserve and by **25% of a purse (₹30 cr) for any one player**. **The cap binds the computer teams only** (ratified by the user): a human may pay any price the reserve rule allows, and outbids a capped computer team by a single increment.
-`value = 180L × e^(0.08 × (rating − 70))`. Need rewards a missing keeper, bowlers short of
+`value = A × e^(K × (rating − 70))`, **one curve per format** [A142]: open `(120L, 0.08)`,
+mega `(80L, 0.13)` — see §15.10. Need rewards a missing keeper, bowlers short of
 seven, and thin batting bands; personality is aggressive / balanced / value; a franchise pays
 15% more for its own former players. **All declared game-design constants**, set by
 `tools.auction_calibration` against measured targets, not by feel.
@@ -2464,3 +2465,29 @@ decides whether to play a card, the winner makes the one final raise, the holder
 not. Running out means no card, no raise, no match. Everyone else keeps watching the floor
 (`rtm_watch`), with the bidding that led to the hammer and whose decision it is. A human who
 skipped to the end is never asked, as single player's `pall` declines every card.
+
+### 15.10 One valuation per format [A142]
+
+The two formats are different economies, so the computer teams value players on different
+curves. Both are measured against the real 2025 mega auction (182 sold for ₹639 cr, ₹27 cr
+top, 2 sold above ₹25 cr and 3 above ₹20 cr, mean ₹3.51 cr):
+
+| | ₹25 cr+ | ₹20 cr+ | top | mean | spend |
+|---|---|---|---|---|---|
+| open, before (shared curve) | 6.3 | 10.2 | ₹30 cr | — | 91% |
+| **open, now `(120, 0.08)`** | 0.6 | 3.5 | ₹24.5 cr | — | 75% |
+| mega, before (shared curve) | 0 | 0.3 | ₹17.9 cr | ₹3.95 cr | 93% |
+| **mega, now `(80, 0.13)`** | 1.2 | 2.8 | ₹27.0 cr | ₹3.70 cr | 90% |
+
+**The open format's inflation was structural**: ten teams each holding a full ₹120 cr and no
+retained star, twice the money the real 2025 teams brought to the auction. A per-player cap
+only piled prices up under the cap (eight at ₹20–22.5 cr), and discounting a second star left
+every team's FIRST star expensive. The only change that produced real prices was valuing
+players lower, and the honest cost is that open-auction computer teams now leave about a
+quarter of a full purse unspent. Mega went the other way: retentions already take the legends
+and the money, so its curve is steeper to bring the top back to ₹27 cr.
+
+**Changing the curve changes every replay.** An open-auction state saved before this plays
+out differently now (different computer prices behind the same human decisions), and an
+auction room in progress could find a recorded bid no longer matches the price. Accepted:
+auctions are hours old at most and none is stored beyond its room's 24-hour life.

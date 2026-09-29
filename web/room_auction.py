@@ -291,7 +291,7 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             if all(t.open_places == 0 for t in teams):
                 break
             state = RoomAuctionReplay(auction, team_of, "bid", lot=lot, round_no=round_no)
-            auto = {t.index: au.cpu_ceiling(t, lot, seed, round_no)
+            auto = {t.index: au.cpu_ceiling(t, lot, seed, round_no, mega)
                     for t in teams if not t.human}
 
             def reply():
@@ -378,7 +378,7 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 raise AuctionRoomError("no such fill option")
             card = options[mv["i"]]
         else:
-            card = max(options, key=lambda c: au.need(team, c) * au.value_curve(c.display))
+            card = max(options, key=lambda c: au.need(team, c) * au.value_curve(c.display, mega))
         team.squad.append(card)
         team.paid.append(au.MIN_PRICE)
         team.purse -= au.MIN_PRICE

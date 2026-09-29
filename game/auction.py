@@ -440,8 +440,20 @@ def make_teams(seed: int, human_short: str | None = None,
 # Declared game-design constants, tuned by `tools.auction_calibration` against measured
 # targets (every team legal, purses spent, prices ordered by quality) -- not by feel.
 
-VALUE_AT_70 = 180.0             # lakh; A in V(d) = A * exp(K * (d - 70))
-VALUE_GROWTH = 0.08             # K
+# How a computer team values a player: V(rating) = A * exp(K * (rating - 70)), in lakh.
+# ONE CURVE PER FORMAT [A142], because the two economies differ: an open auction puts a
+# full ₹120 cr in every team's hand with no stars retained, a mega auction arrives with
+# retentions already paid. Both measured against the real 2025 mega auction (182 sold for
+# ₹639 cr; ₹27 cr top; 2 sold above ₹25 cr, 3 above ₹20 cr; mean ₹3.51 cr):
+#   open (120, 0.08) -- was (180, 0.08) for both: six ₹25 cr+ buys an auction and four or
+#       five teams taking two ₹15 cr+ stars. Now ~0.6 above ₹25 cr, ~3.5 above ₹20 cr,
+#       top ~₹24.5 cr -- at the honest cost that computer teams leave ~25% of a full purse
+#       unspent, since only the money habits of a real auction ever produced real prices.
+#   mega (80, 0.13) -- steeper, because retentions already took the money and legends out:
+#       the old shared curve topped out at ~₹17.9 cr. Now ~1.2 above ₹25 cr, ~2.8 above
+#       ₹20 cr, top ~₹27 cr, mean ~₹3.70 cr, Right to Match used ~9.8 (2025: 8).
+OPEN_VALUE = (120.0, 0.08)
+MEGA_VALUE = (80.0, 0.13)
 NOISE = 0.20                    # each team's view of a player varies by +/- this
 PURSE_PRESSURE = 0.8            # how strongly money left per place moves the ceiling
 LOYALTY = 1.15                  # a franchise pays more for its own former players
@@ -460,8 +472,9 @@ KEEPERS_WANTED = 2
 BOWLERS_WANTED = 7
 
 
-def value_curve(display: int | None) -> float:
-    return VALUE_AT_70 * math.exp(VALUE_GROWTH * ((display or 70) - 70))
+def value_curve(display: int | None, mega: bool = False) -> float:
+    a, k = MEGA_VALUE if mega else OPEN_VALUE
+    return a * math.exp(k * ((display or 70) - 70))
 
 
 def need(team: Team, card: Card) -> float:
@@ -503,7 +516,7 @@ def _loyal(team: Team, card: Card) -> float:
         return 1.0
 
 
-def cpu_ceiling(team: Team, lot: Lot, seed: int, round_no: int) -> int:
+def cpu_ceiling(team: Team, lot: Lot, seed: int, round_no: int, mega: bool = False) -> int:
     """The most a computer team will pay for this lot, fixed before the lot opens.
 
     Deliberately blind to anything the human does to THIS lot, which is what makes the two
@@ -514,7 +527,7 @@ def cpu_ceiling(team: Team, lot: Lot, seed: int, round_no: int) -> int:
     per_place = (team.purse - MIN_PRICE * team.open_places) / max(1, team.open_places)
     pressure = max(0.3, min(2.5, per_place / (PURSE / SQUAD_SIZE))) ** PURSE_PRESSURE
     noise = 1.0 + NOISE * (2 * _unit(seed, team.index, lot.index, round_no, 4) - 1)
-    value = (value_curve(card.display) * need(team, card) * pressure
+    value = (value_curve(card.display, mega) * need(team, card) * pressure
              * _personality(team, card) * _loyal(team, card) * noise)
     ceiling = min(int(value), team.max_bid(), int(MAX_SHARE * PURSE))
     return ceiling if ceiling >= lot.base else 0
@@ -750,7 +763,7 @@ def lot_ceilings(auction: Auction, lot: Lot, round_name: str,
             cap = min(human_ceiling, team.max_bid()) if team.may_buy(lot.card) else 0
             ceilings[team.index] = cap if cap >= lot.base else 0
         else:
-            ceilings[team.index] = cpu_ceiling(team, lot, auction.seed, round_no)
+            ceilings[team.index] = cpu_ceiling(team, lot, auction.seed, round_no, auction.mega)
     return ceilings
 
 
@@ -899,7 +912,7 @@ def _fill(auction: Auction, human: Human | None) -> None:
         if team.human and human is not None:
             card = human.fill_choice(auction, team, options)
         else:
-            card = max(options, key=lambda c: need(team, c) * value_curve(c.display))
+            card = max(options, key=lambda c: need(team, c) * value_curve(c.display, auction.mega))
         lot = next((lot for lot in auction.unsold if lot.card is card),
                    Lot(-1, card, "REG", MIN_PRICE))
         team.squad.append(card)

@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=b5a0a4c782">
+<link rel="stylesheet" href="/static/style.css?v=f9af5ebb81">
 </head>
 <body>
 <div class="sheet">
@@ -85,7 +85,14 @@
         bid against you, and then your twelve play the season against them.</p>
     </div>
     <div id="aucFranchises" class="auc-franchises"></div>
-    <div class="room-label" style="margin-top:26px">How you bid</div>
+    <div class="room-label" style="margin-top:26px">Format</div>
+    <div class="room-choices" id="aucFormatChoices">
+      <button class="room-choice" data-format="mega" onclick="setFormat('mega')"
+        title="Keep up to five of your franchise's legends first; unused places become Right to Match cards.">Mega auction · retentions &amp; RTM</button>
+      <button class="room-choice" data-format="open" onclick="setFormat('open')"
+        title="Every team starts from nothing with ₹120 crore.">Open auction · no retentions</button>
+    </div>
+    <div class="room-label" style="margin-top:18px">How you bid</div>
     <div class="room-choices" id="aucStyleChoices">
       <button class="room-choice" data-style="live" onclick="setBidStyle('live')"
         title="Raise the paddle one step at a time against a countdown.">Live · click to bid</button>
@@ -171,6 +178,39 @@
       <div id="aucSquad" class="auc-squad"></div>
     </div>
   </section>
+
+  <!-- ============ RETENTIONS ============ -->
+  <section id="aucRetain" class="hide">
+    <div class="auc-hero">
+      <div class="auc-kicker">Before the auction · retentions</div>
+      <h2 class="auc-title">Keep your <span>legends</span></h2>
+      <p class="auc-lede">Keep up to five players from your franchise's nineteen seasons, one
+        season each, at the real slabs: ₹18, 14, 11, 18 and 14 crore, in the order you pick
+        them. Every place you leave unused becomes a Right to Match card, so you can win back
+        one of your old players when he sells to someone else.</p>
+    </div>
+    <div class="auc-retain">
+      <div class="col">
+        <div class="col-head"><span>Your franchise's players</span><em id="aucRetainCount"></em></div>
+        <div id="aucRetainList" class="col-scroll"></div>
+      </div>
+      <div class="col">
+        <div class="col-head"><span>Kept</span><em id="aucRetainSpend"></em></div>
+        <div id="aucRetainSum"></div>
+        <div class="foot-actions">
+          <button class="act lead" id="aucRetainBtn" onclick="confirmRetain(this)">Keep these and start</button>
+          <button class="act" onclick="confirmRetain(this, true)">Keep nobody</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT TO MATCH ============ -->
+  <div id="aucRtm" class="card-overlay hide">
+    <div class="scorecard-shell auc-rtm-shell">
+      <div class="scorecard-frame" id="aucRtmBody"></div>
+    </div>
+  </div>
 
   <!-- ============ FILL ROUND ============ -->
   <section id="aucFill" class="hide">
@@ -265,8 +305,8 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=26b8eacf93"></script>
+<script src="/static/common.js?v=dd3e0bfc76"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/auction.js?v=d558ee75e5"></script>
+<script src="/static/auction.js?v=5b904e3920"></script>
 </body>
 </html>

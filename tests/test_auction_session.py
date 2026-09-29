@@ -149,3 +149,109 @@ def test_the_season_is_played_against_the_teams_bid_against(deck):
     squads = {t.short: {c.person_id for c in t.squad} for t in r.auction.teams}
     for side in others:
         assert {c.person_id for c in side.xi + [side.impact]} <= squads[side.short]
+
+
+# --- the mega auction: retentions and Right to Match [A138] -------------------------------
+
+def test_the_two_formats_are_told_apart_by_the_prefix_and_old_states_keep_replaying(deck):
+    old = A.pass_lots(deck, A.new_state(5, "KKR"), "lot").state
+    assert old.startswith("A5-") and not A.is_mega(old)
+    assert A.replay(deck, old).auction.mega is False
+    mega = A.new_state(5, "KKR", mega=True)
+    assert mega.startswith("AR5-") and A.is_mega(mega)
+
+
+def test_a_mega_auction_opens_on_the_retention_screen(deck):
+    r = A.replay(deck, A.new_state(3, "RCB", mega=True))
+    assert r.phase == "retain" and r.auction is None
+    assert r.retention_pool and all(au.franchise_of(c) == "Royal Challengers Bengaluru"
+                                    for c in r.retention_pool)
+
+
+def test_retaining_charges_the_slabs_and_leaves_the_rest_as_cards(deck):
+    r = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1])
+    you = r.you
+    assert you.squad[:2] == [r.auction.teams[you.index].squad[0], you.squad[1]]
+    assert you.paid[:2] == list(au.RETENTION_SLABS[:2])
+    assert you.purse == au.PURSE - sum(au.RETENTION_SLABS[:2])
+    assert you.rtm == au.RTM_PLACES - 2
+
+
+def test_two_seasons_of_one_player_cannot_both_be_retained(deck):
+    r = A.replay(deck, A.new_state(3, "RCB", mega=True))
+    pool = r.retention_pool
+    i, j = next((i, j) for i in range(len(pool)) for j in range(i + 1, len(pool))
+                if pool[i].person_id == pool[j].person_id)
+    with pytest.raises(A.InvalidState):
+        A.retain(deck, r.state, [i, j])
+
+
+def _walk_to(deck, state, phase, answer=True):
+    """Pass on every lot until `phase` is asked, answering any other RTM question with
+    `answer`. Returns the replay at that question, or None if the auction ended first."""
+    r = A.replay(deck, state)
+    while r.phase in ("bid", "rtm_use", "rtm_match", "rtm_raise"):
+        if r.phase == phase:
+            return r
+        r = A.pass_lots(deck, r.state, "lot") if r.phase == "bid" else A.rtm(deck, r.state, answer)
+    return None
+
+
+def test_a_right_to_match_question_is_about_your_own_franchise_s_player(deck):
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    r = _walk_to(deck, start, "rtm_use")
+    assert r is not None
+    assert au.franchise_of(r.lot.card) == "Royal Challengers Bengaluru"
+    assert r.rtm_other.short != "RCB"
+
+
+def test_using_and_matching_a_card_takes_the_player_and_spends_it(deck):
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    r = _walk_to(deck, start, "rtm_use")
+    lot, cards = r.lot, r.you.rtm
+    r = A.rtm(deck, r.state, True)
+    if r.phase == "rtm_match":
+        r = A.rtm(deck, r.state, True)
+    assert lot.card in r.you.squad
+    assert r.you.rtm == cards - 1
+
+
+def test_declining_a_card_leaves_the_player_with_the_winner(deck):
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    r = _walk_to(deck, start, "rtm_use")
+    lot, cards, winner = r.lot, r.you.rtm, r.rtm_other.short
+    r = A.rtm(deck, r.state, False)
+    # Every replay builds new Team objects, so look the winner up by name, not identity.
+    winner_now = next(t for t in r.auction.teams if t.short == winner)
+    assert lot.card not in r.you.squad and lot.card in winner_now.squad
+    assert r.you.rtm == cards
+
+
+def test_passing_on_everything_declines_every_card_without_asking(deck):
+    r = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1])
+    r = A.pass_lots(deck, r.state, "all")
+    assert r.phase in ("fill", "twelve")
+    assert r.you.rtm == au.RTM_PLACES - 2
+
+
+def test_as_the_winner_your_final_raise_is_recorded_and_cannot_undercut_the_hammer(deck):
+    """Win a star outright, then face the old franchise's card."""
+    for seed in range(30):
+        r = A.retain(deck, A.new_state(seed, "CSK", mega=True), [])
+        while r.phase == "bid" and (r.lot.card.display or 0) < 90:
+            r = A.pass_lots(deck, r.state, "lot")
+        guard = 0
+        while r.phase == "bid" and guard < 40:
+            r = A.bid(deck, r.state, r.you.max_bid(), done=True)
+            guard += 1
+            while r.phase == "bid" and (r.lot.card.display or 0) < 90:
+                r = A.pass_lots(deck, r.state, "lot")
+        if r.phase == "rtm_raise":
+            break
+    else:
+        pytest.skip("no card was played against the human in 30 seeds")
+    hammer = r.rtm_price
+    with pytest.raises(A.InvalidState):
+        A.rtm(deck, r.state, True, hammer - 5)
+    after = A.rtm(deck, r.state, True, hammer + 100)
+    assert f".x{hammer + 100}" in after.state

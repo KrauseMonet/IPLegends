@@ -71,16 +71,23 @@ def _spearman(xs: list[float], ys: list[float]) -> float:
     return num / den if den else 0.0
 
 
-def measure(deck, trials: int, seed: int, policy: str = "none") -> dict:
+def measure(deck, trials: int, seed: int, policy: str = "none", mega: bool = False) -> dict:
     stranded = illegal = fills = fill_auctions = unsold = 0
     spend, tops, medians, at_base, corr, spread, secs = [], [], [], [], [], [], []
     top_share, human_spend, human_legal = [], [], 0
+    kept, rtm_used, rtm_matched, cards_left = [], 0, 0, []
     for t in range(trials):
         s = seed * 1_000_003 + t
         human = {"none": None, "passive": Passive(), "greedy": Greedy(),
                  "random": Random(s)}[policy]
         start = time.perf_counter()
-        a = au.run_auction(deck, s, human_short="KKR" if human else None, human=human)
+        a = au.run_auction(deck, s, human_short="KKR" if human else None, human=human,
+                           mega=mega)
+        kept.extend(t.retained for t in a.teams)
+        cards_left.extend(t.rtm for t in a.teams)
+        events = [x.rtm for x in a.sales if x.rtm]
+        rtm_used += len(events)
+        rtm_matched += sum(e.matched for e in events)
         secs.append(time.perf_counter() - start)
 
         stranded += len(a.stranded)
@@ -127,6 +134,11 @@ def measure(deck, trials: int, seed: int, policy: str = "none") -> dict:
         "rating_price_rho": round(statistics.mean(corr), 2),
         "strength_spread": round(statistics.mean(spread), 1),
         "ms_per_auction": round(1000 * statistics.mean(secs)),
+        **({"retained_per_team": round(statistics.mean(kept), 2),
+            "rtm_played_per_auction": round(rtm_used / trials, 1),
+            "rtm_matched_share": f"{rtm_matched / max(1, rtm_used):.0%}",
+            "rtm_cards_unused_per_team": round(statistics.mean(cards_left), 2)}
+           if mega else {}),
         **({"human_legal": f"{human_legal}/{trials}",
             "human_spend": f"{statistics.mean(human_spend):.0%}" if human_spend else "-"}
            if policy != "none" else {}),
@@ -137,6 +149,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--trials", type=int, default=100)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--mega", action="store_true",
+                        help="retentions and Right to Match (A138)")
     parser.add_argument("--sweep", action="store_true",
                         help="grid over VALUE_AT_70 x VALUE_GROWTH")
     args = parser.parse_args()
@@ -155,7 +169,7 @@ def main() -> None:
 
     for policy in ("none", "passive", "greedy", "random"):
         print(f"\n== human: {policy}")
-        for key, value in measure(deck, args.trials, args.seed, policy).items():
+        for key, value in measure(deck, args.trials, args.seed, policy, args.mega).items():
             print(f"  {key:<20} {value}")
 
 

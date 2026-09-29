@@ -25,10 +25,14 @@ const FRANCHISES = [
 ];
 const LIVE_SECONDS = 8;
 const STYLE_KEY = 'iplegends_auction_style';
+const FORMAT_KEY = 'iplegends_auction_format';
 
 let A = null;              // the last AuctionOut drawn
 let CHOSEN_TEAM = null;
 let BID_STYLE = 'live';
+let FORMAT = 'mega';       // 'mega' = retentions and Right to Match [A138]; 'open' = none
+let RETAIN = [];           // pool indexes picked, in the order picked (the slab order)
+let RETAIN_SEASON = {};    // person_id -> the pool index of the season showing for him
 let LIMIT = null;          // the limit being composed, in lakh
 let BUSY = false;
 let COUNTDOWN = null;
@@ -36,6 +40,7 @@ let TWELVE = null;         // [11 order indexes..., impact index] being edited
 let TWELVE_SEL = null;     // position in TWELVE the user tapped, awaiting a swap
 
 try { BID_STYLE = localStorage.getItem(STYLE_KEY) || 'live'; } catch(e) {}
+try { FORMAT = localStorage.getItem(FORMAT_KEY) || 'mega'; } catch(e) {}
 
 // --- money -----------------------------------------------------------------------------
 
@@ -66,6 +71,7 @@ function renderSetup(){
       style="--fr:${bg};--fr-ink:${fg}"><b>${s}</b><span>${name}</span></button>`;
   }).join('');
   setBidStyle(BID_STYLE);
+  setFormat(FORMAT);
   show('aucSetup');
 }
 
@@ -83,11 +89,18 @@ function setBidStyle(style){
   if (A && A.phase === 'bid') renderBidControls();
 }
 
+function setFormat(format){
+  FORMAT = format;
+  try { localStorage.setItem(FORMAT_KEY, format); } catch(e) {}
+  document.querySelectorAll('#aucFormatChoices .room-choice').forEach(b =>
+    b.classList.toggle('sel', b.dataset.format === format));
+}
+
 function startAuction(ctrl){
   if (!CHOSEN_TEAM) return;
   busyClick(ctrl, 'Opening the room…', async () => {
     const d = await api('/api/auction', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                         body: JSON.stringify({team: CHOSEN_TEAM})});
+                                         body: JSON.stringify({team: CHOSEN_TEAM, mega: FORMAT === 'mega'})});
     await apply(d, false);
   });
 }
@@ -95,7 +108,7 @@ function startAuction(ctrl){
 // --- screens -------------------------------------------------------------------------------
 
 function show(id){
-  ['aucSetup', 'aucFloor', 'aucFill', 'aucTwelve'].forEach(s =>
+  ['aucSetup', 'aucRetain', 'aucFloor', 'aucFill', 'aucTwelve'].forEach(s =>
     $('#' + s).classList.toggle('hide', s !== id));
 }
 
@@ -103,13 +116,17 @@ async function apply(d, animate){
   const prev = A;
   stopCountdown();
   history.replaceState(null, '', '#' + d.state);
+  closeRtm();
   if (animate && prev && prev.phase === 'bid') await animateFrom(prev, d);
+  else if (animate && prev && isRtm(prev.phase)) await stampAfterRtm(prev, d);
   A = d;
-  if (d.phase === 'bid'){
+  if (d.phase === 'retain'){ renderRetain(); show('aucRetain'); }
+  else if (d.phase === 'bid' || isRtm(d.phase)){
     const entering = $('#aucFloor').classList.contains('hide');
     show('aucFloor'); renderFloor();
     // On a phone the masthead fills the first screen; bring the lot itself into view.
     if (entering && STACKED_DRAFT.matches) $('.auc-lotbar').scrollIntoView({block: 'start'});
+    if (isRtm(d.phase)) openRtm();
   }
   else if (d.phase === 'fill'){ show('aucFill'); renderFill(); }
   else { renderTwelve(); show('aucTwelve'); }
@@ -122,6 +139,15 @@ async function apply(d, animate){
 // could not buy) go straight into the feed rather than making you watch them.
 
 function saleKey(s){ return s.round + ':' + s.lot; }
+function isRtm(phase){ return phase === 'rtm_use' || phase === 'rtm_match' || phase === 'rtm_raise'; }
+
+// Once a Right to Match question is answered the lot is decided: show its hammer, which
+// now carries who ended up with the player, without replaying bidding already watched.
+// A lot still being decided (use -> match) is not in `recent` yet, so nothing stamps early.
+async function stampAfterRtm(prev, next){
+  const sale = next.recent.find(s => s.lot === prev.lot.lot && s.round === prev.lot.round);
+  if (sale) await stamp(sale);
+}
 
 async function animateFrom(prev, next){
   const lot = prev.lot;
@@ -172,7 +198,10 @@ async function stamp(sale){
   const el = $('#aucStamp');
   if (sale.team){
     const [bg] = TEAM_COLOURS[sale.team] || ['#fff'];
-    el.innerHTML = `<b>SOLD</b><span>${chip(sale.team)} ${cr(sale.price)}</span>`;
+    const rtm = sale.rtm_holder
+      ? `<em>${sale.rtm_matched ? 'Right to Match · ' + sale.rtm_holder + ' took him back'
+                                 : sale.rtm_holder + ' played a card and did not match'}</em>` : '';
+    el.innerHTML = `<b>SOLD</b><span>${chip(sale.team)} ${cr(sale.price)}</span>${rtm}`;
     el.style.setProperty('--stamp', bg);
     el.classList.remove('unsold');
   } else {
@@ -208,7 +237,11 @@ function renderFloor(){
     <div class="colophon stat-tiles auc-stats">${cardStatHtml(c)}</div>
     <div class="auc-card-base">Base price <b>${cr(lot.base)}</b></div>`;
 
-  if (d.bids.length){
+  if (isRtm(d.phase)){
+    $('#aucPriceLabel').textContent = 'Hammer';
+    $('#aucPrice').textContent = cr(d.rtm.price);
+    setLeader(d.rtm.kind === 'rtm_raise' ? d.you : d.rtm.other);
+  } else if (d.bids.length){
     $('#aucPriceLabel').textContent = 'Current bid';
     $('#aucPrice').textContent = cr(d.price);
     setLeader(d.leader);
@@ -222,7 +255,8 @@ function renderFloor(){
     ? `<span>Still to come in this set</span> ${lot.upcoming.slice(0, 8).join(' · ')}${lot.upcoming.length > 8 ? ' …' : ''}`
     : '';
   renderSide();
-  renderBidControls();
+  if (d.phase === 'bid') renderBidControls();
+  else { stopCountdown(); $('#aucNote').textContent = ''; }
 }
 
 function roleLabel(c){
@@ -253,13 +287,13 @@ function renderSide(){
       ${chip(t.short)}
       <div class="auc-team-bar"><i style="width:${100 * t.purse / d.purse_total}%;background:${TEAM_COLOURS[t.short][0]}"></i></div>
       <b>${cr(t.purse)}</b>
-      <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}</span>
+      <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>
     </div>`).join('');
 
   $('#aucSoldCount').textContent = d.sold;
   $('#aucFeed').innerHTML = d.recent.slice().reverse().slice(0, 14).map(s => `
     <div class="auc-feed-row${s.team ? '' : ' unsold'}${s.team === d.you ? ' mine' : ''}">
-      <span class="auc-feed-name">${s.name} <em>${s.season_year || ''}</em></span>
+      <span class="auc-feed-name">${s.name} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
       ${s.team ? `${chip(s.team)}<b>${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
     </div>`).join('') || '<div class="note">Nothing sold yet.</div>';
 
@@ -269,7 +303,7 @@ function renderSide(){
     const s = d.squad[i];
     slots.push(s ? `
       <div class="auc-slot filled" onclick='showStat(${JSON.stringify(s.card).replace(/'/g, "&#39;")})'>
-        ${ICON[s.card.kind] || ''}<span>${s.card.name}</span><b>${cr(s.price)}</b>
+        ${ICON[s.card.kind] || ''}<span>${s.card.name}</span><b>${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
       </div>` : '<div class="auc-slot"></div>');
   }
   $('#aucSquad').innerHTML = slots.join('');
@@ -392,6 +426,147 @@ document.addEventListener('keydown', e => {
     passLot('lot', $('#aucPassBtn'));
   }
 });
+
+// --- retentions [A138] --------------------------------------------------------------------
+
+function retentionPeople(){
+  // The pool is strongest first; group it by player, keeping that order.
+  const people = new Map();
+  for (const p of A.retention_pool){
+    if (!people.has(p.card.person_id)) people.set(p.card.person_id, []);
+    people.get(p.card.person_id).push(p);
+  }
+  return [...people.values()];
+}
+
+function renderRetain(){
+  const people = retentionPeople();
+  const picked = new Set(RETAIN);
+  $('#aucRetainCount').textContent = `${people.length} players`;
+  $('#aucRetainList').innerHTML = people.map(seasons => {
+    const pid = seasons[0].card.person_id;
+    const showing = RETAIN_SEASON[pid] ?? seasons[0].index;
+    const cur = seasons.find(p => p.index === showing) || seasons[0];
+    const kept = seasons.some(p => picked.has(p.index));
+    const c = cur.card;
+    const choose = seasons.length > 1
+      ? `<select class="auc-season" onchange="pickSeason('${pid}', +this.value)" ${kept ? 'disabled' : ''}>
+           ${seasons.map(p => `<option value="${p.index}" ${p.index === cur.index ? 'selected' : ''}>
+             ${p.card.season_year} · ${p.card.rating}</option>`).join('')}
+         </select>`
+      : `<span class="auc-season-one">${c.season_year}</span>`;
+    return `<div class="auc-retain-row${kept ? ' kept' : ''}">
+      ${ICON[c.kind] || ''}${keeperBadge(c)}
+      <span class="auc-retain-name" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
+        ${c.overseas ? '<em class="auc-tag os">Overseas</em>' : ''}</span>
+      ${choose}${ratingBadge(c, true)}
+      <button class="act minor" onclick="toggleRetain(${cur.index})">${kept ? 'Release' : 'Keep'}</button>
+    </div>`;
+  }).join('');
+
+  const slabs = A.retention_slabs;
+  const byIndex = new Map(A.retention_pool.map(p => [p.index, p.card]));
+  const spend = RETAIN.reduce((sum, _, i) => sum + slabs[i], 0);
+  $('#aucRetainSpend').textContent = spend ? cr(spend) : '';
+  $('#aucRetainSum').innerHTML = `
+    ${RETAIN.map((i, n) => `<div class="auc-kept-row"><span>${n + 1}.</span>
+        <b>${byIndex.get(i).name}</b><em>${byIndex.get(i).season_year}</em><i>${cr(slabs[n])}</i></div>`).join('')
+      || '<div class="note">Nobody kept yet. You can start with a full purse and six Right to Match cards.</div>'}
+    <div class="auc-retain-totals">
+      <div><b>${cr(A.purse_total - spend)}</b><span>purse for the auction</span></div>
+      <div><b>${A.rtm_places - RETAIN.length}</b><span>Right to Match cards</span></div>
+    </div>`;
+  $('#aucRetainBtn').disabled = RETAIN.length === 0;
+}
+
+function pickSeason(pid, index){ RETAIN_SEASON[pid] = index; renderRetain(); }
+
+function toggleRetain(index){
+  const pos = RETAIN.indexOf(index);
+  if (pos >= 0){ RETAIN.splice(pos, 1); renderRetain(); return; }
+  if (RETAIN.length >= A.retention_slabs.length){
+    slip(`At most ${A.retention_slabs.length} retentions.`);
+    return;
+  }
+  RETAIN.push(index);
+  renderRetain();
+}
+
+function confirmRetain(ctrl, nobody){
+  busyClick(ctrl, 'Opening the auction…', async () => {
+    try {
+      const d = await api(`/api/auction/${A.state}/retain`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({picks: nobody ? [] : RETAIN})});
+      await apply(d, false);
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// --- Right to Match [A138] ------------------------------------------------------------------
+
+let RAISE = null;
+
+function openRtm(){
+  const d = A, r = d.rtm, c = d.lot.card;
+  const who = `<b>${c.name}</b> <em>${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</em>`;
+  let body;
+  if (r.kind === 'rtm_use'){
+    body = `
+      <div class="over-line">Right to Match · ${cardsLeft(d)}</div>
+      <div class="call">Your old player</div>
+      <p>${who} has gone to ${chip(r.other)} for <b>${cr(r.price)}</b>.</p>
+      <p class="room-note">Play a card and ${r.other} get one final raise. Match it and he is
+        yours; don't, and they keep him at the raised price. A card is only spent if you match.</p>
+      <div class="actions"><button class="act lead" onclick="answerRtm(true, this)">Use Right to Match</button>
+        <button class="act" onclick="answerRtm(false, this)">Let him go</button></div>`;
+  } else if (r.kind === 'rtm_match'){
+    body = `
+      <div class="over-line">Right to Match · the final raise</div>
+      <div class="call">${r.other} raise to ${cr(r.price)}</div>
+      <p>Match it and ${who} is yours for <b>${cr(r.price)}</b>.</p>
+      <div class="actions"><button class="act lead" onclick="answerRtm(true, this)"
+          ${d.max_bid < r.price ? 'disabled' : ''}>Match ${cr(r.price)}</button>
+        <button class="act" onclick="answerRtm(false, this)">Decline</button></div>
+      ${d.max_bid < r.price ? `<p class="room-note">You can pay at most ${cr(d.max_bid)} and still fill your squad.</p>` : ''}`;
+  } else {
+    RAISE = r.price;
+    body = `
+      <div class="over-line">Right to Match · against you</div>
+      <div class="call">${r.other} want him back</div>
+      <p>You bought ${who} for <b>${cr(r.price)}</b>, and ${r.other} have played a card. Make one
+        final raise: if they match it they take him, if they don't you keep him at that price.</p>
+      <div class="auc-limit">
+        <button class="act minor" onclick="nudgeRaise(-1)">−</button>
+        <div class="auc-limit-val"><span>Final price</span><b id="aucRaiseVal">${cr(RAISE)}</b></div>
+        <button class="act minor" onclick="nudgeRaise(1)">+</button>
+      </div>
+      <div class="actions"><button class="act lead" onclick="answerRtm(true, this)">Raise to <span id="aucRaiseBtn">${cr(RAISE)}</span></button>
+        <button class="act" onclick="answerRtm(false, this)">No raise</button></div>`;
+  }
+  $('#aucRtmBody').innerHTML = `<div class="auc-rtm">${body}</div>`;
+  $('#aucRtm').classList.remove('hide');
+}
+
+function cardsLeft(d){
+  const n = d.teams.find(t => t.human).rtm;
+  return `${n} card${n === 1 ? '' : 's'} left`;
+}
+
+function closeRtm(){ const el = $('#aucRtm'); if (el) el.classList.add('hide'); }
+
+function nudgeRaise(dir){
+  const floor = A.rtm.price, top = A.rtm.max_raise;
+  RAISE = dir > 0 ? Math.min(stepUp(RAISE), top) : Math.max(stepDown(RAISE, floor), floor);
+  $('#aucRaiseVal').textContent = cr(RAISE);
+  $('#aucRaiseBtn').textContent = cr(RAISE);
+}
+
+function answerRtm(yes, ctrl){
+  const body = {yes};
+  if (A.rtm.kind === 'rtm_raise' && yes) body.price = RAISE;
+  send('rtm', body, ctrl);
+}
 
 // --- the fill round ------------------------------------------------------------------------
 

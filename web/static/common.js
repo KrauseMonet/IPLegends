@@ -57,7 +57,7 @@ async function api(path, opts){
 function isAuctionState(state){ return (state || '').startsWith('A'); }
 function stateLabel(state){
   const head = (state || '').split('-')[0];
-  return isAuctionState(state) ? 'Auction ' + head.slice(1) : 'Seed ' + head;
+  return isAuctionState(state) ? 'Auction ' + head.replace(/^\D+/, '') : 'Seed ' + head;
 }
 
 function slip(msg){

@@ -309,3 +309,192 @@ def test_the_price_cap_binds_the_computer_teams_and_never_the_human(deck):
         if any(s.winner == human and s.price > cap for s in a.sales):
             return
     pytest.fail("the human never paid above the computer cap in 20 auctions")
+
+
+# --- retentions and Right to Match [A138] ------------------------------------------------
+
+def _pool_card(deck, franchise, name, year=None):
+    return next(c for c in au.retention_pool(deck, franchise)
+                if c.name == name and (year is None or c.season_year == year))
+
+
+@needs_snapshot
+def test_a_retention_must_come_from_your_own_franchise_one_season_per_player(deck):
+    team = au.Team(0, "DC", "Delhi Capitals")
+    rahul_dc = _pool_card(deck, "Delhi Capitals", "KL Rahul")
+    rahul_pbks = _pool_card(deck, "Punjab Kings", "KL Rahul", 2021)
+    assert au.retention_errors(team, [rahul_dc]) == []
+    assert au.retention_errors(team, [rahul_pbks])            # another franchise's season
+    other_dc = [c for c in au.retention_pool(deck, "Delhi Capitals")
+                if c.person_id == rahul_dc.person_id and c is not rahul_dc]
+    assert au.retention_errors(team, [rahul_dc, other_dc[0]])  # the same man twice
+    six = []
+    for c in au.retention_pool(deck, "Delhi Capitals"):
+        if c.person_id not in {x.person_id for x in six}:
+            six.append(c)
+        if len(six) == 6:
+            break
+    assert au.retention_errors(team, six)                      # over the limit
+
+
+@needs_snapshot
+def test_retentions_are_charged_at_the_slabs_and_leave_the_rest_as_cards(deck):
+    a = au.run_auction(deck, 13, mega=True)
+    for team in a.teams:
+        slabs = list(au.RETENTION_SLABS[:team.retained])
+        assert team.paid[:team.retained] == slabs
+        assert team.rtm + sum(1 for s in a.sales if s.rtm and s.rtm.matched
+                              and s.rtm.holder == team.index) == au.RTM_PLACES - team.retained
+        for c in team.squad[:team.retained]:
+            assert au.franchise_of(c) == team.franchise
+
+
+@needs_snapshot
+def test_nobody_is_retained_twice_or_offered_after_being_kept(deck):
+    a = au.run_auction(deck, 13, mega=True)
+    kept = [c.person_id for t in a.teams for c in t.squad[:t.retained]]
+    assert len(kept) == len(set(kept))
+    assert not set(kept) & {lot.card.person_id for lot in a.lots}
+
+
+@needs_snapshot
+def test_the_human_retains_first_so_a_shared_legend_is_theirs(deck):
+    """LSG is team 9 and PBKS team 7, so in plain team order PBKS would keep Rahul before
+    the human was asked. The fixture has to put the human AFTER the computer team, or the
+    priority rule never gets anything to do -- the first version used DC (team 5) and
+    passed with the rule deleted."""
+    rahul = _pool_card(deck, "Lucknow Super Giants", "KL Rahul")
+    assert [s for s, _ in au.FRANCHISES].index("LSG") > \
+        [s for s, _ in au.FRANCHISES].index("PBKS")
+
+    class KeepRahul(au.Human):
+        def retain(self, auction, team, pool):
+            return [rahul]
+
+    alone = au.run_auction(deck, 13, mega=True)
+    pbks = next(t for t in alone.teams if t.short == "PBKS")
+    assert rahul.person_id in {c.person_id for c in pbks.squad[:pbks.retained]}, \
+        "the fixture needs PBKS to want Rahul when nobody else has him"
+    a = au.run_auction(deck, 13, human_short="LSG", human=KeepRahul(), mega=True)
+    pbks = next(t for t in a.teams if t.short == "PBKS")
+    lsg = next(t for t in a.teams if t.short == "LSG")
+    assert lsg.squad[0] is rahul
+    assert rahul.person_id not in {c.person_id for c in pbks.squad}
+
+
+@needs_snapshot
+def test_an_illegal_human_retention_is_refused(deck):
+    class Poach(au.Human):
+        def retain(self, auction, team, pool):
+            return [_pool_card(deck, "Punjab Kings", "KL Rahul", 2021)]
+    with pytest.raises(au.RetentionError):
+        au.run_auction(deck, 13, human_short="DC", human=Poach(), mega=True)
+
+
+@needs_snapshot
+@pytest.mark.parametrize("seed", range(4))
+def test_a_mega_auction_still_ends_with_every_squad_legal(deck, seed):
+    a = au.run_auction(deck, seed, mega=True)
+    assert a.stranded == []
+    for team in a.teams:
+        assert len(team.squad) == au.SQUAD_SIZE and team.purse >= 0
+        assert order_errors(*a.twelve(team), team.squad) == []
+
+
+@needs_snapshot
+def test_right_to_match_goes_to_the_franchise_the_season_was_played_for(deck):
+    for seed in range(6):
+        a = au.run_auction(deck, seed, mega=True)
+        for s in a.sales:
+            if s.rtm:
+                holder = a.teams[s.rtm.holder]
+                assert holder.franchise == au.franchise_of(s.lot.card)
+                assert s.rtm.raised_to >= s.rtm.hammer
+                assert s.winner == (s.rtm.holder if s.rtm.matched else s.bids[-1].team)
+                assert s.price == s.rtm.raised_to
+
+
+def _find_rtm(deck, human_short, role):
+    """A seed on which the human's franchise meets a Right to Match in `role`:
+    'holder' (their old player sold elsewhere) or 'winner' (they bought someone's)."""
+    class Probe(au.Human):
+        hit = False
+
+        def ceiling(self, auction, team, lot, round_no):
+            return team.max_bid() if role == "winner" and (lot.card.display or 0) >= 88 else 0
+
+        def rtm_use(self, *a):
+            Probe.hit = True
+            return False
+
+        def rtm_raise(self, auction, team, lot, price, holder):
+            Probe.hit = True
+            return price
+
+    for seed in range(40):
+        Probe.hit = False
+        au.run_auction(deck, seed, human_short=human_short, human=Probe(), mega=True)
+        if Probe.hit:
+            return seed
+    pytest.skip(f"no {role} RTM for {human_short} in 40 seeds")
+
+
+@needs_snapshot
+def test_a_human_holder_who_uses_and_matches_takes_the_player(deck):
+    seed = _find_rtm(deck, "RCB", "holder")
+
+    class UseAndMatch(au.Human):
+        def rtm_use(self, *a): return True
+        def rtm_match(self, *a): return True
+
+    a = au.run_auction(deck, seed, human_short="RCB", human=UseAndMatch(), mega=True)
+    rcb = next(t for t in a.teams if t.short == "RCB")
+    events = [s for s in a.sales if s.rtm and s.rtm.holder == rcb.index]
+    assert events and all(s.winner == rcb.index and s.rtm.matched for s in events)
+    assert rcb.rtm == au.RTM_PLACES - rcb.retained - len(events)
+
+
+@needs_snapshot
+def test_a_human_holder_who_declines_to_match_keeps_the_card(deck):
+    seed = _find_rtm(deck, "RCB", "holder")
+
+    class UseNoMatch(au.Human):
+        def rtm_use(self, *a): return True
+        def rtm_match(self, *a): return False
+
+    a = au.run_auction(deck, seed, human_short="RCB", human=UseNoMatch(), mega=True)
+    rcb = next(t for t in a.teams if t.short == "RCB")
+    for s in a.sales:
+        if s.rtm and s.rtm.holder == rcb.index and not s.rtm.matched:
+            assert s.winner != rcb.index and s.price == s.rtm.raised_to > s.rtm.hammer
+    assert rcb.rtm == au.RTM_PLACES - rcb.retained - sum(
+        1 for s in a.sales if s.rtm and s.rtm.holder == rcb.index and s.rtm.matched)
+
+
+@needs_snapshot
+def test_a_human_winner_s_final_raise_is_what_the_holder_must_match(deck):
+    seed = _find_rtm(deck, "KKR", "winner")
+    raises = []
+
+    class RaiseHard(au.Human):
+        def ceiling(self, auction, team, lot, round_no):
+            return team.max_bid() if (lot.card.display or 0) >= 88 else 0
+
+        def rtm_raise(self, auction, team, lot, price, holder):
+            raises.append(price)
+            return 10 ** 7                       # everything the reserve allows
+
+    a = au.run_auction(deck, seed, human_short="KKR", human=RaiseHard(), mega=True)
+    kkr = next(t for t in a.teams if t.short == "KKR")
+    events = [s for s in a.sales if s.rtm and s.bids[-1].team == kkr.index]
+    assert raises and len(events) == len(raises)
+    for s in events:
+        assert s.rtm.raised_to > s.rtm.hammer
+        assert not s.rtm.matched or a.teams[s.rtm.holder].purse >= 0
+
+
+@needs_snapshot
+def test_without_mega_there_are_no_retentions_and_no_cards(deck):
+    a = au.run_auction(deck, 13)
+    assert all(t.retained == 0 and t.rtm == 0 for t in a.teams)
+    assert not any(s.rtm for s in a.sales)

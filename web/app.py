@@ -1771,6 +1771,8 @@ class AuctionTeamOut(BaseModel):
     players: int
     overseas: int
     human: bool
+    retained: int = 0
+    rtm: int = Field(default=0, description="Right to Match cards left")
 
 
 class AuctionBidOut(BaseModel):
@@ -1790,6 +1792,10 @@ class AuctionSaleOut(BaseModel):
     team: str | None = Field(description="buyer's short name; null means unsold")
     price: int
     bids: list[AuctionBidOut]
+    rtm_holder: str | None = Field(default=None, description="who played a Right to Match")
+    rtm_hammer: int | None = None
+    rtm_raised: int | None = None
+    rtm_matched: bool | None = None
 
 
 class AuctionLotOut(BaseModel):
@@ -1806,11 +1812,26 @@ class AuctionLotOut(BaseModel):
 class AuctionSquadOut(BaseModel):
     card: CardOut
     price: int
+    retained: bool = False
+
+
+class AuctionPoolOut(BaseModel):
+    index: int
+    card: CardOut
+
+
+class AuctionRtmOut(BaseModel):
+    kind: Literal["rtm_use", "rtm_match", "rtm_raise"]
+    price: int = Field(description="the hammer (use, raise) or the winner's raise (match)")
+    other: str = Field(description="the winner (use, match) or the card's holder (raise)")
+    max_raise: int | None = Field(default=None, description="rtm_raise: your reserve limit")
 
 
 class AuctionOut(BaseModel):
     state: str
-    phase: Literal["bid", "fill", "twelve", "ready"]
+    phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "fill", "twelve",
+                   "ready"]
+    mega: bool = False
     you: str
     franchise: str
     lot: AuctionLotOut | None = None
@@ -1819,12 +1840,16 @@ class AuctionOut(BaseModel):
     price: int | None = None
     next_price: int | None = None
     your_bid: int | None = Field(default=None, description="your open ceiling on this lot")
-    max_bid: int
+    max_bid: int = 0
     can_bid: bool = False
-    teams: list[AuctionTeamOut]
-    squad: list[AuctionSquadOut]
-    recent: list[AuctionSaleOut] = Field(description="the latest sales, newest last")
-    sold: int
+    teams: list[AuctionTeamOut] = []
+    squad: list[AuctionSquadOut] = []
+    recent: list[AuctionSaleOut] = Field(default=[], description="the latest sales, newest last")
+    sold: int = 0
+    rtm: AuctionRtmOut | None = None
+    retention_pool: list[AuctionPoolOut] = []
+    retention_slabs: list[int] = list(auction.RETENTION_SLABS)
+    rtm_places: int = auction.RTM_PLACES
     fill_options: list[CardOut] = []
     suggestion: list[int] | None = Field(
         default=None, description="squad indexes: eleven in batting order, then Impact")
@@ -1841,30 +1866,56 @@ def _sale_out(r: auction_session.Replay, sale: auction.Sale) -> AuctionSaleOut:
         season_year=c.season_year, franchise=c.franchise, rating=c.display,
         base=sale.lot.base, team=teams[sale.winner].short if sale.winner is not None else None,
         price=sale.price, bids=[AuctionBidOut(team=teams[b.team].short, price=b.price)
-                                for b in sale.bids])
+                                for b in sale.bids],
+        rtm_holder=teams[sale.rtm.holder].short if sale.rtm else None,
+        rtm_hammer=sale.rtm.hammer if sale.rtm else None,
+        rtm_raised=sale.rtm.raised_to if sale.rtm else None,
+        rtm_matched=sale.rtm.matched if sale.rtm else None)
+
+
+# The retention screen shows at most this many of a franchise's seasons -- the strongest,
+# which is where every sensible retention is, rather than all ~400 of Mumbai's.
+RETENTION_POOL_SHOWN = 150
+
+
+def _lot_out(r: auction_session.Replay) -> AuctionLotOut:
+    a, lot = r.auction, r.lot
+    same_set = [x for x in a.lots if x.set_code == lot.set_code and x.index > lot.index]
+    if r.round_no == 1:     # the accelerated round revisits the unsold, not a set
+        same_set = []
+    return AuctionLotOut(
+        lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
+        set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
+        card=_card(lot.card), upcoming=[x.card.name for x in same_set])
 
 
 def _auction_out(r: auction_session.Replay) -> AuctionOut:
+    if r.phase == "retain":
+        return AuctionOut(
+            state=r.state, phase="retain", mega=True, you=r.short, franchise=r.franchise,
+            max_bid=auction.PURSE,
+            retention_pool=[AuctionPoolOut(index=i, card=_card(c))
+                            for i, c in enumerate(r.retention_pool[:RETENTION_POOL_SHOWN])])
     a, you = r.auction, r.you
     out = AuctionOut(
-        state=r.state, phase=r.phase, you=you.short, franchise=you.franchise,
+        state=r.state, phase=r.phase, mega=r.mega, you=you.short, franchise=you.franchise,
         max_bid=you.max_bid(),
         teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
-                              players=len(t.squad), overseas=t.overseas, human=t.human)
+                              players=len(t.squad), overseas=t.overseas, human=t.human,
+                              retained=t.retained, rtm=t.rtm)
                for t in a.teams],
-        squad=[AuctionSquadOut(card=_card(c), price=p) for c, p in zip(you.squad, you.paid)],
+        squad=[AuctionSquadOut(card=_card(c), price=p, retained=i < you.retained)
+               for i, (c, p) in enumerate(zip(you.squad, you.paid))],
         recent=[_sale_out(r, s) for s in a.sales[-25:]],
         sold=sum(1 for s in a.sales if s.winner is not None),
     )
-    if r.phase == "bid":
+    if r.phase in ("rtm_use", "rtm_match", "rtm_raise"):
+        out.lot = _lot_out(r)
+        out.rtm = AuctionRtmOut(kind=r.phase, price=r.rtm_price, other=r.rtm_other.short,
+                                max_raise=you.max_bid() if r.phase == "rtm_raise" else None)
+    elif r.phase == "bid":
         lot = r.lot
-        same_set = [x for x in a.lots if x.set_code == lot.set_code and x.index > lot.index]
-        if r.round_no == 1:     # the accelerated round revisits the unsold, not a set
-            same_set = []
-        out.lot = AuctionLotOut(
-            lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
-            set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
-            card=_card(lot.card), upcoming=[x.card.name for x in same_set])
+        out.lot = _lot_out(r)
         log = r.preview()
         out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price) for b in log]
         out.leader = a.teams[log[-1].team].short if log else None
@@ -1893,6 +1944,17 @@ def _auction(fn, *args) -> AuctionOut:
 class AuctionStartIn(BaseModel):
     team: str
     seed: int | None = None
+    mega: bool = Field(default=True, description="retentions and Right to Match (A138)")
+
+
+class AuctionRetainIn(BaseModel):
+    picks: list[int] = Field(default=[], max_length=auction.MAX_RETENTIONS,
+                             description="indexes into retention_pool")
+
+
+class AuctionRtmIn(BaseModel):
+    yes: bool
+    price: int | None = Field(default=None, description="rtm_raise: your final raise")
 
 
 class AuctionBidIn(BaseModel):
@@ -1917,7 +1979,7 @@ class AuctionTwelveIn(BaseModel):
 def auction_start(body: AuctionStartIn) -> AuctionOut:
     seed = body.seed if body.seed is not None else sess.new_seed()
     try:
-        state = auction_session.new_state(seed, body.team)
+        state = auction_session.new_state(seed, body.team, body.mega)
     except auction_session.InvalidState as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _auction(auction_session.replay, state)
@@ -1946,6 +2008,16 @@ def auction_fill(state: str, body: AuctionFillIn) -> AuctionOut:
 @app.post("/api/auction/{state}/twelve", response_model=AuctionOut)
 def auction_twelve(state: str, body: AuctionTwelveIn) -> AuctionOut:
     return _auction(auction_session.choose_twelve, state, body.order, body.impact)
+
+
+@app.post("/api/auction/{state}/retain", response_model=AuctionOut)
+def auction_retain(state: str, body: AuctionRetainIn) -> AuctionOut:
+    return _auction(auction_session.retain, state, body.picks)
+
+
+@app.post("/api/auction/{state}/rtm", response_model=AuctionOut)
+def auction_rtm(state: str, body: AuctionRtmIn) -> AuctionOut:
+    return _auction(auction_session.rtm, state, body.yes, body.price)
 
 
 

@@ -68,6 +68,19 @@ OVERSEAS_LOTS = 90
 MARQUEE_SIZE = 12
 SET_SIZE = 12
 
+# --- retentions and Right to Match [A138] -------------------------------------------------
+#
+# The real 2025 mega-auction rules, adapted where the archive cannot support them. A team
+# may keep players from its OWN franchise's nineteen seasons before the auction -- one
+# season per person, chosen by the team -- at the real capped-player slabs, in order. Every
+# retention place not used becomes a Right to Match card. The real rules also allow two
+# uncapped players at ₹4 cr; the archive holds no international-cap data to say who is
+# uncapped, and a ₹4 cr slot open to anybody would retain a 99 for a sixth of his price, so
+# that slot is left out rather than approximated.
+RETENTION_SLABS = (1800, 1400, 1100, 1800, 1400)
+MAX_RETENTIONS = len(RETENTION_SLABS)
+RTM_PLACES = 6                  # retentions + RTM cards <= 6, as in 2025
+
 # --- money helpers ----------------------------------------------------------------------
 
 
@@ -338,11 +351,11 @@ def draw_seasons(deck: Deck, seed: int) -> list[Card]:
     return drawn
 
 
-def build_catalogue(deck: Deck, seed: int) -> list[Lot]:
+def build_catalogue(deck: Deck, seed: int, exclude: frozenset[str] = frozenset()) -> list[Lot]:
     """The strongest DOMESTIC_LOTS domestic and OVERSEAS_LOTS overseas draws, in sets run
     the way the real auction runs them: marquee first, then a set of each category in
-    turn, then the second set of each..."""
-    drawn = draw_seasons(deck, seed)
+    turn, then the second set of each... `exclude` is everyone already retained."""
+    drawn = [c for c in draw_seasons(deck, seed) if c.person_id not in exclude]
     pool = ([c for c in drawn if c.overseas is not True][:DOMESTIC_LOTS]
             + [c for c in drawn if c.overseas is True][:OVERSEAS_LOTS])
     pool.sort(key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
@@ -381,6 +394,8 @@ class Team:
     purse: int = PURSE
     squad: list[Card] = field(default_factory=list)
     paid: list[int] = field(default_factory=list)
+    retained: int = 0               # how many of `squad` were kept before the auction
+    rtm: int = 0                    # Right to Match cards left
 
     @property
     def open_places(self) -> int:
@@ -501,6 +516,98 @@ def cpu_ceiling(team: Team, lot: Lot, seed: int, round_no: int) -> int:
     return ceiling if ceiling >= lot.base else 0
 
 
+# --- retentions ---------------------------------------------------------------------------
+
+RETAIN_MIN = 90                 # a computer team keeps its own legends rated at least this
+RETAIN_COUNT = {"aggressive": 5, "balanced": 4, "value": 3}
+RTM_PREMIUM = 1.05              # how far past its own ceiling a team goes for its old player
+
+
+def franchise_of(card: Card) -> str | None:
+    try:
+        return canonical(card.franchise) if card.franchise else None
+    except RuntimeError:
+        return None
+
+
+def retention_pool(deck: Deck, franchise: str) -> list[Card]:
+    """Every season a franchise ever had, strongest first. A team keeps at most one season
+    of any one person, and chooses which."""
+    pool = [c for cards in deck.cards_by_fs.values() for c in cards
+            if franchise_of(c) == franchise]
+    pool.sort(key=lambda c: (-(c.display or 0), -c.rating, c.person_id, c.season_year or 0))
+    return pool
+
+
+def retention_errors(team: Team, chosen: list[Card]) -> list[str]:
+    """Why a set of retentions is not allowed, or nothing. Checked for the computer teams
+    as well as the human -- a rule enforced for one side only is half a rule."""
+    errors = []
+    if len(chosen) > MAX_RETENTIONS:
+        errors.append(f"at most {MAX_RETENTIONS} retentions")
+    if len({c.person_id for c in chosen}) != len(chosen):
+        errors.append("one season per player")
+    if any(franchise_of(c) != team.franchise for c in chosen):
+        errors.append("only your own franchise's players")
+    if sum(c.overseas is True for c in chosen) > SQUAD_OVERSEAS_CAP:
+        errors.append("too many overseas players")
+    if not twelve_feasible(chosen, SQUAD_SIZE - len(chosen)):
+        errors.append("no legal twelve could be built around them")
+    return errors
+
+
+def retain(team: Team, chosen: list[Card]) -> None:
+    for card, price in zip(chosen, RETENTION_SLABS):
+        team.squad.append(card)
+        team.paid.append(price)
+        team.purse -= price
+    team.retained = len(chosen)
+    team.rtm = RTM_PLACES - len(chosen)
+
+
+def cpu_retain(team: Team, pool: list[Card], taken: set[str]) -> list[Card]:
+    """Keep the best season of each of the franchise's own legends, up to what the team's
+    personality allows. A declared rule, measured by the calibration like the rest."""
+    best: dict[str, Card] = {}
+    for c in pool:                   # pool is strongest first, so the first seen is best
+        if c.person_id not in taken:
+            best.setdefault(c.person_id, c)
+    chosen: list[Card] = []
+    for c in best.values():
+        if len(chosen) >= RETAIN_COUNT[team.personality] or (c.display or 0) < RETAIN_MIN:
+            break
+        if not retention_errors(team, chosen + [c]):
+            chosen.append(c)
+    return chosen
+
+
+# --- Right to Match -----------------------------------------------------------------------
+
+
+def rtm_holder(auction: "Auction", lot: Lot, winner: int) -> Team | None:
+    """The franchise this season was played for, if it still holds a card and could take
+    the player. A season played for Deccan or Kochi has nobody to come back for it."""
+    home = franchise_of(lot.card)
+    for team in auction.teams:
+        if (team.franchise == home and team.index != winner and team.rtm > 0
+                and team.may_buy(lot.card)):
+            return team
+    return None
+
+
+def _ladder_at_most(price: int, floor: int) -> int:
+    """The highest price on the bidding ladder that is at most `price`, from `floor` up."""
+    p = floor
+    while next_price(p) <= price:
+        p = next_price(p)
+    return p
+
+
+def cpu_rtm_limit(team: Team, lot: Lot, ceiling: int) -> int:
+    """How far a computer team will go to take back its own player with a card."""
+    return min(int(ceiling * RTM_PREMIUM), team.max_bid())
+
+
 # --- a lot ------------------------------------------------------------------------------
 
 
@@ -517,6 +624,18 @@ class Sale:
     winner: int | None          # team index, None if unsold
     price: int
     bids: list[Bid]
+    rtm: "RtmEvent | None" = None
+
+
+@dataclass(frozen=True)
+class RtmEvent:
+    """A Right to Match, as it happened: `holder` played the card after the hammer at
+    `hammer`, the winner made a final raise to `raised_to` (equal to `hammer` if none),
+    and the holder matched it or did not."""
+    holder: int
+    hammer: int
+    raised_to: int
+    matched: bool
 
 
 def bid_log(lot: Lot, ceilings: dict[int, int], seed: int, round_no: int,
@@ -557,6 +676,24 @@ class Human:
     def fill_choice(self, auction: "Auction", team: Team, options: list[Card]) -> Card:
         return max(options, key=_card_value)
 
+    def retain(self, auction: "Auction", team: Team, pool: list[Card]) -> list[Card]:
+        return []
+
+    def rtm_use(self, auction: "Auction", team: Team, lot: Lot, price: int,
+                winner: Team) -> bool:
+        """Your old player just sold to `winner` for `price`. Play a card?"""
+        return False
+
+    def rtm_raise(self, auction: "Auction", team: Team, lot: Lot, price: int,
+                  holder: Team) -> int:
+        """You won, and `holder` played a card. Your one final raise (price = none)."""
+        return price
+
+    def rtm_match(self, auction: "Auction", team: Team, lot: Lot, price: int,
+                  winner: Team) -> bool:
+        """`winner` raised to `price` after your card. Match it?"""
+        return False
+
 
 ROUNDS = ("main", "accelerated")
 
@@ -566,6 +703,7 @@ class Auction:
     seed: int
     lots: list[Lot]
     teams: list[Team]
+    mega: bool = False              # retentions and Right to Match [A138]
     sales: list[Sale] = field(default_factory=list)
     register: list[Card] = field(default_factory=list)  # drawn, never catalogued
     stranded: list[int] = field(default_factory=list)   # teams the fill round could not finish
@@ -613,25 +751,98 @@ def _offer(auction: Auction, lot: Lot, round_name: str, human: Human | None) -> 
     hi = human_index(auction)
     if hi is not None and human is not None and auction.teams[hi].may_buy(lot.card):
         wanted = human.ceiling(auction, auction.teams[hi], lot, round_no)
-    bids = bid_log(lot, lot_ceilings(auction, lot, round_name, wanted), auction.seed,
-                   round_no, hi)
+    ceilings = lot_ceilings(auction, lot, round_name, wanted)
+    bids = bid_log(lot, ceilings, auction.seed, round_no, hi)
     if not bids:
         return Sale(lot, round_name, None, 0, bids)
-    last = bids[-1]
-    team = auction.teams[last.team]
+    buyer, price = bids[-1].team, bids[-1].price
+    event = None
+    if auction.mega:
+        buyer, price, event = _right_to_match(auction, lot, buyer, price, ceilings, human)
+    team = auction.teams[buyer]
     team.squad.append(lot.card)
-    team.paid.append(last.price)
-    team.purse -= last.price
-    return Sale(lot, round_name, last.team, last.price, bids)
+    team.paid.append(price)
+    team.purse -= price
+    return Sale(lot, round_name, buyer, price, bids, event)
+
+
+def _right_to_match(auction: Auction, lot: Lot, winner_idx: int, hammer: int,
+                    ceilings: dict[int, int], human: Human | None):
+    """The 2025 rule. The player's old franchise may play a card; the winner then makes ONE
+    final raise; the old franchise matches it and takes the player, or the winner has him
+    at the raised price. A card is spent only when it is matched."""
+    winner = auction.teams[winner_idx]
+    holder = rtm_holder(auction, lot, winner_idx)
+    if holder is None or holder.max_bid() < hammer:
+        return winner_idx, hammer, None
+
+    def asks(team: Team) -> bool:
+        return team.human and human is not None
+
+    limit = 0 if asks(holder) else cpu_rtm_limit(holder, lot, ceilings[holder.index])
+    use = (human.rtm_use(auction, holder, lot, hammer, winner) if asks(holder)
+           else limit >= hammer)
+    if not use:
+        return winner_idx, hammer, None
+
+    if asks(winner):
+        wanted = human.rtm_raise(auction, winner, lot, hammer, holder)
+    else:
+        # Halfway to what the winner would have paid: enough to make the card cost
+        # something, not so much that a declined match leaves the winner badly overpaid.
+        wanted = hammer + (max(hammer, ceilings[winner_idx]) - hammer) // 2
+    raised = _ladder_at_most(min(max(wanted, hammer), winner.max_bid()), hammer)
+
+    if raised > holder.max_bid():
+        matched = False
+    elif raised == hammer:
+        matched = True
+    elif asks(holder):
+        matched = human.rtm_match(auction, holder, lot, raised, winner)
+    else:
+        matched = limit >= raised
+    event = RtmEvent(holder.index, hammer, raised, matched)
+    if matched:
+        holder.rtm -= 1
+        return holder.index, raised, event
+    return winner_idx, raised, event
+
+
+class RetentionError(ValueError):
+    pass
+
+
+def _retentions(deck: Deck, seed: int, teams: list[Team], human: Human | None) -> set[str]:
+    """Every team keeps its players before the auction opens, the human first so a legend
+    two franchises share is never taken out from under them. Returns who was kept."""
+    taken: set[str] = set()
+    order = sorted(teams, key=lambda t: (not t.human, t.index))
+    for team in order:
+        pool = [c for c in retention_pool(deck, team.franchise) if c.person_id not in taken]
+        if team.human and human is not None:
+            chosen = human.retain(None, team, pool)
+            errors = retention_errors(team, chosen)
+            if errors or any(c.person_id in taken for c in chosen):
+                raise RetentionError("; ".join(errors) or "already retained elsewhere")
+        else:
+            chosen = cpu_retain(team, pool, taken)
+        retain(team, chosen)
+        taken |= {c.person_id for c in chosen}
+    return taken
 
 
 def run_auction(deck: Deck, seed: int, human_short: str | None = None,
                 human: Human | None = None,
-                on_sale: Callable[[Sale], None] | None = None) -> Auction:
-    lots = build_catalogue(deck, seed)
-    listed = {lot.card.person_id for lot in lots}
+                on_sale: Callable[[Sale], None] | None = None,
+                mega: bool = False) -> Auction:
+    teams = make_teams(seed, human_short)
+    kept: set[str] = set()
+    if mega:
+        kept = _retentions(deck, seed, teams, human)
+    lots = build_catalogue(deck, seed, frozenset(kept))
+    listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = Auction(seed, lots, make_teams(seed, human_short), register=register)
+    auction = Auction(seed, lots, teams, mega=mega, register=register)
     for round_name in ROUNDS:
         lots = auction.lots if round_name == "main" else auction.unsold
         for lot in lots:

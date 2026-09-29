@@ -2359,3 +2359,44 @@ natural key (the state) already distinguishes it, so no migration was needed.
 once the fill round turned out to offer good leftovers (Malinga at 86, Smith at 84) for ₹30L:
 over 40 auctions a human who never bids averages a twelve of **79.6** against the computer
 teams' **84.8** and finishes **last of ten every time**.
+
+### 15.7 Retentions and Right to Match [A138]
+
+A **mega auction** (state prefix `AR`) adds the real 2025 retention phase and Right to Match;
+an **open auction** (`A`) keeps §15.1–15.6 exactly, so a state saved before this existed
+replays unchanged. New auctions default to mega.
+
+**Retentions.** Before the auction every team may keep up to **five** players from its OWN
+franchise's nineteen seasons — one season per person, chosen by the team — at the real
+capped slabs in the order kept: **₹18, 14, 11, 18, 14 cr**. The real rules add two
+uncapped places at ₹4 cr; the archive carries no international-cap data to say who is
+uncapped, and a ₹4 cr place open to anyone would keep a 99-rated season for a sixth of his
+price, so that place is left out rather than approximated. The human keeps first, so a
+legend two franchises share is theirs if they want him; kept players never reach the
+catalogue. Computer teams keep their best seasons rated 90+, up to 5 / 4 / 3 by personality.
+
+**Right to Match.** Unused retention places become cards (retentions + cards = 6, as in
+2025). A card belongs to the franchise **the lot's season was played for**, so a Deccan or
+Kochi season has nobody to come back for it. After the hammer the holder may play a card;
+the winner makes **one** final raise; the holder matches it and takes the player, or the
+winner keeps him at the raised price. A card is spent only when it is matched. A computer
+holder plays and matches up to 5% above its own ceiling.
+
+**Measured against the real 2025 mega auction** (40 auctions, no human):
+
+| | ours | 2025 |
+|---|---|---|
+| retained | 37 players, ₹557 cr | 46 players, ₹558.5 cr |
+| auction spend | ₹563 cr | ₹639.15 cr (182 sold) |
+| mean price | ₹3.94 cr | ₹3.51 cr |
+| top price | ₹17.7 cr (max ₹22.8 cr) | ₹27 cr |
+| overseas share of sales | 28% | 34% |
+| RTM cards used | 11.3 of 22.9 | 8 of 14 |
+
+The 5% Right to Match premium was chosen here: at 25% cards were used ~17 times an auction
+and matched 88% of the time. Our top price runs lower because the franchises retain most of
+the 99-rated legends before the auction starts, and our squads buy eighteen, not twenty-five.
+
+**Not yet shown:** the bidding that led to a Right to Match question. The engine does not
+keep a lot's bids while it is still deciding it, so the prompt shows the hammer price alone.
+The addition is small (`Auction.current_bids`) and was deliberately set aside.

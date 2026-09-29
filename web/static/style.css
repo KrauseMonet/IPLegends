@@ -1741,3 +1741,41 @@ body.has-ground{
   .auc-bidbox .act.minor{padding:9px 8px;font-size:10px;letter-spacing:.02em;flex:1}
   .auc-limit-quick .act.minor{flex:0 1 auto}
 }
+
+/* --- the auction: retentions and Right to Match [A138] --- */
+.auc-retain{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;margin-top:22px;position:relative;z-index:1}
+.auc-retain-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.auc-retain-row.kept{background:rgba(245,184,61,.1);box-shadow:inset 3px 0 0 var(--gold)}
+.auc-retain-name{flex:1;font-weight:700;cursor:pointer;font-size:14px}
+.auc-retain-name .auc-tag{margin-left:6px;font-style:normal}
+.auc-season{font-family:var(--mono);font-size:12px;background:var(--panel-3);color:var(--ink);
+  border:1px solid var(--line-strong);border-radius:6px;padding:5px 6px}
+.auc-season-one{font-family:var(--mono);font-size:12px;color:var(--ink-3);padding:0 6px}
+.auc-kept-row{display:grid;grid-template-columns:22px 1fr auto auto;gap:8px;align-items:baseline;
+  padding:10px 18px;border-bottom:1px solid var(--line);font-size:14px}
+.auc-kept-row span,.auc-kept-row em{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-style:normal}
+.auc-kept-row i{font-style:normal;font-family:var(--mono);color:var(--mint);font-size:12.5px}
+.auc-retain-totals{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px 18px}
+.auc-retain-totals div{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel-2)}
+.auc-retain-totals b{display:block;font-family:var(--display);font-weight:400;font-size:28px;line-height:1}
+.auc-retain-totals span{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.auc-rtm-shell{max-width:520px}
+.auc-rtm .over-line{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--gold)}
+.auc-rtm .call{font-family:var(--display);font-weight:400;font-size:34px;line-height:1.05;
+  text-transform:uppercase;margin:8px 0 12px}
+.auc-rtm .room-note{font-family:var(--sans);font-size:13.5px;color:var(--ink-3);line-height:1.55}
+.auc-rtm p{color:var(--ink-2);font-size:15px}
+.auc-rtm p b{color:var(--ink)}
+.auc-rtm p em{font-style:normal;color:var(--ink-3);font-size:13px}
+.auc-rtm .actions{margin-top:18px}
+.auc-rtm-tag{font-style:normal;color:var(--gold)!important;font-weight:700}
+.auc-stamp em{font-family:var(--mono);font-size:13px;color:var(--gold-2);font-style:normal;letter-spacing:.04em;
+  animation:fadeUp .4s .35s ease-out both}
+@media (max-width:900px){
+  .auc-retain{grid-template-columns:1fr}
+  /* Name on its own line, controls beneath: at 375px one line clipped the Keep button. */
+  .auc-retain-row{flex-wrap:wrap;row-gap:8px}
+  .auc-retain-name{flex:1 1 calc(100% - 60px)}
+  .auc-retain-row .act.minor{margin-left:auto}
+}

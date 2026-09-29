@@ -2238,3 +2238,93 @@ A missing, corrupt, wrong-version or schema-mismatched snapshot degrades to the 
 path. The worst case is therefore slow, never wrong, which is what makes the whole thing
 safe to ship. `/api/health` reports `source` so the two are distinguishable from outside —
 the fallback is silent by design and would otherwise be invisible.
+
+## 15. The auction [A136]
+
+A second way to build a side. Ten franchises, **₹120 crore** each, **eighteen bought and
+twelve played**, the twelve picked once before the season. Phase 1 (this section) is the
+engine and its tuning; the page, retentions/Right to Match, and rooms follow as later
+phases and will extend this section rather than replace it.
+
+`game/auction.py` is pure: a function of the deck, a seed and what the human decided.
+Money is held in **lakh** as integers.
+
+### 15.1 The catalogue
+
+One season of every player is drawn at random per auction (so "which Kohli" varies), then
+the strongest **170 domestic and 90 overseas** draws are listed. **The split is by
+nationality, not by rating alone**: ranked as one pool the catalogue came out 60% overseas,
+every squad filled its six overseas places by mid-auction, and 95 overseas lots went unsold
+while two teams had nobody domestic left to buy. Lots run in sets as the real auction does —
+a marquee set of twelve, then batters / all-rounders / keepers / pace / spin in turn, twelve a
+set, order drawn within a set. Everybody not listed is **the register**, which only the fill
+round draws on.
+
+### 15.2 The rules
+
+| | |
+|---|---|
+| Purse | ₹120 cr (ratified, not tuned) |
+| Squad | 18, at most 6 overseas; the twelve at most 4 (`order_errors`) |
+| Base price | ₹30L to ₹2 cr by card rating, the real tiers |
+| Increments | ₹5L below ₹1 cr, ₹10L to ₹2 cr, ₹20L to ₹3 cr, ₹25L above |
+| Rounds | main, then one accelerated pass over the unsold, then the fill round |
+
+**A bid is legal only if afterwards the team can still (1) afford every empty place at ₹30L
+and (2) form a legal twelve from its squad plus the best possible future buys**
+(`twelve_feasible`). Eighteen-then-twelve brings position MATCHING back — A73 could delete it
+because its squad was its twelve, and this one is not — and it stays exact and cheap because
+A76 gives every card one of four batting bands: Hall's condition over sixteen band subsets,
+inside a small dynamic programme over (bands, overseas, bowlers, keeper). It is checked
+against an independent brute-force solver.
+
+**The fill round** gives any team still short a player at ₹30L, fewest-players first, from
+the unsold lots and then the register. It records every player it hands out and any team it
+cannot finish. It is a net: measured below at 4 auctions in 100 with no human.
+
+### 15.3 Two bidding styles, one number per lot
+
+A computer team's ceiling for a lot is fixed before the lot opens and never depends on what
+the human does to that lot; every tie-break inside a lot is a hash of (seed, lot, price,
+leader). So raising your limit only EXTENDS the bid log you have already seen, and a human
+clicking step by step plays the same game as one who sets a maximum up front — their last bid
+IS their maximum. The whole human decision per lot is therefore one integer, and an auction
+replays from a seed plus those integers (§11's shape). A test pins the property, and breaking
+it (letting a CPU tie-break see the human's ceiling) fails it.
+
+### 15.4 The computer teams
+
+Ceiling = value(rating) × need × money-per-place pressure × personality × loyalty × noise,
+capped by the purse reserve and by **25% of a purse (₹30 cr) for any one player**. **The cap binds the computer teams only** (ratified by the user): a human may pay any price the reserve rule allows, and outbids a capped computer team by a single increment.
+`value = 180L × e^(0.08 × (rating − 70))`. Need rewards a missing keeper, bowlers short of
+seven, and thin batting bands; personality is aggressive / balanced / value; a franchise pays
+15% more for its own former players. **All declared game-design constants**, set by
+`tools.auction_calibration` against measured targets, not by feel.
+
+The cap is load-bearing, and the sweep says why: without it, the only curves that spent the
+purses sent stars to ₹65–106 cr, over half a purse on one man, and those teams then limped
+through the fill round (up to 79 fills per auction).
+
+### 15.5 Measured (100 auctions per row)
+
+| human | stranded | illegal twelves | fills / auction | spend | top price | median | ρ(rating, price) |
+|---|---|---|---|---|---|---|---|
+| none | 0/1000 | 0/1000 | 0.04 | 91% | ₹29.9 cr | ₹3.98 cr | 0.86 |
+| never bids | 0/1000 | 0/1000 | 18.0 | 83% | ₹29.9 cr | ₹3.95 cr | 0.87 |
+| all-in on stars | 0/1000 | 0/1000 | 13.0 | 92% | ₹30.2 cr | ₹4.23 cr | 0.87 |
+| careless | 0/1000 | 0/1000 | 0.37 | 91% | ₹29.9 cr | ₹4.00 cr | 0.86 |
+
+About two players per auction reach the ₹30 cr cap. Sales: 5% under ₹1 cr, 27% ₹1–3 cr, 45%
+₹3–8 cr, 16% ₹8–15 cr, 7% above. The strongest and weakest computer twelves differ by 2.5
+rating points. ~0.35 s per auction.
+
+**Not yet checked against the real auction**, and the comparison is deliberately deferred:
+with no retentions every team spends a full ₹120 cr on eighteen, so prices here sit above a
+real mega auction's by construction (the real one's purses are cut by retentions first). The
+external check belongs with the retentions phase, when the two economies are comparable.
+
+**One known unrealism, recorded rather than tuned:** only 4% of sales are at the base price,
+far fewer than a real auction, because every team arrives with a full purse and no
+retentions. Also recorded for phase 2: a lot averages **31 bids**, which is fine when a
+maximum resolves it instantly and too long to click through one step at a time — the page
+must compress computer-only bidding.

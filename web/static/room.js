@@ -660,7 +660,7 @@ function renderLobbyFranchises(r){
     const taken = owner && !mine;
     return franchiseButton(s, name,
       `${taken ? 'disabled' : ''} onclick="chooseRoomFranchise('${s}', this)" title="${name}"`,
-      `<span class="auc-fr-owner">${owner ? owner.name : ''}</span>`)
+      `<span class="auc-fr-owner">${owner ? esc(owner.name) : ''}</span>`)
       .replace('class="auc-fr ', `class="auc-fr${mine ? ' sel' : ''}${taken ? ' taken' : ''} `);
   }).join('');
 }
@@ -867,7 +867,7 @@ function renderRoomDraft(r){
       : (active ? `${active.name}'s team so far` : 'Batting order');
     showRoomDeal(active && active.deal, r.status === 'complete' ? 'Draft complete' : '—');
     $('#roomOptions').innerHTML = '<div class="note">'
-      + (active ? `${active.name} is choosing -- options stay hidden until it's their turn to show.`
+      + (active ? `${esc(active.name)} is choosing -- options stay hidden until it's their turn to show.`
                 : 'Waiting on the rest of the room…') + '</div>';
 
     const rows = (shown ? shown.order : Array(11).fill(null))

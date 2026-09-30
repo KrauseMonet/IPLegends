@@ -107,10 +107,10 @@ function anPaint(){
       <div class="an-panel-head"><div><h3>The season's biggest moments</h3></div></div>
       <div class="an-moments">
         ${momentCard('Biggest over', d.best_over && `${d.best_over.runs}`,
-                     d.best_over && `Over ${d.best_over.over} · ${d.best_over.side} · off ${d.best_over.bowler}`,
+                     d.best_over && `Over ${d.best_over.over} · ${esc(d.best_over.side)} · off ${d.best_over.bowler}`,
                      'runs')}
         ${momentCard('Highest innings', d.highest_innings && `${d.highest_innings.runs}/${d.highest_innings.wickets}`,
-                     d.highest_innings && `${d.highest_innings.side} · ${d.highest_innings.overs} overs`,
+                     d.highest_innings && `${esc(d.highest_innings.side)} · ${d.highest_innings.overs} overs`,
                      '')}
       </div>
     </div>
@@ -502,7 +502,8 @@ function positionSvg(rows){
 // every row. A second line costs vertical space the panel has and buys back the width
 // the names did not.
 function teamTag(team){
-  return team ? `<i class="an-team">${team}</i>` : '';
+  // A room side's tag comes from a player's own name, so it is escaped like any typed text.
+  return team ? `<i class="an-team">${esc(team)}</i>` : '';
 }
 
 // The `title` remains, because a name can still outrun its line on a narrow viewport --

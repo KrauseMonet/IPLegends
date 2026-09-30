@@ -1574,3 +1574,24 @@ def test_an_auction_room_has_no_kits(conn):
     assert rooms.seat_kits(rooms._load_room(conn, room.code)) == {}
     with pytest.raises(rooms.RoomError, match="franchise"):
         rooms.set_kit(conn, room.code, host, _kit())
+
+
+# --- names are text, never markup -------------------------------------------------------
+
+@pytest.mark.parametrize("bad", ["<img src=x onerror=alert(1)>", "Rahul <3", "a>b",
+                                 "Tab\tin\u0000side", "Right‮to left", "   "])
+def test_a_name_that_is_markup_or_carries_control_characters_is_refused(conn, bad):
+    """The page escapes every name it draws; this is the layer behind that, because a
+    public room shows its host's name to strangers before anyone has joined."""
+    with pytest.raises(rooms.RoomError):
+        rooms.create_room(conn, "final", 15, bad)
+    room, _host = rooms.create_room(conn, "final", 15, "Host")
+    with pytest.raises(rooms.RoomError):
+        rooms.join_room(conn, room.code, bad, DECK)
+
+
+def test_an_ordinary_name_is_kept_as_typed_with_whitespace_tidied(conn):
+    room, host = rooms.create_room(conn, "final", 15, "  Rohan   D'Souza & Co. ")
+    _, guest = rooms.join_room(conn, room.code, "Priyā Iyer", DECK)
+    names = {p.player_id: p.name for p in rooms._load_room(conn, room.code).players.values()}
+    assert names == {host: "Rohan D'Souza & Co.", guest: "Priyā Iyer"}

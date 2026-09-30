@@ -549,7 +549,7 @@ function renderSide(){
 
   $('#aucTeams').innerHTML = d.teams.map(t => `
     <div class="auc-team${t.short === d.you ? ' you' : ''}">
-      ${chip(t.short)}${t.owner ? `<em class="auc-owner">${t.owner}</em>` : ''}
+      ${chip(t.short)}${t.owner ? `<em class="auc-owner">${esc(t.owner)}</em>` : ''}
       <div class="auc-team-bar crest-${t.short}"><i style="width:${100 * t.purse / d.purse_total}%;background:var(--team)"></i></div>
       <b>${cr(t.purse)}</b>
       <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>

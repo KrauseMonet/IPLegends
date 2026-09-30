@@ -33,6 +33,7 @@ def test_whitespace_in_a_name_collapses():
 @pytest.mark.parametrize("bad", [
     {"name": ""}, {"name": "   "}, {"name": "x" * 25}, {"name": "Bad\u0000Name"},
     {"name": "Right‮to left"},              # a format character, not a letter
+    {"name": "<b>Bold</b> XI"},
     {"monogram": ""}, {"monogram": "ABCD"}, {"monogram": "A B"}, {"monogram": "<b>"},
     {"colour": "chartreuse"}, {"colour": None},
 ])
@@ -116,3 +117,11 @@ def test_the_database_name_bound_is_the_code_bound(table):
 def test_the_database_monogram_rule_is_the_code_rule(table):
     pattern = re.search(r"~ '([^']+)'", _check(table, "monogram")).group(1)
     assert pattern == kit._MONOGRAM.pattern
+
+
+def test_a_default_kit_from_a_name_carrying_markup_falls_back_to_a_plain_one():
+    """A seat name stored before names were checked could carry markup; its default kit
+    must not inherit it."""
+    k = default_kit('<img src=x onerror="x">', 0, set(), set())
+    assert "<" not in k.name and ">" not in k.name
+    assert parse_kit(k.to_dict()) == k

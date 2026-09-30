@@ -175,7 +175,7 @@ async function roomListOpenRooms(){
           <span>
             <span class="rr-name">${ROOM_FORMAT_LABEL[r.format] || r.format}</span>
             <span class="rr-meta">${r.seats_filled} of ${r.seats_total} seats · ${r.timer_seconds}s
-              · ${r.host_name}'s room</span>
+              · ${esc(r.host_name)}'s room</span>
           </span>
         </span>
         <button class="act" onclick="joinOpenRoom('${r.code}', this)">Enter →</button>

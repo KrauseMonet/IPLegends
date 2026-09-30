@@ -79,6 +79,10 @@ def clean_name(raw: str) -> str:
     name = " ".join(str(raw).split())
     if any(unicodedata.category(ch).startswith("C") for ch in name):
         raise KitError("a team name cannot contain control characters")
+    # Same rule as a room seat's name (web/rooms.py `clean_player_name`): the page escapes
+    # every name it draws, and this keeps markup out of storage behind that.
+    if "<" in name or ">" in name:
+        raise KitError("a team name cannot contain < or >")
     if not name:
         raise KitError("give your team a name")
     if len(name) > NAME_MAX:

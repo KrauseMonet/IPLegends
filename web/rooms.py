@@ -63,6 +63,7 @@ import random
 import secrets
 import string
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 from psycopg.types.json import Json
@@ -355,6 +356,25 @@ def _save_room(conn, room: Room) -> None:
         )
 
 
+def clean_player_name(raw: str) -> str:
+    """A seat name as typed, with runs of whitespace collapsed -- refused if it carries a
+    control or format character, or an angle bracket.
+
+    The page escapes every name it draws (common.js `esc`), and that is the fix for
+    markup in a name. This is the second layer: a room can be listed publicly and its
+    host's name shown to strangers, so a name that could only ever be an attempt at
+    markup is turned away before it is stored, rather than trusted to every render site
+    that exists now and every one written later."""
+    name = " ".join(str(raw).split())
+    if not name:
+        raise RoomError("enter a name")
+    if any(unicodedata.category(ch).startswith("C") for ch in name):
+        raise RoomError("a name cannot contain control characters")
+    if "<" in name or ">" in name:
+        raise RoomError("a name cannot contain < or >")
+    return name
+
+
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
                  game: str = "draft", kit: dict | None = None) -> tuple[Room, str]:
@@ -369,6 +389,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
         raise RoomError(f"timer must be one of {TIMER_CHOICES}")
     if draft_mode not in DRAFT_MODES:
         raise RoomError(f"unknown draft_mode {draft_mode!r}: choose one of {DRAFT_MODES}")
+    host_name = clean_player_name(host_name)
     _sweep_stale_rooms(conn)
     room_seed = sess.new_seed()
     host_id = secrets.token_urlsafe(8)
@@ -383,6 +404,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
 
 def join_room(conn, code: str, name: str, deck: Deck,
               kit: dict | None = None) -> tuple[Room, str]:
+    name = clean_player_name(name)
     room = _load_room(conn, code)
     if room.status != "lobby":
         raise RoomError("this room has already started")

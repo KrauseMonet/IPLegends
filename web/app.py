@@ -660,6 +660,8 @@ class RoomPickIn(BaseModel):
     player_id: str
     index: int = Field(ge=0, description="an index into THIS seat's own current deal")
     slot: int = Field(ge=1, description="1-11 a batting position, or 12 for Impact")
+    picks_made: int | None = Field(
+        default=None, description="this seat's pick count when the choice was made [A146]")
 
 
 class RoomPlayerOut(BaseModel):
@@ -2939,18 +2941,36 @@ def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
             room = rooms.room_state(conn, code, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=player_id)
+    # After the commit: a poll that caught the room up took the row lock to do it [A146].
+    return _room_state_out(room, STATE["deck"], caller_id=player_id)
+
+
+def _stale_move_response(exc: rooms.StaleMove, caller_id: str) -> JSONResponse:
+    """[A146] A refused move answers 409 WITH the room as it really is now, so the page
+    redraws on this response instead of sitting on the state the player clicked against
+    until its next poll -- which is most of what "my bid wasn't taken" looked like: the
+    refusal arrived and the stale price stayed on screen."""
+    out = _room_state_out(exc.room, STATE["deck"], caller_id=caller_id)
+    return JSONResponse(status_code=409,
+                        content={"detail": str(exc), "room": out.model_dump(mode="json")})
 
 
 @app.post("/api/rooms/{code}/pick", response_model=RoomStateOut)
-def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
+def room_pick(code: str, body: RoomPickIn):
+    # The response is built AFTER the `with` block, i.e. after the commit that releases
+    # the room's row lock [A146]: building it holds nothing the next seat's request needs.
     with _db() as conn:
         try:
-            room = rooms.submit_pick(
-                conn, code, body.player_id, body.index, body.slot, STATE["deck"])
+            room = rooms.submit_pick(conn, code, body.player_id, body.index, body.slot,
+                                     STATE["deck"], picks_made=body.picks_made)
+            stale = None
+        except rooms.StaleMove as exc:
+            stale = exc
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+    if stale is not None:
+        return _stale_move_response(stale, body.player_id)
+    return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 class FranchiseIn(BaseModel):
@@ -2958,18 +2978,24 @@ class FranchiseIn(BaseModel):
     short: str
 
 
-class RoomBidIn(BaseModel):
+class _LotMoveIn(BaseModel):
     player_id: str
+    # [A146] Which lot the page was showing. Optional so an older page still works; when
+    # given, a move that arrives after its lot closed is refused rather than landing on
+    # the next one.
+    lot: int | None = None
+    round: str | None = None
+
+
+class RoomBidIn(_LotMoveIn):
     price: int = Field(description="the price you raise to: must be the current next bid")
 
 
-class RoomLimitIn(BaseModel):
-    player_id: str
+class RoomLimitIn(_LotMoveIn):
     max: int = Field(description="lakh; the server bids for you up to this")
 
 
-class RoomPassIn(BaseModel):
-    player_id: str
+class RoomPassIn(_LotMoveIn):
     scope: Literal["lot", "set", "all"]
 
 
@@ -3005,50 +3031,59 @@ def room_franchise(code: str, body: FranchiseIn) -> RoomStateOut:
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
-def _auction_move(code: str, player_id: str, action, *args) -> RoomStateOut:
+def _auction_move(code: str, player_id: str, action, *args):
     """Every auction-room move goes through `room_auction.submit`, under the row lock.
     A refusal is a 409 -- the move was reasonable when sent, but the room moved on (most
-    often "outbid") -- so the page refetches rather than treating it as a mistake."""
+    often "outbid") -- and carries the room as it now is, so the page redraws at once.
+    The response is built after the commit, so the lock is not held while it is [A146]."""
     with _db() as conn:
         try:
             room = room_auction.submit(conn, code, STATE["deck"], action, player_id, *args)
+            stale = None
+        except rooms.StaleMove as exc:
+            stale = exc
         except (room_auction.AuctionRoomError, rooms.RoomError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=player_id)
+    if stale is not None:
+        return _stale_move_response(stale, player_id)
+    return _room_state_out(room, STATE["deck"], caller_id=player_id)
 
 
 @app.post("/api/rooms/{code}/auction/bid", response_model=RoomStateOut)
-def room_auction_bid(code: str, body: RoomBidIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.bid, body.price)
+def room_auction_bid(code: str, body: RoomBidIn):
+    return _auction_move(code, body.player_id, room_auction.bid, body.price, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/limit", response_model=RoomStateOut)
-def room_auction_limit(code: str, body: RoomLimitIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.limit, body.max)
+def room_auction_limit(code: str, body: RoomLimitIn):
+    return _auction_move(code, body.player_id, room_auction.limit, body.max, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/pass", response_model=RoomStateOut)
-def room_auction_pass(code: str, body: RoomPassIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope)
+def room_auction_pass(code: str, body: RoomPassIn):
+    return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/fill", response_model=RoomStateOut)
-def room_auction_fill(code: str, body: RoomFillIn) -> RoomStateOut:
+def room_auction_fill(code: str, body: RoomFillIn):
     return _auction_move(code, body.player_id, room_auction.fill, body.index)
 
 
 @app.post("/api/rooms/{code}/auction/retain", response_model=RoomStateOut)
-def room_auction_retain(code: str, body: RoomRetainIn) -> RoomStateOut:
+def room_auction_retain(code: str, body: RoomRetainIn):
     return _auction_move(code, body.player_id, room_auction.retain, body.picks)
 
 
 @app.post("/api/rooms/{code}/auction/rtm", response_model=RoomStateOut)
-def room_auction_rtm(code: str, body: RoomRtmIn) -> RoomStateOut:
+def room_auction_rtm(code: str, body: RoomRtmIn):
     return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price)
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)
-def room_auction_twelve(code: str, body: RoomTwelveIn) -> RoomStateOut:
+def room_auction_twelve(code: str, body: RoomTwelveIn):
     return _auction_move(code, body.player_id, room_auction.twelve, body.order, body.impact)
 
 

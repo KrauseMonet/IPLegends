@@ -163,7 +163,7 @@ def test_the_clock_closes_a_lot_nobody_finished(deck, clock):
     conn = FakeConn()
     code, host, guest = two_human_room(conn, deck, clock)
     first = ra.replay(load(conn, code), deck)
-    clock.now += ra.LOT_SECONDS + 1
+    clock.now += ra.LOT_SECONDS + rooms.CLOCK_GRACE_S + 1
     rooms.room_state(conn, code, deck)
     room = load(conn, code)
     assert room.moves[-1] == {"k": "close", "lot": first.lot.index, "r": first.round_no}
@@ -217,7 +217,7 @@ def run_to_the_end(conn, code, deck, clock):
         room = load(conn, code)
         if room.status != "auctioning":
             break
-        clock.now = room.turn_started_at + 1
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
         rooms.room_state(conn, code, deck)
     return load(conn, code)
 
@@ -246,14 +246,14 @@ def test_a_human_s_chosen_twelve_is_the_one_that_plays(deck, clock):
         r = ra.replay(room, deck)
         if r.phase == "twelve":
             break
-        clock.now = room.turn_started_at + 1
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
         rooms.room_state(conn, code, deck)
     order, impact = ra.suggestion(r.auction, r.team_of[host])
     order[0], order[1] = order[1], order[0]           # a legal swap of the openers
     ra.submit(conn, code, deck, ra.twelve, host, order, impact)
     with pytest.raises(ra.AuctionRoomError):
         ra.submit(conn, code, deck, ra.twelve, host, order, impact)
-    clock.now = load(conn, code).turn_started_at + 1
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
     rooms.room_state(conn, code, deck)
     room = load(conn, code)
     assert room.status == "complete"
@@ -355,7 +355,7 @@ def test_a_retention_nobody_submits_is_what_a_computer_team_would_keep(deck, clo
     ra.submit(conn, code, deck, ra.retain, host, [])
     before = ra.replay(load(conn, code), deck)
     expected = ra.retention_suggestion(before, before.team_of[guest])
-    clock.now = load(conn, code).turn_started_at + 1
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
     rooms.room_state(conn, code, deck)
     assert load(conn, code).moves[-1] == {"k": "retain", "seat": guest, "picks": expected}
 
@@ -413,7 +413,7 @@ def test_a_card_nobody_answers_is_not_played(deck, clock):
     code, host, guest = started_mega(conn, deck, clock)
     r = walk_to_rtm(conn, code, deck, host, guest, clock)
     pid = r.pid_of[r.rtm_team]
-    clock.now = load(conn, code).turn_started_at + 1
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
     rooms.room_state(conn, code, deck)
     assert load(conn, code).moves[-1] == {"k": "rtm_use", "seat": pid, "use": False}
     after = ra.replay(load(conn, code), deck)
@@ -430,3 +430,97 @@ def test_someone_who_skipped_to_the_end_is_never_asked_about_a_card(deck, clock)
     r = ra.replay(load(conn, code), deck)
     assert r.phase in ("fill", "twelve")
     assert not any(m["k"].startswith("rtm") for m in load(conn, code).moves)
+
+
+# --- late and repeated moves [A146] ---------------------------------------------------------
+
+def test_a_bid_inside_the_grace_lands_on_the_lot_it_was_made_for(deck, clock):
+    """A bid with a second on the clock reaches the server a round trip later; it used to
+    find the lot closed. Inside CLOCK_GRACE_S it lands, and extends the clock."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S / 2
+    rooms.room_state(conn, code, deck)
+    assert not any(m["k"] == "close" for m in load(conn, code).moves), "not closed yet"
+    ra.submit(conn, code, deck, ra.bid, host, r.next_price, r.lot.index, au.ROUNDS[r.round_no])
+    assert load(conn, code).moves[-1]["k"] == "bid"
+
+
+def test_a_pass_for_a_closed_lot_is_refused_not_applied_to_the_next(deck, clock):
+    """Without naming its lot, a pass that arrived after its lot closed passed on the NEXT
+    player -- one the person never saw. It is refused as stale instead, the refusal carries
+    the room as it now is, and the clock close it caught up is saved with nothing else."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    first = ra.replay(load(conn, code), deck)
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
+    with pytest.raises(rooms.StaleMove) as refused:
+        ra.submit(conn, code, deck, ra.pass_lot, host, "lot", first.lot.index,
+                  au.ROUNDS[first.round_no])
+    assert isinstance(refused.value, ra.AuctionRoomError), "still an auction refusal"
+    now_open = ra.replay(refused.value.room, deck)
+    assert now_open.lot.index != first.lot.index
+    moves = load(conn, code).moves
+    assert moves == [{"k": "close", "lot": first.lot.index, "r": first.round_no}], \
+        "the close is saved and the refused pass is not"
+
+
+def test_a_retried_pass_or_limit_records_nothing_twice(deck, clock):
+    """A move whose response was lost is retried by the page. With the lot named it can
+    only ever land on that lot, and a repeat is a no-op rather than a second move. Each
+    repeat is made while the OTHER human is still deciding, so the lot is still open and
+    it is the no-op, not the stale-lot refusal, being tested."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    lot, rnd = r.lot.index, au.ROUNDS[r.round_no]
+    ra.submit(conn, code, deck, ra.pass_lot, host, "lot", lot, rnd)
+    n = len(load(conn, code).moves)
+    ra.submit(conn, code, deck, ra.pass_lot, host, "lot", lot, rnd)
+    assert len(load(conn, code).moves) == n
+
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    for _ in range(40):
+        r = ra.replay(load(conn, code), deck)
+        if r.can_bid(r.auction.teams[r.team_of[guest]]):
+            break
+        for pid in (host, guest):
+            ra.submit(conn, code, deck, ra.pass_lot, pid, "lot")
+    lot, rnd = r.lot.index, au.ROUNDS[r.round_no]
+    ceiling = r.auction.teams[r.team_of[guest]].max_bid()
+    ra.submit(conn, code, deck, ra.limit, guest, ceiling, lot, rnd)
+    assert ra.replay(load(conn, code), deck).lot.index == lot, "the host is still deciding"
+    n = len(load(conn, code).moves)
+    ra.submit(conn, code, deck, ra.limit, guest, ceiling, lot, rnd)
+    assert len(load(conn, code).moves) == n
+
+
+def test_a_move_refused_inside_the_replay_is_never_saved(deck, clock):
+    """`record` appends a move before replaying it, and a fill index out of range is only
+    found by the replay. When the same request also caught up an expired clock, the
+    catch-up is saved -- and without restoring the log, the refused move went with it, so
+    every later replay of the room raised and the room was dead for everybody."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    for pid in (host, guest):
+        ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    for _ in range(80):
+        room = load(conn, code)
+        if ra.replay(room, deck).phase == "fill":
+            break
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
+        rooms.room_state(conn, code, deck)
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
+    ahead = load(conn, code)
+    ra.resolve(ahead, deck)                          # what the request will catch up to
+    r = ra.replay(ahead, deck)
+    if r.phase != "fill" or r.fill_team not in r.pid_of:
+        pytest.skip("the clock's fill ended the humans' turns")
+    with pytest.raises(ra.AuctionRoomError):
+        ra.submit(conn, code, deck, ra.fill, r.pid_of[r.fill_team], 10**6)
+    stored = load(conn, code)
+    assert len(stored.moves) == len(ahead.moves), "the catch-up is saved..."
+    ra._CACHE.clear()
+    ra.replay(stored, deck)                          # ...and the room still replays

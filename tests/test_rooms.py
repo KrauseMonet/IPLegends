@@ -917,7 +917,7 @@ def test_the_timer_auto_picks_a_random_eligible_candidate_for_the_active_seat(
     assert replay.pending_seat_id == host_id
     fs_id, candidates = replay.pending_deal
 
-    clock["t"] += 16   # past the 15s window; nobody has picked
+    clock["t"] += 16 + rooms.CLOCK_GRACE_S   # past the 15s window and its grace
     room = rooms.room_state(conn, room.code, DECK)
 
     assert len(room.moves) == 1, "only the one active (host's) turn should auto-resolve"
@@ -949,7 +949,7 @@ def test_the_timer_does_not_always_hand_out_the_worst_card(conn, monkeypatch):
         _, candidates = replay.pending_deal
         worst = min(candidates, key=lambda c: c.rating).person_id
 
-        clock["t"] += 16
+        clock["t"] += 16 + rooms.CLOCK_GRACE_S
         room = rooms.room_state(conn, room.code, DECK)
         picked = candidates[room.moves[0]["index"]].person_id
         was_worst.append(picked == worst)
@@ -976,7 +976,7 @@ def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch
     moves_after_host_pick = list(room.moves)
     assert moves_after_host_pick[0]["seat"] == host_id
 
-    clock["t"] += 16
+    clock["t"] += 16 + rooms.CLOCK_GRACE_S
     room = rooms.room_state(conn, room.code, DECK)
 
     assert room.moves[0] == moves_after_host_pick[0], (
@@ -985,6 +985,55 @@ def test_an_auto_pick_never_touches_a_seat_that_already_picked(conn, monkeypatch
     assert len(room.moves) == 2 and room.moves[1]["seat"] == bob_id, (
         "the AFK seat (Bob, whose turn it was) must have been resolved"
     )
+
+
+def test_a_pick_inside_the_grace_still_counts(conn, monkeypatch):
+    """[A146] A click with a second on the clock arrives a round trip later. It used to find
+    the turn auto-picked; inside CLOCK_GRACE_S it is the player's own pick that lands."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
+    room, host_id = _make_room(conn, "final", timer_seconds=15)
+    rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    replay = rooms.replay_room(room, DECK)
+    _, candidates = replay.pending_deal
+    slot = min(candidates[0].slots & replay.seats[host_id].open_slots)
+
+    clock["t"] += 15 + rooms.CLOCK_GRACE_S / 2       # past the shown zero, inside the grace
+    assert len(rooms.room_state(conn, room.code, DECK).moves) == 0, "a poll does not auto-pick yet"
+    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK, picks_made=0)
+    assert room.moves == [{"seat": host_id, "index": 0, "slot": slot}]
+
+
+def test_a_pick_made_against_a_deal_the_clock_replaced_is_refused(conn, monkeypatch):
+    """[A146] A snake draft puts the same seat on the clock twice running (host, Bob, Bob,
+    host). If Bob's first turn times out, a late pick of his carried an index into a deal
+    that no longer exists -- and landed on his SECOND deal, a player he never clicked. With
+    `picks_made` it is refused as stale, carrying the caught-up room, and the auto-pick the
+    catch-up made is saved rather than thrown away with the refusal."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(rooms.time, "time", lambda: clock["t"])
+    room, host_id = _make_room(conn, "final", timer_seconds=15)
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    replay = rooms.replay_room(room, DECK)
+    _, candidates = replay.pending_deal
+    slot = min(candidates[0].slots & replay.seats[host_id].open_slots)
+    room = rooms.submit_pick(conn, room.code, host_id, 0, slot, DECK)
+
+    replay = rooms.replay_room(room, DECK)
+    assert replay.pending_seat_id == bob_id
+    _, bob_deal = replay.pending_deal
+    bob_slot = min(bob_deal[0].slots & replay.seats[bob_id].open_slots)
+
+    clock["t"] += 16 + rooms.CLOCK_GRACE_S           # Bob's first turn times out...
+    with pytest.raises(rooms.StaleMove) as refused:
+        rooms.submit_pick(conn, room.code, bob_id, 0, bob_slot, DECK, picks_made=0)
+    assert rooms.replay_room(refused.value.room, DECK).pending_seat_id == bob_id, \
+        "...and he is on the clock again, which is exactly when the old pick misfired"
+    stored = rooms._load_room(conn, room.code, lock=False)
+    assert len(stored.moves) == 2 and stored.moves[1]["seat"] == bob_id, \
+        "the auto-pick the refusal caught up is saved, not rolled back"
 
 
 def test_filler_seats_never_take_a_turn(conn, monkeypatch):

@@ -634,10 +634,14 @@ function jumpLimit(lakh){
   renderLimit();
 }
 
-// Room mode: what a single-player move means as a ROOM move.
+// Room mode: what a single-player move means as a ROOM move. Each names the lot on screen
+// [A146], so one that arrives after that lot closed is refused rather than landing on the
+// next player -- and so the room can safely retry it if the answer is lost.
 function roomMove(path, body){
-  if (path === 'bid' && body.done) return ['limit', {max: body.ceiling}];
-  if (path === 'bid') return ['bid', {price: body.ceiling}];
+  const on = (A && A.lot) ? {lot: A.lot.lot, round: A.lot.round} : {};
+  if (path === 'bid' && body.done) return ['limit', {max: body.ceiling, ...on}];
+  if (path === 'bid') return ['bid', {price: body.ceiling, ...on}];
+  if (path === 'pass') return ['pass', {...body, ...on}];
   return [path, body];
 }
 

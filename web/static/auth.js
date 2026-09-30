@@ -27,7 +27,11 @@ function renderAuthArea(){
     // Signed in: an identity chip that says where it GOES. "Hi, name" was a greeting, not
     // a destination -- nothing about it suggested a career page sat behind it.
     const initial = (ME.username[0] || '?').toUpperCase();
-    el.innerHTML = `
+    // [A154] Admins get a way into the console. Only a signpost: /api/admin/* checks
+    // again on every request, so hiding or showing this decides nothing.
+    const adminLink = ME.is_admin
+      ? '<a href="/admin" class="auth-admin" title="Admin console">Admin</a>' : '';
+    el.innerHTML = `${adminLink}
       <a href="/profile" class="auth-me" title="Your player card">
         <span class="auth-avatar">${initial}</span>
         <span class="auth-me-text">

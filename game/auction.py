@@ -733,6 +733,9 @@ class Auction:
     mega: bool = False              # retentions and Right to Match [A138]
     sales: list[Sale] = field(default_factory=list)
     register: list[Card] = field(default_factory=list)  # drawn, never catalogued
+    # [A150] Every season in the deck: the fill round's last resort, used only for a team
+    # the unsold lots and the register can no longer complete. See `fill_options`.
+    reserve: list[Card] = field(default_factory=list)
     stranded: list[int] = field(default_factory=list)   # teams the fill round could not finish
     fills: int = 0                                      # players the fill round handed out
     # The lot being decided, while a Right to Match is asked about it -- so a paused
@@ -876,7 +879,7 @@ def run_auction(deck: Deck, seed: int, human_short: str | None = None,
     lots = build_catalogue(deck, seed, frozenset(kept))
     listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = Auction(seed, lots, teams, mega=mega, register=register)
+    auction = Auction(seed, lots, teams, mega=mega, register=register, reserve=reserve_of(deck))
     for round_name in ROUNDS:
         lots = auction.lots if round_name == "main" else auction.unsold
         for lot in lots:
@@ -890,6 +893,48 @@ def run_auction(deck: Deck, seed: int, human_short: str | None = None,
     return auction
 
 
+def reserve_of(deck: Deck) -> list[Card]:
+    """Every card in the deck, in a fixed order -- the fill round's last resort [A150]."""
+    return [c for fs_id in sorted(deck.cards_by_fs) for c in deck.cards_by_fs[fs_id]]
+
+
+def _fill_key(c: Card):
+    return (-(c.display or 0), -c.rating, c.person_id, c.season_year or 0)
+
+
+def fill_options(auction: Auction, team: Team) -> list[Card]:
+    """The players a team short of eighteen may take at the minimum price, best first --
+    the ONE definition both the single-player auction and an auction room use.
+
+    From the unsold lots and then the register, as the real auction's long list works.
+    **[A150] If those can no longer complete the team, from every season in the deck.**
+    `may_buy`'s legality test is optimistic -- it assumes the places still open can be
+    filled by anyone at all -- so a team can reach its last place needing, say, a
+    wicketkeeper when every keeper in the register has gone. It was then left short, with
+    no legal twelve, and an auction room froze on it: the twelve step raised on every poll.
+    Widening only when nothing else fits keeps an ordinary fill round exactly as it was,
+    and since the deck holds every season of every player, a legal completion that exists
+    anywhere is found. One season per person is offered, the strongest.
+    """
+    taken = {c.person_id for t in auction.teams for c in t.squad}
+
+    def usable(pool):
+        seen: set[str] = set()
+        out = []
+        for c in sorted(pool, key=_fill_key):
+            if c.person_id in taken or c.person_id in seen:
+                continue
+            if team.may_buy(c) and team.purse >= MIN_PRICE:
+                seen.add(c.person_id)
+                out.append(c)
+        return out
+
+    options = usable([lot.card for lot in auction.unsold] + auction.register)
+    if not options and auction.reserve:
+        options = usable(auction.reserve)
+    return options
+
+
 def _fill(auction: Auction, human: Human | None) -> None:
     """Every team still short takes a player at the minimum price, fewest-players first --
     from the unsold lots, and then from the rest of the register, as the real auction's
@@ -901,11 +946,7 @@ def _fill(auction: Auction, human: Human | None) -> None:
         if not short:
             return
         team = min(short, key=lambda t: (len(t.squad), t.index))
-        taken = {c.person_id for t in auction.teams for c in t.squad}
-        pool = [lot.card for lot in auction.unsold] + auction.register
-        options = sorted((c for c in pool if c.person_id not in taken
-                          and team.may_buy(c) and team.purse >= MIN_PRICE),
-                         key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
+        options = fill_options(auction, team)
         if not options:
             auction.stranded.append(team.index)
             continue

@@ -524,3 +524,74 @@ def test_a_move_refused_inside_the_replay_is_never_saved(deck, clock):
     assert len(stored.moves) == len(ahead.moves), "the catch-up is saved..."
     ra._CACHE.clear()
     ra.replay(stored, deck)                          # ...and the room still replays
+
+
+# --- a team the fill round cannot complete [A150] ------------------------------------------
+
+def _careless_room(conn, deck, clock, seed, game="mega"):
+    """Two humans who keep nobody, pass on everything and always take fill option 0 -- the
+    shape that left a human squad with no legal twelve before A150."""
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game=game)
+    room, guest = rooms.join_room(conn, room.code, "Ben", deck)
+    rooms.choose_franchise(conn, room.code, host, "MI")
+    rooms.choose_franchise(conn, room.code, guest, "CSK")
+    conn.execute("update rooms set seed = %s where code = %s", (seed, room.code))
+    rooms.start_room(conn, room.code, host, deck)
+    code = room.code
+    for _ in range(400):
+        rm = load(conn, code)
+        if rm.status != "auctioning":
+            break
+        r = ra.replay(rm, deck)
+        if r.phase == "retain":
+            for pid in r.waiting_on():
+                ra.submit(conn, code, deck, ra.retain, pid, [])
+        elif r.phase == "bid":
+            for pid in (host, guest):
+                try:
+                    ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+                except ra.AuctionRoomError:
+                    pass                               # already done with this lot
+        elif r.phase == "fill":
+            ra.submit(conn, code, deck, ra.fill, r.pid_of[r.fill_team], 0)
+        elif r.phase.startswith("rtm"):
+            ra.submit(conn, code, deck, ra.rtm, r.pid_of[r.rtm_team], False)
+        else:
+            break
+    return code, host, guest
+
+
+def test_a_careless_room_can_still_field_every_twelve(deck, clock):
+    """Seed 8 is the measured case: CSK's last fill place needed a wicketkeeper and none was
+    left in the unsold lots or the register, so the squad ended one short with no legal
+    twelve -- and the twelve step then raised on every poll, freezing the room for good.
+    The fill round now widens to the whole deck when nothing else fits."""
+    conn = FakeConn()
+    code, host, guest = _careless_room(conn, deck, clock, seed=8)
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase == "twelve", r.phase
+    assert not r.auction.stranded
+    assert all(r.auction.twelve(t) is not None for t in r.auction.teams)
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
+    room = rooms.room_state(conn, code, deck)     # the twelve timeout: used to raise here
+    assert room.status == "complete"
+    assert len(rooms.room_sides(room, deck)) == 10
+
+
+def test_a_team_that_still_cannot_field_a_twelve_ends_the_room_cleanly(deck, clock, monkeypatch):
+    """The last line of defence: if a team is ever left without a legal twelve anyway, the
+    room is marked failed with a reason for every seat -- never an exception on each poll."""
+    real = ra.au.fill_options
+    monkeypatch.setattr(ra.au, "fill_options",
+                        lambda auction, team: [] if team.short == "CSK" else real(auction, team))
+    ra._CACHE.clear()
+    conn = FakeConn()
+    code, host, guest = _careless_room(conn, deck, clock, seed=8)
+    # Failed by the very move that left the team short -- not left 'auctioning' in a phase
+    # no page can render until the next clock catch-up gets round to it.
+    assert load(conn, code).status == "failed"
+    clock.now = load(conn, code).turn_started_at + rooms.CLOCK_GRACE_S + 1
+    room = rooms.room_state(conn, code, deck)
+    assert room.status == "failed"
+    assert "Chennai Super Kings could not field a legal twelve" in room.failure_reason
+    ra._CACHE.clear()

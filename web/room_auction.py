@@ -71,7 +71,7 @@ class StaleAuctionMove(StaleMove, AuctionRoomError):
 class RoomAuctionReplay:
     auction: au.Auction
     team_of: dict[str, int]                 # human player_id -> team index
-    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete
+    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete | failed
     lot: au.Lot | None = None
     round_no: int = 0
     bids: list[au.Bid] = field(default_factory=list)
@@ -86,6 +86,7 @@ class RoomAuctionReplay:
     rtm_team: int | None = None             # the human being asked
     rtm_other: int | None = None            # the winner (use, match) or holder (raise)
     rtm_price: int | None = None
+    failed_team: int | None = None          # [A150] a team with no legal twelve
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -240,6 +241,18 @@ class _RoomRtm(au.Human):
         return bool(self._take("rtm_match", team, winner, price)["yes"])
 
 
+_RESERVE: dict[int, list[Card]] = {}
+
+
+def _reserve(deck: Deck) -> list[Card]:
+    """Every card in the deck, built once per deck rather than once per replay."""
+    key = id(deck)
+    if key not in _RESERVE:
+        _RESERVE.clear()
+        _RESERVE[key] = au.reserve_of(deck)
+    return _RESERVE[key]
+
+
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             mega: bool = False) -> RoomAuctionReplay:
     teams = au.make_teams(seed, humans=frozenset(humans.values()))
@@ -287,7 +300,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     lots = au.build_catalogue(deck, seed, frozenset(kept))
     listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = au.Auction(seed, lots, teams, mega=mega, register=register)
+    auction = au.Auction(seed, lots, teams, mega=mega, register=register,
+                         reserve=_reserve(deck))
     if mega:
         auction.retention_lost = lost
     flags: dict[int, set] = {i: set() for i in human_idx}
@@ -356,18 +370,15 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             auction.sales.append(au.Sale(lot, round_name, buyer, price, list(state.bids), event))
 
     # The fill round: every team still short takes a player at the minimum price,
-    # fewest-players first, exactly as `game.auction._fill` does it.
+    # fewest-players first, from `game.auction.fill_options` -- the one rule both the
+    # single-player auction and a room use, so the two cannot drift [A150].
     stranded: set[int] = set()
     while True:
         short = [t for t in teams if t.open_places > 0 and t.index not in stranded]
         if not short:
             break
         team = min(short, key=lambda t: (len(t.squad), t.index))
-        taken = {c.person_id for t in teams for c in t.squad}
-        pool = [lot.card for lot in auction.unsold] + auction.register
-        options = sorted((c for c in pool if c.person_id not in taken
-                          and team.may_buy(c) and team.purse >= au.MIN_PRICE),
-                         key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
+        options = au.fill_options(auction, team)
         if not options:
             stranded.add(team.index)
             auction.stranded.append(team.index)
@@ -393,6 +404,17 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                    au.Lot(-1, card, "REG", au.MIN_PRICE))
         auction.sales.append(au.Sale(lot, "fill", team.index, au.MIN_PRICE,
                                      [au.Bid(team.index, au.MIN_PRICE)]))
+
+    # [A150] The last line of defence. `fill_options` widens to the whole deck, so a team
+    # left without a legal twelve should not happen -- but if one ever is, the room ENDS
+    # with a reason rather than raising on every poll (the twelve step and `room_sides`
+    # both need a legal twelve for every team, human or computer, and would crash).
+    # `twelve_feasible(squad, 0)` is the exact legality test (no wildcard places left to
+    # assume anything about), and ~500x cheaper than building the best twelve itself --
+    # measured 0.03 ms a team against 16 ms, on every uncached replay of this phase.
+    unfieldable = [t for t in teams if not au.twelve_feasible(t.squad, 0)]
+    if unfieldable:
+        return RoomAuctionReplay(auction, team_of, "failed", failed_team=unfieldable[0].index)
 
     # Every human picks a twelve, in any order.
     result = RoomAuctionReplay(auction, team_of, "twelve")
@@ -458,13 +480,24 @@ def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctio
     before = replay(room, deck)
     room.moves = room.moves + [move]
     after = replay(room, deck)                 # raises if invalid; `submit` restores the log
-    if after.phase == "complete":
+    if after.phase == "failed":
+        _fail(room, after)
+    elif after.phase == "complete":
         room.status = "complete"
     elif after.stage() != before.stage():
         room.turn_started_at = now + _stage_seconds(after)
     elif move["k"] in ("bid", "limit"):
         room.turn_started_at = max(room.turn_started_at, now) + BID_EXTEND
     return after
+
+
+def _fail(room, r: RoomAuctionReplay) -> None:
+    """[A150] End the room: a team that cannot field a legal twelve cannot play a season,
+    and every step after this one needs its twelve. Reported to every seat, never a crash."""
+    team = r.auction.teams[r.failed_team]
+    room.status = "failed"
+    room.failure_reason = (f"{team.franchise} could not field a legal twelve from its squad, "
+                           f"so the season cannot be played")
 
 
 def _seat(r: RoomAuctionReplay, player_id: str) -> au.Team:
@@ -605,6 +638,10 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
     # second still lands on it rather than finding the next lot open.
     while room.status == "auctioning" and now > room.turn_started_at + CLOCK_GRACE_S:
         r = replay(room, deck)
+        if r.phase == "failed":
+            _fail(room, r)
+            changed = True
+            break
         if r.phase == "bid":
             record(room, deck, {"k": "close", "lot": r.lot.index, "r": r.round_no}, now)
         elif r.phase == "fill":
@@ -670,6 +707,8 @@ def start(room, deck: Deck, now: float | None = None) -> None:
     r = replay(room, deck)
     room.status = "complete" if r.phase == "complete" else "auctioning"
     room.turn_started_at = now + _stage_seconds(r)
+    if r.phase == "failed":
+        _fail(room, r)
 
 
 def room_sides(room, deck: Deck):

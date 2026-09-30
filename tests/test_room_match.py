@@ -895,8 +895,36 @@ def test_sides_actually_use_the_fixed_abbreviation(monkeypatch):
                 ("p2", rooms_mod.RoomPlayer("p2", "Chennai Super Kings 2010", True), [], None)]
 
     monkeypatch.setattr(rooms_mod, "room_sides", fake_room_sides)
-    shorts = {pid: side.short for pid, side in room_match._sides_with_pid(None, None)}
+    room = _kit_room(rooms_mod, kit=None)
+    shorts = {pid: side.short for pid, side in room_match._sides_with_pid(room, None)}
+    # [A146] A seat with no chosen kit wears a default whose monogram is these same
+    # initials, so the short reads exactly as it did before kits existed.
     assert shorts == {"p1": "KRA", "p2": "CSK 2010"}, shorts
+
+
+def _kit_room(rooms_mod, kit):
+    room = rooms_mod.Room(code="KITS01", format="final", timer_seconds=15, seed=1,
+                          host_id="p1")
+    room.players["p1"] = rooms_mod.RoomPlayer("p1", "Krause", False, kit=kit)
+    room.players["p2"] = rooms_mod.RoomPlayer("p2", "CPU 1", True)
+    return room
+
+
+def test_a_drafted_side_plays_under_its_chosen_kit(monkeypatch):
+    """[A146] The kit's name and monogram are what reach the scorecard -- a filler, which
+    is a historical franchise, keeps its own name however the room is set up."""
+    from web import room_match, rooms as rooms_mod
+    from web.kit import Kit
+
+    def fake_room_sides(room, deck):
+        return [("p1", room.players["p1"], [], None),
+                ("p2", rooms_mod.RoomPlayer("p2", "Chennai Super Kings 2010", True), [], None)]
+
+    monkeypatch.setattr(rooms_mod, "room_sides", fake_room_sides)
+    room = _kit_room(rooms_mod, kit=Kit("Bombay Blasters", "BB", "royal"))
+    sides = dict(room_match._sides_with_pid(room, None))
+    assert (sides["p1"].name, sides["p1"].short) == ("Bombay Blasters", "BB")
+    assert (sides["p2"].name, sides["p2"].short) == ("Chennai Super Kings 2010", "CSK 2010")
 
 
 # --- the match phase can no longer freeze on a human who left -------------------------
@@ -1125,3 +1153,19 @@ def test_skip_to_end_is_idempotent_on_a_finished_room(conn):
     again = rooms._load_room(conn, room.code, lock=False)
     assert again.match_moves == settled.match_moves
     assert again.version == settled.version, "a repeat skip wrote to the room"
+
+
+# --- team kits lock when the matches start [A146] ----------------------------------------
+
+def test_a_kit_can_still_change_at_squad_review(conn):
+    room, host_id, _guest = _drafted_but_not_started(conn)
+    rooms.set_kit(conn, room.code, host_id,
+                  {"name": "Late Deciders", "monogram": "LD", "colour": "teal"})
+    assert rooms.seat_kits(rooms._load_room(conn, room.code))[host_id].name == "Late Deciders"
+
+
+def test_a_kit_is_locked_once_the_matches_start(conn):
+    room, host_id, _guest = _complete_final_room(conn)
+    with pytest.raises(rooms.RoomError, match="locked"):
+        rooms.set_kit(conn, room.code, host_id,
+                      {"name": "Too Late", "monogram": "TL", "colour": "teal"})

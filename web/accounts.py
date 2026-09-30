@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 
 from web import auth
+from web.kit import Kit
 
 _USERNAME_RE = re.compile(r"[A-Za-z0-9_]+")
 
@@ -27,6 +28,7 @@ class Account:
     account_id: int
     username: str
     email: str
+    kit: Kit | None = None     # migration 036 [A146] -- read by get_account only
 
 
 def create_account(conn, username: str, email: str, password: str) -> Account:
@@ -85,10 +87,27 @@ def authenticate(conn, identifier: str, password: str) -> Account | None:
 
 def get_account(conn, account_id: int) -> Account | None:
     row = conn.execute(
-        "select account_id, username, email from accounts where account_id = %s",
+        "select account_id, username, email, kit_name, kit_monogram, kit_colour"
+        "  from accounts where account_id = %s",
         (account_id,),
     ).fetchone()
-    return None if row is None else Account(*row)
+    if row is None:
+        return None
+    account_id, username, email, name, monogram, colour = row
+    # Migration 036's CHECK makes the three columns null together, so testing one is
+    # testing all three.
+    kit = Kit(name, monogram, colour) if name is not None else None
+    return Account(account_id, username, email, kit)
+
+
+def set_kit(conn, account_id: int, kit: Kit) -> None:
+    """The account's team kit [A146]. The caller has already validated it (web/kit.py
+    parse_kit); migration 036's CHECKs are the backstop for its shape."""
+    conn.execute(
+        "update accounts set kit_name = %s, kit_monogram = %s, kit_colour = %s"
+        " where account_id = %s",
+        (kit.name, kit.monogram, kit.colour, account_id),
+    )
 
 
 @dataclass(frozen=True)

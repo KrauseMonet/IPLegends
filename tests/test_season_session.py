@@ -258,3 +258,13 @@ def test_an_incomplete_draft_is_refused_before_the_season_ever_starts():
     s = sess.replay(DECK, 4, ())   # nowhere near a complete squad
     with pytest.raises(sess.InvalidState):
         ss.replay_season(DECK, _model_with_fixed_state(), s.state, ss.recorded_moves(()))
+
+
+def test_a_drafted_season_has_no_crest_of_its_own():
+    """[A146] A drafted twelve is no single franchise, so the page draws the player's kit
+    for it -- `your_crest` must be null for exactly that to happen."""
+    from web.app import _season_progress_out
+    played = walk(11)
+    replay = ss.replay_season(DECK, _model_with_fixed_state(), played.state,
+                              ss.recorded_moves(()))
+    assert _season_progress_out(played.state, replay).your_crest is None

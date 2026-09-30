@@ -182,10 +182,19 @@ def _short_name(name: str, pid: str) -> str:
 
 
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
+    # [A146] A drafted side plays under its kit: the team name, and the monogram as its
+    # scoreboard short. Monograms are unique within a room (`rooms.seat_kits`), and a
+    # filler's short always carries its season ("CSK 2010"), so no two sides share one.
+    # Kits lock when the matches start, so every replay of a tournament names its sides
+    # the same way.
+    kits = rooms.seat_kits(room)
     out = []
     for pid, p, order, impact in rooms.room_sides(room, deck):
         franchise, year = _franchise_of_seat(p, order)
-        out.append((pid, Side(name=p.name, short=_short_name(p.name, pid),
+        kit = kits.get(pid)
+        name = kit.name if kit else p.name
+        short = kit.monogram if kit else _short_name(p.name, pid)
+        out.append((pid, Side(name=name, short=short,
                               xi=order, impact=impact, franchise=franchise, year=year)))
     return out
 

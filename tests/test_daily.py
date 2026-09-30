@@ -1237,3 +1237,21 @@ def test_every_recorded_attempt_still_verifies_under_the_account_it_was_played_b
     assert rows
     for d, account_id, state in rows:
         daily.decode_own_state(state, d, account_id)
+
+
+@pytest.mark.parametrize("kind", ["defend_by", "win_by_runs", "chase", "win_by_wickets",
+                                  "chase_in_overs"])
+def test_you_home_names_the_players_own_side(kind):
+    """[A146] The page puts the player's kit on whichever side `you_home` names, so it has
+    to be the side labelled "You" whether the player batted first or second."""
+    import web.app as app
+    from game.scenarios import Outcome
+
+    scenario = _scenario_for(kind)
+    bats_first = scenario.player_bats_first
+    labels = ("You", "CSK 2010") if bats_first else ("CSK 2010", "You")
+    play = daily.DayPlay(Outcome(True, 0, 0, (), "s"), _stub_innings(150),
+                         _stub_innings(140), labels[0], labels[1],
+                         player_bats_first=bats_first)
+    out = app._daily_match_out(play, scenario)
+    assert (out["home"] if out["you_home"] else out["away"]) == "You"

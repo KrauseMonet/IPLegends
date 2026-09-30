@@ -168,7 +168,8 @@ let META = null;
 // could pin an old shape indefinitely.
 // v2: the shape grew `showcase` and `crests` for the home page. A new key rather than a
 // tolerant reader, so a copy cached before them is never rendered as though complete.
-const META_CACHE_KEY = 'iplegends_meta_v2';
+// v3: `kits` and `kit_default`, the team-kit palette [A146].
+const META_CACHE_KEY = 'iplegends_meta_v3';
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 
 function readMetaCache(){
@@ -517,6 +518,194 @@ function crestClass(url){ const k = crestKey(url); return k ? 'crest-' + k : '';
 // the fallback the caller passes, so a missing crest never leaves an empty hole.
 function crestImg(url, cls = 'crest-img', fallback = ''){
   return url ? `<img class="${cls}" src="${url}" alt="" loading="lazy">` : fallback;
+}
+
+// --- team kits [A146] -----------------------------------------------------------------------
+//
+// A drafted twelve is a mix of franchises, so it has no crest; it wears a kit instead -- a
+// team name, a 1-3 letter monogram and a colour from the palette `/api/meta` serves (web/
+// kit.py). Each colour carries the same three shades a crest does (--team, --team-deep,
+// --team-ink), so anything tinted by a crest can be tinted by a kit through kitStyle().
+//
+// Your own kit lives in this browser and, when you are signed in, on your account -- the
+// account copy wins, since it is the one that follows you between devices. It never goes
+// into a draft state: that string is the replay contract and a saved game's identity.
+
+const KIT_STORE_KEY = 'iplegends_kit_v1';
+
+// Every user-typed string drawn as markup goes through this -- a team name is data.
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function kitPalette(){ return (META && META.kits) || []; }
+function kitColour(key){
+  const p = kitPalette();
+  return p.find(c => c.key === key) || p[0] || null;
+}
+function kitStyle(kit){
+  const c = kit && kitColour(kit.colour);
+  return c ? `--team:${c.team};--team-deep:${c.deep};--team-ink:${c.ink}` : '';
+}
+function kitBadge(kit, cls = ''){
+  if (!kit) return '';
+  return `<span class="kit-badge ${cls}" style="${kitStyle(kit)}" title="${esc(kit.name)}"
+    >${esc(kit.monogram)}</span>`;
+}
+
+function localKit(){
+  try { const k = JSON.parse(localStorage.getItem(KIT_STORE_KEY)); return k && k.name ? k : null; }
+  catch(e){ return null; }
+}
+
+// The kit your drafted side wears: your account's, else this browser's, else the default.
+function myKit(){
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  return (me && me.kit) || localKit() || (META && META.kit_default)
+    || {name: 'Your eleven', monogram: 'YOU', colour: 'gold'};
+}
+
+// Only a kit you actually chose -- never the default. A room gives a seat with no kit of its
+// own a distinct default, which beats every such seat arriving as a gold 'YOU'.
+function savedKit(){
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  return (me && me.kit) || localKit();
+}
+
+async function saveMyKit(kit){
+  try { localStorage.setItem(KIT_STORE_KEY, JSON.stringify(kit)); } catch(e){ /* private mode */ }
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  if (me && me.account_id){
+    const saved = await api('/api/account/kit', {method:'PUT',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(kit)});
+    me.kit = saved;
+    document.dispatchEvent(new Event('kitchange'));
+    return saved;
+  }
+  document.dispatchEvent(new Event('kitchange'));
+  return kit;
+}
+
+// Called once you are known to be signed in: an account that has never had a kit takes
+// the one this browser already has, so choosing one before signing up is not lost.
+function syncKitToAccount(){
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  const local = localKit();
+  if (!me || !me.account_id || me.kit || !local) return;
+  api('/api/account/kit', {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(local)}).then(k => { me.kit = k; }).catch(() => {});
+}
+
+// The monogram a name suggests -- web/kit.py `initials`, mirrored only to pre-fill the
+// editor as you type; the server decides what is accepted.
+function kitInitials(name){
+  const words = String(name).split(/\s+/).map(w => w.replace(/[^A-Za-z0-9]/g, '')).filter(Boolean);
+  if (!words.length) return 'XI';
+  return (words.length > 1 ? words.map(w => w[0]).join('') : words[0]).toUpperCase().slice(0, 3);
+}
+
+// A modal to choose a kit. `onSave(kit)` does the saving and may throw -- its message is
+// shown and the editor stays open. Returns nothing; closes itself on success.
+function openKitEditor({kit, title, note, onSave}){
+  closeKitEditor();
+  const cur = {...(kit || myKit())};
+  // The monogram follows the name as you type until you edit it yourself -- a default kit's
+  // 'YOU' counts as untouched, and so does a saved one that is still just its initials.
+  const isDefault = META && META.kit_default && cur.name === META.kit_default.name
+    && cur.monogram === META.kit_default.monogram;
+  let monoTouched = !isDefault && cur.monogram !== kitInitials(cur.name);
+  const el = document.createElement('div');
+  el.id = 'kitEditor';
+  el.className = 'kit-editor';
+  el.innerHTML = `
+    <div class="kit-editor-back"></div>
+    <div class="kit-editor-panel" role="dialog" aria-label="Your team kit">
+      <div class="kit-editor-head"><b></b><button class="kit-editor-x" aria-label="Close">Close</button></div>
+      <div class="kit-preview"></div>
+      <label class="room-label" for="kitName">Team name</label>
+      <input id="kitName" class="room-input" maxlength="24" autocomplete="off">
+      <label class="room-label" for="kitMono">Monogram</label>
+      <input id="kitMono" class="room-input kit-mono-input" maxlength="3" autocomplete="off">
+      <span class="room-label">Colour</span>
+      <div class="kit-swatches">${kitPalette().map(c =>
+        `<button class="kit-swatch" data-colour="${c.key}" title="${c.label}" aria-label="${c.label}"
+          style="--team:${c.team};--team-deep:${c.deep}"></button>`).join('')}</div>
+      <p class="room-note kit-note"></p>
+      <div class="actions"><button class="act lead kit-save">Save kit</button></div>
+    </div>`;
+  el.querySelector('.kit-editor-head b').textContent = title || 'Your team kit';
+  el.querySelector('.kit-note').textContent = note || '';
+  const name = el.querySelector('#kitName'), mono = el.querySelector('#kitMono');
+  name.value = cur.name; mono.value = cur.monogram;
+  const paint = () => {
+    el.querySelector('.kit-preview').innerHTML =
+      `<div class="kit-preview-card" style="${kitStyle(cur)}">${kitBadge(cur, 'kit-badge-lg')}
+        <div><b>${esc(cur.name || ' ')}</b><em>${esc(kitColour(cur.colour)?.label || '')}</em></div></div>`;
+    el.querySelectorAll('.kit-swatch').forEach(b =>
+      b.classList.toggle('sel', b.dataset.colour === cur.colour));
+  };
+  name.oninput = () => {
+    cur.name = name.value;
+    if (!monoTouched){ cur.monogram = kitInitials(cur.name); mono.value = cur.monogram; }
+    paint();
+  };
+  mono.oninput = () => {
+    mono.value = mono.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    cur.monogram = mono.value; monoTouched = true; paint();
+  };
+  el.querySelectorAll('.kit-swatch').forEach(b => b.onclick = () => { cur.colour = b.dataset.colour; paint(); });
+  el.querySelector('.kit-editor-back').onclick = closeKitEditor;
+  el.querySelector('.kit-editor-x').onclick = closeKitEditor;
+  el.querySelector('.kit-save').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const k = {name: cur.name.trim().replace(/\s+/g, ' '), monogram: cur.monogram, colour: cur.colour};
+    if (!k.name){ slip('Give your team a name.'); return; }
+    if (!k.monogram){ slip('A monogram needs at least one letter.'); return; }
+    btn.disabled = true;
+    try { await onSave(k); closeKitEditor(); }
+    catch(err){ slip(err.message); btn.disabled = false; }
+  };
+  document.body.appendChild(el);
+  document.addEventListener('keydown', kitEditorKey);
+  paint();
+  name.focus();
+}
+function kitEditorKey(e){ if (e.key === 'Escape') closeKitEditor(); }
+function closeKitEditor(){
+  const el = document.getElementById('kitEditor');
+  if (el) el.remove();
+  document.removeEventListener('keydown', kitEditorKey);
+}
+
+// A strip naming a drafted side by its kit, with an edit button where it is the viewer's
+// own to change. Used on the finished draft (solo and daily) and in a room's lobby.
+function kitStripHtml(kit, label, onEdit){
+  return `<div class="kit-strip" style="${kitStyle(kit)}">${kitBadge(kit)}
+    <div class="kit-strip-text"><em>${esc(label)}</em><b>${esc(kit.name)}</b></div>
+    ${onEdit ? `<button class="kit-strip-edit" onclick="${onEdit}">Edit kit</button>` : ''}</div>`;
+}
+
+// Your own kit, for solo and the daily. Saved to your account when signed in, else here.
+function editMyKit(){
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  openKitEditor({
+    kit: myKit(),
+    note: me && me.account_id ? 'Saved to your account, so it follows you to any device.'
+      : 'Saved in this browser. Sign in and it goes with you to any device.',
+    onSave: saveMyKit,
+  });
+}
+
+// One badge for any side, in order of what it genuinely is: a real franchise's crest, a
+// drafted side's kit, or -- for a side that has neither -- a colour hashed from its name.
+function sideBadge(side, cls = ''){
+  if (side && side.crest) return `<img class="team-crest ${cls}" src="${side.crest}" alt="">`;
+  if (side && side.kit) return kitBadge(side.kit, cls);
+  const short = String((side && (side.short || side.name)) || '?');
+  let h = 0;
+  for (let i = 0; i < short.length; i++) h = (h * 33 + short.charCodeAt(i)) >>> 0;
+  return `<span class="team-badge ${cls}" style="background:hsl(${h % 360} 60% 52%)">${esc(short.slice(0, 2).toUpperCase())}</span>`;
 }
 
 function markCurrentNav(){

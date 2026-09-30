@@ -272,3 +272,18 @@ def test_as_the_winner_your_final_raise_is_recorded_and_cannot_undercut_the_hamm
         A.rtm(deck, r.state, True, hammer - 5)
     after = A.rtm(deck, r.state, True, hammer + 100)
     assert f".x{hammer + 100}" in after.state
+
+
+def test_an_auction_season_reports_its_franchise_crest_for_your_side(deck):
+    """[A146] An auction side IS its franchise, so the season response names your side's
+    crest -- which is what stops the page drawing a drafted side's kit over it."""
+    from web import season_session as ss
+    from web.app import _season_progress_out
+    r = to_twelve_phase(deck)
+    order, impact = A.twelve_indexes(r, r.suggestion)
+    state = A.choose_twelve(deck, r.state, order, impact).state
+    replay = ss.replay_season(deck, snapshot_deck.model_from(DOC), state,
+                              ss.recorded_moves(()))
+    out = _season_progress_out(state, replay)
+    assert out.your_side == "Kolkata Knight Riders"
+    assert out.your_crest and "/crests/KKR-" in out.your_crest

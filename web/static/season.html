@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=da0a68ed79">
+<link rel="stylesheet" href="/static/style.css?v=f447aed394">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -129,23 +129,34 @@
     <!-- the over-by-over stepper: paces through one already-known over_log, entirely
          client-side (no network call per over) -- speed/pause/skip are all local -->
     <div id="overStepper" class="hide">
-      <!-- the innings already known, kept on screen for the whole second-innings reveal
-           so a target is never something the viewer has to remember -- hidden entirely
-           when this IS the first innings (nothing prior to recap). -->
-      <div class="report compact hide" id="overPrior">
-        <div class="over-line">First innings</div>
-        <div class="call" id="overPriorScore"></div>
-        <div class="margin" id="overPriorBest"></div>
-        <div class="margin" id="overTargetLine" style="font-style:normal;font-weight:700;color:var(--gold-2)"></div>
+<!-- shell:scoreboard -->
+      <!-- The live scoreboard [A146]: written into season, room and daily by tools.shell,
+           so the three reveals are one piece of markup. reveal.js fills every id here;
+           the controls under it stay on each page, since each page skips differently. -->
+      <div class="sb" id="scoreboard">
+        <div class="sb-stage" id="overStage"></div>
+        <div class="sb-main">
+          <div class="sb-team sb-bat" id="sbBat"></div>
+          <div class="sb-centre">
+            <div class="sb-score"><span id="overScoreLine">0/0</span></div>
+            <div class="sb-overs" id="sbOvers"></div>
+          </div>
+          <div class="sb-team sb-bowl" id="sbBowl"></div>
+        </div>
+        <div class="sb-target" id="overTargetLine"></div>
+        <div class="sb-gauge"><i id="overOversBar" style="width:0%"></i></div>
+        <div class="sb-last" id="overLastLine"></div>
+        <div class="sb-bars" id="overChips" aria-label="Runs in each over"></div>
+        <div class="sb-phases"><span>Powerplay</span><span>Middle overs</span><span>Death</span></div>
+        <!-- the innings already known, kept on screen for the whole chase so a target is
+             never something to remember -- hidden when this IS the first innings. -->
+        <div class="sb-prior hide" id="overPrior">
+          <span class="sb-prior-label">First innings</span>
+          <b id="overPriorScore"></b>
+          <span id="overPriorBest"></span>
+        </div>
       </div>
-      <div class="report">
-        <div class="over-matchup" id="overMatchup"></div>
-        <div class="over-line" id="overStage"></div>
-        <div class="call" id="overScoreLine"></div>
-        <div class="margin" id="overLastLine"></div>
-        <div class="over-gauge"><div class="gauge"><i id="overOversBar" style="width:0%"></i></div></div>
-        <div id="overChips"></div>
-      </div>
+<!-- /shell:scoreboard -->
       <div class="actions" style="justify-content:center;margin-top:20px">
         <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
         <select id="overSpeedSelect" class="room-input" style="width:auto"
@@ -283,10 +294,10 @@
 <!-- /shell:footer -->
 </div>
 
-<script src="/static/common.js?v=31cf94eeb1"></script>
-<script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/reveal.js?v=0e33d3b771"></script>
+<script src="/static/common.js?v=2e9b7c8372"></script>
+<script src="/static/auth.js?v=25d4a4350d"></script>
+<script src="/static/reveal.js?v=e2f83fa9d9"></script>
 <script src="/static/analysis.js?v=2430be62ce"></script>
-<script src="/static/season.js?v=943ebdf901"></script>
+<script src="/static/season.js?v=84c0e4f03d"></script>
 </body>
 </html>

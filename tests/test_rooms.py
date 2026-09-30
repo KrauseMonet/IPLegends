@@ -109,10 +109,11 @@ class FakeConn:
                 # A room with no seats still returns exactly one row, with every column
                 # of the right-hand side NULL -- that is what an outer join does, and
                 # `_load_room` has an explicit branch for it.
-                return FakeCursor([base + (None, None, None, game, None)])
+                return FakeCursor([base + (None, None, None, game, None, None, None, None)])
+            # The kit columns (migration 036) follow the franchise, as in the real SELECT.
             return FakeCursor([
-                base + (pid, name, is_cpu, game, franchise)
-                for (_seat, pid, name, is_cpu, franchise) in seats
+                base + (pid, name, is_cpu, game, franchise, kn, km, kc)
+                for (_seat, pid, name, is_cpu, franchise, kn, km, kc) in seats
             ])
 
         if sql_norm.startswith("set local lock_timeout"):
@@ -154,14 +155,18 @@ class FakeConn:
             # way psycopg binds them against the repeated VALUES clause. On conflict only
             # the franchise is updated (migration 033), exactly like the real statement:
             # a seat's order, name and CPU flag keep what the first insert wrote.
-            for k in range(0, len(params), 6):
-                code, player_id, seat_order, name, is_cpu, franchise = params[k:k + 6]
+            # Nine columns a row since migration 036 added the kit, which -- like the
+            # franchise -- is updated on conflict.
+            for k in range(0, len(params), 9):
+                (code, player_id, seat_order, name, is_cpu, franchise,
+                 kn, km, kc) = params[k:k + 9]
                 seats = self.players.setdefault(code, {})
                 if player_id in seats:
                     old = seats[player_id]
-                    seats[player_id] = old[:4] + (franchise,)
+                    seats[player_id] = old[:4] + (franchise, kn, km, kc)
                 else:
-                    seats[player_id] = (seat_order, player_id, name, is_cpu, franchise)
+                    seats[player_id] = (seat_order, player_id, name, is_cpu, franchise,
+                                        kn, km, kc)
             return FakeCursor([])
 
         if sql_norm.startswith("delete from room_players"):
@@ -1441,3 +1446,82 @@ def test_the_open_list_is_ordered_by_activity_not_creation(conn):
     codes = [r.code for r in rooms.list_open_rooms(conn)]
     assert codes.index(older.code) < codes.index(newer.code), \
         f"expected the just-joined room first, got {codes}"
+
+
+# --- team kits [A146] --------------------------------------------------------------------
+
+def _kit(name="Bombay Blasters", monogram="BB", colour="royal"):
+    return {"name": name, "monogram": monogram, "colour": colour}
+
+
+def test_seats_that_never_chose_a_kit_still_wear_different_badges(conn):
+    room, host = rooms.create_room(conn, "cup", 15, "Rahul Kumar")
+    rooms.join_room(conn, room.code, "Rohan Kapoor", DECK)
+    rooms.join_room(conn, room.code, "Riya Khanna", DECK)
+    kits = rooms.seat_kits(rooms._load_room(conn, room.code))
+    assert len(kits) == 3
+    assert len({k.monogram for k in kits.values()}) == 3, kits
+    assert len({k.colour for k in kits.values()}) == 3, kits
+
+
+def test_a_chosen_kit_is_stored_and_worn(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Host")
+    rooms.set_kit(conn, room.code, host, _kit())
+    reloaded = rooms._load_room(conn, room.code)
+    assert rooms.seat_kits(reloaded)[host].name == "Bombay Blasters"
+    assert reloaded.players[host].kit.monogram == "BB"
+
+
+def test_a_kit_survives_every_later_write_to_the_room(conn):
+    """`_save_room` rewrites every seat on every write; a pick or a join must carry the
+    stored kit along rather than resetting it to the default."""
+    room, host = rooms.create_room(conn, "final", 15, "Host")
+    rooms.set_kit(conn, room.code, host, _kit())
+    rooms.join_room(conn, room.code, "Guest", DECK)
+    rooms.start_room(conn, room.code, host, DECK)
+    assert rooms._load_room(conn, room.code).players[host].kit.name == "Bombay Blasters"
+
+
+def test_a_monogram_another_seat_wears_is_refused(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Host")
+    _, guest = rooms.join_room(conn, room.code, "Guest", DECK)
+    rooms.set_kit(conn, room.code, host, _kit())
+    with pytest.raises(rooms.RoomError, match="already wears BB"):
+        rooms.set_kit(conn, room.code, guest, _kit(name="Other", colour="lime"))
+
+
+def test_a_monogram_another_seat_wears_by_default_is_refused_too(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Krause")     # default KRA
+    _, guest = rooms.join_room(conn, room.code, "Guest", DECK)
+    with pytest.raises(rooms.RoomError, match="already wears KRA"):
+        rooms.set_kit(conn, room.code, guest, _kit(monogram="KRA"))
+
+
+def test_an_invalid_kit_is_refused_with_a_reason(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Host")
+    with pytest.raises(rooms.RoomError, match="monogram"):
+        rooms.set_kit(conn, room.code, host, _kit(monogram="TOOLONG"))
+
+
+def test_a_kit_brought_into_a_room_keeps_its_name_but_not_a_clashing_monogram(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Host", kit=_kit())
+    _, guest = rooms.join_room(conn, room.code, "Guest", DECK,
+                               _kit(name="Bangalore Bolts", colour="gold"))
+    kits = rooms.seat_kits(rooms._load_room(conn, room.code))
+    assert kits[host].monogram == "BB"
+    assert (kits[guest].name, kits[guest].colour) == ("Bangalore Bolts", "gold")
+    assert kits[guest].monogram != "BB"
+
+
+def test_a_bad_kit_never_stops_anyone_joining(conn):
+    room, host = rooms.create_room(conn, "final", 15, "Host")
+    _, guest = rooms.join_room(conn, room.code, "Guest", DECK, _kit(colour="plaid"))
+    assert rooms._load_room(conn, room.code).players[guest].kit is None
+    assert guest in rooms.seat_kits(rooms._load_room(conn, room.code))
+
+
+def test_an_auction_room_has_no_kits(conn):
+    room, host = rooms.create_room(conn, "league", 15, "Host", game="auction", kit=_kit())
+    assert rooms.seat_kits(rooms._load_room(conn, room.code)) == {}
+    with pytest.raises(rooms.RoomError, match="franchise"):
+        rooms.set_kit(conn, room.code, host, _kit())

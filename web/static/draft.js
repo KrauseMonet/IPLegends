@@ -140,6 +140,9 @@ async function rerollDeal(kind, ctrl){
   });
 }
 
+// [A146] A kit edited here (or brought in by signing in) repaints the finished squad.
+document.addEventListener('kitchange', () => { if (S && S.squad_complete) render(S); });
+
 function render(s){
   S = s;
   // '?mode=memory', never '.memory' -- '.' already separates moves inside the state
@@ -196,7 +199,7 @@ function render(s){
     LAST_DEAL_FS = null;
     clearTimeout(ROLL_TIMERS.get($('#dealTeam')));
     $('#dealYear').textContent = '';
-    $('#dealTeam').textContent = 'Your twelve';
+    $('#dealTeam').textContent = myKit().name;
     const panel = $('#dealTeam').closest('.fixture');
     panel.className = 'fixture';
     panel.querySelector('.deal-crest')?.classList.remove('in');
@@ -207,6 +210,7 @@ function render(s){
     // full field, every position set, with the squad's own three numbers under it.
     $('#options').innerHTML = `
       <div class="squad-done">
+        ${kitStripHtml(myKit(), 'Your team', 'editMyKit()')}
         ${fieldWheel(s.order.length, s.order.length)}
         <div class="done-line">Field set</div>
         <div class="ledger">${teamRatingsHtml(s)}</div>

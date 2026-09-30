@@ -36,6 +36,7 @@ function render(p){
   $('#totLeagues').textContent = n(p.solo_titles);
   $('#totFriendLeagues').textContent = n(p.friend_titles);
 
+  renderProfileKit();
   $('#profileBatters').innerHTML = capRows(p.top_batters, 'runs');
   $('#profileBowlers').innerHTML = capRows(p.top_bowlers, 'wkts');
 }
@@ -52,6 +53,13 @@ function render(p){
 // `loadMe()` was being awaited for. Firing it immediately costs a wasted request in the
 // signed-out case -- who is redirected away anyway -- and saves two round trips in the
 // case that matters.
+// [A146] Your team kit -- what your drafted sides wear in solo, the daily and rooms. This
+// page is signed-in only, so saving here always saves to the account.
+function renderProfileKit(){
+  $('#profileKit').innerHTML = kitStripHtml(myKit(), 'Your team kit', 'editMyKit()');
+}
+document.addEventListener('kitchange', () => { if (ME && ME.account_id) renderProfileKit(); });
+
 async function boot(){
   const meta = loadMeta().then(m => { renderDeckStats(m); });
   const me = loadMe();

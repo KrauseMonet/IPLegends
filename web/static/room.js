@@ -488,6 +488,9 @@ function renderRoomLobby(r){
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyFranchises(r);
+  const mine = r.players.find(p => p.player_id === MY_PID);
+  $('#lobbyKitWrap').classList.toggle('hide', auction || !mine || !mine.kit);
+  if (!auction && mine && mine.kit) $('#lobbyKit').innerHTML = roomKitStrip(mine);
   const amHost = MY_PID === r.host_id;
   $('#lobbyPlayers').innerHTML = r.players.map(p => {
     const isHost = p.player_id === r.host_id;
@@ -497,10 +500,52 @@ function renderRoomLobby(r){
       ? `<span class="picks"><button class="act" onclick="kickRoomPlayer('${p.player_id}', this)"
            >Kick</button></span>` : '';
     const fr = p.franchise ? ` ${chip(p.franchise)}` : '';
-    return `<div class="entry"><span class="nm">${crestImg(p.crest, 'row-crest')}${p.name}${isHost
-      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}${fr}</span>${kickBtn}</div>`;
+    // The team name only where it says something the player's own name does not.
+    const team = p.kit && p.kit.name !== p.name ? ` <em class="kit-team">${esc(p.kit.name)}</em>` : '';
+    return `<div class="entry"><span class="nm">${roomSeatMark(p)}${esc(p.name)}${isHost
+      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}${fr}${team}</span>${kickBtn}</div>`;
   }).join('');
   $('#lobbyStartBtn').classList.toggle('hide', !amHost);
+}
+
+// --- team kits [A146] ------------------------------------------------------------------------
+//
+// Each drafted side in a draft room wears a kit -- chosen, or a distinct default the server
+// hands out -- and everyone sees everyone's. Auction and filler seats are franchises and
+// show their crest instead.
+
+function roomSeatMark(p){
+  if (p.crest) return crestImg(p.crest, 'row-crest');
+  if (p.kit) return kitBadge(p.kit, 'kit-badge-row');
+  return '';
+}
+
+// Editable until the host starts the matches; the server refuses after that (kits lock so
+// a side cannot change its name partway through a tournament it is on the scoreboard of).
+function roomKitStrip(me){
+  const locked = ROOM_MATCH_DATA && !ROOM_MATCH_DATA.awaiting_start;
+  return kitStripHtml(me.kit, 'Your team', locked ? null : 'editRoomKit()');
+}
+
+function editRoomKit(){
+  const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
+  if (!me) return;
+  openKitEditor({
+    kit: me.kit, title: 'Your team kit',
+    note: 'Everyone in this room sees it. It locks when the matches start.',
+    onSave: async (k) => {
+      const myGen = ++ROOM_GEN;
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/kit`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, ...k})});
+      // Kept as your own kit too, so the next room (and solo) start with it.
+      saveMyKit(k).catch(() => {});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+      if (ROOM_MATCH_DATA && ROOM_MATCH_DATA.awaiting_start) renderRoomStartReview(ROOM_MATCH_DATA);
+    },
+  });
 }
 
 // --- auction rooms [A139] --------------------------------------------------------------------
@@ -717,7 +762,7 @@ function renderRoomDraft(r){
     const role = isActive ? 'ACTIVE' : (p.is_cpu ? 'HISTORICAL' : (p.done ? 'DONE' : 'WAITING'));
     return `<div class="line ${p.done ? 'set' : ''} ${isActive ? 'active-turn' : ''}">
       <span class="role">${role}</span>
-      <span class="who">${crestImg(p.crest, 'row-crest')}${p.name}</span>
+      <span class="who">${roomSeatMark(p)}${esc(p.name)}</span>
       <span class="club">${isActive && p.deal ? (p.deal.franchise + ' ' + p.deal.season_year) : ''}</span>
       <span class="fig">${p.picks_made}/12</span>
     </div>`;
@@ -806,15 +851,15 @@ function roomYourResults(m){
   let won = 0, lost = 0;
   const html = mine.map(([i, r]) => {
     const myShort = r.you_home ? r.home : r.away;
-    const them = r.you_home ? r.away : r.home;
-    const themCrest = r.you_home ? r.away_crest : r.home_crest;
+    const themSide = r.you_home ? resolveSide(r.away, r.away_crest, r.away_kit)
+                                : resolveSide(r.home, r.home_crest, r.home_kit);
     const mineScore = r.you_home ? r.home_score : r.away_score;
     const theirsScore = r.you_home ? r.away_score : r.home_score;
     const k = r.winner === myShort ? 'w' : (r.winner === null ? '' : 'l');
     if (k === 'w') won++; else if (k === 'l') lost++;
     return `<div class="fx" onclick="showRoomScorecard(${i})">
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
-      <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
+      <span>v ${sideMark(themSide)}${esc(themSide.name)}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
   }).join('');
   return {html, won, lost};
 }
@@ -833,11 +878,16 @@ function roomPlayoffsHtml(m){
     return `<div class="tie-stage">${e.stage}</div>
       <div class="fx" onclick="showRoomScorecard(${i})">
         <span class="wl ${k}">${r.yours ? (k ? k.toUpperCase() : 'T') : '·'}</span>
-        <span>${crestImg(r.home_crest, 'row-crest')}${r.home} v ${crestImg(r.away_crest, 'row-crest')}${r.away}</span>
+        <span>${roomRowSide(r.home, r.home_crest, r.home_kit)} v ${roomRowSide(r.away, r.away_crest, r.away_kit)}</span>
         <span class="sc">${r.home_score} · ${r.away_score}</span></div>
       <div class="fx" style="border:0;padding-top:2px"><span></span>
         <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`;
   }).join('');
+}
+
+function roomRowSide(short, crest, kit){
+  const side = resolveSide(short, crest, kit);
+  return `${sideMark(side)}${esc(side.name)}`;
 }
 
 function roomTableHtml(m){
@@ -852,7 +902,7 @@ function roomTableHtml(m){
     <tbody>
     ${m.table.map(row => `<tr class="${row.you ? 'you' : ''} ${row.pos === 4 ? 'cut' : ''}">
       <td class="n" style="text-align:left">${row.pos}</td>
-      <td class="side">${teamBadge(row.short, row.you, row.crest)}${row.name}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
+      <td class="side">${teamBadge(row.short, row.you, row.crest, row.kit)}${esc(row.name)}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
       <td class="n">${row.played}</td><td class="n">${row.won}</td><td class="n">${row.lost}</td>
       <td class="n pts">${row.points}</td>
       ${nrrCell(row.nrr)}</tr>`).join('')}
@@ -893,10 +943,12 @@ function roomWaitingHtml(m, myMatch){
   const pendingRows = m.current_matches.filter(cm => cm.result === null).map(cm => {
     const isMine = cm.a_pid === MY_PID || cm.b_pid === MY_PID;
     const waitingOn = cm.pending_toss_winner_pid === cm.a_pid ? cm.a_name : cm.b_name;
+    const a = {name: cm.a_name, crest: cm.a_crest, kit: cm.a_kit};
+    const b = {name: cm.b_name, crest: cm.b_crest, kit: cm.b_kit};
     return `<div class="fx">
       <span>${cm.stage}${isMine ? ' (you)' : ''}</span>
-      <span>${cm.a_name} v ${cm.b_name}</span>
-      <span class="sc">${waitingOn} to call the toss</span>
+      <span>${sideMark(a)}${esc(a.name)} v ${sideMark(b)}${esc(b.name)}</span>
+      <span class="sc">${esc(waitingOn)} to call the toss</span>
     </div>`;
   }).join('');
 
@@ -985,8 +1037,10 @@ function roomEnterReveal(myMatch){
 
 function showRoomTossScreen(myMatch){
   $('#tossStage').textContent = myMatch.stage;
-  $('#tossOpponent').innerHTML = `${crestImg(myMatch.a_crest, 'toss-crest')}${myMatch.a_name} v ${
-    crestImg(myMatch.b_crest, 'toss-crest')}${myMatch.b_name} -- elect to bat or bowl first.`;
+  const tossMark = (crest, kit) => crest ? crestImg(crest, 'toss-crest')
+    : (kit ? kitBadge(kit, 'kit-badge-toss') : '');
+  $('#tossOpponent').innerHTML = `${tossMark(myMatch.a_crest, myMatch.a_kit)}${esc(myMatch.a_name)} v ${
+    tossMark(myMatch.b_crest, myMatch.b_kit)}${esc(myMatch.b_name)} -- elect to bat or bowl first.`;
   $('#tossScreen').classList.remove('hide');
 }
 
@@ -1012,14 +1066,15 @@ function roomStartReveal(myMatch){
   roomShowRevealSkips();
   const r = myMatch.result;
   const steps = [];
-  const home = {name: r.home, crest: r.home_crest}, away = {name: r.away, crest: r.away_crest};
-  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`, null,
+  const home = resolveSide(r.home, r.home_crest, r.home_kit);
+  const away = resolveSide(r.away, r.away_crest, r.away_kit);
+  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${home.name} batting`, null,
     {bat: home, bowl: away}]);
   // Built from r.home_innings/r.home directly, not steps[0] -- home always bats first in
   // this engine, but indexing into steps would attach the wrong innings as "prior" in the
   // (currently unreached) case where home_innings is ever absent.
-  if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${r.away} batting`,
-    r.home_innings ? { innings: r.home_innings, battingLabel: r.home } : null,
+  if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${away.name} batting`,
+    r.home_innings ? { innings: r.home_innings, battingLabel: home.name } : null,
     {bat: away, bowl: home}]);
   let i = 0;
   (function next(){
@@ -1083,7 +1138,7 @@ function renderRoomStartReview(m){
          <button class="act lead" onclick="roomStartMatches(this)">Continue</button>
        </div>`
     : `<div class="margin">Waiting for the host to continue…</div>`;
-  el.innerHTML = `<div class="report compact">
+  el.innerHTML = `${me.kit ? roomKitStrip(me) : ''}<div class="report compact">
       <div class="over-line">Your squad</div>
       <div class="ledger" style="grid-template-columns:repeat(3,1fr)">${teamRatingsHtml(me)}</div>
     </div>
@@ -1225,7 +1280,9 @@ function showRoomMatchComplete(m){
   if (m.format === 'final'){
     const res = m.results[0].result;
     el.innerHTML = `<div class="report compact">
-      <div class="call ${res.winner ? 'won' : ''}">${res.winner ? res.winner + ' win' : 'Tied'}</div>
+      <div class="call ${res.winner ? 'won' : ''}">${res.winner
+        ? esc(resolveSide(res.winner, null, res.winner === res.home ? res.home_kit : res.away_kit).name) + ' win'
+        : 'Tied'}</div>
       <div class="figures">${res.home_score} · ${res.away_score}</div>
       <div class="margin">${res.margin}</div>
       <div class="foot-actions room-actions">
@@ -1241,7 +1298,7 @@ function showRoomMatchComplete(m){
     // roomPlayoffsHtml alone covers the whole tournament here -- grouped by stage with
     // its margin line, not the flat "stage: home v away" rows this replaced.
     el.innerHTML = `<div class="report compact">
-      <div class="call won room-banner">${m.champion} win the cup</div>
+      <div class="call won room-banner">${esc(m.champion)} win the cup</div>
       </div>
       ${roomPlayoffsHtml(m)}
       <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
@@ -1256,7 +1313,7 @@ function showRoomMatchComplete(m){
   const your = roomYourResults(m);
   const playoffsHtml = roomPlayoffsHtml(m);
   el.innerHTML = `<div class="report compact">
-      <div class="call won room-banner">${m.champion} win the league</div>
+      <div class="call won room-banner">${esc(m.champion)} win the league</div>
     </div>
     <div class="season">
       <div>
@@ -1318,7 +1375,12 @@ function showRoomJourneyCard(){
   // ROOM_MATCH_DATA already carries the journey card's own numbers once complete --
   // no second fetch, same reasoning as solo's own showJourneyCard.
   if (!ROOM_MATCH_DATA || !ROOM_MATCH_DATA.squad){ slip('Play the match first.'); return; }
-  drawJourneyCard(ROOM_MATCH_DATA, 'ROOM ' + ROOM_CODE);
+  // [A146] Your own side, as the room knows it: a franchise's crest in an auction room, the
+  // kit in a draft room.
+  const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
+  const side = me ? {name: me.kit ? me.kit.name : (me.franchise || me.name),
+                     crest: me.crest || null, kit: me.kit || null} : null;
+  drawJourneyCard(ROOM_MATCH_DATA, 'ROOM ' + ROOM_CODE, side);
   $('#cardOverlay').classList.remove('hide');
 }
 

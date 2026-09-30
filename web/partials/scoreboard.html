@@ -1,0 +1,26 @@
+      <!-- The live scoreboard [A146]: written into season, room and daily by tools.shell,
+           so the three reveals are one piece of markup. reveal.js fills every id here;
+           the controls under it stay on each page, since each page skips differently. -->
+      <div class="sb" id="scoreboard">
+        <div class="sb-stage" id="overStage"></div>
+        <div class="sb-main">
+          <div class="sb-team sb-bat" id="sbBat"></div>
+          <div class="sb-centre">
+            <div class="sb-score"><span id="overScoreLine">0/0</span></div>
+            <div class="sb-overs" id="sbOvers"></div>
+          </div>
+          <div class="sb-team sb-bowl" id="sbBowl"></div>
+        </div>
+        <div class="sb-target" id="overTargetLine"></div>
+        <div class="sb-gauge"><i id="overOversBar" style="width:0%"></i></div>
+        <div class="sb-last" id="overLastLine"></div>
+        <div class="sb-bars" id="overChips" aria-label="Runs in each over"></div>
+        <div class="sb-phases"><span>Powerplay</span><span>Middle overs</span><span>Death</span></div>
+        <!-- the innings already known, kept on screen for the whole chase so a target is
+             never something to remember -- hidden when this IS the first innings. -->
+        <div class="sb-prior hide" id="overPrior">
+          <span class="sb-prior-label">First innings</span>
+          <b id="overPriorScore"></b>
+          <span id="overPriorBest"></span>
+        </div>
+      </div>

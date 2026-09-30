@@ -188,7 +188,7 @@ async function joinOpenRoom(code, ctrl){
   await busyClick(ctrl, 'Joining…', async () => {
     try {
       const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({name})});
+        body: JSON.stringify({name, kit: savedKit()})});
       enterRoom(code, r.player_id);
     } catch(e){ slip(e.message); }
   });
@@ -208,7 +208,9 @@ async function createRoom(ctrl){
           format: CHOSEN_FORMAT === 'auction' ? 'league' : CHOSEN_FORMAT,
           game: CHOSEN_FORMAT !== 'auction' ? 'draft' : (CHOSEN_MEGA ? 'mega' : 'auction'),
           timer_seconds: CHOSEN_TIMER, host_name: name,
-          draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY})});
+          draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY,
+          // [A146] Your saved kit, if you have one; an auction room ignores it.
+          kit: savedKit()})});
       enterRoom(r.room.code, r.player_id);
     } catch(e){ slip(e.message); }
   });
@@ -221,7 +223,7 @@ async function joinRoom(ctrl){
   await busyClick(ctrl, 'Joining…', async () => {
     try {
       const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({name})});
+        body: JSON.stringify({name, kit: savedKit()})});
       enterRoom(code, r.player_id);
     } catch(e){ slip(e.message); }
   });

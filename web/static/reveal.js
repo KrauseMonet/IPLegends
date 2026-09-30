@@ -54,9 +54,9 @@ function inningsTopBowler(inn){
 // already in hand (REVEAL.pending for solo, the match result's own home innings for a
 // room), never re-fetched. "Home always bats first" is enforced server-side (game/
 // season.py), so the prior innings is always the one already fully known.
-// `matchup` is {bat, bowl}, each {name, crest} -- who is batting and who is bowling this
-// innings, for the line above the score. A side with no crest (the player's own) shows the
-// gold star instead. Optional, so a caller without it still gets a working reveal.
+// `matchup` is {bat, bowl}, each {name, crest, kit} -- who is batting and who is bowling
+// this innings, for the two team panels. A real franchise shows its crest, a drafted side
+// its kit [A146]; optional, so a caller without it still gets a working reveal.
 function startOverStepper(innings, stageText, onDone, priorContext, matchup){
   hideAllRevealScreens();
   renderOverMatchup(matchup);
@@ -68,24 +68,44 @@ function startOverStepper(innings, stageText, onDone, priorContext, matchup){
   };
   renderOverPrior();
   $('#overStepper').classList.remove('hide');
+  // The screen before (an Impact choice, a long result list) may have left the page
+  // scrolled well down; the score is the thing to watch, so bring the board into view.
+  const board = document.getElementById('scoreboard');
+  if (board && board.getBoundingClientRect().top < 0) board.scrollIntoView({block: 'start'});
   renderOverStep();
   if (OVER_STEP) scheduleNextOver();
 }
 
-// The batting side's crest leads and its colours tint the stepper (a `.crest-KEY` class on
-// #overStepper, read by the CSS); the bowling side sits smaller beside it.
+// Each panel takes its own side's colours -- a `.crest-KEY` class for a franchise, inline
+// kit variables for a drafted side -- and the scoreboard as a whole takes the BATTING
+// side's, which is what colours the score's accent and the bars of this innings.
+function sideTint(side){
+  if (!side) return {cls: '', style: ''};
+  if (side.crest) return {cls: crestClass(side.crest), style: ''};
+  if (side.kit) return {cls: '', style: kitStyle(side.kit)};
+  return {cls: '', style: ''};
+}
+
 function renderOverMatchup(m){
-  const el = document.getElementById('overMatchup');
-  const panel = document.getElementById('overStepper');
-  if (!el || !panel) return;
-  panel.className = panel.className.replace(/\bcrest-[A-Z]+\b/g, '').trim();
-  if (!m){ el.innerHTML = ''; return; }
-  const cls = crestClass(m.bat.crest);
-  if (cls) panel.classList.add(cls);
-  const side = (s, role) => `<div class="om-side om-${role}">
-    ${s.crest ? `<img src="${s.crest}" alt="">` : '<span class="om-you">★</span>'}
-    <b>${s.name}</b><em>${role === 'bat' ? 'batting' : 'bowling'}</em></div>`;
-  el.innerHTML = side(m.bat, 'bat') + '<span class="om-v">v</span>' + side(m.bowl, 'bowl');
+  const board = document.getElementById('scoreboard');
+  if (!board) return;
+  const paint = (el, side, role) => {
+    el.className = `sb-team sb-${role}`;
+    el.removeAttribute('style');
+    if (!side){ el.innerHTML = ''; return; }
+    const t = sideTint(side);
+    if (t.cls) el.classList.add(t.cls);
+    if (t.style) el.setAttribute('style', t.style);
+    el.innerHTML = `<div class="sb-badge">${sideBadge(side, 'sb-mark')}</div>
+      <div class="sb-name"><b>${esc(side.name)}</b><em>${role === 'bat' ? 'Batting' : 'Bowling'}</em></div>`;
+  };
+  paint(document.getElementById('sbBat'), m && m.bat, 'bat');
+  paint(document.getElementById('sbBowl'), m && m.bowl, 'bowl');
+  board.className = 'sb';
+  board.removeAttribute('style');
+  const t = sideTint(m && m.bat);
+  if (t.cls) board.classList.add(t.cls);
+  if (t.style) board.setAttribute('style', t.style);
 }
 
 // Painted once, at the start of the reveal, and left alone -- unlike renderOverStep this
@@ -95,7 +115,7 @@ function renderOverPrior(){
   $('#overPrior').classList.toggle('hide', !p);
   if (!p) return;
   $('#overPriorScore').textContent =
-    `${p.battingLabel} posted ${p.innings.runs}/${p.innings.wickets} (${p.innings.overs} ov)`;
+    `${p.battingLabel} ${p.innings.runs}/${p.innings.wickets} (${p.innings.overs} ov)`;
   const bat = inningsTopBatter(p.innings), bowl = inningsTopBowler(p.innings);
   $('#overPriorBest').textContent = [
     bat ? `${bat.name} ${bat.runs}${bat.out ? '' : '*'} (${bat.balls})` : null,
@@ -135,17 +155,30 @@ function pulseScoreLine(wicketFell, scoreChanged){
   else if (scoreChanged) el.classList.add('score-pop');
 }
 
-// One small pill per over revealed so far -- a cheap "worm chart" substitute with no
-// charting library, rebuilt from scratch each tick (cheap at <=20 overs). Only the most
-// recently added chip gets the pop-in animation.
+// The innings as twenty bars, one per over, drawn in the batting side's colour -- height
+// is that over's runs (capped at 24, so one freak over cannot flatten the rest), a red pip
+// per wicket above it, and the powerplay and death overs shaded behind. Overs not yet
+// bowled stay as empty slots, so the shape of what is left is visible too. Rebuilt whole
+// each tick (twenty elements); only the newest bar animates in.
+const BAR_CAP = 24;
 function renderOverChips(entries){
-  $('#overChips').innerHTML = entries.map((o, idx) => {
-    const cls = o.over_runs >= 12 ? 'great' : (o.over_runs >= 7 ? 'good' : '');
-    const wkt = o.over_wickets ? ' wicket' : '';
-    const isNew = idx === entries.length - 1;
-    return `<span class="chip ${cls}${wkt}${isNew ? ' chip-new' : ''}">${o.over_runs}</span>`;
-  }).join('');
+  const bars = [];
+  for (let n = 0; n < 20; n++){
+    const o = entries[n];
+    const phase = n < 6 ? 'pp' : (n >= 15 ? 'death' : 'mid');
+    if (!o){ bars.push(`<div class="sb-bar ${phase} future"><i></i><span>${n + 1}</span></div>`); continue; }
+    const h = Math.max(4, 100 * Math.min(o.over_runs, BAR_CAP) / BAR_CAP);
+    const pips = o.over_wickets ? `<u>${'<s></s>'.repeat(Math.min(o.over_wickets, 3))}</u>` : '';
+    const isNew = n === entries.length - 1;
+    bars.push(`<div class="sb-bar ${phase}${isNew ? ' new' : ''}${o.over_runs >= 12 ? ' big' : ''}"
+      title="Over ${n + 1}: ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}${o.over_wickets ? ', ' + o.over_wickets + ' wkt' : ''}">
+      ${pips}<i style="height:${h}%"><b>${o.over_runs}</b></i><span>${n + 1}</span></div>`);
+  }
+  $('#overChips').innerHTML = bars.join('');
 }
+
+function oversText(balls){ return `${Math.floor(balls / 6)}.${balls % 6}`; }
+function runRate(runs, balls){ return balls ? (runs * 6 / balls).toFixed(2) : '0.00'; }
 
 function renderOverStep(){
   const { log, i, stageText, innings, priorContext } = OVER_STEP;
@@ -154,18 +187,21 @@ function renderOverStep(){
     // either a genuinely over-free innings, or the log just ran out -- either way the
     // final total is already known, so show it and hand off immediately.
     $('#overScoreLine').textContent = `${innings.runs}/${innings.wickets}`;
-    $('#overLastLine').textContent = `${innings.overs} overs, ${innings.extras} extras`;
+    $('#sbOvers').textContent = `${innings.overs} ov · RR ${runRate(innings.runs, innings.balls)}`;
+    $('#overLastLine').textContent = `Innings over · ${innings.extras} extras`;
     $('#overOversBar').style.width = (100 * Math.min(1, innings.balls / 120)) + '%';
     renderChaseLine(priorContext, innings.runs, innings.balls, true);
+    renderOverChips(log);
     finishOverStepper();
     return;
   }
   const o = log[i];
   const scoreChanged = OVER_STEP.lastRuns !== null && o.runs !== OVER_STEP.lastRuns;
   OVER_STEP.lastRuns = o.runs;
-  $('#overScoreLine').textContent = `${o.runs}/${o.wickets} after ${o.over + 1} overs`;
+  $('#overScoreLine').textContent = `${o.runs}/${o.wickets}`;
+  $('#sbOvers').textContent = `${oversText(o.balls)} ov · RR ${runRate(o.runs, o.balls)}`;
   $('#overLastLine').textContent =
-    `Over ${o.over + 1}: ${o.bowler} -- ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
+    `Over ${o.over + 1} · ${o.bowler} · ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
     (o.over_wickets ? `, ${o.over_wickets} wicket${o.over_wickets === 1 ? '' : 's'}` : '');
   $('#overOversBar').style.width = (100 * Math.min(1, o.balls / 120)) + '%';
   renderChaseLine(priorContext, o.runs, o.balls, false);
@@ -230,17 +266,42 @@ function finishOverStepper(){
   if (onDone) onDone();
 }
 
+/* --- whose side is whose [A146] --------------------------------------------------------- */
+
+// The viewer's own side as this page knows it -- {short, name, crest, kit}. The engine
+// calls a solo side 'YOU' and a daily side 'You'; the page sets this so every screen that
+// draws a result shows the player's team name and kit instead. Null where a page has no
+// side of its own to substitute (a room names every side server-side already).
+let MY_SIDE = null;
+
+// A side named in a result, resolved to what should be drawn for it. `kit` is supplied
+// by a room, where each drafted side's kit travels with the result.
+function resolveSide(short, crest, kit){
+  if (MY_SIDE && short === MY_SIDE.short) return {...MY_SIDE};
+  return {short, name: kit ? kit.name : short, crest: crest || null, kit: kit || null};
+}
+
+// The small mark that sits before a side's name in a row or a caption.
+function sideMark(side){
+  if (side.crest) return crestImg(side.crest, 'row-crest');
+  if (side.kit) return kitBadge(side.kit, 'kit-badge-row');
+  return '';
+}
+
 /* --- the scorecard overlay -------------------------------------------------------- */
 
 function renderScorecard(r){
   if (!r || !r.home_innings || !r.away_innings) return;
+  const home = resolveSide(r.home, r.home_crest, r.home_kit);
+  const away = resolveSide(r.away, r.away_crest, r.away_kit);
+  const winner = r.winner === r.home ? home : (r.winner === r.away ? away : null);
   $('#scStage').textContent = r.stage;
-  $('#scHeadline').textContent = r.winner ? `${r.winner} win` : 'Match tied';
+  $('#scHeadline').textContent = winner ? `${winner.name} win` : 'Match tied';
   $('#scHeadline').classList.toggle('won', !!r.winner);
   $('#scMargin').textContent = r.margin;
   $('#scInnings').innerHTML =
-    scorecardInnings(r.home, r.home_score, r.home_innings, r.home_crest) +
-    scorecardInnings(r.away, r.away_score, r.away_innings, r.away_crest);
+    scorecardInnings(home, r.home_score, r.home_innings) +
+    scorecardInnings(away, r.away_score, r.away_innings);
   $('#scSuperOver').innerHTML = superOverBlock(r.super_overs);
   $('#scorecardOverlay').classList.remove('hide');
 }
@@ -257,7 +318,7 @@ function superOverBlock(sos){
   const rows = sos.map(so => `
     <div class="so-block">
       <div class="so-head"><span>${sos.length > 1 ? `Super over ${so.number}` : ''}</span>
-        <span class="so-verdict">${so.winner ? `${so.winner} win` : 'tied, played again'}</span></div>
+        <span class="so-verdict">${so.winner ? `${esc(resolveSide(so.winner).name)} win` : 'tied, played again'}</span></div>
       ${superOverSide(so.first, so.first_score, so.first_innings)}
       ${superOverSide(so.second, so.second_score, so.second_innings)}
     </div>`).join('');
@@ -266,7 +327,8 @@ function superOverBlock(sos){
 }
 
 function superOverSide(short, score, inn){
-  if (!inn) return `<div class="so-row"><span class="so-team">${short}</span>
+  const label = esc(resolveSide(short).name);
+  if (!inn) return `<div class="so-row"><span class="so-team">${label}</span>
     <span class="so-score">${score}</span><span class="so-detail"></span></div>`;
   // Only the batters who actually faced. With three nominated and two dismissals ending
   // the innings, the third man very often does not bat, and a "did not bat" line for him
@@ -275,7 +337,7 @@ function superOverSide(short, score, inn){
     .map(b => `${b.name} ${b.runs}${b.out ? '' : '*'} (${b.balls})`).join(', ');
   const bowl = inn.bowling.map(bo => `${bo.name} ${bo.wickets}-${bo.runs}`).join(', ');
   return `<div class="so-row">
-    <span class="so-team">${short}</span>
+    <span class="so-team">${label}</span>
     <span class="so-score">${score} (${inn.overs})</span>
     <span class="so-detail">${bats}${bowl ? ` &middot; b ${bowl}` : ''}</span></div>`;
 }
@@ -297,7 +359,7 @@ function bdyCell(n){
   return n ? `<td class="n">${n}</td>` : `<td class="n bdy-none">–</td>`;
 }
 
-function scorecardInnings(short, score, inn, crest){
+function scorecardInnings(side, score, inn){
   // The innings' best contribution, so a scorecard has a subject rather than being a wall
   // of equally-weighted rows. Ties resolve to whoever appears first, which is batting
   // order -- the earlier man faced his runs under more of the innings.
@@ -328,7 +390,7 @@ function scorecardInnings(short, score, inn, crest){
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';
   return `<div>
     <table>
-      <caption>${crestImg(crest, 'row-crest')}${short} · ${score} (${inn.overs} ov, ${inn.extras} extras) · ${
+      <caption>${sideMark(side)}${esc(side.name)} · ${score} (${inn.overs} ov, ${inn.extras} extras) · ${
         inn.fours}x4 ${inn.sixes}x6</caption>
       <tr><th>Batting</th><th class="n">R</th><th class="n">B</th><th class="n">4s</th>
         <th class="n">6s</th><th class="n">SR</th></tr>
@@ -352,18 +414,15 @@ function nrrCell(v){
   return `<td class="n ${cls}">${n > 0 ? '+' : ''}${n.toFixed(3)}</td>`;
 }
 
-// A generated colour-coded initial stands in for a team crest (there is no real crest
-// art for a franchise-season, and hashing keeps it stable without a lookup table). The
-// viewer's own row gets a fixed gold star instead, never a hashed colour, so it reads as
-// a status rather than just another team.
-function teamBadge(short, isYou, crest){
-  if (isYou) return `<span class="team-badge you-badge">★</span>`;
-  // A real franchise-season has its crest; the hashed initial is only for a side that is
-  // nobody's in particular -- another player's drafted twelve in a room.
+// A table or results row's badge. A real franchise shows its crest; a drafted side its
+// kit [A146] -- passed in for another player's side in a room, and your own kit when the
+// row is yours and has no crest (an auction side keeps its franchise's crest). Anything
+// else falls back to a colour hashed from its name.
+function teamBadge(short, isYou, crest, kit){
   if (crest) return `<img class="team-crest" src="${crest}" alt="">`;
-  let h = 0;
-  for (let i = 0; i < short.length; i++) h = (h * 33 + short.charCodeAt(i)) >>> 0;
-  return `<span class="team-badge" style="background:hsl(${h % 360} 60% 52%)">${short.slice(0, 2).toUpperCase()}</span>`;
+  if (kit) return kitBadge(kit, 'kit-badge-row');
+  if (isYou) return kitBadge(myKit(), 'kit-badge-row');
+  return sideBadge({short});
 }
 
 // The tournament's own Orange Cap/Purple Cap, never populated until the season/room is
@@ -453,7 +512,10 @@ function loadImages(urls){
   })));
 }
 
-async function drawJourneyCard(d, header){
+// `side` is the team the card is about -- {name, crest} for a franchise, {name, kit} for a
+// drafted twelve [A146]. Its colour rims the card and its badge heads the squad list.
+async function drawJourneyCard(d, header, side){
+  const [sideCrest] = await loadImages([side && side.crest]);
   const crestImgs = await loadImages(d.squad.map(c => c.crest));
   const canvas = $('#journeyCanvas');
   const ctx = canvas.getContext('2d');
@@ -469,7 +531,8 @@ async function drawJourneyCard(d, header){
   grad.addColorStop(1, bg);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = gold;
+  const kitCol = side && side.kit ? kitColour(side.kit.colour) : null;
+  ctx.strokeStyle = kitCol ? kitCol.team : gold;
   ctx.lineWidth = 5;
   ctx.strokeRect(30, 30, W - 60, H - 60);
   ctx.strokeStyle = lineStrong;
@@ -529,9 +592,34 @@ async function drawJourneyCard(d, header){
   // card: who he actually was that season (franchise, season) and what he did in THIS
   // simulated tournament, not the real archive figures the draft screen already showed
   ctx.textAlign = 'left';
+  const headY = boxY + boxH + 60;
+  let labelX = 60;
+  if (sideCrest){
+    const box = 56, k = Math.min(box / sideCrest.width, box / sideCrest.height);
+    ctx.drawImage(sideCrest, 60, headY - 38 + (box - sideCrest.height * k) / 2 - 10,
+                  sideCrest.width * k, sideCrest.height * k);
+    labelX = 60 + box + 16;
+  } else if (kitCol){
+    // The kit badge, as the page draws it: monogram in `ink` on `deep`, ringed in the
+    // team colour.
+    const r = 28, bx = 60 + r, by = headY - 8;
+    ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fillStyle = kitCol.deep; ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = kitCol.team; ctx.stroke();
+    ctx.fillStyle = kitCol.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `800 20px ${CARD_MONO}`;
+    ctx.fillText(side.kit.monogram, bx, by + 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    labelX = 60 + 2 * r + 18;
+  }
+  ctx.fillStyle = ink;
+  ctx.font = `800 30px ${CARD_SANS}`;
+  ctx.fillText(((side && side.name) || 'Your twelve').toUpperCase(), labelX, headY);
   ctx.fillStyle = ink3;
-  ctx.font = `600 20px ${CARD_MONO}`;
-  ctx.fillText('YOUR TWELVE', 60, boxY + boxH + 60);
+  ctx.font = `600 16px ${CARD_MONO}`;
+  ctx.textAlign = 'right';
+  ctx.fillText('THE TWELVE', W - 60, headY);
+  ctx.textAlign = 'left';
 
   const listTop = boxY + boxH + 110, rowH = 108, rowGap = 14, rowX = 60, rowW = W - 120;
   d.squad.forEach((c, i) => {

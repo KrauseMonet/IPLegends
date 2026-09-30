@@ -107,6 +107,16 @@ async function dailySubmit(ctrl){
 // "bowl first" day is the opposition -- their innings is the one your own five bowlers
 // held down, and it is what makes the target mean something rather than being a number in
 // a banner.
+// [A146] The engine calls your side 'You'; every screen here draws your kit instead.
+// `you_home` says which side that is, so the lookup never depends on the label text alone.
+function setDailySide(m){
+  const k = myKit();
+  const short = !m ? 'You'
+    : m.you_home === true ? m.home : m.you_home === false ? m.away
+    : (m.home === 'You' ? m.home : m.away);
+  MY_SIDE = {short, name: k.name, crest: null, kit: k};
+}
+
 function dailyReveal(){
   const m = DAY.match;
   if (!m){ showDone(); return; }
@@ -119,11 +129,12 @@ function dailyReveal(){
   window.scrollTo(0, 0);
 
   const steps = [];
-  const home = {name: m.home, crest: m.home_crest}, away = {name: m.away, crest: m.away_crest};
-  if (m.home_innings) steps.push([m.home_innings, `${m.stage} · ${m.home} batting`, null,
+  setDailySide(m);
+  const home = resolveSide(m.home, m.home_crest), away = resolveSide(m.away, m.away_crest);
+  if (m.home_innings) steps.push([m.home_innings, `${m.stage} · ${home.name} batting`, null,
     {bat: home, bowl: away}]);
-  if (m.away_innings) steps.push([m.away_innings, `${m.stage} · ${m.away} batting`,
-    m.home_innings ? {innings: m.home_innings, battingLabel: m.home} : null,
+  if (m.away_innings) steps.push([m.away_innings, `${m.stage} · ${away.name} batting`,
+    m.home_innings ? {innings: m.home_innings, battingLabel: home.name} : null,
     {bat: away, bowl: home}]);
 
   let i = 0;
@@ -209,7 +220,7 @@ async function shareResult(btn){
 }
 
 function dailyScorecard(){
-  if (DAY && DAY.match) renderScorecard(DAY.match);
+  if (DAY && DAY.match){ setDailySide(DAY.match); renderScorecard(DAY.match); }
 }
 
 async function showDone(){

@@ -41,6 +41,7 @@ from web import auth
 from web import daily as daily_lib
 from web import db
 from web import flashback as flashback_lib
+from web import kit as kit_lib
 from web import room_match as room_match_lib
 from web import rooms
 from tools import snapshot_deck
@@ -467,11 +468,29 @@ class InningsOut(BaseModel):
                     "entry; the final scorecard already covers that moment")
 
 
+class KitOut(BaseModel):
+    """A drafted side's team kit [A146]. `colour` is a key into `/api/meta`'s `kits`."""
+    name: str
+    monogram: str
+    colour: str
+
+
+class KitIn(BaseModel):
+    name: str = Field(max_length=200)
+    monogram: str = Field(max_length=20)
+    colour: str = Field(max_length=40)
+
+
+def _kit_out(k) -> KitOut | None:
+    return None if k is None else KitOut(name=k.name, monogram=k.monogram, colour=k.colour)
+
+
 class StandingOut(BaseModel):
     pos: int
     name: str
     short: str
     crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
+    kit: KitOut | None = Field(default=None, description="a room's drafted side's kit [A146]")
     you: bool
     played: int
     won: int
@@ -507,6 +526,10 @@ class ResultOut(BaseModel):
     away: str
     home_crest: str | None = None
     away_crest: str | None = None
+    home_kit: KitOut | None = Field(default=None, description="a room's drafted side's "
+                                    "kit [A146]; null for a franchise, and in solo, where "
+                                    "the page supplies the player's own")
+    away_kit: KitOut | None = None
     home_score: str
     away_score: str
     winner: str | None
@@ -581,6 +604,9 @@ class PendingImpactOut(BaseModel):
 class SeasonProgressOut(BaseModel):
     state: str
     your_side: str
+    your_crest: str | None = Field(
+        default=None, description="your franchise's crest in an auction season; null "
+                    "for a drafted twelve, which wears the player's own kit instead [A146]")
     table: list[StandingOut] = Field(
         description="empty until the league stage is fully resolved")
     your_results: list[ResultOut] = Field(description="your completed matches so far")
@@ -641,10 +667,14 @@ class CreateRoomIn(BaseModel):
     game: Literal["draft", "auction", "mega"] = Field(
         default="draft", description="'auction' plays a live auction [A139]; 'mega' adds "
                                      "retentions and Right to Match [A140]; league only")
+    kit: KitIn | None = Field(default=None, description="the host's kit [A146]; draft "
+                              "rooms only, dropped if invalid")
 
 
 class JoinRoomIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
+    kit: KitIn | None = Field(default=None, description="the kit the player brings from "
+                              "their account or browser [A146]; dropped if invalid")
 
 
 class HostActionIn(BaseModel):
@@ -667,6 +697,9 @@ class RoomPlayerOut(BaseModel):
     name: str
     is_cpu: bool
     franchise: str | None = Field(default=None, description="auction rooms only [A139]")
+    kit: KitOut | None = Field(default=None, description="a draft room seat's team kit "
+                               "[A146] -- chosen, or the default it wears until then; "
+                               "null for filler and auction seats, which have crests")
     crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     picks_made: int
     done: bool
@@ -762,6 +795,8 @@ class RoomCurrentMatchOut(BaseModel):
     b_name: str
     a_crest: str | None = None
     b_crest: str | None = None
+    a_kit: KitOut | None = None
+    b_kit: KitOut | None = None
     a_pid: str
     b_pid: str
     pending_toss_winner_pid: str | None = Field(
@@ -872,6 +907,7 @@ class LoginIn(BaseModel):
 class AccountOut(BaseModel):
     account_id: int
     username: str
+    kit: KitOut | None = Field(default=None, description="the account's team kit, if set")
 
 
 class MeOut(BaseModel):
@@ -880,6 +916,8 @@ class MeOut(BaseModel):
                     "401s, since every page calls it unconditionally on boot and a "
                     "no-login-wall app can't need special-case handling for that")
     username: str | None = None
+    kit: KitOut | None = Field(default=None, description="the account's team kit [A146]; "
+                                                         "null if none was ever chosen")
 
 
 class LeaderOut(BaseModel):
@@ -1256,6 +1294,10 @@ def meta() -> dict:
         "seasons": sorted(s for s in seasons if s),
         "showcase": _showcase(deck),
         "crests": all_crests(),
+        # [A146] the team-kit palette, each colour with its derived shades, and the kit
+        # a solo side wears before its player chooses one.
+        "kits": kit_lib.palette(),
+        "kit_default": kit_lib.SOLO_DEFAULT,
     }
 
 
@@ -1506,7 +1548,8 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
         )
 
     if not replay.complete:
-        return SeasonProgressOut(state=state, your_side=yours.name, table=table,
+        return SeasonProgressOut(state=state, your_side=yours.name,
+                                  your_crest=_side_crest(yours), table=table,
                                   your_results=your_results, playoffs=playoffs,
                                   pending=pending, complete=False)
 
@@ -1515,7 +1558,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     leaders = tournament_leaders(season.results + season.playoffs)
     rating = team_rating(all_twelve)
     return SeasonProgressOut(
-        state=state, your_side=yours.name, table=table,
+        state=state, your_side=yours.name, your_crest=_side_crest(yours), table=table,
         your_results=your_results, playoffs=playoffs, pending=None, complete=True,
         champion=season.champion.name, champion_crest=_side_crest(season.champion),
         you_champion=season.champion is yours,
@@ -2139,7 +2182,9 @@ def login(body: LoginIn, request: Request, response: Response) -> AccountOut:
         if account is None:
             raise HTTPException(status_code=401, detail="wrong username/email or password")
         _set_session_cookie(request, response, account.account_id)
-        return AccountOut(account_id=account.account_id, username=account.username)
+        full = accounts.get_account(conn, account.account_id)
+        return AccountOut(account_id=account.account_id, username=account.username,
+                          kit=_kit_out(full.kit if full else None))
 
 
 @app.post("/api/auth/logout")
@@ -2160,7 +2205,24 @@ def me(request: Request) -> MeOut:
         # longer exists -- not possible today (nothing ever deletes an account), but
         # treated the same as no cookie at all rather than assumed unreachable.
         return MeOut(account_id=None, username=None)
-    return MeOut(account_id=account.account_id, username=account.username)
+    return MeOut(account_id=account.account_id, username=account.username,
+                 kit=_kit_out(account.kit))
+
+
+@app.put("/api/account/kit", response_model=KitOut)
+def save_account_kit(body: KitIn, request: Request) -> KitOut:
+    """[A146] Save the signed-in player's team kit, so it follows them between devices.
+    Signed out, the page keeps it in the browser instead and never calls this."""
+    account_id = _current_account_id(request)
+    if account_id is None:
+        raise HTTPException(status_code=401, detail="sign in to save your kit")
+    try:
+        k = kit_lib.parse_kit(body.model_dump())
+    except kit_lib.KitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with _db() as conn:
+        accounts.set_kit(conn, account_id, k)
+    return _kit_out(k)
 
 
 @app.get("/api/profile", response_model=ProfileOut)
@@ -2185,7 +2247,7 @@ def profile(request: Request) -> ProfileOut:
 
 def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
                       is_active: bool, caller_id: str | None,
-                      pending_deal, pending_blocked) -> RoomPlayerOut:
+                      pending_deal, pending_blocked, kit=None) -> RoomPlayerOut:
     """`deal` is non-null only for the currently active seat, and even then carries
     `options`/`blocked` only for the caller whose own seat this is -- see
     `RoomPlayerOut.deal`'s own description. Everyone else sees just franchise/
@@ -2227,7 +2289,7 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
         rating = team_rating(all_twelve)
     return RoomPlayerOut(
         player_id=player.player_id, name=seat.historical_name or player.name,
-        is_cpu=player.is_cpu,
+        is_cpu=player.is_cpu, kit=_kit_out(kit),
         crest=crest_url(seat.order[0].franchise, seat.order[0].season_year)
               if player.is_cpu and seat.order and seat.order[0] else None,
         picks_made=TWELVE_SIZE if player.is_cpu else len(seat.picks),
@@ -2323,6 +2385,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
     if room.game != "draft":
         return _auction_room_state_out(room, deck, caller_id)
     replay = rooms.replay_room(room, deck)
+    kits = rooms.seat_kits(room)
     remaining = 0
     if room.status == "drafting":
         remaining = max(0, round(room.timer_seconds - (time.time() - room.turn_started_at)))
@@ -2335,7 +2398,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
             _room_player_out(
                 p, replay.seats[pid], is_active=(pid == replay.pending_seat_id),
                 caller_id=caller_id, pending_deal=replay.pending_deal,
-                pending_blocked=replay.pending_blocked,
+                pending_blocked=replay.pending_blocked, kit=kits.get(pid),
             )
             for pid, p in room.players.items()
         ],
@@ -2569,6 +2632,8 @@ def _daily_match_out(play, scenario) -> dict:
                   if first.runs != second.runs else None,
         "margin": play.outcome.summary,
         "yours": True,
+        # [A146] which side is the player's, so the page can put their kit on it.
+        "you_home": player_is_first,
         "home_innings": _daily_innings_out(first, bowled_by_a_player=play.first_real_bowling),
         "away_innings": _daily_innings_out(second, bowled_by_a_player=play.second_real_bowling),
         # A level daily still goes to a super over -- the day's own objective is a margin
@@ -2836,7 +2901,7 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
         try:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
-                body.is_open, body.game)
+                body.is_open, body.game, body.kit.model_dump() if body.kit else None)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -2848,7 +2913,8 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
 def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
     with _db() as conn:
         try:
-            room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"])
+            room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"],
+                                              body.kit.model_dump() if body.kit else None)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -2958,6 +3024,10 @@ class FranchiseIn(BaseModel):
     short: str
 
 
+class RoomKitIn(KitIn):
+    player_id: str
+
+
 class RoomBidIn(BaseModel):
     player_id: str
     price: int = Field(description="the price you raise to: must be the current next bid")
@@ -3000,6 +3070,19 @@ def room_franchise(code: str, body: FranchiseIn) -> RoomStateOut:
     with _db() as conn:
         try:
             room = rooms.choose_franchise(conn, code, body.player_id, body.short)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+@app.post("/api/rooms/{code}/kit", response_model=RoomStateOut)
+def room_kit(code: str, body: RoomKitIn) -> RoomStateOut:
+    """[A146] A draft room seat chooses its team kit -- until the matches start."""
+    with _db() as conn:
+        try:
+            room = rooms.set_kit(conn, code, body.player_id,
+                                 {"name": body.name, "monogram": body.monogram,
+                                  "colour": body.colour})
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
@@ -3052,7 +3135,8 @@ def room_auction_twelve(code: str, body: RoomTwelveIn) -> RoomStateOut:
     return _auction_move(code, body.player_id, room_auction.twelve, body.order, body.impact)
 
 
-def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
+def _room_result_out(entry, player_id: str | None, kits: dict | None = None) -> RoomMatchResultOut:
+    kits = kits or {}
     r = entry.result
     # `home_pid`/`away_pid` (not `a_pid`/`b_pid`) decide `you_home` -- the toss, not the
     # fixture list, is what actually assigns home/away, and `RoomResultEntry` keeps the
@@ -3067,6 +3151,8 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
         result=ResultOut(
             stage=r.stage, home=r.home.short, away=r.away.short,
             home_crest=_side_crest(r.home), away_crest=_side_crest(r.away),
+            home_kit=_kit_out(kits.get(entry.home_pid)),
+            away_kit=_kit_out(kits.get(entry.away_pid)),
             home_score=_score(r.home_runs, r.home_wickets),
             away_score=_score(r.away_runs, r.away_wickets),
             winner=None if r.winner is None else r.winner.short,
@@ -3082,21 +3168,34 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     )
 
 
+def _kit_by_short(kits: dict, side):
+    if side.franchise:
+        return None
+    return next((k for k in kits.values() if k.monogram == side.short), None)
+
+
 def _room_current_match_out(fs, display_names: dict, player_id: str | None,
-                            seat_crests: dict | None = None) -> RoomCurrentMatchOut:
+                            seat_crests: dict | None = None,
+                            kits: dict | None = None) -> RoomCurrentMatchOut:
     seat_crests = seat_crests or {}
+    kits = kits or {}
     def name(pid: str) -> str:
         return display_names.get(pid, "")
 
     return RoomCurrentMatchOut(
         stage=fs.stage, a_name=name(fs.a_pid), b_name=name(fs.b_pid),
         a_crest=seat_crests.get(fs.a_pid), b_crest=seat_crests.get(fs.b_pid),
+        a_kit=_kit_out(kits.get(fs.a_pid)), b_kit=_kit_out(kits.get(fs.b_pid)),
         a_pid=fs.a_pid, b_pid=fs.b_pid,
         pending_toss_winner_pid=fs.pending_toss_winner_pid,
         you_decide_toss=player_id is not None and player_id == fs.pending_toss_winner_pid,
         result=None if fs.result is None else ResultOut(
             stage=fs.stage, home=fs.result.home.short, away=fs.result.away.short,
             home_crest=_side_crest(fs.result.home), away_crest=_side_crest(fs.result.away),
+            # Matched on the short, which for a drafted side IS its kit's monogram and is
+            # unique in the room (rooms.seat_kits) -- a franchise side never matches one.
+            home_kit=_kit_out(_kit_by_short(kits, fs.result.home)),
+            away_kit=_kit_out(_kit_by_short(kits, fs.result.away)),
             home_score=_score(fs.result.home_runs, fs.result.home_wickets),
             away_score=_score(fs.result.away_runs, fs.result.away_wickets),
             winner=None if fs.result.winner is None else fs.result.winner.short,
@@ -3123,20 +3222,25 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     # can drift back to the raw stored placeholder ("CPU 1") the way
     # `_room_current_match_out` used to.
     sides = rooms.room_sides(room, deck)
-    display_names = {pid: p.name for pid, p, _, _ in sides}
+    # [A146] A drafted side is named by its kit, the same name `_sides_with_pid` gave it
+    # on the scoreboard -- the champion banner must not call it something else.
+    kits = rooms.seat_kits(room)
+    display_names = {pid: (kits[pid].name if pid in kits else p.name)
+                     for pid, p, _, _ in sides}
 
     def name(pid: str | None) -> str:
         return display_names.get(pid, "") if pid else ""
 
     seat_crests = {pid: crest_url(*room_match_lib._franchise_of_seat(p, order))
                    for pid, p, order, _ in sides}
-    current_matches = [_room_current_match_out(fs, display_names, player_id, seat_crests)
+    current_matches = [_room_current_match_out(fs, display_names, player_id, seat_crests, kits)
                         for fs in (replay.current_round or [])]
 
     table = None
     if replay.table is not None:
         table = [StandingOut(pos=i, name=row.standing.side.name, short=row.standing.side.short,
                              crest=_side_crest(row.standing.side),
+                             kit=_kit_out(kits.get(row.pid)),
                              you=row.pid == player_id, played=row.standing.played,
                              won=row.standing.won, lost=row.standing.lost,
                              tied=row.standing.tied, points=row.standing.points,
@@ -3164,7 +3268,7 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
 
     return RoomMatchOut(
         format=room.format,
-        results=[_room_result_out(e, player_id) for e in replay.results],
+        results=[_room_result_out(e, player_id, kits) for e in replay.results],
         table=table, complete=replay.complete,
         awaiting_start=replay.awaiting_start,
         you_decide_start=replay.awaiting_start and player_id == room.host_id,
@@ -3178,7 +3282,7 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         league_revealed=league_revealed, league_total=league_total,
         you_decide_league_reveal=(replay.league_progress is not None
                                    and player_id == room.host_id),
-        league_next_result=(_room_result_out(replay.league_next, player_id)
+        league_next_result=(_room_result_out(replay.league_next, player_id, kits)
                              if replay.league_next is not None else None),
         you_are_out=you_are_out,
         runs=journey.runs if journey else None,

@@ -14,6 +14,9 @@ let ME = null;
 async function loadMe(){
   ME = await api('/api/auth/me');
   renderAuthArea();
+  syncKitToAccount();
+  // [A146] A page showing your kit repaints: the account's copy wins over this browser's.
+  document.dispatchEvent(new Event('kitchange'));
   return ME;
 }
 
@@ -114,6 +117,8 @@ async function submitLogin(ctrl){
       ME = await api('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({identifier, password})});
       renderAuthArea();
+      syncKitToAccount();
+      document.dispatchEvent(new Event('kitchange'));
       $('#authOverlay').classList.add('hide');
     } catch(e){ $('#authError').textContent = e.message; }
   });
@@ -131,6 +136,8 @@ async function submitRegister(ctrl){
       ME = await api('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({username, email, password})});
       renderAuthArea();
+      syncKitToAccount();
+      document.dispatchEvent(new Event('kitchange'));
       $('#authOverlay').classList.add('hide');
     } catch(e){ $('#authError').textContent = e.message; }
   });
@@ -141,5 +148,6 @@ async function submitLogout(ctrl){
     try { await api('/api/auth/logout', {method:'POST'}); } catch(e){ /* clear locally regardless */ }
     ME = {account_id: null, username: null};
     renderAuthArea();
+    document.dispatchEvent(new Event('kitchange'));
   });
 }

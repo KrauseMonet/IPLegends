@@ -34,6 +34,7 @@ class FakeConn:
         self.people: dict[str, str] = {}                    # person_id -> primary_name
         self.game_results: dict[int, tuple] = {}             # game_result_id -> row
         self.game_result_players: list[tuple] = []           # flat list of child rows
+        self.kits: dict[int, tuple] = {}                     # account_id -> kit columns
         self._next_id = 1
         self._next_game_result_id = 1
 
@@ -64,10 +65,17 @@ class FakeConn:
                     return FakeCursor([(aid, u, e, ph)])
             return FakeCursor([])
 
-        if sql_norm.startswith("select account_id, username, email from accounts"):
+        if sql_norm.startswith("select account_id, username, email, kit_name"):
             (account_id,) = params
             row = self.rows.get(account_id)
-            return FakeCursor([(row[0], row[1], row[2])] if row else [])
+            kit = self.kits.get(account_id, (None, None, None))
+            return FakeCursor([(row[0], row[1], row[2], *kit)] if row else [])
+
+        if sql_norm.startswith("update accounts set kit_name"):
+            name, monogram, colour, account_id = params
+            if account_id in self.rows:
+                self.kits[account_id] = (name, monogram, colour)
+            return FakeCursor([])
 
         if sql_norm.startswith("select coalesce(sum(gr.matches_won), 0)"):
             (account_id,) = params
@@ -465,3 +473,19 @@ def test_the_two_leader_models_stay_distinct():
     assert set(LeaderOut.model_fields) == {"person_id", "name", "total"}
     # `team` added by A111: a row is a (person, side) pair, so it names the side.
     assert set(AnalysisLeaderOut.model_fields) == {"name", "value", "detail", "team", "crest"}
+
+
+# --- team kits [A146] ---------------------------------------------------------------
+
+def test_an_account_has_no_kit_until_one_is_set():
+    conn = FakeConn()
+    account = accounts.create_account(conn, "kitless", "k@example.com", "a-long-password")
+    assert accounts.get_account(conn, account.account_id).kit is None
+
+
+def test_a_kit_set_on_an_account_reads_back():
+    from web.kit import Kit
+    conn = FakeConn()
+    account = accounts.create_account(conn, "kitted", "kt@example.com", "a-long-password")
+    accounts.set_kit(conn, account.account_id, Kit("Bombay Blasters", "BB", "royal"))
+    assert accounts.get_account(conn, account.account_id).kit == Kit("Bombay Blasters", "BB", "royal")

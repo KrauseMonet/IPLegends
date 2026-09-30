@@ -1771,6 +1771,11 @@ dependency runs one way and the pipeline is exactly as testable as it was.
 - Any franchise logo, crest, kit colour or player photograph. IPL and BCCI marks are
   aggressively enforced and player likeness rights are live litigation territory in India.
   **Text only.**
+  **[Overtaken by A145 and A146, recorded rather than deleted.]** A145 added franchise
+  crests at the user's decision, on a non-commercial fan-site basis with no licence (see
+  CREDITS.md). A146's team kits are a different thing and raise none of this: a name,
+  monogram and colour the PLAYER chooses for their own drafted side, never a franchise's
+  mark. Player photographs remain out.
 
 ## 10. The match engine
 
@@ -2503,3 +2508,39 @@ license or download. An auctioneer's voice announces each sale ("Sold! Rashid Kh
 Chennai Super Kings, for 29 crore") through the browser's own speech synthesis, preferring
 an Indian English voice. Sound and voice are separate switches on the floor, remembered per
 browser; browsers allow no sound before the first click, so nothing plays until then.
+
+## 16. Team kits [A146]
+
+A drafted twelve is a mix of franchises, so it has no crest. It wears a **kit** instead: a
+team name (1-24 characters), a monogram (1-3 letters or digits, drawn in capitals) and one
+of twelve palette colours. The kit is drawn wherever a crest would be -- the live
+scoreboard's team panel, the league table, results rows, the scorecard, the toss screen and
+the journey card -- and the side's colour tints the scoreboard exactly as a franchise's
+does.
+
+**Colours.** The palette's twelve base hues are hand-picked (web/kit.py). Each is turned
+into the same three shades a crest carries -- `team`, `deep`, `ink` -- by the one
+derivation the crest build uses (web/colours.py), so a kit and a crest of the same hue are
+indistinguishable in treatment. A badge draws its monogram in `ink` on `deep`, the pairing
+guaranteed to clear 4.5:1.
+
+**Where a kit lives.**
+
+| Mode | The side's identity | Stored in | Set from |
+|---|---|---|---|
+| Solo draft, daily | the player's kit | the browser; the account when signed in (migration 036) | finished draft screen, profile |
+| Draft room | each seat's kit, seen by every seat | `room_players.kit_*` (migration 036) | lobby, squad review |
+| Auction, solo or room | the franchise | nothing new | -- |
+
+A signed-in account's kit wins over the browser's. An account that has never had one takes
+the browser's on sign-in, so a kit chosen before signing up is not lost. **A kit never
+enters a draft state**: that string is the replay contract and a saved game's natural key
+(§11, A102), so putting cosmetics in it would make one season saveable twice.
+
+**Rooms.** A seat that never chose a kit wears a default computed on read -- its name, its
+initials, and the first palette colour nobody else wears -- so an unconfigured room still
+shows every side distinctly. Two seats may never share a monogram (refused with a reason);
+colours may repeat. Kits lock when the host starts the matches, because a drafted side
+plays under its kit name and monogram (`room_match._sides_with_pid`) and must be named the
+same way on every replay of the tournament.
+

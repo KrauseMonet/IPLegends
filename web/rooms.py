@@ -73,6 +73,7 @@ from etl.feasibility import (
 )
 from game.season import historical_sides
 from web import session as sess
+from web.kit import Kit, KitError, default_kit, parse_kit
 
 ROOM_FORMATS = {"final": 2, "cup": 4, "league": 10}
 TIMER_CHOICES = (15, 30, 45)
@@ -103,6 +104,7 @@ class RoomPlayer:
     name: str
     is_cpu: bool
     franchise: str | None = None    # migration 033 -- auction rooms only
+    kit: Kit | None = None          # migration 036 -- a draft room seat's chosen kit [A146]
 
 
 @dataclass
@@ -243,7 +245,8 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                r.turn_started_at, r.failure_reason, r.moves, r.match_moves,
                r.draft_mode, r.is_open, r.version,
                extract(epoch from (now() - r.updated_at)) as idle_seconds,
-               p.player_id, p.name, p.is_cpu, r.game, p.franchise
+               p.player_id, p.name, p.is_cpu, r.game, p.franchise,
+               p.kit_name, p.kit_monogram, p.kit_colour
           from rooms r
           left join room_players p on p.room_code = r.code
          where r.code = %s
@@ -265,12 +268,15 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                 idle_seconds=float(idle_seconds or 0.0), game=rows[0][17])
     for row in rows:
         player_id, name, is_cpu, franchise = row[14], row[15], row[16], row[18]
+        kit_name, kit_monogram, kit_colour = row[19], row[20], row[21]
         # NULL on every column of the right-hand side means the outer join matched no
         # seat at all -- a room that exists with nobody in it, which is a real state
         # (`leave_room` can empty a lobby), not a missing row to guess at.
         if player_id is None:
             continue
-        room.players[player_id] = RoomPlayer(player_id, name, is_cpu, franchise)
+        # Migration 036 makes the three kit columns null together.
+        kit = Kit(kit_name, kit_monogram, kit_colour) if kit_name is not None else None
+        room.players[player_id] = RoomPlayer(player_id, name, is_cpu, franchise, kit)
     return room
 
 
@@ -316,19 +322,25 @@ def _save_room(conn, room: Room) -> None:
     # was the earlier, separate fix -- A92). Values are still individually conflict-
     # checked/skipped exactly as before; only the round-trip count changes.
     if room.players:
-        values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s)"] * len(room.players))
+        values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s, %s, %s, %s)"] * len(room.players))
         params = []
         for seat_order, (player_id, p) in enumerate(room.players.items()):
-            params.extend([room.code, player_id, seat_order, p.name, p.is_cpu, p.franchise])
-        # The franchise is the one seat field that changes after a seat exists (chosen in
-        # an auction room's lobby, or assigned at start), so it alone is updated on
-        # conflict; everything else about a seat is still set once.
+            k = p.kit
+            params.extend([room.code, player_id, seat_order, p.name, p.is_cpu, p.franchise,
+                           k.name if k else None, k.monogram if k else None,
+                           k.colour if k else None])
+        # The franchise (chosen in an auction room's lobby, or assigned at start) and the
+        # kit (chosen any time before the matches start) are the seat fields that change
+        # after a seat exists, so they alone are updated on conflict; a seat's order, name
+        # and CPU flag are still set once.
         conn.execute(
             f"""
             insert into room_players (room_code, player_id, seat_order, name, is_cpu,
-                                      franchise)
+                                      franchise, kit_name, kit_monogram, kit_colour)
             values {values_sql}
-            on conflict (room_code, player_id) do update set franchise = excluded.franchise
+            on conflict (room_code, player_id) do update set
+                franchise = excluded.franchise, kit_name = excluded.kit_name,
+                kit_monogram = excluded.kit_monogram, kit_colour = excluded.kit_colour
             """,
             params,
         )
@@ -336,7 +348,7 @@ def _save_room(conn, room: Room) -> None:
 
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
-                 game: str = "draft") -> tuple[Room, str]:
+                 game: str = "draft", kit: dict | None = None) -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
     if game != "draft" and fmt != "league":
@@ -355,11 +367,13 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                 seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
                 game=game)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
+    room.players[host_id].kit = _arriving_kit(room, host_id, kit)
     _save_room(conn, room)
     return room, host_id
 
 
-def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
+def join_room(conn, code: str, name: str, deck: Deck,
+              kit: dict | None = None) -> tuple[Room, str]:
     room = _load_room(conn, code)
     if room.status != "lobby":
         raise RoomError("this room has already started")
@@ -367,8 +381,81 @@ def join_room(conn, code: str, name: str, deck: Deck) -> tuple[Room, str]:
         raise RoomError("this room is full")
     player_id = secrets.token_urlsafe(8)
     room.players[player_id] = RoomPlayer(player_id, name, is_cpu=False)
+    room.players[player_id].kit = _arriving_kit(room, player_id, kit)
     _save_room(conn, room)
     return room, player_id
+
+
+# --- team kits [A146] ------------------------------------------------------------------
+#
+# A draft room's drafted sides are mixes of franchises and so have no crest; each wears a
+# kit instead (web/kit.py). A seat that never chose one wears a default computed on read,
+# never stored -- so a default can make way for a kit somebody else chooses later, and the
+# first thing a player chooses is the first thing written. Auction seats are franchises
+# and filler seats historical squads: neither has a kit, both have a crest.
+
+def seat_kits(room: Room) -> dict[str, Kit]:
+    """player_id -> the kit that seat's side wears, for every drafting seat of a draft
+    room; empty for an auction room. Chosen kits first, then defaults in seat order, each
+    default avoiding every monogram and colour already worn -- so two seats in one room
+    never carry the same badge."""
+    if room.game != "draft":
+        return {}
+    drafting = [(i, pid, p) for i, (pid, p) in enumerate(room.players.items())
+                if not p.is_cpu]
+    out = {pid: p.kit for _, pid, p in drafting if p.kit is not None}
+    taken_monograms = {k.monogram for k in out.values()}
+    taken_colours = {k.colour for k in out.values()}
+    for i, pid, p in drafting:
+        if pid in out:
+            continue
+        k = default_kit(p.name, i, taken_monograms, taken_colours)
+        out[pid] = k
+        taken_monograms.add(k.monogram)
+        taken_colours.add(k.colour)
+    return out
+
+
+def _arriving_kit(room: Room, player_id: str, raw: dict | None) -> Kit | None:
+    """The kit a player brings into a room from their account or browser. Never a reason
+    to refuse a join: an invalid one is dropped (the seat wears a default), and one whose
+    monogram another seat already wears keeps its name and colour with the monogram made
+    unique, exactly as a default would be."""
+    if raw is None or room.game != "draft":
+        return None
+    try:
+        k = parse_kit(raw)
+    except KitError:
+        return None
+    taken = {kk.monogram for pid, kk in seat_kits(room).items() if pid != player_id}
+    if k.monogram in taken:
+        k = Kit(k.name, default_kit(k.name, 0, taken, set()).monogram, k.colour)
+    return k
+
+
+def set_kit(conn, code: str, player_id: str, raw: dict) -> Room:
+    """A seat chooses its kit. Any time until the room's matches start -- through the
+    lobby, the draft and the squad review -- and locked after, so a side cannot change
+    its name halfway through a tournament it is already on the scoreboard of."""
+    room = _load_room(conn, code)
+    if player_id not in room.players:
+        raise RoomError("you are not in this room")
+    if room.game != "draft":
+        raise RoomError("in an auction your side is its franchise")
+    if room.players[player_id].is_cpu:
+        raise RoomError("a filler seat has no kit")
+    if any(isinstance(mv, dict) and mv.get("kind") == "start" for mv in room.match_moves):
+        raise RoomError("the matches have started -- kits are locked")
+    try:
+        k = parse_kit(raw)
+    except KitError as exc:
+        raise RoomError(str(exc)) from exc
+    for pid, other in seat_kits(room).items():
+        if pid != player_id and other.monogram == k.monogram:
+            raise RoomError(f"another side in this room already wears {k.monogram}")
+    room.players[player_id].kit = k
+    _save_room(conn, room)
+    return room
 
 
 def choose_franchise(conn, code: str, player_id: str, short: str) -> Room:

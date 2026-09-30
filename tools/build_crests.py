@@ -35,13 +35,13 @@ import json
 import pathlib
 import sys
 
+from web.colours import colours_from
 from web.crests import CRESTS, FILES_JSON
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "assets" / "crests"
 OUT = ROOT / "web" / "static" / "crests"
 CSS = ROOT / "web" / "static" / "crests.css"
-NAVY = (6, 13, 31)           # --bg in style.css
 
 # Fits a crest shown at up to ~160 CSS pixels on a 2x screen. The largest a crest is
 # drawn anywhere is the draft's deal card; nothing needs more.
@@ -51,23 +51,6 @@ QUALITY = 86
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:10]
-
-
-def _luminance(c) -> float:
-    def ch(x):
-        x /= 255
-        return x / 12.92 if x <= .03928 else ((x + .055) / 1.055) ** 2.4
-    return .2126 * ch(c[0]) + .7152 * ch(c[1]) + .0722 * ch(c[2])
-
-
-def _contrast(a, b) -> float:
-    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
-    return (hi + .05) / (lo + .05)
-
-
-def _with_lightness(c, lightness: float) -> tuple[int, int, int]:
-    h, _, s = colorsys.rgb_to_hls(*(x / 255 for x in c))
-    return tuple(round(x * 255) for x in colorsys.hls_to_rgb(h, lightness, s))
 
 
 def team_colours(im) -> dict[str, str]:
@@ -87,16 +70,7 @@ def team_colours(im) -> dict[str, str]:
     w, r, g, b = max(bins, key=lambda x: x[0])
     if not w:                                             # a crest with no colour at all
         return {"team": "#8a94a8", "deep": "#1a2236", "ink": "#c3cad8"}
-    hue = (r / w, g / w, b / w)
-    lightness = colorsys.rgb_to_hls(*(x / 255 for x in hue))[1]
-    team = _with_lightness(hue, min(max(lightness, .42), .6))
-    deep = tuple(round(team[i] * .22 + NAVY[i] * .78) for i in range(3))
-    ink, lightness = team, colorsys.rgb_to_hls(*(x / 255 for x in team))[1]
-    while _contrast(ink, deep) < 4.5 and lightness < .92:
-        lightness += .02
-        ink = _with_lightness(team, lightness)
-    hexed = lambda c: "#%02x%02x%02x" % c
-    return {"team": hexed(team), "deep": hexed(deep), "ink": hexed(ink)}
+    return colours_from((r / w, g / w, b / w))
 
 
 def _css(colours: dict[str, dict[str, str]]) -> str:

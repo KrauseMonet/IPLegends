@@ -91,7 +91,23 @@ async function maybeSaveSeason(d){
   catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
 }
 
+// [A146] Your side as every screen here draws it. An auction season is a real franchise
+// and keeps its crest; a drafted twelve wears your kit. Set from each response, and again
+// when the kit changes (you edited it, or signing in brought your account's).
+function setMySide(d){
+  const k = myKit();
+  MY_SIDE = d && d.your_crest
+    ? {short: 'YOU', name: d.your_side, crest: d.your_crest, kit: null}
+    : {short: 'YOU', name: k.name, crest: null, kit: k};
+}
+document.addEventListener('kitchange', () => {
+  if (!SEASON_DATA && !REVEAL) return;
+  setMySide(SEASON_DATA || REVEAL);
+  if (SEASON_DATA && SEASON_DATA.complete){ renderTableAndForm(SEASON_DATA); renderVerdictAndBracket(SEASON_DATA); }
+});
+
 function showSeason(d){
+  setMySide(d);
   renderTableAndForm(d);
   renderVerdictAndBracket(d);
   go('result');
@@ -101,13 +117,14 @@ function showSeason(d){
 
 function renderTableAndForm(d){
   SEASON_DATA = d;
+  setMySide(d);
   SEASON_STATE = d.state;
   $('#tableNote').innerHTML = `<b>${d.matches_each} each</b><span>matches played</span>`;
   $('#ladder').innerHTML =
     `<thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
         <th class="n">Pts</th><th class="n">NRR</th></tr></thead><tbody>` +
     d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${r.pos}</td><td class="side">${teamBadge(r.short, r.you, r.crest)}${r.short}</td>
+      <td class="n" style="text-align:left">${r.pos}</td><td class="side">${teamBadge(r.short, r.you, r.crest)}${r.you ? esc(MY_SIDE.name) : r.short}</td>
       <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
       <td class="n pts">${r.points}</td>
       ${nrrCell(r.nrr)}</tr>`).join('') + '</tbody>';
@@ -146,7 +163,7 @@ function renderVerdictAndBracket(d){
   $('#resVerdict').classList.toggle('won', won);
   $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
   $('#resMargin').textContent = won
-    ? `Your eleven take the title, finishing ${ordinal(me.pos)} in the league.`
+    ? `${MY_SIDE.name} take the title, finishing ${ordinal(me.pos)} in the league.`
     : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
   // The champions' crest beside the verdict -- the one image that says who won.
   $('#resCrest').innerHTML = won ? '' : crestImg(d.champion_crest, 'res-crest');
@@ -156,13 +173,19 @@ function renderVerdictAndBracket(d){
     <div class="fx" onclick="showScorecard('playoffs', ${i})">
       <span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
       >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
-      <span>${crestImg(r.home_crest, 'row-crest')}${r.home} v ${crestImg(r.away_crest, 'row-crest')}${r.away}</span>
+      <span>${rowSide(r.home, r.home_crest)} v ${rowSide(r.away, r.away_crest)}</span>
       <span class="sc">${r.home_score} · ${r.away_score}</span></div>
     <div class="fx" style="border:0;padding-top:2px"><span></span>
       <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
 
   $('#capRow').innerHTML = capRowHtml(d.orange_cap, d.orange_cap_runs,
                                        d.purple_cap, d.purple_cap_wickets);
+}
+
+// A side as a results row names it: its mark, then its name -- yours resolved to your team.
+function rowSide(short, crest){
+  const side = resolveSide(short, crest);
+  return `${sideMark(side)}${esc(side.name)}`;
 }
 
 function showGroupStageChoice(d){
@@ -198,6 +221,7 @@ let REVEAL = null;     // the latest SeasonProgressOut driving these screens, pl
 // Its `pending` (if any) decides which screen comes up next; `complete` ends the reveal
 // the same way `showSeason` always has.
 function enterRevealStage(d){
+  setMySide(d);
   REVEAL = d;
   SEASON_STATE = d.state;
   syncHash();
@@ -215,7 +239,8 @@ function enterRevealStage(d){
     // you won it), so this is also where a match that skipped the toss screen entirely
     // first appears -- the first innings is already fully known, so it plays out
     // over-by-over before the break-time choice itself is shown.
-    const you = {name: 'Your eleven', crest: null};
+    setMySide(d);
+    const you = MY_SIDE;
     const them = {name: d.pending.opponent, crest: d.pending.opponent_crest};
     startOverStepper(d.pending.first_innings,
       matchLabel(d.pending.stage, d.your_results.length + 1, d.matches_each),
@@ -250,7 +275,7 @@ async function submitToss(elects, ctrl){
 
 function showImpactScreen(pending){
   $('#impactStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
-  const battingSide = pending.human_bats_first ? 'Your eleven' : pending.opponent;
+  const battingSide = pending.human_bats_first ? MY_SIDE.name : pending.opponent;
   $('#impactFirstInnings').textContent =
     `${battingSide} posted ${pending.first_innings.runs}/${pending.first_innings.wickets} ` +
     `(${pending.first_innings.overs} ov). You're ${pending.discipline === 'bat' ? 'batting' : 'bowling'} next.`;
@@ -267,7 +292,7 @@ async function submitImpact(slot, ctrl){
   // read one screen earlier -- REVEAL itself is about to be replaced by the response.
   const priorContext = {
     innings: REVEAL.pending.first_innings,
-    battingLabel: REVEAL.pending.human_bats_first ? 'Your eleven' : REVEAL.pending.opponent,
+    battingLabel: REVEAL.pending.human_bats_first ? MY_SIDE.name : REVEAL.pending.opponent,
   };
   await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
     try {
@@ -280,11 +305,10 @@ async function submitImpact(slot, ctrl){
       // too, and gets its own over-by-over pass before the result is shown.
       const list = stage === 'league' ? d.your_results : d.playoffs;
       const match = list[list.length - 1];
-      const named = (short, crest) => ({name: short === 'YOU' ? 'Your eleven' : short, crest});
       startOverStepper(match.away_innings,
         matchLabel(stage, d.your_results.length, d.matches_each),
         () => revealCompletedMatch(match, d), priorContext,
-        {bat: named(match.away, match.away_crest), bowl: named(match.home, match.home_crest)});
+        {bat: resolveSide(match.away, match.away_crest), bowl: resolveSide(match.home, match.home_crest)});
     } catch(e){ slip(e.message); }
   });
 }
@@ -338,7 +362,7 @@ function revealCompletedMatch(match, d){
        <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc">${mine} · ${theirs}</span>`
     : `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
         >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
-       <span>${crestImg(match.home_crest, 'row-crest')}${match.home} v ${crestImg(match.away_crest, 'row-crest')}${match.away}</span>
+       <span>${rowSide(match.home, match.home_crest)} v ${rowSide(match.away, match.away_crest)}</span>
        <span class="sc">${match.home_score} · ${match.away_score}</span>`;
 
   if (isLeague){
@@ -427,7 +451,7 @@ function showJourneyCard(){
   // so opening the card is a synchronous re-draw of data already in hand, not a second
   // ~3s simulation behind an unlabelled fetch.
   if (!SEASON_DATA){ slip('Play the season first.'); return; }
-  drawJourneyCard(SEASON_DATA);
+  drawJourneyCard(SEASON_DATA, null, MY_SIDE);
   $('#cardOverlay').classList.remove('hide');
 }
 

@@ -1,0 +1,134 @@
+{
+  "files": {
+    "CSK": "CSK-d64ab22559.webp",
+    "DC": "DC-b806756a94.webp",
+    "DCH": "DCH-d5e8cafdc2.webp",
+    "DD": "DD-192da9ba7c.webp",
+    "GL": "GL-e8ae3e8514.webp",
+    "GT": "GT-654eb7556d.webp",
+    "KKR": "KKR-03a652a6d5.webp",
+    "KTK": "KTK-80cb659f70.webp",
+    "KXIP": "KXIP-8b4bca1b13.webp",
+    "LSG": "LSG-17a790c572.webp",
+    "MI": "MI-0181cfeeb1.webp",
+    "PBKS": "PBKS-9db9031ca2.webp",
+    "PWI": "PWI-9cc8828e1d.webp",
+    "RCB": "RCB-6f7bdc34a4.webp",
+    "RCBB": "RCBB-732d119ad4.webp",
+    "RPS": "RPS-e617700640.webp",
+    "RR": "RR-41fbbbf110.webp",
+    "SRH": "SRH-9e8ebc4b7c.webp"
+  },
+  "sources": {
+    "CSK": "8295b96b6e",
+    "DC": "a50ec6ee79",
+    "DCH": "ff48a17a09",
+    "DD": "dc2751992c",
+    "GL": "7972ee2397",
+    "GT": "a1defcb81c",
+    "KKR": "bd1de89488",
+    "KTK": "41f2cff065",
+    "KXIP": "055952e7b0",
+    "LSG": "dcac6d9d03",
+    "MI": "200d05c0d8",
+    "PBKS": "0c4722c819",
+    "PWI": "3582860d0d",
+    "RCB": "9e560e2979",
+    "RCBB": "2b8cc4cd8d",
+    "RPS": "9e4e554557",
+    "RR": "e39ea96721",
+    "SRH": "8ab2bf63e2"
+  },
+  "colours": {
+    "CSK": {
+      "team": "#f75e19",
+      "deep": "#3b1f1e",
+      "ink": "#f75e19"
+    },
+    "DC": {
+      "team": "#3a469d",
+      "deep": "#111a3b",
+      "ink": "#7a84ce"
+    },
+    "DCH": {
+      "team": "#3764a0",
+      "deep": "#11203b",
+      "ink": "#608dc8"
+    },
+    "DD": {
+      "team": "#e63037",
+      "deep": "#371524",
+      "ink": "#ea545a"
+    },
+    "GL": {
+      "team": "#f0db26",
+      "deep": "#393a21",
+      "ink": "#f0db26"
+    },
+    "GT": {
+      "team": "#d8b95a",
+      "deep": "#34332c",
+      "ink": "#d8b95a"
+    },
+    "KKR": {
+      "team": "#edc745",
+      "deep": "#393627",
+      "ink": "#edc745"
+    },
+    "KTK": {
+      "team": "#813e98",
+      "deep": "#21183a",
+      "ink": "#ae6ec4"
+    },
+    "KXIP": {
+      "team": "#f30e0d",
+      "deep": "#3a0d1b",
+      "ink": "#f53e3e"
+    },
+    "LSG": {
+      "team": "#af2736",
+      "deep": "#2b1324",
+      "ink": "#da5866"
+    },
+    "MI": {
+      "team": "#1672c0",
+      "deep": "#0a2342",
+      "ink": "#238de6"
+    },
+    "PBKS": {
+      "team": "#dd212e",
+      "deep": "#351122",
+      "ink": "#e6565f"
+    },
+    "PWI": {
+      "team": "#dbc406",
+      "deep": "#35351a",
+      "ink": "#dbc406"
+    },
+    "RCB": {
+      "team": "#c8a944",
+      "deep": "#312f27",
+      "ink": "#c8a944"
+    },
+    "RCBB": {
+      "team": "#ba8d1c",
+      "deep": "#2e291e",
+      "ink": "#ba8d1c"
+    },
+    "RPS": {
+      "team": "#b77a32",
+      "deep": "#2d2523",
+      "ink": "#c78536"
+    },
+    "RR": {
+      "team": "#ee1987",
+      "deep": "#391036",
+      "ink": "#f13f9b"
+    },
+    "SRH": {
+      "team": "#c52230",
+      "deep": "#301223",
+      "ink": "#e25763"
+    }
+  }
+}

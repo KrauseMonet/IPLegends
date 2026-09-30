@@ -21,124 +21,126 @@
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="/static/og-image.png">
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2624074910535553"
-     crossorigin="anonymous"></script>
 <!-- Same-origin, so no preconnect and no second host to resolve. Preloaded because both
      are needed by the first paint (masthead + headline) and would otherwise not be
      discovered until the stylesheet had parsed. -->
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=b63c74f8d5">
+<link rel="stylesheet" href="/static/style.css?v=eb578c0038">
+<link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
-<body class="has-ground">
-<div class="sheet">
-  <div class="rig" aria-hidden="true">
-    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
-        <line x1="380" y1="10" x2="60" y2="230"/>
-        <line x1="380" y1="10" x2="140" y2="260"/>
-        <line x1="380" y1="10" x2="230" y2="280"/>
-        <line x1="380" y1="10" x2="320" y2="285"/>
-      </g>
-      <g fill="var(--gold)">
-        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
-        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
-        <circle cx="380" cy="10" r="4.5"/>
-      </g>
-    </svg>
-  </div>
-
-  <div class="masthead">
-    <div class="wordmark" onclick="window.scrollTo(0,0)">
-      <div class="crest"><img src="/static/logo-emblem.webp" alt="" width="220" height="235"></div>
-      <div>
-        <span class="the">The</span>
-        <h1>Legends <span class="leg">Almanack</span></h1>
-      </div>
+<body>
+<!-- shell:nav -->
+<nav class="topnav" aria-label="Main">
+  <div class="topnav-in">
+    <a class="brand" href="/" data-home>
+      <img src="/static/logo-emblem.webp" alt="" width="34" height="36">
+      <span>Legends <b>Almanack</b></span>
+    </a>
+    <div class="topnav-links">
+      <a href="/draft" data-match="/draft /season">Draft</a>
+      <a href="/auction" data-match="/auction">Auction</a>
+      <a href="/rooms" data-match="/rooms">Rooms</a>
+      <a href="/daily" data-match="/daily">Daily</a>
+      <a href="/flashback" data-match="/flashback">Flashback</a>
+      <a href="/records" data-match="/records">Records</a>
     </div>
-    <div class="edition">
-      <b>Indian Premier League</b><br>
-      <span id="deckPill">…</span>
-    </div>
-    <!-- Its own masthead slot, not a third line inside `.edition`. Sitting in that block
-         it inherited caption styling and read as more metadata rather than as the one
-         control up here. -->
-    <!-- Install sits BESIDE the account control, not among the play actions. It is a
-         browser utility, and in the home page's `.actions` row it read as a fourth game
-         mode -- on a phone a full-width button with the same weight as "Daily challenge",
-         which it also pushed down a line. Here it is on every page rather than only the
-         home one, which is the point: somebody decides they want the app while they are
-         playing, not before they have started. -->
-    <div class="masthead-actions">
+    <div class="topnav-r">
       <button class="install-pill hide" data-install onclick="installApp(this)"
         title="Add the Almanack to your home screen.">Install app</button>
       <div id="authArea"></div>
     </div>
   </div>
+</nav>
+<!-- /shell:nav -->
+<div class="sheet">
 
-  <!-- ============ OPENING ============ -->
-  <section id="home">
-    <div class="spread">
-      <div>
-        <div class="standfirst">Nineteen seasons · one XI · fourteen matches</div>
-        <h2 class="headline">Build the XI<br>the IPL <i>never picked</i>.</h2>
-        <p class="deck">Chennai 2010 gives up Dhoni. Kolkata 2012 gives up Narine. Mumbai
-          2019 gives up Bumrah. <span class="drop">Nineteen seasons</span> of the IPL,
-          opened one squad at a time — take one man from each, into a spot he actually
-          batted. Twelve selections: eleven who bat, one Impact Player, no more than four
-          overseas. Then your XI plays a season: fourteen matches against real
-          franchise-sides, a table, then the playoffs.</p>
-        <div class="room-label" style="margin-top:22px">Draft by</div>
-        <div class="room-choices" id="modeChoices">
-          <button class="room-choice sel" data-mode="stat" onclick="setDraftMode('stat')"
-            title="Every card shows its rating, and you can click a name for his season stats.">Stat</button>
-          <button class="room-choice" data-mode="memory" onclick="setDraftMode('memory')"
-            title="No rating, no stats -- just names, roles and where they've batted. Draft on what you remember.">Memory</button>
-        </div>
-        <div class="actions">
-          <button class="act lead" onclick="newDraft(this)">Begin a draft</button>
-        </div>
-        <div class="actions minor-row">
-          <span class="minor-label">or</span>
-          <button class="act minor" onclick="location.href='/auction'"
-            title="₹120 crore, eighteen players from nineteen seasons, nine franchises bidding against you.">Auction</button>
-          <button class="act minor" onclick="location.href='/rooms'">Play with friends</button>
-          <button class="act minor" onclick="location.href='/daily'"
-            title="One scenario a day, the same squads for everyone, one attempt each.">Daily challenge</button>
-          <button class="act minor" onclick="location.href='/flashback'"
-            title="Three real facts about a real season -- guess the year.">Flashback</button>
-        </div>
-        <div class="colophon" id="homeStats"></div>
-      </div>
-      <div>
-        <div class="field" id="homeGround"><div class="wicket"></div></div>
-        <div class="field-cap">Field placings · illustrative</div>
-      </div>
-    </div>
 
-    <div class="method">
-      <section>
-        <h3><span class="mico bat"><svg viewBox="0 0 16 16"><path d="M8 1.1c-1 0-1.8.9-1.8 2.2v4.9c0 .8.5 1.4 1.2 1.7l-.4 4.4c0 .35.3.6.65.6h.7c.35 0 .65-.25.65-.6l-.4-4.4c.7-.3 1.2-.9 1.2-1.7V3.3c0-1.3-.8-2.2-1.8-2.2Z"/></svg></span>
-          <span>I.</span> The squads</h3>
-        <p>A franchise-season drawn evenly from all one hundred and sixty-six. Mumbai answers
-           nineteen times; Kochi Tuskers Kerala, once only.</p>
-      </section>
-      <section>
-        <h3><span class="mico"><svg viewBox="0 0 16 16"><path d="M8 8.4a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M2.4 13.6c.6-2.7 2.6-4.2 5.6-4.2s5 1.5 5.6 4.2"/></svg></span>
-          <span>II.</span> The selection</h3>
-        <p>One man from that squad, for a place still open. He must have played that season.
-           There are no imaginary teams here.</p>
-      </section>
-      <section>
-        <h3><span class="mico ball"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M4.6 4.1a9 9 0 0 1 0 7.8M11.4 4.1a9 9 0 0 0 0 7.8"/></svg></span>
-          <span>III.</span> The season</h3>
-        <p>Fourteen league matches and the playoffs, every delivery priced from every ball
-           bowled in the competition since 2008.</p>
-      </section>
+  <section id="home" class="home">
+    <div class="home-hero">
+      <div>
+        <div class="kicker">2008 – 2026 · every season · every squad</div>
+        <h1 class="home-title">Build the XI<br>the IPL <em>never</em><br>picked.</h1>
+        <p class="home-lede">Chennai 2010 gives up Dhoni. Kolkata 2012 gives up Narine.
+          Mumbai 2019 gives up Bumrah. Take <b>one player from each squad you're dealt</b>,
+          into a spot he really batted, then play a full season against the real sides of
+          history.</p>
+        <div class="home-cta">
+          <button class="btn primary" onclick="newDraft(this)">Start a draft</button>
+          <a class="btn ghost" href="/auction">Run an auction</a>
+        </div>
+        <div class="home-mode">
+          <span class="home-mode-label">Draft by</span>
+          <div class="room-choices" id="modeChoices">
+            <button class="room-choice sel" data-mode="stat" onclick="setDraftMode('stat')"
+              title="Every card shows its rating, and you can click a name for his season stats.">Stat</button>
+            <button class="room-choice" data-mode="memory" onclick="setDraftMode('memory')"
+              title="No rating, no stats -- just names, roles and where they've batted. Draft on what you remember.">Memory</button>
+          </div>
+        </div>
+        <a class="home-today hide" id="homeToday" href="/daily"></a>
+      </div>
+      <div class="home-fan" id="homeFan" aria-hidden="true"></div>
     </div>
   </section>
 
+  <div class="crest-marquee" aria-hidden="true"><div class="crest-track" id="crestTrack"></div></div>
+  <div class="home-stats" id="homeStats"></div>
+
+  <section class="home-modes">
+    <h2 class="home-h2">Pick a way to play</h2>
+    <p class="home-sub">Solo, head to head with friends, or one shared challenge a day.</p>
+    <div class="modes">
+      <a class="mode big" href="#" onclick="newDraft(null); return false;">
+        <span class="mode-tag">Solo · about ten minutes</span>
+        <h3>Draft &amp; season</h3>
+        <p>Twelve picks, one from each squad you're dealt, each into a batting spot he really
+          played. Then fourteen league matches, a table and the playoffs.</p>
+        <span class="mode-go">Start a draft →</span>
+        <span class="mode-art" data-crests="RCBB DCH RR"></span>
+      </a>
+      <a class="mode" href="/auction">
+        <span class="mode-tag">Solo or with friends</span>
+        <h3>Auction</h3>
+        <p>₹120 crore, nine rival franchises, retentions and Right to Match.</p>
+        <span class="mode-go">Take a paddle →</span>
+        <span class="mode-art" data-crests="MI CSK"></span>
+      </a>
+      <a class="mode" href="/rooms">
+        <span class="mode-tag">Up to ten players</span>
+        <h3>Rooms</h3>
+        <p>Draft against friends from one shared deck, then play it out as a league.</p>
+        <span class="mode-go">Open a room →</span>
+        <span class="mode-art" data-crests="KXIP DD"></span>
+      </a>
+      <a class="mode" href="/daily">
+        <span class="mode-tag">New every day</span>
+        <h3>Daily challenge</h3>
+        <p>Everyone gets the same squads and the same opposition. One attempt.</p>
+        <span class="mode-go">Play today →</span>
+        <span class="mode-art" data-crests="SRH"></span>
+      </a>
+      <a class="mode" href="/flashback">
+        <span class="mode-tag">Quick game</span>
+        <h3>Flashback</h3>
+        <p>A franchise, its top scorer and its top wicket-taker. Name the season.</p>
+        <span class="mode-go">Guess a season →</span>
+        <span class="mode-art" data-crests="KTK"></span>
+      </a>
+    </div>
+
+    <div class="home-how">
+      <div><b>Dealt a squad</b><span>Drawn evenly from all 166. Mumbai comes round nineteen
+        times; Kochi Tuskers Kerala once.</span></div>
+      <div><b>Take one player</b><span>For a batting spot he actually filled that season.
+        There are no imaginary teams here.</span></div>
+      <div><b>Play the season</b><span>Every ball priced from every delivery bowled in the
+        IPL since 2008.</span></div>
+    </div>
+  </section>
+
+  <!-- shell:auth -->
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
     <div class="scorecard-shell auth-frame">
       <div class="scorecard-frame">
@@ -174,15 +176,24 @@
       </div>
     </div>
   </div>
+<!-- /shell:auth -->
 
-  <div class="imprint">
-    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/records">Records</a> · <a href="/flashback">Flashback</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
-    <div>The Legends Almanack · squads · selection · season</div>
-    <div id="footStats"></div>
+  <!-- shell:footer -->
+<footer class="imprint">
+  <div class="imprint-links">
+    <a href="/about">About</a><a href="/faq">FAQ</a><a href="/records">Records</a>
+    <a href="/flashback">Flashback</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
   </div>
+  <div id="footStats"></div>
+  <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the
+    BCCI, the IPL or any franchise. Team names and logos belong to their owners and appear
+    only to identify the teams. Ball-by-ball data from
+    <a href="https://cricsheet.org/" rel="noopener">Cricsheet</a> (ODbL).</p>
+</footer>
+<!-- /shell:footer -->
 </div>
 
-<script src="/static/common.js?v=5b0d2dca5e"></script>
+<script src="/static/common.js?v=31cf94eeb1"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script>
 // 'stat' shows a rating badge on every card and lets a name be clicked for his season
@@ -199,39 +210,49 @@ function setDraftMode(mode){
     b.classList.toggle('sel', b.dataset.mode === mode));
 }
 async function boot(){
-  loadMe();   // fire-and-forget -- the auth control fills in whenever it resolves,
-              // nothing else on this page waits on login state
-  // loadMeta, not a bare api() call: it serves a cached copy instantly and revalidates in
-  // the background, so a repeat visit paints the deck figures with no round trip at all.
+  loadMe();   // fire-and-forget -- nothing on this page waits on login state
+  loadToday();
+  // Cache-first: a repeat visit paints the cards and the crest strip with no round trip.
   await loadMeta();
   renderDeckStats(META);
-  $('#homeStats').innerHTML = statRow();
-  drawField();
+  renderHome(META);
 }
 
-const PEOPLE = '<path d="M8 8.4a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M2.4 13.6c.6-2.7 2.6-4.2 5.6-4.2s5 1.5 5.6 4.2"/>';
-const SHIRT  = '<path d="M5.4 2.4 2.2 5l1.8 2 1.6-1.2v7.8h5v-7.8L12.2 7l1.8-2-3.2-2.6c-.6.9-1.6 1.4-2.8 1.4s-2.2-.5-2.8-1.4Z"/>';
-const TROPHY = '<path d="M5 2.4h6v3.6a3 3 0 0 1-6 0Z"/><path d="M5 3.4H2.6v1a2.4 2.4 0 0 0 2.4 2.4M11 3.4h2.4v1a2.4 2.4 0 0 1-2.4 2.4"/><path d="M8 8.4v3.2M5.6 13.6h4.8M6.2 13.6l.5-2h2.6l.5 2"/>';
-
-function statRow(){
-  const s = META.seasons;
-  const items = [[PEOPLE, META.cards.toLocaleString(), 'Rated player-seasons'],
-    [SHIRT, META.franchise_seasons, 'Franchise-seasons'], [TROPHY, s.length, 'Seasons']];
-  return items.map(([icon,n,label]) =>
-    `<div class="stat"><span class="ico">${svg(icon)}</span><div><b>${n}</b><span>${label}</span></div></div>`
-  ).join('');
+function renderHome(m){
+  $('#homeStats').innerHTML = [[m.seasons.length, 'seasons'], [m.franchise_seasons, 'squads'],
+    [m.cards.toLocaleString(), 'player-seasons']]
+    .map(([n, label]) => `<div><b>${n}</b>${label}</div>`).join('');
+  const crests = m.crests || {};
+  const strip = Object.values(crests).map(u => `<img src="${u}" alt="" loading="lazy">`).join('');
+  $('#crestTrack').innerHTML = strip + strip;        // twice, so the loop has no seam
+  document.querySelectorAll('.mode-art').forEach(el => {
+    el.innerHTML = el.dataset.crests.split(' ').filter(k => crests[k])
+      .map(k => `<img src="${crests[k]}" alt="" loading="lazy">`).join('');
+  });
+  $('#homeFan').innerHTML = (m.showcase || []).map((fs, i) => `
+    <div class="fan-card fan-${i} ${crestClass(fs.crest)}">
+      <div class="fan-band">
+        <div class="fan-name">${fs.franchise}</div>
+        <div class="fan-year">${fs.season_year}</div>
+        ${fs.crest ? `<img src="${fs.crest}" alt="">` : ''}
+      </div>
+      <div class="fan-rows">${fs.players.map(p => `
+        <div class="fan-row${p.featured ? ' star' : ''}">
+          <span class="fan-role">${KIND_SHORT[p.kind] || ''}</span>${p.name}
+          <span class="fan-rate">${p.rating ?? ''}</span></div>`).join('')}</div>
+    </div>`).join('');
 }
 
-function drawField(){
-  const g = $('#homeGround');
-  for (const [t,x,y] of [['Keeper',50,74],['Slip',61,72],['Point',78,54],['Cover',73,37],
-      ['Mid-off',58,26],['Mid-on',42,26],['Midwicket',26,37],['Square leg',22,54],
-      ['Fine leg',39,81],['Third',63,83],['Long-on',50,13]]){
-    const c = document.createElement('div');
-    c.className = 'pos'; c.textContent = t;
-    c.style.left = x + '%'; c.style.top = y + '%';
-    g.appendChild(c);
-  }
+// The one line about today's challenge. Its own request, never awaited: a slow or failed
+// daily must not hold up the rest of the page, so on failure the line simply stays hidden.
+async function loadToday(){
+  try {
+    const t = await api('/api/daily/today');
+    const el = $('#homeToday');
+    el.innerHTML = `<span class="live-dot"></span>${t.crest ? `<img src="${t.crest}" alt="">` : ''}
+      <span><b>Today's challenge:</b> ${t.scenario}</span>`;
+    el.classList.remove('hide');
+  } catch(e){ /* the tile below still links to it */ }
 }
 
 /* --- draft --- */

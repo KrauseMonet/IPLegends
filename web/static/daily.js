@@ -50,6 +50,7 @@ function keepAnonAttempt(date, state){
 function dailyBanner(d){
   $('#dailyDate').textContent = 'Daily challenge · ' + d.challenge_date;
   $('#dailyScenario').textContent = d.scenario;
+  $('#dailyCrest').innerHTML = crestImg(d.opposition_crest, 'daily-crest');
   // A day carries ONE bonus, rotated, so this reads as a thing to chase rather than a
   // list header. The plural form is kept for the stored days generated before the
   // rotation, which really do offer several.

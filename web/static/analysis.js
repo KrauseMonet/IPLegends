@@ -396,7 +396,7 @@ function leaderPanel(title, sub, rows, kind, fmt, unit){
     return `
     <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}</span>
+      <span class="an-lead-name">${crestImg(r.crest, 'lead-crest')}${r.name}</span>
       <span class="an-lead-value">${fmt(r.value)}</span>
       <span class="an-lead-sub">${teamTag(r.team)}${r.detail}</span>
     </div>`;

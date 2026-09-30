@@ -275,6 +275,11 @@ class Side:
     impact: Card | None = None        # the Impact Player -- decide_impact (below) decides
                                        # whether he plays, as a batter or a bowler, per match
     you: bool = False
+    # Which real franchise-season this side IS, when it is one -- a historical opponent,
+    # an auction franchise. None for a drafted side, which is nobody's in particular.
+    # Plain facts rather than a crest URL: the engine does not know the web exists.
+    franchise: str | None = None
+    year: int | None = None
 
 
 @dataclass
@@ -1241,7 +1246,8 @@ def historical_sides(deck: Deck, rng: random.Random, n: int) -> list[Side]:
         card = squad[0]
         sides.append(Side(name=f"{card.franchise} {card.season_year}",
                           short=_abbrev(card.franchise, card.season_year),
-                          xi=xi, impact=impact))
+                          xi=xi, impact=impact,
+                          franchise=card.franchise, year=card.season_year))
     return sides
 
 

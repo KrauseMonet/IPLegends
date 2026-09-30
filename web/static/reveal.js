@@ -219,8 +219,8 @@ function renderScorecard(r){
   $('#scHeadline').classList.toggle('won', !!r.winner);
   $('#scMargin').textContent = r.margin;
   $('#scInnings').innerHTML =
-    scorecardInnings(r.home, r.home_score, r.home_innings) +
-    scorecardInnings(r.away, r.away_score, r.away_innings);
+    scorecardInnings(r.home, r.home_score, r.home_innings, r.home_crest) +
+    scorecardInnings(r.away, r.away_score, r.away_innings, r.away_crest);
   $('#scSuperOver').innerHTML = superOverBlock(r.super_overs);
   $('#scorecardOverlay').classList.remove('hide');
 }
@@ -277,7 +277,7 @@ function bdyCell(n){
   return n ? `<td class="n">${n}</td>` : `<td class="n bdy-none">–</td>`;
 }
 
-function scorecardInnings(short, score, inn){
+function scorecardInnings(short, score, inn, crest){
   // The innings' best contribution, so a scorecard has a subject rather than being a wall
   // of equally-weighted rows. Ties resolve to whoever appears first, which is batting
   // order -- the earlier man faced his runs under more of the innings.
@@ -308,7 +308,7 @@ function scorecardInnings(short, score, inn){
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';
   return `<div>
     <table>
-      <caption>${short} · ${score} (${inn.overs} ov, ${inn.extras} extras) · ${
+      <caption>${crestImg(crest, 'row-crest')}${short} · ${score} (${inn.overs} ov, ${inn.extras} extras) · ${
         inn.fours}x4 ${inn.sixes}x6</caption>
       <tr><th>Batting</th><th class="n">R</th><th class="n">B</th><th class="n">4s</th>
         <th class="n">6s</th><th class="n">SR</th></tr>
@@ -336,8 +336,11 @@ function nrrCell(v){
 // art for a franchise-season, and hashing keeps it stable without a lookup table). The
 // viewer's own row gets a fixed gold star instead, never a hashed colour, so it reads as
 // a status rather than just another team.
-function teamBadge(short, isYou){
+function teamBadge(short, isYou, crest){
   if (isYou) return `<span class="team-badge you-badge">★</span>`;
+  // A real franchise-season has its crest; the hashed initial is only for a side that is
+  // nobody's in particular -- another player's drafted twelve in a room.
+  if (crest) return `<img class="team-crest" src="${crest}" alt="">`;
   let h = 0;
   for (let i = 0; i < short.length; i++) h = (h * 33 + short.charCodeAt(i)) >>> 0;
   return `<span class="team-badge" style="background:hsl(${h % 360} 60% 52%)">${short.slice(0, 2).toUpperCase()}</span>`;
@@ -420,7 +423,18 @@ const KIND_CHIP = {
   keeper: ['WK', 'gold2'], unrated: ['—', 'ink2'],
 };
 
-function drawJourneyCard(d, header){
+// A canvas can only draw an image that has finished loading, so the crests are fetched
+// first. One that fails to load is simply left off its row -- never a broken card.
+function loadImages(urls){
+  return Promise.all(urls.map(u => !u ? null : new Promise(res => {
+    const im = new Image();
+    im.onload = () => res(im); im.onerror = () => res(null);
+    im.src = u;
+  })));
+}
+
+async function drawJourneyCard(d, header){
+  const crestImgs = await loadImages(d.squad.map(c => c.crest));
   const canvas = $('#journeyCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height, cx = W / 2;
@@ -513,9 +527,17 @@ function drawJourneyCard(d, header){
     ctx.font = `600 22px ${CARD_MONO}`;
     ctx.fillText(i === 11 ? 'IMP' : String(i + 1), rowX + padX, midY1);
 
+    // The crest of the side he was drafted from, fitted into a 56x56 box beside his number.
+    const im = crestImgs[i], box = 56, crestX = rowX + padX + 44;
+    if (im){
+      const k = Math.min(box / im.width, box / im.height);
+      const w = im.width * k, h = im.height * k;
+      ctx.drawImage(im, crestX + (box - w) / 2, y + (rowH - h) / 2, w, h);
+    }
+
     const [chipLabel, chipColorKey] = KIND_CHIP[c.kind] || KIND_CHIP.unrated;
     const chipColor = {ink2, red, gold, gold2}[chipColorKey] || ink2;
-    const chipX = rowX + padX + 46, chipW = 64, chipH = 26, chipTop = midY1 - 19;
+    const chipX = crestX + box + 16, chipW = 64, chipH = 26, chipTop = midY1 - 19;
     ctx.strokeStyle = chipColor;
     ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.roundRect(chipX, chipTop, chipW, chipH, 13); ctx.stroke();

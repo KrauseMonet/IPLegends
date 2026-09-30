@@ -107,7 +107,7 @@ function renderTableAndForm(d){
     `<thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
         <th class="n">Pts</th><th class="n">NRR</th></tr></thead><tbody>` +
     d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${r.pos}</td><td>${teamBadge(r.short, r.you)}${r.short}</td>
+      <td class="n" style="text-align:left">${r.pos}</td><td class="side">${teamBadge(r.short, r.you, r.crest)}${r.short}</td>
       <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
       <td class="n pts">${r.points}</td>
       ${nrrCell(r.nrr)}</tr>`).join('') + '</tbody>';
@@ -123,6 +123,7 @@ function renderTableAndForm(d){
   $('#yourForm').innerHTML = `<div class="form-strip">${strip}</div>` +
     d.your_results.map((r, i) => {
     const them = r.home === 'YOU' ? r.away : r.home;
+    const themCrest = r.home === 'YOU' ? r.away_crest : r.home_crest;
     const mine = r.home === 'YOU' ? r.home_score : r.away_score;
     const theirs = r.home === 'YOU' ? r.away_score : r.home_score;
     const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? '' : 'l');
@@ -130,7 +131,7 @@ function renderTableAndForm(d){
     // way to tell which of "130/10 · 157/7" you had scored.
     return `<div class="fx" onclick="showScorecard('league', ${i})">
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
-      <span>v ${them}</span><span class="sc"><span class="mine">${mine}</span>
+      <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc"><span class="mine">${mine}</span>
         <span class="theirs">· ${theirs}</span></span></div>`;
   }).join('');
 }
@@ -147,13 +148,15 @@ function renderVerdictAndBracket(d){
   $('#resMargin').textContent = won
     ? `Your eleven take the title, finishing ${ordinal(me.pos)} in the league.`
     : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
+  // The champions' crest beside the verdict -- the one image that says who won.
+  $('#resCrest').innerHTML = won ? '' : crestImg(d.champion_crest, 'res-crest');
 
   $('#bracket').innerHTML = d.playoffs.map((r, i) => `
     <div class="tie-stage">${r.stage}</div>
     <div class="fx" onclick="showScorecard('playoffs', ${i})">
       <span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
       >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
-      <span>${r.home} v ${r.away}</span>
+      <span>${crestImg(r.home_crest, 'row-crest')}${r.home} v ${crestImg(r.away_crest, 'row-crest')}${r.away}</span>
       <span class="sc">${r.home_score} · ${r.away_score}</span></div>
     <div class="fx" style="border:0;padding-top:2px"><span></span>
       <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
@@ -169,6 +172,7 @@ function showGroupStageChoice(d){
   $('#resVerdict').classList.remove('won');
   $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
   $('#resMargin').textContent = `${ordinal(me.pos)} of ${d.teams} -- into the playoffs.`;
+  $('#resCrest').innerHTML = '';
   $('#bracket').innerHTML = `
     <p class="deck" style="max-width:none">You're through to the knockouts. Play them all
       at once, or one result at a time?</p>
@@ -315,6 +319,7 @@ function revealCompletedMatch(match, d){
     ? `League · match ${d.your_results.length} of ${d.matches_each}` : match.stage;
 
   const them = match.home === 'YOU' ? match.away : match.home;
+  const themCrest = match.home === 'YOU' ? match.away_crest : match.home_crest;
   const mine = match.home === 'YOU' ? match.home_score : match.away_score;
   const theirs = match.home === 'YOU' ? match.away_score : match.home_score;
   const headline = match.winner === 'YOU' ? 'You win'
@@ -324,10 +329,10 @@ function revealCompletedMatch(match, d){
   $('#revealLine').innerHTML = isLeague
     ? `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
         >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
-       <span>v ${them}</span><span class="sc">${mine} · ${theirs}</span>`
+       <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc">${mine} · ${theirs}</span>`
     : `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
         >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
-       <span>${match.home} v ${match.away}</span>
+       <span>${crestImg(match.home_crest, 'row-crest')}${match.home} v ${crestImg(match.away_crest, 'row-crest')}${match.away}</span>
        <span class="sc">${match.home_score} · ${match.away_score}</span>`;
 
   if (isLeague){

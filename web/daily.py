@@ -145,7 +145,8 @@ def side_for_fs(deck: Deck, fs_id: int) -> Side | None:
         return None
     card = squad[0]
     return Side(name=f"{card.franchise} {card.season_year}",
-                short=_abbrev(card.franchise, card.season_year), xi=xi, impact=impact)
+                short=_abbrev(card.franchise, card.season_year), xi=xi, impact=impact,
+                franchise=card.franchise, year=card.season_year)
 
 
 def opposition_total(model: Model, side: Side, rng: random.Random) -> Innings:

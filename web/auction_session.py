@@ -384,7 +384,8 @@ def season_sides(deck: Deck, state: str):
     if r.phase != "ready":
         raise InvalidState("pick your twelve before the season")
     order, impact = r.twelve
-    yours = Side(name=r.you.franchise, short="YOU", xi=list(order), impact=impact, you=True)
+    yours = Side(name=r.you.franchise, short="YOU", xi=list(order), impact=impact, you=True,
+                 franchise=r.you.franchise)
     others = []
     for team in r.auction.teams:
         if team.human:
@@ -393,5 +394,6 @@ def season_sides(deck: Deck, state: str):
         if arranged is None:
             raise InvalidState(f"{team.short} could not field a twelve")
         others.append(Side(name=team.franchise, short=team.short,
-                           xi=list(arranged[0]), impact=arranged[1]))
+                           xi=list(arranged[0]), impact=arranged[1],
+                           franchise=team.franchise))
     return yours, others, r.seed

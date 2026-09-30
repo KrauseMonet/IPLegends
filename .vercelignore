@@ -24,3 +24,5 @@ pyproject.toml
 CLAUDE.md
 SPEC.md
 CREDITS.md
+# Crest sources: the site serves the built copies in web/static/crests/, never these.
+assets/

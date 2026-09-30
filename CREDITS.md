@@ -37,5 +37,16 @@ Attribution must appear in the shipped UI regardless.
 This project does **not** scrape or ingest data from ESPNcricinfo, Transfermarkt,
 Howstat, or any comparable site. Their terms of use prohibit it.
 
-No IPL, BCCI, or franchise trademarks, crests, kit designs, or player photographs
-are used anywhere in this project. Text only.
+No kit designs or player photographs are used anywhere in this project.
+
+**[Corrected 2026-09-30 -- this section used to say no franchise crests were used, and
+that is no longer true.]** The site now shows the franchises' crests, era by era, to
+identify the teams. **There is no licence for them**: the site owner decided to use them
+on the basis that this is a non-commercial fan site -- no advertising (Google AdSense was
+removed in the same change) and no betting -- having been told plainly that IPL/BCCI
+permission could not be confirmed and that each crest belongs to its franchise's owner.
+Fifteen come from Wikipedia's file pages and three were supplied by the owner; every one
+is listed with its source in `assets/crests/SOURCES.md`. The footer on every page says
+the site is unofficial and that team names and logos belong to their owners. If a
+rights-holder objects, removing them is one command: delete the entries in
+`web/crests.py` and every surface falls back to the old initials badge.

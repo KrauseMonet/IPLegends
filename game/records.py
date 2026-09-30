@@ -30,6 +30,10 @@ class RecordRow:
     team: str | None
     value: float
     detail: str
+    # The franchise-season behind `team`, as facts rather than a display string, so the web
+    # layer can show its crest without parsing "Delhi Daredevils 2012" back apart.
+    franchise: str | None = None
+    year: int | None = None
 
 
 def _all_cards(deck: Deck) -> list[Card]:
@@ -52,7 +56,8 @@ def top_rated(deck: Deck, limit: int = 10, role: str | None = None) -> list[Reco
         cards = [c for c in cards if c.role == role]
     cards.sort(key=lambda c: (c.display, c.name), reverse=True)
     return [
-        RecordRow(c.name, _team(c), float(c.display), f"{c.role or '?'} · {c.season_year}")
+        RecordRow(c.name, _team(c), float(c.display), f"{c.role or '?'} · {c.season_year}",
+                  c.franchise, c.season_year)
         for c in cards[:limit]
     ]
 
@@ -61,7 +66,8 @@ def most_runs(deck: Deck, limit: int = 10) -> list[RecordRow]:
     cards = [c for c in _all_cards(deck) if c.bat_runs is not None]
     cards.sort(key=lambda c: (c.bat_runs, c.name), reverse=True)
     return [
-        RecordRow(c.name, _team(c), float(c.bat_runs), f"off {c.bat_balls} balls")
+        RecordRow(c.name, _team(c), float(c.bat_runs), f"off {c.bat_balls} balls",
+                  c.franchise, c.season_year)
         for c in cards[:limit]
     ]
 
@@ -70,7 +76,8 @@ def most_wickets(deck: Deck, limit: int = 10) -> list[RecordRow]:
     cards = [c for c in _all_cards(deck) if c.bowl_wickets is not None]
     cards.sort(key=lambda c: (c.bowl_wickets, c.name), reverse=True)
     return [
-        RecordRow(c.name, _team(c), float(c.bowl_wickets), f"off {c.bowl_balls} balls")
+        RecordRow(c.name, _team(c), float(c.bowl_wickets), f"off {c.bowl_balls} balls",
+                  c.franchise, c.season_year)
         for c in cards[:limit]
     ]
 
@@ -84,7 +91,7 @@ def best_strike_rate(deck: Deck, limit: int = 10) -> list[RecordRow]:
     return [
         RecordRow(
             c.name, _team(c), round(100 * c.bat_runs / c.bat_balls, 1),
-            f"{c.bat_runs} off {c.bat_balls}",
+            f"{c.bat_runs} off {c.bat_balls}", c.franchise, c.season_year,
         )
         for c in cards[:limit]
     ]
@@ -99,7 +106,7 @@ def best_economy(deck: Deck, limit: int = 10) -> list[RecordRow]:
     return [
         RecordRow(
             c.name, _team(c), round(6 * c.bowl_runs / c.bowl_balls, 2),
-            f"{c.bowl_wickets} wkts, {c.bowl_balls} balls",
+            f"{c.bowl_wickets} wkts, {c.bowl_balls} balls", c.franchise, c.season_year,
         )
         for c in cards[:limit]
     ]

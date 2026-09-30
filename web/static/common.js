@@ -166,7 +166,9 @@ let META = null;
 // matters because `meta` carries board constants, not just decoration -- the point of
 // serving them (A19: no second copy of the rules in JavaScript) would be lost if a cache
 // could pin an old shape indefinitely.
-const META_CACHE_KEY = 'iplegends_meta_v1';
+// v2: the shape grew `showcase` and `crests` for the home page. A new key rather than a
+// tolerant reader, so a copy cached before them is never rendered as though complete.
+const META_CACHE_KEY = 'iplegends_meta_v2';
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 
 function readMetaCache(){
@@ -286,14 +288,35 @@ const ROLL_STEP_MS = [55, 65, 80, 95, 120, 150, 190];   // decelerating; ~755ms 
 const ROLL_TIMERS = new Map();   // teamEl -> pending timeout, so overlapping calls on
                                   // the same slot cancel each other rather than racing
 
-function rollDeal(yearEl, teamEl, finalYear, finalTeam){
+function rollDeal(yearEl, teamEl, finalYear, finalTeam, crest){
   clearTimeout(ROLL_TIMERS.get(teamEl));
+  // The crest and the team colours belong to the franchise-season that LANDS, so they are
+  // withheld while the names flicker and arrive together with the final name: the panel
+  // turning Kolkata purple before the roll stops would give the result away.
+  const panel = teamEl.closest('.fixture');
+  let img = panel && panel.querySelector('.deal-crest');
+  if (panel && !img){
+    img = document.createElement('img');
+    img.className = 'deal-crest'; img.alt = '';
+    panel.prepend(img);
+  }
+  if (panel){
+    panel.className = panel.className.replace(/\bcrest-[A-Z]+\b/g, '').trim();
+    panel.classList.remove('landed');
+    img.classList.remove('in');
+  }
   let i = 0;
   const step = () => {
     if (i >= ROLL_STEP_MS.length){
       yearEl.textContent = finalYear;
       teamEl.textContent = finalTeam;
       ROLL_TIMERS.delete(teamEl);
+      if (panel){
+        const cls = crestClass(crest);
+        if (cls) panel.classList.add(cls);
+        panel.classList.add('landed');
+        if (crest){ img.src = crest; img.classList.add('in'); }
+      }
       return;
     }
     yearEl.textContent = 2008 + Math.floor(Math.random() * 19);
@@ -476,6 +499,35 @@ function mountTipFooterLink(){
 }
 
 document.addEventListener('DOMContentLoaded', mountTipFooterLink);
+
+// The shared nav is identical markup on every page (tools.shell), so which link is the
+// current page is decided here, from the path: each link names the paths it owns.
+// --- crests ---------------------------------------------------------------------------------
+// The API hands out a crest as a URL (web/crests.py decides which, per franchise and
+// season). Its team colours live in crests.css as `.crest-KEY`, KEY being the file name's
+// stem -- so any element given crestClass(url) can use var(--team), var(--team-deep) and
+// var(--team-ink) without a second lookup table here.
+const KIND_SHORT = {batter: 'BAT', bowler: 'BOWL', allrounder: 'AR', keeper: 'WK'};
+function crestKey(url){
+  const m = url && url.match(/\/crests\/([A-Z]+)-[0-9a-f]+\.webp$/);
+  return m ? m[1] : null;
+}
+function crestClass(url){ const k = crestKey(url); return k ? 'crest-' + k : ''; }
+// A crest image, or -- for a side that is no single franchise, e.g. your own drafted one --
+// the fallback the caller passes, so a missing crest never leaves an empty hole.
+function crestImg(url, cls = 'crest-img', fallback = ''){
+  return url ? `<img class="${cls}" src="${url}" alt="" loading="lazy">` : fallback;
+}
+
+function markCurrentNav(){
+  const path = location.pathname;
+  document.querySelectorAll('.topnav-links a[data-match]').forEach(a => {
+    const on = a.dataset.match.split(' ').some(m => path === m || path.startsWith(m + '/'));
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+}
+markCurrentNav();
 
 
 // --- installable app -----------------------------------------------------------------------

@@ -227,6 +227,13 @@ function leaveRoomAndGoHome(){
   location.href = '/';
 }
 
+// The shared nav's logo goes home; from inside a room "home" has to mean leaving it, or
+// the saved session sends the visitor straight back here (index.html resumes it).
+document.addEventListener('DOMContentLoaded', () => {
+  const home = document.querySelector('.topnav [data-home]');
+  if (home) home.addEventListener('click', e => { e.preventDefault(); leaveRoomAndGoHome(); });
+});
+
 function enterRoom(code, playerId){
   saveRoomSession(code, playerId);
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
@@ -490,7 +497,7 @@ function renderRoomLobby(r){
       ? `<span class="picks"><button class="act" onclick="kickRoomPlayer('${p.player_id}', this)"
            >Kick</button></span>` : '';
     const fr = p.franchise ? ` ${chip(p.franchise)}` : '';
-    return `<div class="entry"><span class="nm">${p.name}${isHost
+    return `<div class="entry"><span class="nm">${crestImg(p.crest, 'row-crest')}${p.name}${isHost
       ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}${fr}</span>${kickBtn}</div>`;
   }).join('');
   $('#lobbyStartBtn').classList.toggle('hide', !amHost);
@@ -502,13 +509,13 @@ function renderLobbyFranchises(r){
   const held = {};
   r.players.forEach(p => { if (p.franchise) held[p.franchise] = p; });
   $('#lobbyFranchises').innerHTML = FRANCHISES.map(([s, name]) => {
-    const [bg, fg] = TEAM_COLOURS[s];
     const owner = held[s];
     const mine = owner && owner.player_id === MY_PID;
     const taken = owner && !mine;
-    return `<button class="auc-fr${mine ? ' sel' : ''}${taken ? ' taken' : ''}" ${taken ? 'disabled' : ''}
-        onclick="chooseRoomFranchise('${s}', this)" style="--fr:${bg};--fr-ink:${fg}" title="${name}">
-      <b>${s}</b><span class="auc-fr-owner">${owner ? owner.name : ''}</span></button>`;
+    return franchiseButton(s, name,
+      `${taken ? 'disabled' : ''} onclick="chooseRoomFranchise('${s}', this)" title="${name}"`,
+      `<span class="auc-fr-owner">${owner ? owner.name : ''}</span>`)
+      .replace('class="auc-fr ', `class="auc-fr${mine ? ' sel' : ''}${taken ? ' taken' : ''} `);
   }).join('');
 }
 
@@ -577,7 +584,7 @@ function showRoomDeal(deal, fallbackText){
   if (deal){
     if (deal.fs_id !== LAST_ROOM_DEAL_FS){
       LAST_ROOM_DEAL_FS = deal.fs_id;
-      rollDeal($('#roomDealYear'), $('#roomDealTeam'), deal.season_year, deal.franchise);
+      rollDeal($('#roomDealYear'), $('#roomDealTeam'), deal.season_year, deal.franchise, deal.crest);
     }
   } else {
     LAST_ROOM_DEAL_FS = null;
@@ -710,7 +717,7 @@ function renderRoomDraft(r){
     const role = isActive ? 'ACTIVE' : (p.is_cpu ? 'HISTORICAL' : (p.done ? 'DONE' : 'WAITING'));
     return `<div class="line ${p.done ? 'set' : ''} ${isActive ? 'active-turn' : ''}">
       <span class="role">${role}</span>
-      <span class="who">${p.name}</span>
+      <span class="who">${crestImg(p.crest, 'row-crest')}${p.name}</span>
       <span class="club">${isActive && p.deal ? (p.deal.franchise + ' ' + p.deal.season_year) : ''}</span>
       <span class="fig">${p.picks_made}/12</span>
     </div>`;
@@ -800,13 +807,14 @@ function roomYourResults(m){
   const html = mine.map(([i, r]) => {
     const myShort = r.you_home ? r.home : r.away;
     const them = r.you_home ? r.away : r.home;
+    const themCrest = r.you_home ? r.away_crest : r.home_crest;
     const mineScore = r.you_home ? r.home_score : r.away_score;
     const theirsScore = r.you_home ? r.away_score : r.home_score;
     const k = r.winner === myShort ? 'w' : (r.winner === null ? '' : 'l');
     if (k === 'w') won++; else if (k === 'l') lost++;
     return `<div class="fx" onclick="showRoomScorecard(${i})">
       <span class="wl ${k}">${k ? k.toUpperCase() : 'T'}</span>
-      <span>v ${them}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
+      <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc">${mineScore} · ${theirsScore}</span></div>`;
   }).join('');
   return {html, won, lost};
 }
@@ -825,7 +833,7 @@ function roomPlayoffsHtml(m){
     return `<div class="tie-stage">${e.stage}</div>
       <div class="fx" onclick="showRoomScorecard(${i})">
         <span class="wl ${k}">${r.yours ? (k ? k.toUpperCase() : 'T') : '·'}</span>
-        <span>${r.home} v ${r.away}</span>
+        <span>${crestImg(r.home_crest, 'row-crest')}${r.home} v ${crestImg(r.away_crest, 'row-crest')}${r.away}</span>
         <span class="sc">${r.home_score} · ${r.away_score}</span></div>
       <div class="fx" style="border:0;padding-top:2px"><span></span>
         <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`;
@@ -844,7 +852,7 @@ function roomTableHtml(m){
     <tbody>
     ${m.table.map(row => `<tr class="${row.you ? 'you' : ''} ${row.pos === 4 ? 'cut' : ''}">
       <td class="n" style="text-align:left">${row.pos}</td>
-      <td>${teamBadge(row.short, row.you)}${row.name}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
+      <td class="side">${teamBadge(row.short, row.you, row.crest)}${row.name}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
       <td class="n">${row.played}</td><td class="n">${row.won}</td><td class="n">${row.lost}</td>
       <td class="n pts">${row.points}</td>
       ${nrrCell(row.nrr)}</tr>`).join('')}

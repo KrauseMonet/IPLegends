@@ -184,9 +184,22 @@ def _short_name(name: str, pid: str) -> str:
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
     out = []
     for pid, p, order, impact in rooms.room_sides(room, deck):
+        franchise, year = _franchise_of_seat(p, order)
         out.append((pid, Side(name=p.name, short=_short_name(p.name, pid),
-                              xi=order, impact=impact)))
+                              xi=order, impact=impact, franchise=franchise, year=year)))
     return out
+
+
+def _franchise_of_seat(p, order) -> tuple[str | None, int | None]:
+    """The real franchise a seat plays as, for its crest. An auction seat is its chosen
+    franchise as it is now; a draft room's filler is one historical franchise-season, so
+    its own cards say which. A drafted seat is a mix of franchises and has none."""
+    if p.franchise:
+        from game.auction import FRANCHISES
+        return dict(FRANCHISES).get(p.franchise), None
+    if p.is_cpu and order:
+        return order[0].franchise, order[0].season_year
+    return None, None
 
 
 def _pid_of(side: Side, pairs: list[tuple[str, Side]]) -> str:

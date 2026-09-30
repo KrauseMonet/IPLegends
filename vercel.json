@@ -18,6 +18,11 @@
       "headers": { "cache-control": "public, max-age=31536000, immutable" }
     },
     {
+      "src": "/static/crests/(.*)",
+      "dest": "/web/static/crests/$1",
+      "headers": { "cache-control": "public, max-age=31536000, immutable" }
+    },
+    {
       "src": "/static/(.*\\.(?:woff2?|ttf|png|jpe?g|webp|svg|ico))",
       "dest": "/web/static/$1",
       "headers": { "cache-control": "public, max-age=2592000, stale-while-revalidate=604800" }

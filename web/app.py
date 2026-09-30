@@ -34,6 +34,7 @@ from game.season import (
 )
 from game.simulator import load_model
 from web import accounts
+from web.crests import all_crests, crest_url, unambiguous_crest
 from web import auction_session
 from web import room_auction
 from web import auth
@@ -281,8 +282,8 @@ def rooms_page() -> FileResponse:
 
 @app.get("/rooms/{code}", include_in_schema=False)
 def room_page(code: str) -> FileResponse:
-    """`code` is accepted only so the route matches at all -- exactly the /ads.txt
-    pattern's own bare-FileResponse convention. All real state is read client-side:
+    """`code` is accepted only so the route matches at all -- the same bare-FileResponse
+    convention as every other page route. All real state is read client-side:
     the URL's own code, a localStorage session, and the room's live poll. No overlap
     with /rooms above -- the two never share a segment count, unlike the existing
     /api/rooms/open vs /api/rooms/{code} pair, which needs declaration order for
@@ -330,14 +331,6 @@ def privacy_page() -> FileResponse:
     return FileResponse(STATIC / "privacy.html")
 
 
-@app.get("/ads.txt", include_in_schema=False)
-def ads_txt() -> FileResponse:
-    """AdSense (and the IAB spec it follows) requires this at the site ROOT, never
-    under `/static` -- `/static/ads.txt` does not satisfy the crawler, hence a
-    dedicated route rather than relying on the StaticFiles mount below."""
-    return FileResponse(STATIC / "ads.txt", media_type="text/plain")
-
-
 # --- wire format ----------------------------------------------------------------------
 
 class CardOut(BaseModel):
@@ -345,6 +338,7 @@ class CardOut(BaseModel):
     name: str
     franchise: str | None
     season_year: int | None
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     band: str | None
     role: str | None
     kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
@@ -373,6 +367,7 @@ class DealOut(BaseModel):
     fs_id: int
     franchise: str | None
     season_year: int | None
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     options: list[CardOut]
     blocked: list[CardOut] = []
 
@@ -476,6 +471,7 @@ class StandingOut(BaseModel):
     pos: int
     name: str
     short: str
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     you: bool
     played: int
     won: int
@@ -509,6 +505,8 @@ class ResultOut(BaseModel):
     stage: str
     home: str
     away: str
+    home_crest: str | None = None
+    away_crest: str | None = None
     home_score: str
     away_score: str
     winner: str | None
@@ -545,6 +543,7 @@ class JourneySquadEntryOut(BaseModel):
     name: str
     franchise: str | None
     season_year: int | None
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     kind: str = Field(description="batter | bowler | allrounder | keeper | unrated")
     sim_bat_runs: int | None = None
     sim_bat_balls: int | None = None
@@ -594,6 +593,7 @@ class SeasonProgressOut(BaseModel):
     # `table`'s row for "you": `journey_stats` adds however far the playoffs took the
     # side, which the fourteen-match league table alone does not count.
     champion: str | None = None
+    champion_crest: str | None = None
     you_champion: bool | None = None
     runs: int | None = None
     wickets: int | None = None
@@ -665,6 +665,7 @@ class RoomPlayerOut(BaseModel):
     name: str
     is_cpu: bool
     franchise: str | None = Field(default=None, description="auction rooms only [A139]")
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     picks_made: int
     done: bool
     deal: DealOut | None = Field(
@@ -757,6 +758,8 @@ class RoomCurrentMatchOut(BaseModel):
     stage: str
     a_name: str
     b_name: str
+    a_crest: str | None = None
+    b_crest: str | None = None
     a_pid: str
     b_pid: str
     pending_toss_winner_pid: str | None = Field(
@@ -982,6 +985,7 @@ class AnalysisLeaderOut(BaseModel):
     # drawn side in the same tournament (16 of 100 on a measured season), so a row is a
     # (person, side) pair and the team is what tells two of his rows apart.
     team: str = ""
+    crest: str | None = None
 
 
 class RecordsOut(BaseModel):
@@ -1009,6 +1013,8 @@ class FlashbackOut(BaseModel):
     franchise: str
     correct_year: int
     candidates: list[int]
+    crest: str | None = Field(default=None, description="null where the name wore more than "
+                              "one crest -- either one would give the year away")
     top_scorer: str | None = None
     top_scorer_runs: int | None = None
     top_wicket_taker: str | None = None
@@ -1129,7 +1135,8 @@ def _kind(card: Card) -> str:
 def _card(card: Card, blocked: str | None = None) -> CardOut:
     return CardOut(
         person_id=card.person_id, name=card.name, franchise=card.franchise,
-        season_year=card.season_year, band=card.band, role=card.role,
+        season_year=card.season_year, crest=crest_url(card.franchise, card.season_year),
+        band=card.band, role=card.role,
         kind=_kind(card), rating=card.display, overseas=card.overseas,
         keeper_eligible=card.keeper_eligible,
         positions=sorted(card.positions), blocked=blocked,
@@ -1146,7 +1153,8 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
     pid = card.person_id
     return JourneySquadEntryOut(
         person_id=pid, name=card.name, franchise=card.franchise,
-        season_year=card.season_year, kind=_kind(card),
+        season_year=card.season_year, crest=crest_url(card.franchise, card.season_year),
+        kind=_kind(card),
         sim_bat_runs=acc.runs.get(pid), sim_bat_balls=acc.balls_faced.get(pid),
         sim_bat_fours=acc.fours.get(pid), sim_bat_sixes=acc.sixes.get(pid),
         sim_bowl_wickets=acc.wickets.get(pid), sim_bowl_runs=acc.runs_conceded.get(pid),
@@ -1175,6 +1183,7 @@ def _session_out(s: sess.Session) -> SessionOut:
         deal=None if s.deal is None else DealOut(
             fs_id=s.deal.fs_id, franchise=s.deal.franchise,
             season_year=s.deal.season_year,
+            crest=crest_url(s.deal.franchise, s.deal.season_year),
             options=[_card(c) for c in s.deal.options],
             blocked=[_card(c, why) for c, why in (s.deal.blocked or [])]
                     + STATE["unrated"].get(s.deal.fs_id, []),
@@ -1242,7 +1251,36 @@ def meta() -> dict:
         "cards": sum(len(v) for v in deck.cards_by_fs.values()),
         "franchise_seasons": len(deck.fs_ids),
         "seasons": sorted(s for s in seasons if s),
+        "showcase": _showcase(deck),
+        "crests": all_crests(),
     }
+
+
+# The home page's three cards, and the three its headline names -- "Chennai 2010 gives up
+# Dhoni" and so on. Named here once, so the copy and the cards cannot disagree; everything
+# ON the cards (ratings, roles, the other two names) is read from the deck.
+SHOWCASE = (("Chennai Super Kings", 2010, "MS Dhoni"),
+            ("Kolkata Knight Riders", 2012, "SP Narine"),
+            ("Mumbai Indians", 2019, "JJ Bumrah"))
+
+
+def _showcase(deck) -> list[dict]:
+    out = []
+    for franchise, year, featured in SHOWCASE:
+        squad = next((cards for cards in deck.cards_by_fs.values()
+                      if cards and cards[0].franchise == franchise
+                      and cards[0].season_year == year), None)
+        if not squad:
+            continue
+        star = next((c for c in squad if c.name == featured), None)
+        others = sorted((c for c in squad if c is not star),
+                        key=lambda c: -(c.display or 0))[:3 - (star is not None)]
+        out.append({"franchise": franchise, "season_year": year,
+                    "crest": crest_url(franchise, year),
+                    "players": [{"name": c.name, "rating": c.display, "kind": _kind(c),
+                                 "featured": c is star}
+                                for c in ([star] if star else []) + others]})
+    return out
 
 
 @app.get("/api/records", response_model=RecordsOut)
@@ -1251,7 +1289,8 @@ def records_route() -> RecordsOut:
     Every board is a sort over `Card`s already sitting in memory (A107), the same figures
     a draft screen already shows one card at a time."""
     deck = STATE["deck"]
-    row = lambda r: AnalysisLeaderOut(name=r.name, value=r.value, detail=r.detail, team=r.team or "")
+    row = lambda r: AnalysisLeaderOut(name=r.name, value=r.value, detail=r.detail, team=r.team or "",
+                                      crest=crest_url(r.franchise, r.year))
     rows = lambda rs: [row(r) for r in rs]
     return RecordsOut(
         top_rated=rows(records.top_rated(deck, limit=20)),
@@ -1275,6 +1314,7 @@ def flashback_route() -> FlashbackOut:
         r = flashback_lib.random_round(conn)
     return FlashbackOut(
         franchise=r.franchise, correct_year=r.correct_year, candidates=r.candidates,
+        crest=unambiguous_crest(r.franchise),
         top_scorer=r.top_scorer, top_scorer_runs=r.top_scorer_runs,
         top_wicket_taker=r.top_wicket_taker, top_wicket_taker_wickets=r.top_wicket_taker_wickets,
         matches_played=r.matches_played, matches_won=r.matches_won,
@@ -1413,9 +1453,14 @@ def _super_overs_out(r) -> list[SuperOverOut]:
     ]
 
 
+def _side_crest(side: Side) -> str | None:
+    return crest_url(side.franchise, side.year)
+
+
 def _result_out(r, you: Side) -> ResultOut:
     return ResultOut(
         stage=r.stage, home=r.home.short, away=r.away.short,
+        home_crest=_side_crest(r.home), away_crest=_side_crest(r.away),
         home_score=_score(r.home_runs, r.home_wickets),
         away_score=_score(r.away_runs, r.away_wickets),
         winner=None if r.winner is None else r.winner.short,
@@ -1437,6 +1482,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     playoffs = [_result_out(r, yours) for r in season.playoffs
                 if r.home is yours or r.away is yours]
     table = [StandingOut(pos=i, name=s.side.name, short=s.side.short, you=s.side.you,
+                         crest=_side_crest(s.side),
                          played=s.played, won=s.won, lost=s.lost, tied=s.tied,
                          points=s.points, nrr=round(s.nrr, 3))
              for i, s in enumerate(season.table, 1)]
@@ -1466,7 +1512,8 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     return SeasonProgressOut(
         state=state, your_side=yours.name, table=table,
         your_results=your_results, playoffs=playoffs, pending=None, complete=True,
-        champion=season.champion.name, you_champion=season.champion is yours,
+        champion=season.champion.name, champion_crest=_side_crest(season.champion),
+        you_champion=season.champion is yours,
         runs=stats.runs, wickets=stats.wickets,
         played=stats.played, won=stats.won, lost=stats.lost, tied=stats.tied,
         top_scorer=stats.top_scorer[0], top_scorer_runs=stats.top_scorer[1],
@@ -1776,6 +1823,7 @@ def _set_label(code: str) -> str:
 class AuctionTeamOut(BaseModel):
     short: str
     franchise: str
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     purse: int = Field(description="lakh")
     players: int
     overseas: int
@@ -1797,6 +1845,7 @@ class AuctionSaleOut(BaseModel):
     name: str
     season_year: int | None
     franchise: str | None
+    crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     rating: int | None
     base: int
     team: str | None = Field(description="buyer's short name; null means unsold")
@@ -1885,7 +1934,8 @@ def _sale_out(r, sale: auction.Sale) -> AuctionSaleOut:
     c = sale.lot.card
     return AuctionSaleOut(
         lot=sale.lot.index, round=sale.round, set_code=sale.lot.set_code, name=c.name,
-        season_year=c.season_year, franchise=c.franchise, rating=c.display,
+        season_year=c.season_year, franchise=c.franchise,
+        crest=crest_url(c.franchise, c.season_year), rating=c.display,
         base=sale.lot.base, team=teams[sale.winner].short if sale.winner is not None else None,
         price=sale.price, bids=[AuctionBidOut(team=teams[b.team].short, price=b.price)
                                 for b in sale.bids],
@@ -1922,7 +1972,8 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
     out = AuctionOut(
         state=r.state, phase=r.phase, mega=r.mega, you=you.short, franchise=you.franchise,
         max_bid=you.max_bid(),
-        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
+        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
+                              purse=t.purse,
                               players=len(t.squad), overseas=t.overseas, human=t.human,
                               retained=t.retained, rtm=t.rtm)
                for t in a.teams],
@@ -2130,6 +2181,7 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
         show_options = player.player_id == caller_id
         deal = DealOut(
             fs_id=fs_id, franchise=franchise, season_year=season_year,
+            crest=crest_url(franchise, season_year),
             options=[_card(c) for c in candidates] if show_options else [],
             blocked=([_card(c, why) for c, why in (pending_blocked or [])]
                      + STATE["unrated"].get(fs_id, [])) if show_options else [],
@@ -2152,6 +2204,8 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
     return RoomPlayerOut(
         player_id=player.player_id, name=seat.historical_name or player.name,
         is_cpu=player.is_cpu,
+        crest=crest_url(seat.order[0].franchise, seat.order[0].season_year)
+              if player.is_cpu and seat.order and seat.order[0] else None,
         picks_made=TWELVE_SIZE if player.is_cpu else len(seat.picks),
         done=done,
         deal=deal,
@@ -2186,7 +2240,8 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         franchise=you.franchise if you else "",
         max_bid=you.max_bid() if you else 0,
         mega=room.game == "mega",
-        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, purse=t.purse,
+        teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
+                              purse=t.purse,
                               players=len(t.squad), overseas=t.overseas, human=t.human,
                               owner=owners.get(t.short), retained=t.retained, rtm=t.rtm)
                for t in a.teams],
@@ -2283,6 +2338,7 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
         rating = team_rating(list(order) + [impact]) if done else None
         players.append(RoomPlayerOut(
             player_id=pid, name=p.name, is_cpu=p.is_cpu, franchise=p.franchise,
+            crest=crest_url(dict(auction.FRANCHISES).get(p.franchise)),
             picks_made=TWELVE_SIZE if done else 0, done=done,
             order=[_card(c) if c else None for c in order],
             impact=_card(impact) if impact else None,
@@ -2378,6 +2434,7 @@ class DailyOut(BaseModel):
     margin_unit: str = Field(
         description="'runs', 'wickets' or 'balls' -- what today ranks on")
     opposition: str
+    opposition_crest: str | None = None
     stage: str
     target: int | None = Field(
         description="the score to REACH; null on every kind generated today, whose target "
@@ -2523,6 +2580,7 @@ def _anon_daily_out(conn, player: str, day, finished_state: str | None) -> Daily
         kind=day.scenario.kind,
         margin_unit=day.scenario.margin_unit,
         opposition=day.scenario.opposition_name,
+        opposition_crest=_fs_crest(day.scenario.opposition_fs_id),
         stage=day.scenario.stage,
         target=(None if day.scenario.target is None else day.scenario.target + 1),
         bonuses=[BONUS_LABELS[b] for b in bonuses_on_offer(day.scenario)],
@@ -2571,6 +2629,7 @@ def _daily_out(conn, account_id: int | str, day,
         kind=day.scenario.kind,
         margin_unit=day.scenario.margin_unit,
         opposition=day.scenario.opposition_name,
+        opposition_crest=_fs_crest(day.scenario.opposition_fs_id),
         stage=day.scenario.stage,
         target=(None if day.scenario.target is None else day.scenario.target + 1),
         bonuses=[BONUS_LABELS[b] for b in bonuses_on_offer(day.scenario)],
@@ -2585,6 +2644,34 @@ def _daily_out(conn, account_id: int | str, day,
         match=match,
         share_text=share,
     )
+
+
+class DailyTeaserOut(BaseModel):
+    challenge_date: str
+    scenario: str
+    opposition: str
+    crest: str | None = None
+
+
+@app.get("/api/daily/today", response_model=DailyTeaserOut)
+def daily_teaser(response: Response) -> DailyTeaserOut:
+    """Today's challenge in one line, for the home page. The same for everybody, so it is
+    cached at the edge: the home page stays off the database for all but the first visitor
+    in each window. Up to five minutes stale across midnight UTC, which the /daily page
+    itself never is."""
+    with _db() as conn:
+        day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
+    response.headers["Cache-Control"] = "public, max-age=300, s-maxage=300"
+    return DailyTeaserOut(
+        challenge_date=str(day.challenge_date), scenario=day.scenario.describe(),
+        opposition=day.scenario.opposition_name,
+        crest=_fs_crest(day.scenario.opposition_fs_id))
+
+
+def _fs_crest(fs_id: int) -> str | None:
+    """The crest of one franchise-season in the deck, read off its own cards."""
+    squad = STATE["deck"].cards_by_fs.get(fs_id) or []
+    return crest_url(squad[0].franchise, squad[0].season_year) if squad else None
 
 
 @app.get("/api/daily", response_model=DailyOut)
@@ -2947,6 +3034,7 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
         stage=entry.stage,
         result=ResultOut(
             stage=r.stage, home=r.home.short, away=r.away.short,
+            home_crest=_side_crest(r.home), away_crest=_side_crest(r.away),
             home_score=_score(r.home_runs, r.home_wickets),
             away_score=_score(r.away_runs, r.away_wickets),
             winner=None if r.winner is None else r.winner.short,
@@ -2962,17 +3050,21 @@ def _room_result_out(entry, player_id: str | None) -> RoomMatchResultOut:
     )
 
 
-def _room_current_match_out(fs, display_names: dict, player_id: str | None) -> RoomCurrentMatchOut:
+def _room_current_match_out(fs, display_names: dict, player_id: str | None,
+                            seat_crests: dict | None = None) -> RoomCurrentMatchOut:
+    seat_crests = seat_crests or {}
     def name(pid: str) -> str:
         return display_names.get(pid, "")
 
     return RoomCurrentMatchOut(
         stage=fs.stage, a_name=name(fs.a_pid), b_name=name(fs.b_pid),
+        a_crest=seat_crests.get(fs.a_pid), b_crest=seat_crests.get(fs.b_pid),
         a_pid=fs.a_pid, b_pid=fs.b_pid,
         pending_toss_winner_pid=fs.pending_toss_winner_pid,
         you_decide_toss=player_id is not None and player_id == fs.pending_toss_winner_pid,
         result=None if fs.result is None else ResultOut(
             stage=fs.stage, home=fs.result.home.short, away=fs.result.away.short,
+            home_crest=_side_crest(fs.result.home), away_crest=_side_crest(fs.result.away),
             home_score=_score(fs.result.home_runs, fs.result.home_wickets),
             away_score=_score(fs.result.away_runs, fs.result.away_wickets),
             winner=None if fs.result.winner is None else fs.result.winner.short,
@@ -3004,12 +3096,15 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     def name(pid: str | None) -> str:
         return display_names.get(pid, "") if pid else ""
 
-    current_matches = [_room_current_match_out(fs, display_names, player_id)
+    seat_crests = {pid: crest_url(*room_match_lib._franchise_of_seat(p, order))
+                   for pid, p, order, _ in sides}
+    current_matches = [_room_current_match_out(fs, display_names, player_id, seat_crests)
                         for fs in (replay.current_round or [])]
 
     table = None
     if replay.table is not None:
         table = [StandingOut(pos=i, name=row.standing.side.name, short=row.standing.side.short,
+                             crest=_side_crest(row.standing.side),
                              you=row.pid == player_id, played=row.standing.played,
                              won=row.standing.won, lost=row.standing.lost,
                              tied=row.standing.tied, points=row.standing.points,

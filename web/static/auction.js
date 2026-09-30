@@ -20,12 +20,10 @@ const AUCTION_ROOM = !!window.AUCTION_ROOM;
 // `effectiveDraftMode` for the draft, so this one is only installed where it is alone.
 if (!AUCTION_ROOM) window.effectiveDraftMode = () => 'stat';
 
-const TEAM_COLOURS = {
-  CSK: ['#f9cd05', '#1a1204'], MI: ['#1b5fc1', '#fff'], RCB: ['#d11d26', '#fff'],
-  KKR: ['#4b2d7f', '#f5c24c'], RR: ['#ea1a85', '#fff'], DC: ['#2561c6', '#fff'],
-  SRH: ['#f26522', '#1a0c02'], PBKS: ['#dd1f2d', '#fff'], GT: ['#1c2c5b', '#9fd4f2'],
-  LSG: ['#a72056', '#fff'],
-};
+// Team colours are no longer picked here: they are derived from each crest and served as
+// `.crest-KEY` classes in crests.css (tools.build_crests), and an auction franchise's short
+// code IS its crest key. The crest image itself comes from META.crests.
+function teamCrestUrl(short){ return ((META && META.crests) || {})[short] || null; }
 const FRANCHISES = [
   ['CSK', 'Chennai Super Kings'], ['MI', 'Mumbai Indians'],
   ['RCB', 'Royal Challengers Bengaluru'], ['KKR', 'Kolkata Knight Riders'],
@@ -67,18 +65,25 @@ function stepDown(p, floor){
 }
 
 function chip(short, big){
-  const [bg, fg] = TEAM_COLOURS[short] || ['#334', '#fff'];
-  return `<span class="auc-chip${big ? ' big' : ''}" style="background:${bg};color:${fg}">${short}</span>`;
+  const url = teamCrestUrl(short);
+  return `<span class="auc-chip crest-${short}${big ? ' big' : ''}">${
+    url ? `<img src="${url}" alt="">` : ''}${short}</span>`;
+}
+
+// One franchise button, for the solo setup screen and an auction room's lobby alike.
+function franchiseButton(s, name, attrs, inner){
+  const url = teamCrestUrl(s);
+  return `<button class="auc-fr crest-${s}" ${attrs}>
+    ${url ? `<img class="auc-fr-crest" src="${url}" alt="">` : ''}
+    <b>${s}</b>${inner ?? `<span>${name}</span>`}</button>`;
 }
 
 // --- setup -------------------------------------------------------------------------------
 
 function renderSetup(){
-  $('#aucFranchises').innerHTML = FRANCHISES.map(([s, name]) => {
-    const [bg, fg] = TEAM_COLOURS[s];
-    return `<button class="auc-fr" data-team="${s}" onclick="chooseTeam('${s}')"
-      style="--fr:${bg};--fr-ink:${fg}"><b>${s}</b><span>${name}</span></button>`;
-  }).join('');
+  $('#aucFranchises').innerHTML = FRANCHISES.map(([s, name]) =>
+    franchiseButton(s, name, `data-team="${s}" onclick="chooseTeam('${s}')" title="${name}"`)
+  ).join('');
   setBidStyle(BID_STYLE);
   setFormat(FORMAT);
   show('aucSetup');
@@ -230,12 +235,14 @@ function setLeader(short){
 async function stamp(sale){
   const el = $('#aucStamp');
   if (sale.team){
-    const [bg] = TEAM_COLOURS[sale.team] || ['#fff'];
     const rtm = sale.rtm_holder
       ? `<em>${sale.rtm_matched ? 'Right to Match · ' + sale.rtm_holder + ' took him back'
                                  : sale.rtm_holder + ' played a card and did not match'}</em>` : '';
     el.innerHTML = `<b>SOLD</b><span>${chip(sale.team)} ${cr(sale.price)}</span>${rtm}`;
-    el.style.setProperty('--stamp', bg);
+    // The stamp takes the buyer's colour through its class, like every other team surface.
+    el.className = el.className.replace(/\bcrest-[A-Z]+\b/g, '').trim();
+    el.classList.add('crest-' + sale.team);
+    el.style.setProperty('--stamp', 'var(--team)');
     el.classList.remove('unsold');
   } else {
     el.innerHTML = '<b>UNSOLD</b>';
@@ -472,10 +479,14 @@ function renderFloor(){
 
   const tag = c.overseas === true ? '<span class="auc-tag os">Overseas</span>'
             : c.overseas === false ? '<span class="auc-tag">India</span>' : '';
-  $('#aucCard').innerHTML = `
+  // The lot wears the colours of the season it comes from -- Pietersen 2012 is a Delhi
+  // Daredevils lot whoever ends up buying him.
+  const card = $('#aucCard');
+  card.className = card.className.replace(/\bcrest-[A-Z]+\b/g, '').trim() + ' ' + crestClass(c.crest);
+  card.innerHTML = `
     <div class="auc-card-top">
       <div>
-        <div class="auc-card-season">${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
+        <div class="auc-card-season">${crestImg(c.crest, 'auc-card-crest')}${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
         <div class="auc-card-name">${c.name}</div>
         <div class="auc-card-meta">${ICON[c.kind] || ''}${keeperBadge(c)}
           <span>${roleLabel(c)}</span>${tag}</div>
@@ -539,7 +550,7 @@ function renderSide(){
   $('#aucTeams').innerHTML = d.teams.map(t => `
     <div class="auc-team${t.short === d.you ? ' you' : ''}">
       ${chip(t.short)}${t.owner ? `<em class="auc-owner">${t.owner}</em>` : ''}
-      <div class="auc-team-bar"><i style="width:${100 * t.purse / d.purse_total}%;background:${TEAM_COLOURS[t.short][0]}"></i></div>
+      <div class="auc-team-bar crest-${t.short}"><i style="width:${100 * t.purse / d.purse_total}%;background:var(--team)"></i></div>
       <b>${cr(t.purse)}</b>
       <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>
     </div>`).join('');
@@ -1006,7 +1017,8 @@ function playSeason(ctrl){
 
 async function auctionBoot(){
   loadMe();
-  loadMeta().then(renderDeckStats).catch(() => {});
+  // Awaited: the franchise buttons and every team chip draw their crest from META.
+  try { renderDeckStats(await loadMeta()); } catch(e) { /* chips fall back to the code alone */ }
   const h = location.hash.slice(1);
   if (!h){ renderSetup(); return; }
   try { await apply(await api('/api/auction/' + h), false); }

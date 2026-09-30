@@ -22,44 +22,35 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=b63c74f8d5">
+<link rel="stylesheet" href="/static/style.css?v=eb578c0038">
+<link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
-<div class="sheet">
-  <div class="rig" aria-hidden="true">
-    <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="var(--gold)" stroke-width="1" opacity=".35">
-        <line x1="380" y1="10" x2="60" y2="230"/>
-        <line x1="380" y1="10" x2="140" y2="260"/>
-        <line x1="380" y1="10" x2="230" y2="280"/>
-        <line x1="380" y1="10" x2="320" y2="285"/>
-      </g>
-      <g fill="var(--gold)">
-        <circle cx="60" cy="230" r="3.4"/><circle cx="140" cy="260" r="3.4"/>
-        <circle cx="230" cy="280" r="3.4"/><circle cx="320" cy="285" r="3.4"/>
-        <circle cx="380" cy="10" r="4.5"/>
-      </g>
-    </svg>
-  </div>
-
-  <div class="masthead">
-    <a class="wordmark" href="/" style="text-decoration:none;color:inherit">
-      <div class="crest"><img src="/static/logo-emblem.webp" alt="" width="220" height="235"></div>
-      <div>
-        <span class="the">The</span>
-        <h1>Legends <span class="leg">Almanack</span></h1>
-      </div>
+<!-- shell:nav -->
+<nav class="topnav" aria-label="Main">
+  <div class="topnav-in">
+    <a class="brand" href="/" data-home>
+      <img src="/static/logo-emblem.webp" alt="" width="34" height="36">
+      <span>Legends <b>Almanack</b></span>
     </a>
-    <div class="edition">
-      <b>Indian Premier League</b><br>
-      <span id="deckPill">…</span>
+    <div class="topnav-links">
+      <a href="/draft" data-match="/draft /season">Draft</a>
+      <a href="/auction" data-match="/auction">Auction</a>
+      <a href="/rooms" data-match="/rooms">Rooms</a>
+      <a href="/daily" data-match="/daily">Daily</a>
+      <a href="/flashback" data-match="/flashback">Flashback</a>
+      <a href="/records" data-match="/records">Records</a>
     </div>
-    <div class="masthead-actions">
+    <div class="topnav-r">
       <button class="install-pill hide" data-install onclick="installApp(this)"
         title="Add the Almanack to your home screen.">Install app</button>
       <div id="authArea"></div>
     </div>
   </div>
+</nav>
+<!-- /shell:nav -->
+<div class="sheet">
+
 
   <!-- ============ FLASHBACK ============ -->
   <section id="flashback" class="prose-page">
@@ -94,14 +85,59 @@
     </div>
   </section>
 
-  <div class="imprint">
-    <div><a href="/about">About</a> · <a href="/faq">FAQ</a> · <a href="/records">Records</a> · <a href="/flashback">Flashback</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div>
-    <div>The Legends Almanack · squads · selection · season</div>
-    <div id="footStats"></div>
+  <!-- shell:auth -->
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
   </div>
+<!-- /shell:auth -->
+  <!-- shell:footer -->
+<footer class="imprint">
+  <div class="imprint-links">
+    <a href="/about">About</a><a href="/faq">FAQ</a><a href="/records">Records</a>
+    <a href="/flashback">Flashback</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
+  </div>
+  <div id="footStats"></div>
+  <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the
+    BCCI, the IPL or any franchise. Team names and logos belong to their owners and appear
+    only to identify the teams. Ball-by-ball data from
+    <a href="https://cricsheet.org/" rel="noopener">Cricsheet</a> (ODbL).</p>
+</footer>
+<!-- /shell:footer -->
 </div>
 
-<script src="/static/common.js?v=5b0d2dca5e"></script>
+<script src="/static/common.js?v=31cf94eeb1"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <script>
 let FB = null;
@@ -113,7 +149,7 @@ function fbClueLine(label, value){
 
 function fbPaint(){
   const d = FB;
-  $('#fbFranchise').textContent = d.franchise;
+  $('#fbFranchise').innerHTML = crestImg(d.crest, 'fb-crest') + d.franchise;
   $('#fbClues').innerHTML = [
     fbClueLine('Leading run-scorer', d.top_scorer ? `${d.top_scorer} (${d.top_scorer_runs} runs)` : null),
     fbClueLine('Leading wicket-taker', d.top_wicket_taker ? `${d.top_wicket_taker} (${d.top_wicket_taker_wickets} wickets)` : null),

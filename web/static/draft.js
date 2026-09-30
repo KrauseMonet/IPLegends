@@ -157,7 +157,7 @@ function render(s){
   if (s.deal){
     if (s.deal.fs_id !== LAST_DEAL_FS){
       LAST_DEAL_FS = s.deal.fs_id;
-      rollDeal($('#dealYear'), $('#dealTeam'), s.deal.season_year, s.deal.franchise);
+      rollDeal($('#dealYear'), $('#dealTeam'), s.deal.season_year, s.deal.franchise, s.deal.crest);
     }
     // Hidden outright where the mode has no rerolls, rather than shown disabled: a
     // greyed control still advertises something this draft will never offer.
@@ -197,6 +197,9 @@ function render(s){
     clearTimeout(ROLL_TIMERS.get($('#dealTeam')));
     $('#dealYear').textContent = '';
     $('#dealTeam').textContent = 'Your twelve';
+    const panel = $('#dealTeam').closest('.fixture');
+    panel.className = 'fixture';
+    panel.querySelector('.deal-crest')?.classList.remove('in');
     $('#rerollRow').classList.add('hide');
     $('#optCount').textContent = '';
     // The deal column has nothing left to deal, so rather than leaving a third of the
@@ -271,7 +274,7 @@ function renderPanels(){
     }
     const whoClick = (got && DRAFT_MODE === 'stat')
       ? ` clickable" onclick="event.stopPropagation(); showOrderStat(${slot})"` : '"';
-    const label2 = got ? (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got, s.squad_complete)
+    const label2 = got ? crestImg(got.crest, 'row-crest') + (ICON[got.kind] || '') + keeperBadge(got) + got.name + ratingBadge(got, s.squad_complete)
                        : (isImpact ? 'no impact player' : 'to be named');
     return `<div class="${classes.join(' ')}" onclick="rowClick(${slot}, this)">
       <span class="num">${label}</span>
@@ -320,8 +323,10 @@ if (!window.DAILY_PAGE) boot().then(() => {
   const [h, query] = location.hash.slice(1).split('?');
   if (query === 'mode=memory') DRAFT_MODE = 'memory';
   if (!h || !h.includes('-')){
-    // No draft to resume -- there's nothing this page can show.
-    location.href = '/';
+    // No draft to resume, so this is somebody who asked for a draft -- the nav's own
+    // Draft link lands here. Deal one rather than bouncing them to the home page.
+    api('/api/draft', {method: 'POST'}).then(s => render(s))
+      .catch(e => { slip(e.message); location.href = '/'; });
     return;
   }
   api('/api/draft/' + h).then(s => render(s)).catch(e => { slip(e.message); location.href = '/'; });

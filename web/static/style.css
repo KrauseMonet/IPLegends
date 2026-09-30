@@ -1860,8 +1860,10 @@ body{
 .fan-rate{margin-left:auto;font:700 13px var(--mono);padding:3px 7px;border-radius:6px;background:rgba(255,255,255,.07)}
 .fan-row.star .fan-rate{background:var(--gold);color:#1a1204}
 .fan-0{left:0;top:56px;transform:rotate(-5deg)}
-.fan-1{left:196px;top:10px;z-index:2;transform:rotate(1deg)}
-.fan-2{left:392px;top:66px;transform:rotate(5deg)}
+/* Anchored to the column's centre and right edge rather than fixed offsets, so the three
+   close up on a narrower window instead of the last one running off the page. */
+.fan-1{left:calc(50% - 106px);top:10px;z-index:2;transform:rotate(1deg)}
+.fan-2{right:0;top:66px;transform:rotate(5deg)}
 .fan-0 .fan-rows{padding-right:30px}      /* clear of the middle card's edge */
 
 /* every crest there has been, rolling past -- full-bleed out of the centred sheet */
@@ -1901,6 +1903,11 @@ body{
 .home-how b{font:400 22px var(--display);text-transform:uppercase;display:block;margin-bottom:6px}
 .home-how span{color:var(--ink-2);font-size:14.5px;line-height:1.55}
 
+/* Between the phone layout and a wide window the column is too narrow for three cards
+   at full size, so the whole fan scales down together rather than the cards overlapping
+   into each other's names and ratings. */
+@media (min-width:901px) and (max-width:1099px){.home-fan{zoom:.75}}
+@media (min-width:1100px) and (max-width:1239px){.home-fan{zoom:.86}}
 @media (max-width:900px){
   .home-hero{grid-template-columns:1fr;padding-top:34px;gap:10px}
   /* The fan becomes a row you swipe: on a phone three tilted cards overlap into mush. */

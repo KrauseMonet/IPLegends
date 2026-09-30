@@ -405,7 +405,7 @@ th.n,td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-
 td{padding:6px 0;border-bottom:1px solid var(--line)}
 tr.tail td{color:var(--ink-3);font-style:italic}
 
-.season{display:grid;grid-template-columns:1.25fr .95fr;gap:16px}
+.season{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .season > div{padding:0 18px 14px;border:1px solid var(--line);background:var(--panel);
   border-radius:10px;position:relative;overflow:hidden}
 tr.you td{font-weight:700;color:var(--ink)}
@@ -458,6 +458,123 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .standings td.nrr-pos{color:var(--green)}
 .standings td.nrr-neg{color:var(--red-2)}
 
+/* --- the points table, IPL-style [A153] -- see reveal.js `standingsHtml` for the why. The
+   points column is the one that stands out (it decides the table), the cut under fourth is
+   a clear rule rather than a faint border, and For/Against sit in quieter type because they
+   are the working behind NRR, not a second headline. */
+.season > .season-wide{grid-column:1 / -1}
+.st-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.standings{font-size:13.5px}
+.standings th,.standings td{padding-left:6px;padding-right:6px}
+.standings .st-pos{width:30px;text-align:left;font-family:var(--mono);color:var(--ink-3);padding-left:10px}
+.standings tbody tr.top .st-pos{color:var(--gold-2);font-weight:800}
+/* The leader's glow is painted once across the ROW -- the older per-cell gradient restarted
+   in every cell, which across eleven columns read as a row of patches. */
+.standings tbody tr.top td:not(.st-pts){background:none}
+.standings tbody tr.top{background:linear-gradient(90deg,rgba(245,184,61,.14),transparent 70%)}
+.standings td.st-team{white-space:nowrap}
+.standings .st-mark{margin-right:10px;vertical-align:middle}
+.standings img.st-mark{width:28px;height:24px;object-fit:contain}
+.standings .kit-badge.st-mark{width:24px;height:24px;font-size:8px}
+.st-full{font-weight:650;color:var(--ink)}
+.standings tr.you .st-full{font-weight:800}
+.st-short{display:none;font-weight:700;color:var(--ink)}
+.st-q{display:inline-grid;place-items:center;width:17px;height:17px;margin-left:9px;border-radius:50%;
+  font:800 9px var(--mono);font-style:normal;color:#9cc8ff;background:rgba(80,150,255,.18);
+  box-shadow:0 0 0 1px rgba(120,180,255,.35) inset;vertical-align:1px}
+.st-cup{font-style:normal;margin-left:7px;font-size:14px}
+.standings th.st-pts{color:var(--gold-2)}
+/* tr-qualified so it outranks the striped and leader-row backgrounds above */
+.standings tbody tr td.st-pts,.standings thead tr th.st-pts{text-align:center;background:rgba(245,184,61,.08)}
+.standings td.st-pts{font-family:var(--mono);font-size:15px;font-weight:800;color:var(--gold-2)}
+.standings td.st-fa{font-size:11.5px;color:var(--ink-3);white-space:nowrap}
+.standings .st-formcell{text-align:right;padding-right:10px}
+.st-form{display:inline-flex;gap:4px}
+.fm{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;
+  font:800 8.5px var(--mono);font-style:normal}
+.fm-w{background:var(--green);color:#04231a}
+.fm-l{background:var(--red);color:#2b0705}
+.fm-t{background:var(--ink-3);color:var(--bg)}
+.standings tr.cut td{border-bottom:2px solid rgba(120,180,255,.55)}
+.standings .st-wl{display:none}
+.st-toggle{display:none;gap:6px;margin:10px 0 6px}
+.st-toggle button{font:700 11px var(--mono);letter-spacing:.06em;padding:6px 14px;border-radius:999px;
+  border:1px solid var(--line-strong);background:none;color:var(--ink-2);cursor:pointer}
+.st-toggle button.sel{background:var(--gold);border-color:var(--gold);color:#2b2005}
+@media (max-width:900px){
+  .standings .st-wide{display:none}
+}
+@media (max-width:640px){
+  .st-toggle{display:flex}
+  .st-full{display:none}
+  .st-short{display:inline}
+  .standings .st-formcell{display:none}
+  .st-wrap.form-view .st-formcell{display:table-cell}
+  .st-wrap.form-view .st-std{display:none}
+  .standings .you-pill{display:none}
+  /* one W-L column in place of two, as the IPL's own phone table does */
+  .standings .st-sep{display:none}
+  .standings .st-wl{display:table-cell;white-space:nowrap}
+  .st-wrap.form-view .st-wl{display:none}
+  .standings th,.standings td{padding-left:4px;padding-right:4px}
+  .standings .st-pos{width:22px;padding-left:4px}
+  .standings .st-mark{margin-right:6px}
+  .standings img.st-mark{width:22px;height:20px}
+  .standings .kit-badge.st-mark{width:20px;height:20px;font-size:7px}
+  .st-q{margin-left:5px;width:14px;height:14px;font-size:8px}
+  .season > .season-wide{padding-left:8px;padding-right:8px}
+  .season > .season-wide .panel-head{margin-left:-8px;margin-right:-8px;padding-left:10px;padding-right:10px}
+  .standings{font-size:12.5px}
+  .standings tbody tr td.st-pts{font-size:13.5px}
+  .fm{width:16px;height:16px;font-size:8px}
+  .st-form{gap:3px}
+}
+
+/* --- the season's verdict [A153] -- a finishing badge, or the champion's moment. */
+.hero{display:flex;align-items:center;justify-content:center;gap:28px 48px;flex-wrap:wrap;
+  margin:14px auto 6px;max-width:760px}
+#roomMatchBody > .hero{margin-bottom:22px}
+.hero-finish{text-align:center}
+.hero-pos{font-family:var(--display);font-size:clamp(64px,12vw,112px);line-height:.9;color:var(--ink)}
+.hero-pos span{display:block;font:600 12px var(--mono);letter-spacing:.24em;text-transform:uppercase;
+  color:var(--ink-3);margin-top:10px}
+.hero-sub{font:700 10.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-top:12px}
+.hero-record{font:600 13px var(--mono);color:var(--ink-2);margin-top:8px;letter-spacing:.04em}
+.hero-winner{display:flex;align-items:center;gap:16px;padding:14px 20px 14px 14px;border-radius:14px;
+  border:1px solid var(--line);background:var(--panel);text-align:left}
+.hero-winner .hero-sub{margin:0 0 4px;color:var(--gold)}
+.hero-winner-mark{width:78px;height:70px;object-fit:contain;filter:drop-shadow(0 8px 18px rgba(0,0,0,.45))}
+.hero-winner .kit-badge.hero-winner-mark{width:62px;height:62px;font-size:18px}
+.hero-winner-name{font:800 18px var(--sans);color:var(--ink);max-width:260px}
+.hero.champ{flex-direction:column;gap:6px;padding:26px 24px 30px;border-radius:20px;position:relative;
+  overflow:hidden;border:1px solid rgba(245,184,61,.45);
+  background:radial-gradient(ellipse at 50% 0%,color-mix(in srgb,var(--team,var(--gold)) 30%,transparent),transparent 70%),
+    linear-gradient(180deg,rgba(245,184,61,.10),transparent);text-align:center}
+.hero.champ::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 30%,rgba(255,236,170,.16) 45%,transparent 60%);
+  transform:translateX(-100%);animation:heroShine 3.2s ease-in-out 0.4s 2}
+@keyframes heroShine{to{transform:translateX(100%)}}
+.hero-trophy{font-size:42px;line-height:1;animation:heroLift .8s ease-out both}
+@keyframes heroLift{from{transform:translateY(10px) scale(.8);opacity:0}to{transform:none;opacity:1}}
+.hero.champ .hero-mark{width:120px;height:108px;object-fit:contain;margin:8px 0 2px;
+  filter:drop-shadow(0 12px 28px rgba(0,0,0,.5))}
+.hero.champ .kit-badge.hero-mark{width:104px;height:104px;font-size:30px;
+  box-shadow:0 0 0 4px var(--team) inset,0 0 40px color-mix(in srgb,var(--team) 50%,transparent)}
+.hero-title{font-family:var(--display);font-size:clamp(46px,9vw,84px);line-height:.95;letter-spacing:.02em;
+  color:var(--gold-2);text-shadow:0 6px 30px rgba(245,184,61,.35);text-transform:uppercase}
+.hero-name{font:800 20px var(--sans);color:var(--ink)}
+.hero-line{font-size:14.5px;color:var(--ink-2);font-style:italic}
+@media (prefers-reduced-motion:reduce){.hero.champ::after,.hero-trophy{animation:none}}
+
+/* --- the cap cards [A153]: the winner's team crest (or kit) large on the right. */
+.cap-card{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cap-text{min-width:0}
+.cap-card .cap-name{font-size:16px}
+.cap-card .cap-value{font-size:12px;color:var(--ink-2)}
+.cap-team{font:600 10.5px var(--mono);color:var(--ink-3);margin-top:4px;line-height:1.35}
+.cap-mark{flex:0 0 auto;width:54px;height:48px;object-fit:contain;opacity:.95}
+.kit-badge.cap-mark{width:44px;height:44px;font-size:13px}
+
 /* --- cap-row: the tournament's Orange Cap (top scorer) and Purple Cap (top wicket
    taker), sitting in the league table's own card below the ten rows -- a ten-row
    standings table leaves real empty space under a fourteen-row "your matches" card
@@ -469,7 +586,7 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .cap-card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:3px}
 .cap-card.cap-orange::before{background:var(--cap-orange)}
 .cap-card.cap-purple::before{background:var(--cap-purple)}
-.cap-label{font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;
+.cap-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
   margin-bottom:5px}
 .cap-orange .cap-label{color:var(--cap-orange)}
 .cap-purple .cap-label{color:var(--cap-purple)}

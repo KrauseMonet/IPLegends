@@ -508,6 +508,20 @@ class TournamentLeaders:
 
     top_scorer: tuple[str, int]
     top_wicket_taker: tuple[str, int]
+    # The side each leader did it FOR -- one (person, side) entry won, so there is exactly
+    # one. For the cap cards' crest and team line; None only when nobody scored at all.
+    top_scorer_side: "Side | None" = None
+    top_wicket_taker_side: "Side | None" = None
+
+
+def _best_entry(entries: list[tuple[int, str, object]]) -> tuple[str, int, object]:
+    """`_best_across`, carrying a third element through: the side the winning entry
+    belongs to. The same tie-break, so the name it returns is always `_best_across`'s."""
+    if not entries:
+        return "", 0, None
+    name, value = _best_across([(v, n) for v, n, _ in entries])
+    side = next(sd for v, n, sd in entries if v == value and n == name)
+    return name, value, side
 
 
 def _best_across(entries: list[tuple[int, str]]) -> tuple[str, int]:
@@ -538,8 +552,10 @@ def tournament_leaders(results: list[Result]) -> TournamentLeaders:
     comparable by value) -- and picking the single best (person, side) entry across
     every side's own accumulator, never summed across sides."""
     per_side: dict[int, JourneyAccumulator] = {}
+    side_of: dict[int, Side] = {}
 
     def _acc_for(side: Side) -> JourneyAccumulator:
+        side_of[id(side)] = side
         return per_side.setdefault(id(side), JourneyAccumulator())
 
     # An innings' own `.bowling` list belongs to whichever side did NOT bat in it --
@@ -558,13 +574,15 @@ def tournament_leaders(results: list[Result]) -> TournamentLeaders:
             _acc_for(r.away).add_batting(r.away_innings)
             _acc_for(r.home).add_bowling(r.away_innings)
 
+    bat_name, bat_runs, bat_side = _best_entry([
+        (v, acc.names[pid], side_of[sid])
+        for sid, acc in per_side.items() for pid, v in acc.runs.items()])
+    bowl_name, bowl_wkts, bowl_side = _best_entry([
+        (v, acc.names[pid], side_of[sid])
+        for sid, acc in per_side.items() for pid, v in acc.wickets.items()])
     return TournamentLeaders(
-        top_scorer=_best_across([
-            (v, acc.names[pid]) for acc in per_side.values() for pid, v in acc.runs.items()
-        ]),
-        top_wicket_taker=_best_across([
-            (v, acc.names[pid]) for acc in per_side.values() for pid, v in acc.wickets.items()
-        ]),
+        top_scorer=(bat_name, bat_runs), top_wicket_taker=(bowl_name, bowl_wkts),
+        top_scorer_side=bat_side, top_wicket_taker_side=bowl_side,
     )
 
 

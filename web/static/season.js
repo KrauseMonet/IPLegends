@@ -120,14 +120,10 @@ function renderTableAndForm(d){
   setMySide(d);
   SEASON_STATE = d.state;
   $('#tableNote').innerHTML = `<b>${d.matches_each} each</b><span>matches played</span>`;
-  $('#ladder').innerHTML =
-    `<thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
-        <th class="n">Pts</th><th class="n">NRR</th></tr></thead><tbody>` +
-    d.table.map(r => `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${r.pos}</td><td class="side">${teamBadge(r.short, r.you, r.crest)}${r.you ? esc(MY_SIDE.name) : r.short}</td>
-      <td class="n">${r.played}</td><td class="n">${r.won}</td><td class="n">${r.lost}</td>
-      <td class="n pts">${r.points}</td>
-      ${nrrCell(r.nrr)}</tr>`).join('') + '</tbody>';
+  // [A153] The IPL-style points table, shared with rooms (reveal.js). The table only
+  // exists once the league is settled, so every Q is earned by the time it is drawn.
+  $('#ladder').innerHTML = standingsHtml(d.table,
+    {complete: true, champion: d.complete ? d.champion : null});
 
   const w = d.your_results.filter(r => r.winner === 'YOU').length;
   const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
@@ -158,19 +154,22 @@ function renderVerdictAndBracket(d){
   $('#resSeed').textContent = stateLabel(d.state);
   const me = d.table.find(r => r.you);
   const won = d.you_champion;
-  $('#resVerdict').textContent = won ? 'Champions'
-    : (me.pos <= 4 ? 'Into the playoffs' : 'The season ends here');
-  $('#resVerdict').classList.toggle('won', won);
-  $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
-  $('#resMargin').textContent = won
-    ? `${MY_SIDE.name} take the title, finishing ${ordinal(me.pos)} in the league.`
-    : `${ordinal(me.pos)} of ${d.teams} on ${me.points} points. ${d.champion} took the title.`;
-  // The champions' crest beside the verdict -- the one image that says who won.
-  $('#resCrest').innerHTML = won ? '' : crestImg(d.champion_crest, 'res-crest');
+  // [A153] The verdict is a hero block now; the group-stage choice screen's four plain
+  // lines stay in the markup for that screen and are hidden here.
+  ['#resVerdict', '#resScore', '#resMargin', '#resCrest'].forEach(id => $(id).classList.add('hide'));
+  $('#resHero').innerHTML = seasonHeroHtml({
+    youChampion: won, you: MY_SIDE, row: me, teams: d.teams,
+    champion: {name: d.champion, crest: d.champion_crest},
+    finishLine: `Finished ${ordinal(me.pos)} in the league, then won the final.`,
+  });
 
-  $('#bracket').innerHTML = d.playoffs.map((r, i) => `
+  // Every playoff fixture, yours or not -- a side that missed the top four still sees how
+  // the title was decided, instead of an empty heading.
+  const bracket = d.bracket && d.bracket.length ? d.bracket : d.playoffs;
+  $('#bracketHead').classList.toggle('hide', !bracket.length);
+  $('#bracket').innerHTML = bracket.map((r, i) => `
     <div class="tie-stage">${r.stage}</div>
-    <div class="fx" onclick="showScorecard('playoffs', ${i})">
+    <div class="fx" onclick="showScorecard('bracket', ${i})">
       <span class="wl ${r.yours ? (r.winner === 'YOU' ? 'w' : 'l') : ''}"
       >${r.yours ? (r.winner === 'YOU' ? 'W' : 'L') : '·'}</span>
       <span>${rowSide(r.home, r.home_crest)} v ${rowSide(r.away, r.away_crest)}</span>
@@ -179,7 +178,8 @@ function renderVerdictAndBracket(d){
       <span class="sc" style="font-style:italic">${r.margin}</span><span></span></div>`).join('');
 
   $('#capRow').innerHTML = capRowHtml(d.orange_cap, d.orange_cap_runs,
-                                       d.purple_cap, d.purple_cap_wickets);
+                                       d.purple_cap, d.purple_cap_wickets,
+                                       d.orange_cap_side, d.purple_cap_side);
 }
 
 // A side as a results row names it: its mark, then its name -- yours resolved to your team.
@@ -191,6 +191,8 @@ function rowSide(short, crest){
 function showGroupStageChoice(d){
   const me = d.table.find(r => r.you);
   $('#resSeed').textContent = stateLabel(d.state);
+  ['#resVerdict', '#resScore', '#resMargin', '#resCrest'].forEach(id => $(id).classList.remove('hide'));
+  $('#resHero').innerHTML = '';
   $('#resVerdict').textContent = 'Group stage complete';
   $('#resVerdict').classList.remove('won');
   $('#resScore').textContent = `${me.won}–${me.lost}${me.tied ? '–' + me.tied : ''}`;
@@ -208,7 +210,8 @@ function showGroupStageChoice(d){
 }
 
 function showScorecard(list, i){
-  renderScorecard(SEASON_DATA[list === 'league' ? 'your_results' : 'playoffs'][i]);
+  const bracket = SEASON_DATA.bracket && SEASON_DATA.bracket.length ? 'bracket' : 'playoffs';
+  renderScorecard(SEASON_DATA[list === 'league' ? 'your_results' : bracket][i]);
 }
 
 /* --- match-by-match reveal: a real toss, a real Impact choice, a real over-by-over --- */

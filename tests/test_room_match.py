@@ -1169,3 +1169,34 @@ def test_a_kit_is_locked_once_the_matches_start(conn):
     with pytest.raises(rooms.RoomError, match="locked"):
         rooms.set_kit(conn, room.code, host_id,
                       {"name": "Too Late", "monogram": "TL", "colour": "teal"})
+
+
+# --- the IPL-style points table, in a room [A153] ----------------------------------------
+
+def test_a_room_table_carries_for_against_and_form_that_agree_with_itself(conn):
+    """The room's table is built by pid from the result entries, not by Side identity, so
+    it gets its own check: For/Against reproduce NRR from the rendered strings, the league
+    concedes exactly what it scores, and each form line is five real results."""
+    from web.app import _room_match_out
+    room, host_id = _make_and_complete_league(conn)
+    _drive_room_to_completion(conn, room, host_id)
+    room, replay = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    out = _room_match_out(room, replay, host_id, DECK)
+    over = lambda t: int(t.split(".")[0]) + int(t.split(".")[1]) / 6
+    for row in out.table:
+        nrr = row.runs_for / over(row.overs_for) - row.runs_against / over(row.overs_against)
+        assert abs(nrr - row.nrr) < 0.001, row.short
+        assert len(row.form) == 5 and set(row.form) <= {"W", "L", "T"}
+        assert row.form.count("W") <= row.won and row.form.count("L") <= row.lost
+    assert sum(r.runs_for for r in out.table) == sum(r.runs_against for r in out.table)
+    assert out.orange_cap_side is not None and out.orange_cap_side.team
+    # Your own row, recomputed from the raw entries a different way: by comparing the
+    # winner's SHORT with the short of the side you played as in that entry.
+    mine = [e for e in replay.results if e.stage == "league"
+            and host_id in (e.home_pid, e.away_pid)][-5:]
+    expect = []
+    for e in mine:
+        me = e.result.home if e.home_pid == host_id else e.result.away
+        expect.append("T" if e.result.winner is None
+                      else ("W" if e.result.winner.short == me.short else "L"))
+    assert next(r for r in out.table if r.you).form == expect

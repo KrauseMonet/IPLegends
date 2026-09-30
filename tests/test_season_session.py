@@ -268,3 +268,67 @@ def test_a_drafted_season_has_no_crest_of_its_own():
     replay = ss.replay_season(DECK, _model_with_fixed_state(), played.state,
                               ss.recorded_moves(()))
     assert _season_progress_out(played.state, replay).your_crest is None
+
+
+# --- the IPL-style points table [A153] ---------------------------------------------------
+
+def _finished():
+    from web.app import _season_progress_out
+    played = walk(11)
+    replay = ss.replay_season(DECK, _model_with_fixed_state(), played.state,
+                              ss.skip_tournament(()))
+    assert replay.complete
+    return _season_progress_out(played.state, replay)
+
+
+def _parse_overs(text: str) -> float:
+    whole, balls = text.split(".")
+    return int(whole) + int(balls) / 6
+
+
+def test_for_and_against_reproduce_the_net_run_rate():
+    """For/Against are shown beside NRR, so they must be the figures NRR is computed from
+    -- recomputed here from the rendered strings, with the tests' own overs parser, so a
+    table that printed balls where it meant overs, or dropped the all-out rule on one side
+    of the ledger, would disagree with its own NRR column."""
+    for row in _finished().table:
+        rr_for = row.runs_for / _parse_overs(row.overs_for)
+        rr_against = row.runs_against / _parse_overs(row.overs_against)
+        assert abs((rr_for - rr_against) - row.nrr) < 0.001, row.short
+
+
+def test_every_side_conceded_what_the_others_scored():
+    """Across the whole league, runs for and runs against are the same runs counted from
+    each end -- a property of the league, not of any one row."""
+    table = _finished().table
+    assert sum(r.runs_for for r in table) == sum(r.runs_against for r in table)
+
+
+def test_form_is_the_last_five_and_agrees_with_the_record():
+    for row in _finished().table:
+        assert len(row.form) == 5 and set(row.form) <= {"W", "L", "T"}
+        assert row.form.count("W") <= row.won and row.form.count("L") <= row.lost
+
+
+def test_the_bracket_holds_every_playoff_fixture_whoever_played_in_it():
+    out = _finished()
+    assert [b.stage for b in out.bracket] == ["Qualifier 1", "Eliminator", "Qualifier 2",
+                                              "Final"]
+    assert len(out.playoffs) == sum(b.yours for b in out.bracket)
+
+
+def test_form_is_oldest_first_and_never_confuses_two_equal_looking_sides():
+    """Two drawn sides can be EQUAL as dataclasses (`Side` has no eq=False), so form is
+    matched by identity -- and reads oldest to newest, the way the IPL's own form column
+    does, so the last circle is the latest match."""
+    from types import SimpleNamespace as NS
+    from game.season import Side
+    from web.app import _side_form
+    a, twin, c = Side("Twin", "TW", []), Side("Twin", "TW", []), Side("C", "C", [])
+    assert a == twin and a is not twin
+    results = [NS(home=a, away=c, winner=a), NS(home=twin, away=c, winner=c),
+               NS(home=c, away=a, winner=c), NS(home=a, away=c, winner=None)]
+    assert _side_form(results, a) == ["W", "L", "T"]
+    assert _side_form(results, twin) == ["L"]
+    six = [NS(home=a, away=c, winner=(a if i % 2 else c)) for i in range(7)]
+    assert _side_form(six, a) == ["L", "W", "L", "W", "L"]    # the LAST five of seven

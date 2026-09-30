@@ -1026,19 +1026,11 @@ function roomTableHtml(m){
   // the backend from the moment the round-robin settles all the way through the
   // playoffs (RoomMatchOut.table's own doc comment), not only once complete, so this
   // markup has to work identically in both places rather than living only in one.
+  // [A153] The IPL-style table is reveal.js's, shared with solo. A Q is shown only once
+  // every group fixture has been revealed: mid-reveal the top four are not yet settled.
   if (!m.table) return '';
-  return `<table class="standings">
-    <thead><tr><th>#</th><th>Side</th><th class="n">P</th><th class="n">W</th><th class="n">L</th>
-        <th class="n">Pts</th><th class="n">NRR</th></tr></thead>
-    <tbody>
-    ${m.table.map(row => `<tr class="${row.you ? 'you' : ''} ${row.pos === 4 ? 'cut' : ''}">
-      <td class="n" style="text-align:left">${row.pos}</td>
-      <td class="side">${teamBadge(row.short, row.you, row.crest, row.kit)}${esc(row.name)}${row.you ? '<span class="you-pill">you</span>' : ''}</td>
-      <td class="n">${row.played}</td><td class="n">${row.won}</td><td class="n">${row.lost}</td>
-      <td class="n pts">${row.points}</td>
-      ${nrrCell(row.nrr)}</tr>`).join('')}
-    </tbody>
-  </table>`;
+  const settled = !(m.league_revealed != null && m.league_revealed < m.league_total);
+  return standingsHtml(m.table, {complete: settled, champion: m.complete ? m.champion : null});
 }
 
 function roomWaitingHtml(m, myMatch){
@@ -1448,21 +1440,37 @@ function showRoomMatchComplete(m){
   // beneath it, never the full round-robin dumped in one flat list.
   const your = roomYourResults(m);
   const playoffsHtml = roomPlayoffsHtml(m);
-  el.innerHTML = `<div class="report compact">
-      <div class="call won room-banner">${esc(m.champion)} win the league</div>
-    </div>
+  // [A153] The same verdict block as solo: your finishing badge, or your champion's moment.
+  const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
+  const myRow = m.table.find(r => r.you);
+  const champRow = m.table.find(r => r.name === m.champion);
+  const you = me ? {name: me.kit ? me.kit.name : (myRow ? myRow.name : me.name),
+                    crest: me.crest || (myRow && myRow.crest) || null, kit: me.kit || null} : null;
+  const hero = seasonHeroHtml({
+    youChampion: m.you_champion, you, row: myRow, teams: m.table.length,
+    champion: champRow ? {name: champRow.name, crest: champRow.crest, kit: champRow.kit}
+                       : {name: m.champion},
+    finishLine: myRow ? `Finished ${myRow.pos}${['th','st','nd','rd'][(myRow.pos % 100 - 20) % 10]
+      || ['th','st','nd','rd'][myRow.pos] || 'th'} in the league, then won the final.` : '',
+  });
+  el.innerHTML = `${hero}
     <div class="season">
-      <div>
+      <div class="season-wide">
         <div class="panel-glow"></div>
-        <div class="panel-head"><h3>League table</h3>
+        <div class="panel-head"><h3>Points table</h3>
           <div class="stat"><b>${m.table.length}</b><span>teams</span></div></div>
         ${roomTableHtml(m)}
-        ${capRowHtml(m.orange_cap, m.orange_cap_runs, m.purple_cap, m.purple_cap_wickets)}
       </div>
       <div>
         <div class="panel-glow"></div>
         ${your.html ? `<div class="panel-head"><h3>Your matches</h3>
           <div class="stat"><b>${your.won} won</b><span>${your.lost} lost</span></div></div>${your.html}` : ''}
+      </div>
+      <div>
+        <div class="panel-glow"></div>
+        <div class="panel-head"><h3>Honours</h3></div>
+        ${capRowHtml(m.orange_cap, m.orange_cap_runs, m.purple_cap, m.purple_cap_wickets,
+                     m.orange_cap_side, m.purple_cap_side)}
         ${playoffsHtml ? `<div class="col-head" style="margin:26px -18px 0">
           <span>🏆 Playoffs</span></div>${playoffsHtml}` : ''}
       </div>

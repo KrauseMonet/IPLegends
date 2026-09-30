@@ -432,20 +432,124 @@ function teamBadge(short, isYou, crest, kit){
 
 // The tournament's own Orange Cap/Purple Cap, never populated until the season/room is
 // actually complete (both callers only have real names to pass once it is), so an empty
-// pair renders nothing rather than a blank card.
-function capRowHtml(orangeName, orangeRuns, purpleName, purpleWickets){
+// pair renders nothing rather than a blank card. [A153] Each card also names the team the
+// winner did it for, with its crest (or kit, or -- when it is the viewer's own side -- the
+// viewer's own identity) large on the right, the way a broadcast graphic carries a cap.
+function capRowHtml(orangeName, orangeRuns, purpleName, purpleWickets, orangeSide, purpleSide){
   if (!orangeName && !purpleName) return '';
+  const card = (cls, label, name, value, capSide) => {
+    const side = capSide && capSide.you && MY_SIDE && !capSide.crest ? MY_SIDE
+      : capSide ? {name: capSide.team, crest: capSide.crest, kit: capSide.kit} : null;
+    const mark = !side ? '' : side.crest
+      ? `<img class="cap-mark" src="${side.crest}" alt="">`
+      : side.kit ? kitBadge(side.kit, 'cap-mark cap-kit') : '';
+    return `<div class="cap-card ${cls}">
+      <div class="cap-text">
+        <div class="cap-label">${label}</div>
+        <div class="cap-name">${esc(name)}</div>
+        <div class="cap-value">${value}</div>
+        ${side ? `<div class="cap-team">${esc(side.name)}</div>` : ''}
+      </div>${mark}
+    </div>`;
+  };
   return `<div class="cap-row">
-    <div class="cap-card cap-orange">
-      <div class="cap-label">🟠 Orange Cap</div>
-      <div class="cap-name">${orangeName}</div>
-      <div class="cap-value">${orangeRuns} runs</div>
+    ${card('cap-orange', 'Orange Cap', orangeName, `${orangeRuns} runs`, orangeSide)}
+    ${card('cap-purple', 'Purple Cap', purpleName, `${purpleWickets} wickets`, purpleSide)}
+  </div>`;
+}
+
+/* --- the points table [A153] -------------------------------------------------------------
+   Laid out like the IPL's own (iplt20.com): position, crest and full name, a Q beside each
+   qualifier, P W L, points as the column that stands out, NRR, For and Against as
+   runs/overs, and the last five results as circles. A divider under fourth, where the
+   playoffs cut. On a phone it drops For/Against and swaps between the standard columns and
+   the form column, the way the real site does. No NR column: nothing in this engine can
+   produce a no result, so it would only ever read zero. A T column appears only in the rare
+   season where a match stayed tied after the super overs (A135). */
+
+function standingsSide(r){
+  // Solo's own row carries the engine's 'YOU'; MY_SIDE is the page's name for it.
+  if (r.you && MY_SIDE && !r.kit) return {...MY_SIDE, short: MY_SIDE.kit ? MY_SIDE.kit.monogram : r.short};
+  return {name: r.name, short: r.short, crest: r.crest, kit: r.kit};
+}
+
+function standingsHtml(rows, {complete = true, champion = null} = {}){
+  if (!rows || !rows.length) return '';
+  const ties = rows.some(r => r.tied);
+  const body = rows.map(r => {
+    const side = standingsSide(r);
+    const q = complete && r.pos <= 4 ? '<i class="st-q" title="Qualified for the playoffs">Q</i>' : '';
+    const cup = champion && r.name === champion ? '<i class="st-cup" title="Champions">🏆</i>' : '';
+    const form = (r.form || []).map(f =>
+      `<i class="fm fm-${f.toLowerCase()}" title="${f === 'W' ? 'Won' : f === 'L' ? 'Lost' : 'Tied'}">${f}</i>`).join('');
+    return `<tr class="${r.you ? 'you' : ''} ${r.pos === 4 ? 'cut' : ''} ${r.pos === 1 ? 'top' : ''}">
+      <td class="st-pos">${r.pos}</td>
+      <td class="st-team">${sideBadge(side, 'st-mark')}<span class="st-full">${esc(side.name)}</span><span
+        class="st-short">${esc(side.short)}</span>${r.you ? '<span class="you-pill">you</span>' : ''}${cup}${q}</td>
+      <td class="n st-std">${r.played}</td>
+      <td class="n st-std st-sep">${r.won}</td><td class="n st-std st-sep">${r.lost}</td>
+      ${ties ? `<td class="n st-std st-sep">${r.tied}</td>` : ''}
+      <td class="n st-std st-wl">${r.won}-${r.lost}${ties ? '-' + r.tied : ''}</td>
+      <td class="n st-pts">${r.points}</td>
+      ${nrrCell(r.nrr).replace('<td class="n', '<td class="n st-std')}
+      <td class="n st-wide st-fa">${r.runs_for}/${r.overs_for}</td>
+      <td class="n st-wide st-fa">${r.runs_against}/${r.overs_against}</td>
+      <td class="st-formcell"><span class="st-form">${form}</span></td>
+    </tr>`;
+  }).join('');
+  return `<div class="st-wrap">
+    <div class="st-toggle" role="tablist">
+      <button class="sel" onclick="standingsView(this, false)">Standard</button>
+      <button onclick="standingsView(this, true)">Form</button>
     </div>
-    <div class="cap-card cap-purple">
-      <div class="cap-label">🟣 Purple Cap</div>
-      <div class="cap-name">${purpleName}</div>
-      <div class="cap-value">${purpleWickets} wickets</div>
-    </div>
+    <table class="standings">
+      <thead><tr><th class="st-pos">#</th><th>Team</th>
+        <th class="n st-std">P</th><th class="n st-std st-sep">W</th><th class="n st-std st-sep">L</th>
+        ${ties ? '<th class="n st-std st-sep">T</th>' : ''}
+        <th class="n st-std st-wl">${ties ? 'W-L-T' : 'W-L'}</th>
+        <th class="n st-pts">Pts</th><th class="n st-std">NRR</th>
+        <th class="n st-wide">For</th><th class="n st-wide">Against</th>
+        <th class="st-formcell">Form</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>`;
+}
+
+// The phone-width Standard/Form switch -- a class on the wrapper; CSS does the rest.
+function standingsView(btn, form){
+  const wrap = btn.closest('.st-wrap');
+  wrap.classList.toggle('form-view', form);
+  wrap.querySelectorAll('.st-toggle button').forEach(b => b.classList.toggle('sel', b === btn));
+}
+
+/* --- the season's verdict [A153] ---------------------------------------------------------
+   Where you finished, as a badge rather than a bare "6-8"; and when you won it all, a
+   champion's moment with your own kit (or franchise crest) large. `you` is the side as the
+   page draws it, `row` your table row, `champion` the winning side ({name, crest, kit}). */
+function seasonHeroHtml({youChampion, you, row, teams, champion, finishLine}){
+  const ord = n => n + (['th','st','nd','rd'][(n % 100 - 20) % 10] || ['th','st','nd','rd'][n] || 'th');
+  const record = row ? `${row.won}W · ${row.lost}L${row.tied ? ' · ' + row.tied + 'T' : ''} · ${row.points} pts` : '';
+  const mark = (side, cls) => !side ? '' : side.crest
+    ? `<img class="${cls}" src="${side.crest}" alt="">` : side.kit ? kitBadge(side.kit, cls) : '';
+  if (youChampion){
+    return `<div class="hero champ" style="${you && you.kit ? kitStyle(you.kit) : ''}">
+      <div class="hero-trophy" aria-hidden="true">🏆</div>
+      ${mark(you, 'hero-mark')}
+      <div class="hero-title">Champions</div>
+      <div class="hero-name">${esc(you ? you.name : '')}</div>
+      <div class="hero-line">${esc(finishLine || '')}</div>
+      ${row ? `<div class="hero-record">${record}</div>` : ''}
+    </div>`;
+  }
+  return `<div class="hero">
+    ${row ? `<div class="hero-finish">
+      <div class="hero-pos">${ord(row.pos)}<span>of ${teams}</span></div>
+      <div class="hero-sub">${row.pos <= 4 ? 'Reached the playoffs' : 'Missed the playoffs'}</div>
+      <div class="hero-record">${record}</div>
+    </div>` : ''}
+    ${champion ? `<div class="hero-winner">
+      ${mark(champion, 'hero-winner-mark')}
+      <div><div class="hero-sub">Champions</div><div class="hero-winner-name">${esc(champion.name)}</div></div>
+    </div>` : ''}
   </div>`;
 }
 

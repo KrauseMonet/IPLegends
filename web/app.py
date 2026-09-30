@@ -497,6 +497,50 @@ class StandingOut(BaseModel):
     tied: int
     points: int
     nrr: float
+    # [A153] The IPL table's own For/Against: runs, and the overs they came in, with a
+    # side bowled out charged its full twenty -- the same figures NRR is computed from,
+    # so the two can never disagree.
+    runs_for: int = 0
+    overs_for: str = "0.0"
+    runs_against: int = 0
+    overs_against: str = "0.0"
+    form: list[str] = Field(default_factory=list, description="the side's last five "
+                            "league results, oldest first: 'W', 'L' or 'T'")
+
+
+FORM_LENGTH = 5
+
+
+def _overs(balls: int) -> str:
+    return f"{balls // 6}.{balls % 6}"
+
+
+def _standing_extras(s) -> dict:
+    """For/Against off a `game.season.Standing`, in the IPL's runs/overs form."""
+    return dict(runs_for=s.runs_for, overs_for=_overs(s.balls_for),
+                runs_against=s.runs_against, overs_against=_overs(s.balls_against))
+
+
+def _form_letter(won: bool | None) -> str:
+    return "T" if won is None else ("W" if won else "L")
+
+
+def _side_form(results, side) -> list[str]:
+    """A side's last FORM_LENGTH league results, oldest first, matched by IDENTITY --
+    `Side` has no `eq=False`, so two drawn sides that happen to compare equal must never
+    share a form line. Each side's own fixtures in the order they were played; the engine
+    schedules no global calendar, so this is the only order that means anything."""
+    mine = [r for r in results if r.home is side or r.away is side]
+    return [_form_letter(None if r.winner is None else r.winner is side)
+            for r in mine[-FORM_LENGTH:]]
+
+
+class CapSideOut(BaseModel):
+    """The side an Orange or Purple Cap winner did it for [A153]."""
+    team: str
+    crest: str | None = None
+    kit: KitOut | None = None
+    you: bool = False
 
 
 class SuperOverOut(BaseModel):
@@ -638,6 +682,12 @@ class SeasonProgressOut(BaseModel):
     orange_cap_runs: int | None = None
     purple_cap: str | None = None
     purple_cap_wickets: int | None = None
+    orange_cap_side: CapSideOut | None = None
+    purple_cap_side: CapSideOut | None = None
+    # [A153] EVERY playoff fixture, not only the ones you played -- `playoffs` above stays
+    # yours (the reveal and its scorecards index into it). A side that missed the top four
+    # used to get an empty "Playoffs" heading, when the playoffs happened all the same.
+    bracket: list[ResultOut] = Field(default_factory=list)
     # The squad-review screen's own overall number, carried through to the journey
     # card (etl.feasibility.team_rating) -- batting/bowling aren't needed again here,
     # only what the user asked the journey card to show.
@@ -866,6 +916,8 @@ class RoomMatchOut(BaseModel):
     orange_cap_runs: int | None = None
     purple_cap: str | None = None
     purple_cap_wickets: int | None = None
+    orange_cap_side: CapSideOut | None = None
+    purple_cap_side: CapSideOut | None = None
     # The squad-review screen's own overall number, carried through to the journey
     # card -- same field name and same meaning as solo's SeasonProgressOut.
     overall_rating: int | None = None
@@ -1550,7 +1602,8 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     table = [StandingOut(pos=i, name=s.side.name, short=s.side.short, you=s.side.you,
                          crest=_side_crest(s.side),
                          played=s.played, won=s.won, lost=s.lost, tied=s.tied,
-                         points=s.points, nrr=round(s.nrr, 3))
+                         points=s.points, nrr=round(s.nrr, 3),
+                         form=_side_form(season.results, s.side), **_standing_extras(s))
              for i, s in enumerate(season.table, 1)]
 
     pending: PendingTossOut | PendingImpactOut | None = None
@@ -1591,9 +1644,23 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
         orange_cap=leaders.top_scorer[0], orange_cap_runs=leaders.top_scorer[1],
         purple_cap=leaders.top_wicket_taker[0],
         purple_cap_wickets=leaders.top_wicket_taker[1],
+        orange_cap_side=_cap_side(leaders.top_scorer_side, yours),
+        purple_cap_side=_cap_side(leaders.top_wicket_taker_side, yours),
+        bracket=[_result_out(r, yours) for r in season.playoffs],
         overall_rating=rating.overall,
         squad=[_journey_entry(c, replay.stats) for c in all_twelve],
     )
+
+
+def _cap_side(side, yours=None, kits: dict | None = None) -> CapSideOut | None:
+    """The team line under a cap winner's name. `yours` marks the viewer's own side, which
+    the solo page draws with the player's own kit; `kits` is a room's, matched on the
+    monogram short a drafted room side plays under."""
+    if side is None:
+        return None
+    return CapSideOut(team=side.name, crest=_side_crest(side),
+                      kit=_kit_out(_kit_by_short(kits, side)) if kits else None,
+                      you=side is yours)
 
 
 def _replay_season_or_400(state: str, cursor: season_session.MoveCursor
@@ -3189,6 +3256,23 @@ def room_auction_twelve(code: str, body: RoomTwelveIn):
     return _auction_move(code, body.player_id, room_auction.twelve, body.order, body.impact)
 
 
+def _room_form(entries, pid: str) -> list[str]:
+    """A room seat's last FORM_LENGTH league results, oldest first -- matched by player
+    id through each entry's own home/away pids rather than by `Side` identity, because a
+    cached round-robin's entries (room_match._ROUND_ROBIN_CACHE) can hold Side objects
+    from an earlier replay than the table's. In the order the room revealed them."""
+    mine = [e for e in entries if e.stage == "league" and pid in (e.home_pid, e.away_pid)]
+    out = []
+    for e in mine[-FORM_LENGTH:]:
+        r = e.result
+        if r.winner is None:
+            out.append("T")
+        else:
+            winner_pid = e.home_pid if r.winner is r.home else e.away_pid
+            out.append(_form_letter(winner_pid == pid))
+    return out
+
+
 def _room_result_out(entry, player_id: str | None, kits: dict | None = None) -> RoomMatchResultOut:
     kits = kits or {}
     r = entry.result
@@ -3298,7 +3382,9 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
                              you=row.pid == player_id, played=row.standing.played,
                              won=row.standing.won, lost=row.standing.lost,
                              tied=row.standing.tied, points=row.standing.points,
-                             nrr=round(row.standing.nrr, 3))
+                             nrr=round(row.standing.nrr, 3),
+                             form=_room_form(replay.results, row.pid),
+                             **_standing_extras(row.standing))
                  for i, row in enumerate(replay.table, 1)]
 
     league_revealed = league_total = None
@@ -3353,6 +3439,8 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
         orange_cap_runs=leaders.top_scorer[1] if leaders else None,
         purple_cap=leaders.top_wicket_taker[0] if leaders else None,
         purple_cap_wickets=leaders.top_wicket_taker[1] if leaders else None,
+        orange_cap_side=_cap_side(leaders.top_scorer_side, kits=kits) if leaders else None,
+        purple_cap_side=_cap_side(leaders.top_wicket_taker_side, kits=kits) if leaders else None,
         overall_rating=rating.overall if rating else None,
         squad=squad,
     )

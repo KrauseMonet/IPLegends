@@ -54,8 +54,12 @@ function inningsTopBowler(inn){
 // already in hand (REVEAL.pending for solo, the match result's own home innings for a
 // room), never re-fetched. "Home always bats first" is enforced server-side (game/
 // season.py), so the prior innings is always the one already fully known.
-function startOverStepper(innings, stageText, onDone, priorContext){
+// `matchup` is {bat, bowl}, each {name, crest} -- who is batting and who is bowling this
+// innings, for the line above the score. A side with no crest (the player's own) shows the
+// gold star instead. Optional, so a caller without it still gets a working reveal.
+function startOverStepper(innings, stageText, onDone, priorContext, matchup){
   hideAllRevealScreens();
+  renderOverMatchup(matchup);
   OVER_STEP = {
     log: innings.over_log, i: 0, timer: null,
     speed: Number($('#overSpeedSelect').value) || 500,
@@ -66,6 +70,22 @@ function startOverStepper(innings, stageText, onDone, priorContext){
   $('#overStepper').classList.remove('hide');
   renderOverStep();
   if (OVER_STEP) scheduleNextOver();
+}
+
+// The batting side's crest leads and its colours tint the stepper (a `.crest-KEY` class on
+// #overStepper, read by the CSS); the bowling side sits smaller beside it.
+function renderOverMatchup(m){
+  const el = document.getElementById('overMatchup');
+  const panel = document.getElementById('overStepper');
+  if (!el || !panel) return;
+  panel.className = panel.className.replace(/\bcrest-[A-Z]+\b/g, '').trim();
+  if (!m){ el.innerHTML = ''; return; }
+  const cls = crestClass(m.bat.crest);
+  if (cls) panel.classList.add(cls);
+  const side = (s, role) => `<div class="om-side om-${role}">
+    ${s.crest ? `<img src="${s.crest}" alt="">` : '<span class="om-you">★</span>'}
+    <b>${s.name}</b><em>${role === 'bat' ? 'batting' : 'bowling'}</em></div>`;
+  el.innerHTML = side(m.bat, 'bat') + '<span class="om-v">v</span>' + side(m.bowl, 'bowl');
 }
 
 // Painted once, at the start of the reveal, and left alone -- unlike renderOverStep this

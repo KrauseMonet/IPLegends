@@ -561,12 +561,14 @@ class PendingTossOut(BaseModel):
     kind: Literal["toss"] = "toss"
     stage: str
     opponent: str
+    opponent_crest: str | None = None
 
 
 class PendingImpactOut(BaseModel):
     kind: Literal["impact"] = "impact"
     stage: str
     opponent: str
+    opponent_crest: str | None = None
     discipline: str = Field(description="'bat' | 'bowl' -- which of YOUR innings this "
                                          "affects (always your SECOND this match)")
     human_bats_first: bool
@@ -1027,6 +1029,7 @@ class PhaseBowlerOut(BaseModel):
     name: str
     person_id: str
     team: str = ""
+    crest: str | None = None
     overs: int
     runs: int
     wickets: int
@@ -1490,10 +1493,12 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
     pending: PendingTossOut | PendingImpactOut | None = None
     if replay.pending_kind == "toss":
         pending = PendingTossOut(stage=replay.pending_stage,
-                                  opponent=replay.pending_opponent.name)
+                                  opponent=replay.pending_opponent.name,
+                                  opponent_crest=_side_crest(replay.pending_opponent))
     elif replay.pending_kind == "impact":
         pending = PendingImpactOut(
             stage=replay.pending_stage, opponent=replay.pending_opponent.name,
+            opponent_crest=_side_crest(replay.pending_opponent),
             discipline=replay.pending_discipline,
             human_bats_first=replay.pending_human_bats_first,
             first_innings=_innings_out(replay.pending_first_innings),
@@ -1685,13 +1690,29 @@ def _split_out(s: analysis.InningsSplit) -> InningsSplitOut:
                            average=s.average, win_rate=s.win_rate)
 
 
-def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
+def _crests_by_short(results) -> dict[str, str]:
+    """side.short -> crest, for Season Analysis, whose rows name a side only by its short
+    label ("DD 2017"). A label shared by two sides with DIFFERENT crests maps to nothing:
+    showing either would put one side's crest on the other's figures."""
+    seen: dict[str, str | None] = {}
+    for r in results:
+        for side in (r.home, r.away):
+            crest = _side_crest(side)
+            if side.short in seen and seen[side.short] != crest:
+                seen[side.short] = None
+                continue
+            seen.setdefault(side.short, crest)
+    return {short: crest for short, crest in seen.items() if crest}
+
+
+def _analysis_out(a: analysis.SeasonAnalysis, results=()) -> AnalysisOut:
+    crests = _crests_by_short(results)
     bars = lambda ms: [OverBarOut(over=b.over, runs=b.runs, wickets=b.wickets,
                                   innings=b.innings, average_runs=b.average_runs,
                                   fours=b.fours, sixes=b.sixes)
                        for b in ms]
-    lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value,
-                                     detail=x.detail, team=x.team) for x in ls]
+    lead = lambda ls: [AnalysisLeaderOut(name=x.name, value=x.value, detail=x.detail,
+                                         team=x.team, crest=crests.get(x.team)) for x in ls]
     return AnalysisOut(
         fixtures=a.fixtures, innings=a.innings, overs_logged=a.overs_logged,
         phases=_phase_out(a.phases), your_phases=_phase_out(a.your_phases),
@@ -1699,10 +1720,12 @@ def _analysis_out(a: analysis.SeasonAnalysis) -> AnalysisOut:
         top_scorers=lead(a.top_scorers), top_wickets=lead(a.top_wickets),
         best_economy=lead(a.best_economy), best_strike=lead(a.best_strike),
         best_over=a.best_over, highest_innings=a.highest_innings,
-        death_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team, overs=b.overs,
+        death_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team,
+                                      crest=crests.get(b.team), overs=b.overs,
                                       runs=b.runs, wickets=b.wickets, economy=b.economy)
                        for b in a.death_bowlers],
-        powerplay_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team, overs=b.overs,
+        powerplay_bowlers=[PhaseBowlerOut(name=b.name, person_id=b.person_id, team=b.team,
+                                      crest=crests.get(b.team), overs=b.overs,
                                           runs=b.runs, wickets=b.wickets, economy=b.economy)
                            for b in a.powerplay_bowlers],
         bat_first=_split_out(a.bat_first), chasing=_split_out(a.chasing),
@@ -1733,7 +1756,8 @@ def season_analysis_route(state: str) -> AnalysisOut:
     if not replay.complete:
         raise HTTPException(status_code=409, detail="season not complete")
     s = replay.season
-    return _analysis_out(analysis.season_analysis(s.results + s.playoffs, track=replay.yours))
+    results = s.results + s.playoffs
+    return _analysis_out(analysis.season_analysis(results, track=replay.yours), results)
 
 
 @app.get("/api/twelve/{state}")
@@ -2532,9 +2556,13 @@ def _daily_match_out(play, scenario) -> dict:
     # From the innings themselves rather than from the margin: a margin is in the day's own
     # unit, and "balls to spare" being positive says nothing about who won.
     player_won = first.runs > second.runs if player_is_first else second.chased
+    # The player's own side is no single franchise, so only the opposition has a crest.
+    opposition = _fs_crest(scenario.opposition_fs_id)
     return {
         "stage": f"Daily · {scenario.stage}",
         "home": play.first_label, "away": play.second_label,
+        "home_crest": None if player_is_first else opposition,
+        "away_crest": opposition if player_is_first else None,
         "home_score": _score(first.runs, first.wickets),
         "away_score": _score(second.runs, second.wickets),
         "winner": (player_label if player_won else other_label)
@@ -2669,8 +2697,12 @@ def daily_teaser(response: Response) -> DailyTeaserOut:
 
 
 def _fs_crest(fs_id: int) -> str | None:
-    """The crest of one franchise-season in the deck, read off its own cards."""
-    squad = STATE["deck"].cards_by_fs.get(fs_id) or []
+    """The crest of one franchise-season in the deck, read off its own cards. None when
+    no deck is loaded: a crest is decoration and must never be what fails a response."""
+    deck = STATE.get("deck")
+    if deck is None or fs_id is None:
+        return None
+    squad = deck.cards_by_fs.get(fs_id) or []
     return crest_url(squad[0].franchise, squad[0].season_year) if squad else None
 
 
@@ -3219,8 +3251,8 @@ def room_analysis(code: str, player_id: str | None = None) -> AnalysisOut:
             track = e.result.away
         if track is not None:
             break
-    return _analysis_out(analysis.season_analysis(
-        [e.result for e in replay.results], track=track))
+    results = [e.result for e in replay.results]
+    return _analysis_out(analysis.season_analysis(results, track=track), results)
 
 
 @app.post("/api/rooms/{code}/save", response_model=SaveResultOut)

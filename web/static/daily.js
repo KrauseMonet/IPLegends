@@ -119,15 +119,18 @@ function dailyReveal(){
   window.scrollTo(0, 0);
 
   const steps = [];
-  if (m.home_innings) steps.push([m.home_innings, `${m.stage} · ${m.home} batting`, null]);
+  const home = {name: m.home, crest: m.home_crest}, away = {name: m.away, crest: m.away_crest};
+  if (m.home_innings) steps.push([m.home_innings, `${m.stage} · ${m.home} batting`, null,
+    {bat: home, bowl: away}]);
   if (m.away_innings) steps.push([m.away_innings, `${m.stage} · ${m.away} batting`,
-    m.home_innings ? {innings: m.home_innings, battingLabel: m.home} : null]);
+    m.home_innings ? {innings: m.home_innings, battingLabel: m.home} : null,
+    {bat: away, bowl: home}]);
 
   let i = 0;
   (function next(){
     if (i >= steps.length){ dailyFinishReveal(); return; }
-    const [innings, label, prior] = steps[i++];
-    startOverStepper(innings, label, next, prior);
+    const [innings, label, prior, matchup] = steps[i++];
+    startOverStepper(innings, label, next, prior, matchup);
   })();
 }
 

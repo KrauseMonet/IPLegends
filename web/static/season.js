@@ -215,15 +215,19 @@ function enterRevealStage(d){
     // you won it), so this is also where a match that skipped the toss screen entirely
     // first appears -- the first innings is already fully known, so it plays out
     // over-by-over before the break-time choice itself is shown.
+    const you = {name: 'Your eleven', crest: null};
+    const them = {name: d.pending.opponent, crest: d.pending.opponent_crest};
     startOverStepper(d.pending.first_innings,
       matchLabel(d.pending.stage, d.your_results.length + 1, d.matches_each),
-      () => showImpactScreen(d.pending));
+      () => showImpactScreen(d.pending), null,
+      d.pending.human_bats_first ? {bat: you, bowl: them} : {bat: them, bowl: you});
   }
 }
 
 function showTossScreen(pending){
   $('#tossStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
-  $('#tossOpponent').textContent = `v ${pending.opponent} -- you called it right.`;
+  $('#tossOpponent').innerHTML =
+    `${crestImg(pending.opponent_crest, 'toss-crest')}v ${pending.opponent} -- you called it right.`;
   $('#tossScreen').classList.remove('hide');
 }
 
@@ -276,9 +280,11 @@ async function submitImpact(slot, ctrl){
       // too, and gets its own over-by-over pass before the result is shown.
       const list = stage === 'league' ? d.your_results : d.playoffs;
       const match = list[list.length - 1];
+      const named = (short, crest) => ({name: short === 'YOU' ? 'Your eleven' : short, crest});
       startOverStepper(match.away_innings,
         matchLabel(stage, d.your_results.length, d.matches_each),
-        () => revealCompletedMatch(match, d), priorContext);
+        () => revealCompletedMatch(match, d), priorContext,
+        {bat: named(match.away, match.away_crest), bowl: named(match.home, match.home_crest)});
     } catch(e){ slip(e.message); }
   });
 }

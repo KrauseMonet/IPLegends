@@ -126,3 +126,17 @@ def test_flashback_withholds_a_crest_that_would_hint_at_the_year():
     assert crests.unambiguous_crest("Kings XI Punjab") is None
     assert crests.unambiguous_crest("Royal Challengers Bangalore") is None
     assert crests.unambiguous_crest("Delhi Daredevils") == crests.crest_url("Delhi Daredevils", 2010)
+
+
+def test_analysis_rows_get_a_crest_only_when_their_label_is_unambiguous():
+    # Season Analysis names a side by its short label alone, so the label is mapped back
+    # to a crest -- and a label two different crests share must map to neither.
+    from types import SimpleNamespace
+    from game.season import Side
+    from web.app import _crests_by_short
+    dd = Side("Delhi Daredevils 2012", "DD 2012", [], franchise="Delhi Daredevils", year=2012)
+    kx = Side("Kings XI Punjab 2014", "KXIP 2014", [], franchise="Kings XI Punjab", year=2014)
+    clash = Side("Kings XI Punjab 2021", "KXIP 2014", [], franchise="Kings XI Punjab", year=2021)
+    you = Side("Your eleven", "YOU", [], you=True)
+    got = _crests_by_short([SimpleNamespace(home=dd, away=kx), SimpleNamespace(home=you, away=clash)])
+    assert got == {"DD 2012": crests.crest_url("Delhi Daredevils", 2012)}

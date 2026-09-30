@@ -985,7 +985,8 @@ function roomEnterReveal(myMatch){
 
 function showRoomTossScreen(myMatch){
   $('#tossStage').textContent = myMatch.stage;
-  $('#tossOpponent').textContent = `${myMatch.a_name} v ${myMatch.b_name} -- elect to bat or bowl first.`;
+  $('#tossOpponent').innerHTML = `${crestImg(myMatch.a_crest, 'toss-crest')}${myMatch.a_name} v ${
+    crestImg(myMatch.b_crest, 'toss-crest')}${myMatch.b_name} -- elect to bat or bowl first.`;
   $('#tossScreen').classList.remove('hide');
 }
 
@@ -1011,17 +1012,20 @@ function roomStartReveal(myMatch){
   roomShowRevealSkips();
   const r = myMatch.result;
   const steps = [];
-  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`, null]);
+  const home = {name: r.home, crest: r.home_crest}, away = {name: r.away, crest: r.away_crest};
+  if (r.home_innings) steps.push([r.home_innings, `${myMatch.stage} · ${r.home} batting`, null,
+    {bat: home, bowl: away}]);
   // Built from r.home_innings/r.home directly, not steps[0] -- home always bats first in
   // this engine, but indexing into steps would attach the wrong innings as "prior" in the
   // (currently unreached) case where home_innings is ever absent.
   if (r.away_innings) steps.push([r.away_innings, `${myMatch.stage} · ${r.away} batting`,
-    r.home_innings ? { innings: r.home_innings, battingLabel: r.home } : null]);
+    r.home_innings ? { innings: r.home_innings, battingLabel: r.home } : null,
+    {bat: away, bowl: home}]);
   let i = 0;
   (function next(){
     if (i >= steps.length){ roomFinishReveal(myMatch); return; }
-    const [innings, label, priorContext] = steps[i++];
-    startOverStepper(innings, label, next, priorContext);
+    const [innings, label, priorContext, matchup] = steps[i++];
+    startOverStepper(innings, label, next, priorContext, matchup);
   })();
 }
 

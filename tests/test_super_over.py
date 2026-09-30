@@ -467,3 +467,4 @@ def test_a_daily_carries_its_super_over_through_to_the_scorecard():
 
 class _DailyScenario:
     stage = "Final"
+    opposition_fs_id = None      # every real Scenario names its opposition

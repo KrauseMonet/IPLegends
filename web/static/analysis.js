@@ -422,7 +422,7 @@ function phasePanel(title, sub, rows, kind){
     return `
     <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
       <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${r.name}</span>
+      <span class="an-lead-name">${crestImg(r.crest, 'lead-crest')}${r.name}</span>
       <span class="an-lead-value">${r.economy.toFixed(2)}</span>
       <span class="an-lead-sub">${teamTag(r.team)}${r.overs} ov · ${r.wickets}w</span>
     </div>`;

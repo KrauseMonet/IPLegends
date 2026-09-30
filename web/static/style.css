@@ -1407,22 +1407,6 @@ body{
 .an-lead-sr{border-top-color:var(--gold)}
 .an-lead-rating{border-top-color:#4aa8ff}
 
-/* --- Flashback: a guess-the-season round -------------------------------------------- */
-.fb-clues{list-style:none;margin:0 0 22px;padding:0;display:flex;flex-direction:column;gap:10px}
-.fb-clues li{font-family:var(--sans);font-size:14.5px;color:var(--ink-2);
-  padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.018)}
-.fb-clues b{color:var(--ink);font-weight:700}
-.fb-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
-.fb-choice{font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:.03em;
-  padding:16px 10px;border-radius:8px;border:1px solid var(--line-strong);
-  background:var(--panel-2);color:var(--ink);transition:border-color .15s,background .15s}
-.fb-choice:hover:not(:disabled){border-color:var(--gold);background:var(--panel-3)}
-.fb-choice:disabled{cursor:not-allowed}
-.fb-choice.correct{border-color:var(--mint);color:var(--mint);background:rgba(61,220,151,.1)}
-.fb-choice.wrong{border-color:var(--hot);color:var(--hot);background:rgba(255,74,53,.1);opacity:.7}
-.fb-verdict{font-family:var(--display);font-size:clamp(22px,3.4vw,32px);margin:20px 0 4px}
-.fb-verdict.good{color:var(--mint)}
-.fb-verdict.bad{color:var(--hot)}
 .an-lead-head{margin-bottom:10px}
 .an-lead-head b{display:block;font-family:var(--display);font-size:19px;text-transform:uppercase;
   letter-spacing:.02em;color:var(--ink);font-weight:400}
@@ -1960,7 +1944,6 @@ caption .row-crest{width:24px;height:22px;margin-right:8px;vertical-align:-6px}
 .lead-crest{width:22px;height:20px;object-fit:contain;margin-right:7px;vertical-align:-5px}
 #dailyCrest{display:flex;justify-content:center}
 .daily-crest{height:84px;width:auto;margin:6px 0 4px;filter:drop-shadow(0 10px 22px rgba(0,0,0,.5))}
-.fb-crest{height:40px;width:auto;margin-right:12px;vertical-align:-10px}
 /* The nav is sticky, so anything scrolled into view (a new auction lot, a reveal) must
    stop below it rather than underneath it. */
 html{scroll-padding-top:80px}
@@ -1987,3 +1970,116 @@ html{scroll-padding-top:80px}
 .om-v{font:400 22px var(--display);color:var(--ink-3)}
 #overStepper .report:not(#overPrior){border-top:3px solid var(--team,transparent)}
 .toss-crest{height:44px;width:auto;vertical-align:middle;margin-right:10px}
+
+/* --- Flashback: a ten-question quiz [A147] --------------------------------------------- */
+.qz{max-width:760px;margin:0 auto}
+.qz-lede{font-size:clamp(16px,2vw,19px);color:var(--ink-2);max-width:56ch;margin:6px 0 26px}
+.qz-challenge{border:1px solid var(--gold);border-radius:12px;padding:14px 18px;margin:0 0 24px;
+  background:rgba(245,184,61,.08);color:var(--ink)}
+.qz-challenge b{color:var(--gold-2)}
+.qz-rules{list-style:none;padding:0;margin:0 0 22px;display:flex;flex-wrap:wrap;gap:12px}
+.qz-rules li{flex:1 1 150px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+  background:rgba(255,255,255,.02)}
+.qz-rules b{display:block;font-family:var(--display);font-size:30px;line-height:1;color:var(--gold);
+  font-weight:400}
+.qz-rules span{font-size:13.5px;color:var(--ink-2)}
+.qz-best{font-family:var(--mono);font-size:13px;color:var(--ink-2);min-height:1em;margin-bottom:6px}
+.qz-best b{color:var(--gold-2)}
+.qz-go{font-size:16px;padding:15px 30px}
+
+.qz-play{padding-top:34px}
+.qz-hud{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}
+.qz-dots{display:flex;gap:6px;flex-wrap:wrap}
+.qz-dots i{width:22px;height:8px;border-radius:4px;background:var(--panel-3);transition:background .2s}
+.qz-dots i.now{background:var(--gold);box-shadow:0 0 10px rgba(245,184,61,.6)}
+.qz-dots i.right{background:var(--mint)}
+.qz-dots i.wrong{background:var(--hot)}
+.qz-score{display:flex;align-items:baseline;gap:8px;font-family:var(--mono)}
+.qz-score b{font-family:var(--display);font-weight:400;font-size:34px;line-height:1;color:var(--ink);
+  display:inline-block}
+.qz-score b.bump{animation:qzBump .45s ease}
+.qz-score i{font-style:normal;font-size:12px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.12em}
+.qz-streak{font-size:15px;color:var(--gold-2);font-weight:700}
+@keyframes qzBump{0%{transform:scale(1)}40%{transform:scale(1.25);color:var(--gold-2)}100%{transform:scale(1)}}
+.qz-timer{height:6px;border-radius:3px;background:var(--panel-3);overflow:hidden;margin-bottom:18px}
+.qz-timer i{display:block;height:100%;width:100%;border-radius:3px;
+  background:linear-gradient(90deg,var(--gold),var(--gold-2));transition:width .08s linear}
+.qz-timer i.urgent{background:var(--hot);animation:qzPulse .6s ease-in-out infinite alternate}
+@keyframes qzPulse{from{opacity:1}to{opacity:.55}}
+
+.qz-card{border:1px solid var(--line);border-radius:16px;padding:26px 26px 24px;
+  background:linear-gradient(180deg,var(--panel),rgba(13,28,58,.55))}
+.qz-card.enter{animation:qzEnter .35s ease}
+@keyframes qzEnter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.qz-num{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:10px}
+.qz-q{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.qz-crest{height:54px;width:auto;flex:none;filter:drop-shadow(0 6px 14px rgba(0,0,0,.45))}
+.qz-q h2{margin:0;font-family:var(--display);font-weight:400;font-size:clamp(24px,3.6vw,34px);
+  line-height:1.08;letter-spacing:.005em}
+.qz-clues{list-style:none;margin:0 0 18px;padding:0;display:flex;flex-direction:column;gap:8px}
+.qz-clues li{font-size:15px;color:var(--ink);padding:10px 14px;border-left:3px solid var(--gold);
+  background:rgba(255,255,255,.03);border-radius:0 8px 8px 0}
+.qz-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.qz-opt{display:flex;align-items:center;gap:10px;text-align:left;min-height:62px;
+  padding:12px 14px;border-radius:10px;border:1px solid var(--line-strong);background:var(--panel-2);
+  color:var(--ink);font:inherit;font-size:15.5px;font-weight:650;cursor:pointer;flex-wrap:wrap;
+  transition:border-color .15s,background .15s,transform .1s}
+.qz-opt:hover:not(:disabled){border-color:var(--gold);background:var(--panel-3);transform:translateY(-1px)}
+.qz-opt:disabled{cursor:default}
+.qz-opt kbd{font-family:var(--mono);font-size:11px;color:var(--ink-3);border:1px solid var(--line);
+  border-radius:4px;padding:1px 6px;flex:none}
+.qz-opt-crest{height:26px;width:auto;flex:none}
+.qz-opt-label{flex:1 1 auto;min-width:0}
+.qz-opt-detail{flex-basis:100%;font-family:var(--mono);font-size:12.5px;font-weight:500;
+  color:var(--ink-2);padding-left:32px}
+.qz-opt-detail:empty{display:none}
+.qz-opt.correct{border-color:var(--mint);background:rgba(61,220,151,.13);animation:qzRight .4s ease}
+.qz-opt.correct .qz-opt-detail{color:var(--mint)}
+.qz-opt.wrong{border-color:var(--hot);background:rgba(255,74,53,.12);animation:qzWrong .35s ease}
+.qz-opt.dim{opacity:.55}
+@keyframes qzRight{50%{transform:scale(1.03)}}
+@keyframes qzWrong{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+.qz-after{margin-top:20px;animation:qzEnter .3s ease}
+.qz-verdict{font-family:var(--display);font-size:clamp(26px,4vw,36px);line-height:1}
+.qz-verdict.good{color:var(--mint)}
+.qz-verdict.bad{color:var(--hot)}
+.qz-pop{display:inline-block;font-size:.7em;color:var(--gold-2);margin-left:8px;animation:qzPop .6s ease}
+@keyframes qzPop{from{opacity:0;transform:translateY(8px) scale(.8)}to{opacity:1;transform:none}}
+.qz-reveal{color:var(--ink-2);margin:8px 0 16px}
+.qz-keys{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);text-align:center;margin-top:14px}
+
+.qz-done{padding-top:40px}
+.qz-over{font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--gold)}
+.qz-title{font-family:var(--display);font-size:clamp(46px,8vw,84px);line-height:.95;margin:8px 0 4px;
+  background:linear-gradient(180deg,var(--gold-2),var(--gold));-webkit-background-clip:text;
+  background-clip:text;color:transparent;animation:qzEnter .5s ease}
+.qz-final{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
+.qz-final b{font-family:var(--display);font-weight:400;font-size:clamp(40px,6vw,56px);line-height:1}
+.qz-final span{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-3)}
+.qz-grid{font-size:24px;letter-spacing:2px;margin-bottom:10px}
+.qz-stats{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--ink-2);font-size:14.5px;margin-bottom:14px}
+.qz-stats b{color:var(--ink)}
+.qz-newbest{color:var(--gold-2);font-weight:700}
+.qz-vs{border-radius:10px;padding:12px 16px;margin-bottom:10px;border:1px solid var(--line);font-weight:650}
+.qz-vs.good{border-color:var(--mint);color:var(--mint);background:rgba(61,220,151,.08)}
+.qz-vs.bad{border-color:var(--hot);color:var(--hot);background:rgba(255,74,53,.08)}
+.qz-review{margin-top:26px}
+.qz-review ol{margin:0;padding:0 20px 18px 40px;display:flex;flex-direction:column;gap:14px}
+.qz-review li{padding-left:6px}
+.qz-review li.right::marker{color:var(--mint)}
+.qz-review li.wrong::marker{color:var(--hot)}
+.qz-rv-q{font-weight:650}
+.qz-rv-a{font-size:14.5px;color:var(--ink)}
+.qz-rv-a span{color:var(--hot)}
+.qz-rv-why{font-size:13.5px;color:var(--ink-2)}
+@media (max-width:640px){
+  .qz-options{grid-template-columns:1fr}
+  .qz-options.two{grid-template-columns:1fr}
+  .qz-card{padding:20px 16px 18px}
+  .qz-crest{height:42px}
+  .qz-opt{min-height:54px}
+  .qz-keys{display:none}
+  .qz-dots i{width:16px}
+}
+.qz-q > span:empty{display:none}

@@ -94,6 +94,45 @@ async function roomApi(path, opts){
   }
   return body;
 }
+
+// [A146] A live move -- a pick, a bid, a pass. Three things the plain fetch did not do,
+// and each was a way a move the player made simply did not happen:
+//  * It gives up after ROOM_MOVE_TIMEOUT_MS, not the page-load 15s: a 15-second lot cannot
+//    afford a request that hangs for all of it.
+//  * With `retry`, a request that never got an answer (a timeout, a dropped connection, a
+//    503 while the room was busy) is sent once more. That is only safe because every
+//    retried move names what it was about -- a pick its pick count, a bid its lot and
+//    price -- so a repeat of a move that DID land is refused or ignored, never doubled.
+//    And a refusal of the retry is exactly that case, so it is treated as success.
+//  * A 409 refusal now carries the room as it really is, which is applied at once, so the
+//    screen shows why ("outbid", "that lot has closed") instead of the stale state the
+//    player clicked against sitting there until the next poll.
+const ROOM_MOVE_TIMEOUT_MS = 7000;
+async function roomPost(path, payload, retry){
+  const opts = {method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({player_id: MY_PID, ...payload}),
+                timeoutMs: ROOM_MOVE_TIMEOUT_MS};
+  for (let attempt = 0; ; attempt++){
+    try {
+      return await roomApi(path, opts);
+    } catch(e){
+      const room = e.status === 409 && e.body && e.body.room;
+      if (room){
+        applyRoom(room);
+        if (attempt > 0) return room;     // the first attempt landed after all
+        e.room = room;
+        throw e;
+      }
+      const transient = e.timeout || e.status === 503 || e.status === undefined;
+      if (retry && transient && attempt === 0){
+        await new Promise(r => setTimeout(r, 400));
+        continue;
+      }
+      if (transient) pollRoom(true);      // show where the room really is meanwhile
+      throw e;
+    }
+  }
+}
 // Whose squad the "Batting order" column shows during someone else's turn: false = the
 // active player's (the default), true = my own. Resets whenever the active player changes
 // so a stale choice doesn't linger into the next person's turn.
@@ -244,15 +283,16 @@ function enterRoom(code, playerId){
   // states until it happened to climb past it.
   ROOM_VERSION_SEEN = -1;
   ROOM_POLL_FAILS = 0;
+  ROOM_POLL_INFLIGHT = false; ROOM_POLL_STARTED = 0;
   ROOM_TIMER_BASE = null;
   // Re-measured per room rather than kept for the tab's lifetime: the best-RTT sample is
   // sticky by design, and a lucky sample from an earlier session is not evidence about
   // this one (the device may have changed network entirely between the two).
   ROOM_CLOCK_OFFSET = 0; ROOM_CLOCK_BEST_RTT = Infinity;
   go('room');
-  pollRoom();
+  pollRoom(true);
   if (ROOM_POLL) clearInterval(ROOM_POLL);
-  ROOM_POLL = setInterval(pollRoom, 2000);
+  ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
   if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
   ROOM_TIMER_TICK = setInterval(tickRoomTimer, 1000);
   watchRoomVisibility();
@@ -278,8 +318,8 @@ function watchRoomVisibility(){
       // Not on a FAILED room: `renderRoomFailed` stops polling deliberately, and there
       // is nothing further to learn about a room that has stranded. Every other status
       // resumes, 'complete' included -- the match phase polls on this same interval.
-      pollRoom();
-      ROOM_POLL = setInterval(pollRoom, 2000);
+      pollRoom(true);
+      ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
       // The countdown is derived from the server's own clock rather than counted down
       // locally, so it needs no catch-up of its own here -- re-rendering it is enough,
       // and it will already show the correct (probably expired) value.
@@ -288,7 +328,7 @@ function watchRoomVisibility(){
   });
   // A phone waking or a network coming back does not always fire visibilitychange, and
   // a poll that fires while offline fails silently and waits a full interval to retry.
-  window.addEventListener('online', () => { if (ROOM_CODE) pollRoom(); });
+  window.addEventListener('online', () => { if (ROOM_CODE) pollRoom(true); });
 }
 
 // Apply a room payload only if it is NEWER than whatever we last applied. Returns
@@ -316,13 +356,43 @@ function applyRoom(room){
   return true;
 }
 
-async function pollRoom(){
+// [A146] Polling ticks every second but only fetches every second while a clock is live
+// (a draft turn, a lot on the floor) -- everywhere else every two, as before. A second
+// matters there: an opponent's bid seen two seconds late was a bid answered against a
+// stale price, and a turn noticed two seconds late was two seconds off a 15-second clock.
+//
+// And never more than one poll in flight. A poll used to fire every interval whether or
+// not the last had answered, so a slow moment -- a cold server, a phone on a weak signal
+// -- stacked requests on top of each other, each one making the next slower: exactly the
+// moment a room felt stuck. A poll that has had no answer for ROOM_POLL_STUCK_MS is given
+// up on, so one lost request can never stop polling altogether.
+const ROOM_POLL_TICK_MS = 1000, ROOM_POLL_IDLE_MS = 2000, ROOM_POLL_STUCK_MS = 8000;
+let ROOM_POLL_STARTED = 0, ROOM_POLL_INFLIGHT = false;
+function roomClockLive(){
+  return !!ROOM && (ROOM.status === 'drafting' || ROOM.status === 'auctioning');
+}
+
+// `now` skips the idle-phase spacing (not the in-flight guard): a tab coming back, the
+// network returning, a move that failed -- each wants the room immediately.
+async function pollRoom(now){
   if (!ROOM_CODE) return;
+  const since = Date.now() - ROOM_POLL_STARTED;
+  if (ROOM_POLL_INFLIGHT && since < ROOM_POLL_STUCK_MS) return;
+  if (now !== true && !roomClockLive() && since < ROOM_POLL_IDLE_MS - 100) return;
+  ROOM_POLL_INFLIGHT = true;
+  ROOM_POLL_STARTED = Date.now();
+  const started = ROOM_POLL_STARTED;
+  try { await pollRoomNow(); }
+  finally { if (ROOM_POLL_STARTED === started) ROOM_POLL_INFLIGHT = false; }
+}
+
+async function pollRoomNow(){
   const myGen = ROOM_GEN;   // a mutation started after this poll was issued supersedes it
   try {
     // player_id identifies the caller so the server knows whose options (if anyone's)
     // to include -- only the currently active seat's own caller ever sees them.
-    const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
+    const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID),
+                               {timeoutMs: ROOM_POLL_STUCK_MS});
     if (myGen !== ROOM_GEN) return;
     if (!applyRoom(room)) return;     // an older read than one already applied
     roomOnline(true);
@@ -425,23 +495,25 @@ function roomOpenPickSheet(me){
     name: card.name,
     status: `${me.picks_made} of 12 chosen` + (cap ? ` · ${overseas} of ${cap} overseas` : ''),
     slots,
-    onChoose: slot => roomSubmitPick(index, slot, null),
+    onChoose: slot => roomSubmitPick(index, slot, null, ROOM_PENDING && ROOM_PENDING.at),
     onCancel: () => { ROOM_PENDING = null; renderRoom(); },
   });
 }
 
 function roomRowClick(slot, ctrl){
   if (!ROOM_PENDING) return;
-  roomSubmitPick(ROOM_PENDING.index, slot, ctrl);
+  roomSubmitPick(ROOM_PENDING.index, slot, ctrl, ROOM_PENDING.at);
 }
 
-async function roomSubmitPick(index, slot, ctrl){
+// `at` is this seat's pick count when the card was chosen [A146]: the server refuses the
+// pick if the clock has since picked for this seat, rather than applying the index to a
+// fresh deal the player never saw.
+async function roomSubmitPick(index, slot, ctrl, at){
   await busyClick(ctrl, 'Taking…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await roomApi(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({player_id: MY_PID, index, slot})});
+      const room = await roomPost(`/api/rooms/${ROOM_CODE}/pick`,
+        {index, slot, picks_made: (typeof at === 'number') ? at : null}, true);
       if (myGen !== ROOM_GEN) return;
       applyRoom(room);
       // Cleared unconditionally, not only when applyRoom accepted: the selection this
@@ -449,7 +521,10 @@ async function roomSubmitPick(index, slot, ctrl){
       // resubmit an index against a deal the server has already moved past.
       ROOM_PENDING = null;
       renderRoom();
-    } catch(e){ slip(e.message); }
+    } catch(e){
+      if (e.room){ ROOM_PENDING = null; renderRoom(); }
+      slip(e.message);
+    }
   });
 }
 
@@ -533,32 +608,62 @@ async function chooseRoomFranchise(short, ctrl){
   });
 }
 
-// auction.js draws the floor; this only feeds it. Updates are chained so an exchange that
-// is still animating is never cut off by the next poll's -- they play one after another.
-let AUCTION_CHAIN = Promise.resolve();
+// auction.js draws the floor; this only feeds it. An exchange that is still animating is
+// never cut off by the next update -- but updates are COALESCED rather than queued [A146].
+// Each exchange takes ~2s to play and polls arrive every second, so a queue of them fell
+// further behind the real room with every opponent bid: the floor showed a price seconds
+// old, a bid against it came back "outbid", and the room looked frozen. Now only the
+// newest view waits; when the current animation ends it plays straight to that one, the
+// bids in between compressed into the same couple of seconds.
+let AUCTION_NEXT = null, AUCTION_DRAIN = null;
 let AUCTION_SEEN = 0;
+function queueAuctionView(view){
+  AUCTION_NEXT = view;
+  if (!AUCTION_DRAIN){
+    AUCTION_DRAIN = (async () => {
+      try {
+        while (AUCTION_NEXT){
+          const v = AUCTION_NEXT;
+          AUCTION_NEXT = null;
+          try { await apply(v, !!A); } catch(e){ slip(e.message); }
+        }
+      } finally { AUCTION_DRAIN = null; }
+    })();
+  }
+  return AUCTION_DRAIN;
+}
 function renderRoomAuction(r){
   if (!r.auction || r.version <= AUCTION_SEEN) return;
   AUCTION_SEEN = r.version;
-  const view = r.auction, first = !A;
-  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, !first)).catch(e => slip(e.message));
+  queueAuctionView(r.auction);
 }
+
+// Only these are retried: each names its lot, so a repeat can never land on another one.
+const AUCTION_RETRYABLE = new Set(['bid', 'limit', 'pass']);
 
 // The two hooks auction.js calls in room mode.
 window.roomAuctionPost = async (path, body) => {
   const myGen = ++ROOM_GEN;
-  const room = await roomApi(`/api/rooms/${ROOM_CODE}/auction/${path}`, {method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: MY_PID, ...body})});
+  let room;
+  try {
+    room = await roomPost(`/api/rooms/${ROOM_CODE}/auction/${path}`, body,
+                          AUCTION_RETRYABLE.has(path));
+  } catch(e){
+    // A refusal carries the room as it now is: draw it before the message shows, so
+    // "outbid" arrives with the new price already on the floor.
+    if (e.room && myGen === ROOM_GEN){
+      AUCTION_SEEN = Math.max(AUCTION_SEEN, e.room.version);
+      if (e.room.status === 'auctioning' && e.room.auction) await queueAuctionView(e.room.auction);
+      else renderRoom();
+    }
+    throw e;
+  }
   if (myGen !== ROOM_GEN) return null;
-  applyRoom(room);
   AUCTION_SEEN = Math.max(AUCTION_SEEN, room.version);
   if (room.status !== 'auctioning'){ renderRoom(); return null; }
-  // Through the same chain as a poll's update, so your own exchange never plays over the
-  // top of one still animating. Returns null: the chain has already drawn it.
-  const view = room.auction;
-  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, true)).catch(e => slip(e.message));
-  await AUCTION_CHAIN;
+  // Through the same queue as a poll's update, so your own exchange never plays over the
+  // top of one still animating. Returns null: the queue has already drawn it.
+  await queueAuctionView(room.auction);
   return null;
 };
 window.roomAuctionDeadline = () => (ROOM ? ROOM.turn_started_at - serverClock() : 0);

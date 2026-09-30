@@ -27,14 +27,18 @@ let API_HEADERS = {};
 
 async function api(path, opts){
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  // `timeoutMs` lets a live move (a bid, a pick) give up sooner than a page load would,
+  // so it can be retried while its clock is still running [A146].
+  const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || API_TIMEOUT_MS);
   let r;
   try {
     r = await fetch(path, {...opts, headers: {...API_HEADERS, ...(opts && opts.headers)},
                            signal: ctrl.signal});
   } catch(e){
     if (e.name === 'AbortError'){
-      throw new Error('That took too long to respond -- the server may be busy. Try again.');
+      const err = new Error('That took too long to respond -- the server may be busy. Try again.');
+      err.timeout = true;
+      throw err;
     }
     throw e;
   } finally {
@@ -47,6 +51,8 @@ async function api(path, opts){
     // from "the server is busy" or a transient network blip, without parsing prose.
     const err = new Error(body.detail || r.statusText);
     err.status = r.status;
+    // The whole body too: a room's 409 carries the room as it now is [A146].
+    err.body = body;
     throw err;
   }
   return body;

@@ -1782,8 +1782,8 @@ body{
   color:var(--stamp);border:6px solid var(--stamp);border-radius:14px;padding:4px 22px 0;
   transform:rotate(-9deg);letter-spacing:.04em;text-shadow:0 0 30px rgba(0,0,0,.4)}
 .auc-stamp span{font-family:var(--mono);font-size:20px;font-weight:700;display:flex;gap:10px;align-items:center}
-.auc-stamp.go b{animation:stampIn .38s cubic-bezier(.2,1.6,.4,1) both}
-.auc-stamp.go span{animation:fadeUp .4s .25s ease-out both}
+.auc-stamp.on b{animation:stampIn .38s cubic-bezier(.2,1.6,.4,1) both}
+.auc-stamp.on span{animation:fadeUp .4s .25s ease-out both}
 @keyframes stampIn{from{transform:rotate(-9deg) scale(2.6);opacity:0}to{transform:rotate(-9deg) scale(1);opacity:1}}
 @keyframes fadeUp{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
 
@@ -2461,4 +2461,85 @@ html{scroll-padding-top:80px}
 }
 @media (prefers-reduced-motion:reduce){
   .auc-bidbox.lead-flash::before,.auc-trail-bid.new,.auc-team.bid-flash,.auc-slot.filled.new{animation:none}
+}
+
+/* --- the auction: the lot card and the sets [A156] ------------------------------------------
+   Every overlay here has no pointer events and waits on nothing, so none of it slows a lot. */
+.auc-card{position:relative}
+.auc-card > *:not(.auc-card-wm){position:relative}
+/* The season's crest, large and faint behind the player, with its colour washing the card. */
+.auc-card::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(520px 260px at 100% 100%,color-mix(in srgb,var(--team,transparent) 20%,transparent),transparent 70%)}
+.auc-card-wm{position:absolute;right:-26px;bottom:-40px;height:250px;width:auto;max-width:60%;
+  object-fit:contain;opacity:.13;pointer-events:none;filter:saturate(1.2)}
+
+/* The auctioneer's closing words, and the stage's border pulsing with them. */
+.auc-stage.closing{animation:stagePulse 1s ease-in-out infinite}
+@keyframes stagePulse{50%{border-color:var(--hot);box-shadow:0 0 0 1px var(--hot),0 0 26px rgba(255,74,53,.25)}}
+/* Bottom right, over the base-price row: never over the name the room is bidding on. */
+.auc-closing{position:absolute;bottom:14px;right:16px;pointer-events:none;
+  font-family:var(--display);font-size:clamp(18px,2.6vw,26px);letter-spacing:.06em;text-transform:uppercase;
+  color:#fff;background:var(--hot);padding:4px 14px 2px;border-radius:6px;white-space:nowrap;
+  box-shadow:0 8px 24px rgba(255,74,53,.35);opacity:0}
+.auc-closing:empty{display:none}
+.auc-closing.on{animation:closingIn .35s ease-out both}
+@keyframes closingIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+
+/* The gavel: one jolt, and a record sale says so. */
+.auc-stage.gavel{animation:gavel .32s cubic-bezier(.3,1.8,.5,1)}
+@keyframes gavel{0%{transform:translateY(0)}25%{transform:translateY(5px) rotate(-.3deg)}
+  55%{transform:translateY(-2px) rotate(.2deg)}100%{transform:none}}
+.auc-record{font-style:normal;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.2em;
+  text-transform:uppercase;color:#1a1204;background:linear-gradient(180deg,var(--gold-2),var(--gold));
+  padding:5px 12px;border-radius:5px;box-shadow:0 6px 22px rgba(245,184,61,.35)}
+.auc-stamp.on .auc-record{animation:fadeUp .35s .2s ease-out both}
+
+/* A buy of your own bursts outwards in your colours. */
+.auc-burst{position:absolute;left:50%;top:50%;width:0;height:0;pointer-events:none}
+.auc-burst i{position:absolute;left:-5px;top:-5px;width:10px;height:10px;border-radius:2px;
+  background:var(--team,var(--gold));opacity:0;
+  animation:burst .95s var(--delay) cubic-bezier(.15,.7,.3,1) forwards}
+.auc-burst i.alt{background:var(--gold-2);border-radius:50%;width:8px;height:8px}
+@keyframes burst{
+  0%{opacity:1;transform:rotate(var(--a)) translateX(0) scale(1)}
+  70%{opacity:1}
+  100%{opacity:0;transform:rotate(var(--a)) translateX(var(--d)) scale(.4)}}
+
+/* A set opens: a broadcast title card for a second, then the first lot underneath. */
+.auc-setcard{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;text-align:center;pointer-events:none;opacity:0;padding:0 18px;
+  background:linear-gradient(90deg,rgba(5,11,26,.2),rgba(5,11,26,.94) 18%,rgba(5,11,26,.94) 82%,rgba(5,11,26,.2))}
+.auc-setcard em{font-style:normal;font-family:var(--mono);font-size:11px;letter-spacing:.3em;
+  text-transform:uppercase;color:var(--gold)}
+.auc-setcard b{font-family:var(--display);font-weight:400;font-size:clamp(34px,6vw,60px);line-height:1;
+  text-transform:uppercase;color:#fff}
+.auc-setcard span{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.auc-setcard b::after{content:"";display:block;height:3px;width:60%;margin:10px auto 0;
+  background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.auc-setcard.accel{background:linear-gradient(90deg,rgba(26,5,8,.2),rgba(26,6,10,.95) 18%,rgba(26,6,10,.95) 82%,rgba(26,5,8,.2))}
+.auc-setcard.accel em{color:var(--red-2)}
+.auc-setcard.accel b::after{background:linear-gradient(90deg,transparent,var(--hot),transparent)}
+.auc-setcard.on{animation:setCard 1.25s ease-in-out both}
+.auc-setcard.on b{animation:setSweep 1.25s ease-out both}
+@keyframes setCard{0%{opacity:0}14%{opacity:1}72%{opacity:1}100%{opacity:0}}
+@keyframes setSweep{0%{transform:translateX(-24px);opacity:0}20%{transform:none;opacity:1}100%{transform:translateX(8px)}}
+
+/* Still to come, as chips rather than a run of names. */
+.auc-upnext > span{display:block;margin-bottom:6px}
+.auc-up-chips{display:flex;flex-wrap:wrap;gap:5px}
+.auc-up{font-style:normal;font-size:12px;color:var(--ink-2);background:var(--panel);
+  border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.auc-up.more{color:var(--ink-3);border-style:dashed}
+
+@media (max-width:900px){
+  /* The phone rule above stretches every .act.minor in the bid box; the limit's − and +
+     must not, or they squeeze the limit itself onto two lines. */
+  .auc-limit .act.minor{flex:0 0 auto}
+  .auc-card-wm{height:180px;right:-20px;bottom:-30px}
+  .auc-up{font-size:11.5px;padding:2px 9px}
+}
+@media (prefers-reduced-motion:reduce){
+  .auc-stage.closing,.auc-stage.gavel,.auc-setcard.on b,.auc-closing.on{animation:none}
+  .auc-closing{opacity:1}
+  .auc-burst{display:none}
 }

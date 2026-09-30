@@ -147,6 +147,7 @@ async function apply(d, animate){
   else if (d.phase === 'bid' || isRtm(d.phase) || d.phase === 'rtm_watch'){
     const entering = $('#aucFloor').classList.contains('hide');
     show('aucFloor'); renderFloor();
+    if (d.phase === 'bid' && opensSet(prev, d)) showSetCard(d.lot);
     // On a phone the masthead fills the first screen; bring the lot itself into view.
     if (entering && STACKED_DRAFT.matches) $('.auc-lotbar').scrollIntoView({block: 'start'});
     if (isRtm(d.phase)) openRtm();
@@ -172,7 +173,7 @@ function isRtm(phase){ return phase === 'rtm_use' || phase === 'rtm_match' || ph
 // A lot still being decided (use -> match) is not in `recent` yet, so nothing stamps early.
 async function stampAfterRtm(prev, next){
   const sale = next.recent.find(s => s.lot === prev.lot.lot && s.round === prev.lot.round);
-  if (sale) await stamp(sale);
+  if (sale) await stamp(sale, isRecord(sale, prev));
 }
 
 async function animateFrom(prev, next){
@@ -192,7 +193,7 @@ async function animateFrom(prev, next){
   }
   const fresh = bids.slice(prev.bids.length);
   await playBids(fresh, bids.slice(0, prev.bids.length));
-  if (sale) await stamp(sale);
+  if (sale) await stamp(sale, isRecord(sale, prev));
   else if (stillOpen && fresh.length) announceBid(next.leader, next.price);
 }
 
@@ -313,13 +314,14 @@ function markRoom(bids, bidder, flash){
   });
 }
 
-async function stamp(sale){
+async function stamp(sale, record){
   const el = $('#aucStamp');
   if (sale.team){
     const rtm = sale.rtm_holder
       ? `<em>${sale.rtm_matched ? 'Right to Match · ' + sale.rtm_holder + ' took him back'
                                  : sale.rtm_holder + ' played a card and did not match'}</em>` : '';
-    el.innerHTML = `<b>SOLD</b><span>${chip(sale.team)} ${cr(sale.price)}</span>${rtm}`;
+    const top = record ? '<i class="auc-record">Most expensive so far</i>' : '';
+    el.innerHTML = `${top}<b>SOLD</b><span>${chip(sale.team)} ${cr(sale.price)}</span>${rtm}`;
     // The stamp takes the buyer's colour through its class, like every other team surface.
     el.className = el.className.replace(/\bcrest-[A-Z]+\b/g, '').trim();
     el.classList.add('crest-' + sale.team);
@@ -330,11 +332,95 @@ async function stamp(sale){
     el.style.setProperty('--stamp', '#8a96b0');
     el.classList.add('unsold');
   }
-  el.classList.remove('hide', 'go'); void el.offsetWidth; el.classList.add('go');
+  el.classList.remove('hide', 'on'); void el.offsetWidth; el.classList.add('on');
+  clearClosing();
+  // The gavel lands: the stage jolts once, and a buy of your own bursts in your colours.
+  const stage = $('#aucStage');
+  stage.classList.remove('gavel'); void stage.offsetWidth; stage.classList.add('gavel');
+  if (sale.team && sale.team === (A && A.you)) burst(sale.team);
   play(sale.team ? 'sold' : 'unsold', sale.team === (A && A.you));
   announceSale(sale);
   await sleep(sale.team === (A && A.you) ? 1700 : 1150);
   el.classList.add('hide');
+}
+
+
+// --- the lot card and the sets [A156] --------------------------------------------------------
+//
+// Presentation only, like A155: none of this waits on anything or delays a lot. The set card
+// and the burst sit over the stage with no pointer events, so the floor stays usable under
+// them, and the countdown runs on regardless.
+
+// The auctioneer's closing words on screen as well as spoken, in the same order (CLOSING).
+const CLOSING_SHOWN = {3: 'Fair warning', 2: 'Going once', 1: 'Going twice'};
+function stageOverlay(id, cls){
+  let el = $('#' + id);
+  if (!el){
+    // Built here: auction.html and room.html each carry their own copy of the stage.
+    el = document.createElement('div');
+    el.id = id;
+    el.className = cls;
+    $('#aucStage').append(el);
+  }
+  return el;
+}
+function showClosing(whole){
+  const el = stageOverlay('aucClosing', 'auc-closing');
+  el.textContent = CLOSING_SHOWN[whole] || '';
+  // Not `go`: that is the site's full-width button class, and it stretched this banner.
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  $('#aucStage').classList.add('closing');
+}
+function clearClosing(){
+  const el = $('#aucClosing');
+  if (el){ el.textContent = ''; el.classList.remove('on'); }
+  const stage = $('#aucStage');
+  if (stage) stage.classList.remove('closing');
+}
+
+// A record beats every sale before it -- equalling the old record is not a new one. Compared
+// with `prev` alone: the sale being stamped is the first to resolve after `prev`, while
+// `next.top_price` may already include later lots (skipping a set resolves the whole set in
+// one response), which would wrongly deny this one its record.
+function isRecord(sale, prev){
+  return !!(sale.team && (prev.top_price == null || sale.price > prev.top_price));
+}
+
+const BURST_PIECES = 22;
+function burst(short){
+  const stage = $('#aucStage');
+  const el = document.createElement('div');
+  el.className = 'auc-burst crest-' + short;
+  let html = '';
+  for (let i = 0; i < BURST_PIECES; i++){
+    const angle = (360 / BURST_PIECES) * i + (i % 3) * 7;
+    const dist = 110 + (i % 4) * 38;
+    html += `<i style="--a:${angle}deg;--d:${dist}px;--delay:${(i % 5) * 18}ms"${i % 2 ? ' class="alt"' : ''}></i>`;
+  }
+  el.innerHTML = html;
+  stage.append(el);
+  setTimeout(() => el.remove(), 1400);
+}
+
+// A new set opens: on moving from one set (or round) to the next, and on the first lot of
+// an auction reached from setup or retentions. A reload in the middle of a set shows none.
+function opensSet(prev, d){
+  const lot = d.lot;
+  if (!lot) return false;
+  if (prev && prev.lot && prev.phase !== 'retain')
+    return prev.lot.set_code !== lot.set_code || prev.lot.round !== lot.round;
+  return lot.lot === 0 && (!prev || prev.phase === 'retain' || !prev.lot);
+}
+
+function showSetCard(lot){
+  const accelerated = lot.round === 'accelerated';
+  const el = stageOverlay('aucSetCard', 'auc-setcard');
+  const count = lot.upcoming.length + 1;
+  el.classList.toggle('accel', accelerated);
+  el.innerHTML = accelerated
+    ? `<em>Accelerated round</em><b>The unsold, again</b><span>Every unsold player comes up once more</span>`
+    : `<em>Now opening</em><b>${esc(lot.set_label)}</b><span>${count} player${count === 1 ? '' : 's'} in this set</span>`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
 }
 
 
@@ -565,6 +651,7 @@ function renderFloor(){
   const card = $('#aucCard');
   card.className = card.className.replace(/\bcrest-[A-Z]+\b/g, '').trim() + ' ' + crestClass(c.crest);
   card.innerHTML = `
+    ${c.crest ? `<img class="auc-card-wm" src="${c.crest}" alt="">` : ''}
     <div class="auc-card-top">
       <div>
         <div class="auc-card-season">${crestImg(c.crest, 'auc-card-crest')}${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
@@ -592,8 +679,11 @@ function renderFloor(){
   }
   renderTrail(d.bids, false);
 
+  const UPNEXT_SHOWN = 8, more = lot.upcoming.length - UPNEXT_SHOWN;
   $('#aucUpNext').innerHTML = lot.upcoming.length
-    ? `<span>Still to come in this set</span> ${lot.upcoming.slice(0, 8).join(' · ')}${lot.upcoming.length > 8 ? ' …' : ''}`
+    ? `<span>Still to come in this set</span><div class="auc-up-chips">${
+        lot.upcoming.slice(0, UPNEXT_SHOWN).map(n => `<i class="auc-up">${esc(n)}</i>`).join('')}${
+        more > 0 ? `<i class="auc-up more">+${more} more</i>` : ''}</div>`
     : '';
   renderSide();
   markRoom(d.bids, null, false);
@@ -854,7 +944,7 @@ function startCountdown(){
     fill.style.strokeDashoffset = C * (1 - left / total);
     num.textContent = Math.ceil(left / 1000);
     const whole = Math.ceil(left / 1000);
-    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); }
+    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); showClosing(whole); }
     lastWhole = whole;
     ring.classList.toggle('urgent', left < 3000);
     if (left <= 0){ stopCountdown(); passLot('lot', null); }
@@ -875,7 +965,8 @@ function startRoomCountdown(){
     fill.style.strokeDashoffset = C * (1 - Math.min(1, left / total));
     num.textContent = Math.ceil(left);
     const whole = Math.ceil(left);
-    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); }
+    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); showClosing(whole); }
+    if (whole > 3) clearClosing();
     lastWhole = whole;
     ring.classList.toggle('urgent', left < 4);
   };
@@ -885,6 +976,7 @@ function startRoomCountdown(){
 
 function stopCountdown(){
   clearInterval(COUNTDOWN); COUNTDOWN = null;
+  clearClosing();
   const ring = $('#aucRing');
   if (ring) ring.classList.add('hide');
 }

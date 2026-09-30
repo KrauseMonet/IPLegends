@@ -2074,6 +2074,8 @@ class AuctionOut(BaseModel):
     squad: list[AuctionSquadOut] = []
     recent: list[AuctionSaleOut] = Field(default=[], description="the latest sales, newest last")
     sold: int = 0
+    top_price: int | None = Field(default=None, description="the highest price paid for "
+                                  "anyone so far; null until somebody is sold")
     rtm: AuctionRtmOut | None = None
     retention_pool: list[AuctionPoolOut] = []
     retention_lost: list[str] = Field(default=[], description="rooms: legends you claimed "
@@ -2129,6 +2131,12 @@ def _lot_out(r: auction_session.Replay) -> AuctionLotOut:
         card=_card(lot.card), upcoming=[x.card.name for x in same_set])
 
 
+def _top_price(a) -> int | None:
+    """Over EVERY sale, not the 25 in `recent`, so "most expensive so far" is the auction's
+    record and not merely the last page's."""
+    return max((s.price for s in a.sales if s.winner is not None), default=None)
+
+
 def _auction_out(r: auction_session.Replay) -> AuctionOut:
     if r.phase == "retain":
         return AuctionOut(
@@ -2149,6 +2157,7 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
                for i, (c, p) in enumerate(zip(you.squad, you.paid))],
         recent=[_sale_out(r, s) for s in a.sales[-25:]],
         sold=sum(1 for s in a.sales if s.winner is not None),
+        top_price=_top_price(a),
     )
     if r.phase in ("rtm_use", "rtm_match", "rtm_raise"):
         out.lot = _lot_out(r)
@@ -2574,6 +2583,7 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
                for i, (c, pr) in enumerate(zip(you.squad, you.paid))] if you else [],
         recent=[_sale_out(r, x) for x in a.sales[-25:]],
         sold=sum(1 for x in a.sales if x.winner is not None),
+        top_price=_top_price(a),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
     if r.phase == "retain" and phase == "retain":

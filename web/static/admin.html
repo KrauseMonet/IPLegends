@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
+<title>Admin · The Legends Almanack</title>
+<meta name="robots" content="noindex">
 <meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
@@ -57,69 +58,60 @@
 <div class="sheet">
 
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
-        </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
+  <!-- ============ ADMIN [A154] ============ -->
+  <!-- Empty until /api/admin/overview answers. Nothing on this page is secret: every
+       figure comes from /api/admin/*, which is 404 to anyone who is not an admin. -->
+  <section id="admin" class="prose-page">
+    <div class="report">
+      <div class="over-line">Admin console</div>
+      <div class="call">Site control</div>
+    </div>
+
+    <div id="adminDenied" class="hide adm-denied">
+      <p>This page is for the site's admins. Sign in with an admin account to use it.</p>
+      <a class="act" href="/">Home</a>
+    </div>
+
+    <div id="adminBody" class="hide">
+      <div class="room-choices adm-tabs" id="adminTabs">
+        <button class="room-choice sel" data-tab="overview" onclick="adminTab('overview')">Overview</button>
+        <button class="room-choice" data-tab="accounts" onclick="adminTab('accounts')">Accounts</button>
+        <button class="room-choice" data-tab="daily" onclick="adminTab('daily')">Daily</button>
+        <button class="room-choice" data-tab="rooms" onclick="adminTab('rooms')">Rooms</button>
       </div>
 
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
+      <div id="tab-overview" class="adm-panel"></div>
+
+      <div id="tab-accounts" class="adm-panel hide">
+        <form class="adm-search" onsubmit="event.preventDefault(); adminSearch()">
+          <input id="adminQuery" class="room-input" placeholder="Search username, email or account id"
+            autocomplete="off">
+          <button class="act" type="submit">Search</button>
+        </form>
+        <div id="adminAccounts"></div>
       </div>
 
-      <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
-        </div>
+      <div id="tab-daily" class="adm-panel hide">
+        <form class="adm-search" onsubmit="event.preventDefault(); loadDaily()">
+          <input id="adminDailyDate" class="room-input" type="date">
+          <button class="act" type="submit">Show</button>
+        </form>
+        <div id="adminDaily"></div>
+      </div>
+
+      <div id="tab-rooms" class="adm-panel hide">
+        <div class="adm-toolbar"><button class="act minor" onclick="loadRooms()">Refresh</button></div>
+        <div id="adminRooms"></div>
       </div>
     </div>
   </section>
 
-  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-shell stat-frame">
-      <div class="scorecard-frame">
-        <div class="report">
-          <div class="over-line" id="statSub"></div>
-          <div class="call" id="statName"></div>
-        </div>
-        <div class="colophon stat-tiles" id="statBody"></div>
-      </div>
+  <!-- One account, opened from the Accounts tab. -->
+  <div id="adminAccountOverlay" class="card-overlay hide" onclick="closeAccount(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame" id="adminAccountBody"></div>
       <div class="scorecard-close">
-        <button class="act" onclick="hideStat()">Close</button>
+        <button class="act" onclick="closeAccount()">Close</button>
       </div>
     </div>
   </div>
@@ -179,6 +171,6 @@
 
 <script src="/static/common.js?v=0d6c2dff60"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/draft.js?v=9317cb8624"></script>
+<script src="/static/admin.js?v=c1c7a91a7a"></script>
 </body>
 </html>

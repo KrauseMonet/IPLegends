@@ -34,6 +34,7 @@ from game.season import (
 )
 from game.simulator import load_model
 from web import accounts
+from web import admin as admin_lib
 from web.crests import all_crests, crest_url, unambiguous_crest
 from web import auction_session
 from web import room_auction
@@ -299,6 +300,13 @@ def profile_page() -> FileResponse:
     parameter, unlike /rooms/{code}, since a profile is always "mine", read from the
     cookie, never named in the URL."""
     return FileResponse(STATIC / "profile.html")
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_page() -> FileResponse:
+    """Served to anybody, like every page: the page itself holds nothing. Every figure on
+    it comes from /api/admin/*, which answers 404 to anyone who is not an admin [A154]."""
+    return FileResponse(STATIC / "admin.html")
 
 
 @app.get("/records", include_in_schema=False)
@@ -973,6 +981,8 @@ class MeOut(BaseModel):
     username: str | None = None
     kit: KitOut | None = Field(default=None, description="the account's team kit [A151]; "
                                                          "null if none was ever chosen")
+    is_admin: bool = Field(default=False, description="[A154] whether to show the Admin "
+                           "link. A convenience only: every admin route checks again.")
 
 
 class LeaderOut(BaseModel):
@@ -2297,7 +2307,7 @@ def me(request: Request) -> MeOut:
         # treated the same as no cookie at all rather than assumed unreachable.
         return MeOut(account_id=None, username=None)
     return MeOut(account_id=account.account_id, username=account.username,
-                 kit=_kit_out(account.kit))
+                 kit=_kit_out(account.kit), is_admin=admin_lib.is_admin(account.account_id))
 
 
 @app.put("/api/account/kit", response_model=KitOut)
@@ -2334,6 +2344,144 @@ def profile(request: Request) -> ProfileOut:
         top_bowlers=[LeaderOut(person_id=r.person_id, name=r.name, total=r.total)
                      for r in stats.top_bowlers],
     )
+
+
+# --- the admin console [A154] ------------------------------------------------------------
+#
+# Every route answers 404, not 403, to anybody who is not an admin -- the same rule as
+# /api/daily/reset: a privileged route should not advertise that it exists to the people
+# who may not use it. Who is an admin, and what an action may touch, both live in
+# web/admin.py; this layer only maps them onto HTTP. Responses are `no-store` so no cache
+# between the browser and the function can ever hold an email address.
+
+
+class AdminUsernameIn(BaseModel):
+    username: str
+
+
+class AdminPasswordIn(BaseModel):
+    password: str
+
+
+def _admin(request: Request, response: Response) -> int:
+    account_id = _current_account_id(request)
+    if not admin_lib.is_admin(account_id):
+        raise HTTPException(status_code=404, detail="not found")
+    response.headers["Cache-Control"] = "no-store"
+    return account_id
+
+
+def _admin_date(value: str | None) -> datetime.date:
+    if not value:
+        return _today()
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+
+def _admin_action(fn, *args):
+    try:
+        return fn(*args)
+    except admin_lib.AdminError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/overview")
+def admin_overview(request: Request, response: Response) -> dict:
+    _admin(request, response)
+    with _db() as conn:
+        out = admin_lib.overview(conn, _today())
+    out["today"] = _today().isoformat()
+    out["health"] = health()
+    return out
+
+
+@app.get("/api/admin/accounts")
+def admin_accounts(request: Request, response: Response, q: str = "",
+                   offset: int = 0) -> dict:
+    _admin(request, response)
+    with _db() as conn:
+        total, rows = admin_lib.list_accounts(conn, q, offset)
+    return {"total": total, "offset": max(0, offset), "page": admin_lib.ACCOUNTS_PAGE,
+            "accounts": rows}
+
+
+@app.get("/api/admin/accounts/{account_id}")
+def admin_account(account_id: int, request: Request, response: Response) -> dict:
+    _admin(request, response)
+    with _db() as conn:
+        try:
+            return admin_lib.account_detail(conn, account_id)
+        except admin_lib.AdminError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/accounts/{account_id}/username")
+def admin_rename(account_id: int, body: AdminUsernameIn, request: Request,
+                 response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        name = _admin_action(admin_lib.rename_account, conn, actor, account_id,
+                             body.username)
+    return {"ok": True, "username": name}
+
+
+@app.post("/api/admin/accounts/{account_id}/password")
+def admin_password(account_id: int, body: AdminPasswordIn, request: Request,
+                   response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.set_password, conn, actor, account_id, body.password)
+    return {"ok": True}
+
+
+@app.post("/api/admin/accounts/{account_id}/clear-kit")
+def admin_clear_kit(account_id: int, request: Request, response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.clear_kit, conn, actor, account_id)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/accounts/{account_id}")
+def admin_delete_account(account_id: int, request: Request, response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.delete_account, conn, actor, account_id)
+    return {"ok": True}
+
+
+@app.get("/api/admin/daily")
+def admin_daily(request: Request, response: Response, date: str | None = None) -> dict:
+    _admin(request, response)
+    with _db() as conn:
+        return admin_lib.daily_view(conn, _admin_date(date))
+
+
+@app.delete("/api/admin/daily/{date}/{account_id}")
+def admin_remove_daily(date: str, account_id: int, request: Request,
+                       response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.remove_daily_result, conn, actor, _admin_date(date),
+                      account_id)
+    return {"ok": True}
+
+
+@app.get("/api/admin/rooms")
+def admin_rooms(request: Request, response: Response) -> dict:
+    _admin(request, response)
+    with _db() as conn:
+        return {"rooms": admin_lib.list_rooms(conn)}
+
+
+@app.delete("/api/admin/rooms/{code}")
+def admin_delete_room(code: str, request: Request, response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.delete_room, conn, actor, code)
+    return {"ok": True}
 
 
 def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
@@ -2574,7 +2722,10 @@ def _may_reset_daily(account_id: int) -> bool:
     Compared as a stripped STRING against the id, never as a substring: `"7" in "17"` is
     true, and an account that merely appears inside the configured one is a different
     account."""
-    return os.environ.get(DAILY_RESET_ACCOUNT_ID, "").strip() == str(account_id)
+    # [A154] An admin may too: the console can already take any non-admin's attempt off
+    # the board, so withholding the admin's own would protect nothing.
+    return (os.environ.get(DAILY_RESET_ACCOUNT_ID, "").strip() == str(account_id)
+            or admin_lib.is_admin(account_id))
 
 
 def _require_account(request: Request) -> int:

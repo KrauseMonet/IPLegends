@@ -31,17 +31,29 @@ class Account:
     kit: Kit | None = None     # migration 036 [A151] -- read by get_account only
 
 
-def create_account(conn, username: str, email: str, password: str) -> Account:
+def validate_username(username: str) -> str:
+    """The stripped username, or AccountError. Shared by registration and the admin
+    rename, so the two can never disagree about what a legal name is."""
     username = username.strip()
-    email = email.strip()
     if not (3 <= len(username) <= 24):
         raise AccountError("username must be 3-24 characters")
     if not _USERNAME_RE.fullmatch(username):
         raise AccountError("username may only contain letters, numbers and underscores")
-    if "@" not in email or len(email) < 3:
-        raise AccountError("enter a valid email address")
+    return username
+
+
+def validate_password(password: str) -> str:
     if len(password) < 8:
         raise AccountError("password must be at least 8 characters")
+    return password
+
+
+def create_account(conn, username: str, email: str, password: str) -> Account:
+    username = validate_username(username)
+    email = email.strip()
+    if "@" not in email or len(email) < 3:
+        raise AccountError("enter a valid email address")
+    validate_password(password)
 
     # Checked in Python, not left to the database's own unique index, so a conflict
     # reads as a clean "that username is already taken" rather than a raw constraint-

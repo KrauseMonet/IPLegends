@@ -6,6 +6,9 @@
 
 /* --- a room's own completed match: renderScorecard/copyRoomCode's data source --- */
 let ROOM_MATCH_DATA = null;
+// [A149] The room version ROOM_MATCH_DATA was fetched at, and when -- see pollRoomNow.
+let ROOM_MATCH_AT = -1, ROOM_MATCH_FETCHED = 0;
+const ROOM_MATCH_RECHECK_MS = 10000;
 
 function showRoomScorecard(i){
   renderScorecard(ROOM_MATCH_DATA.results[i].result);
@@ -141,12 +144,12 @@ let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
 // viewer right now (or null) -- while set, incoming polls are ignored for rendering so
 // a live over-by-over stepper is never restarted out from under the viewer; the fresh
 // data still lands in ROOM_MATCH_DATA and is read the moment the reveal finishes.
-// ROOM_REVEALED_STAGE remembers the last stage we've already animated, so a fixture is
-// never re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
-// is over" choice screen. ROOM_LEAGUE_REVEALED_THROUGH is ROOM_REVEALED_STAGE's own
+// ROOM_REVEALED holds every playoff stage already animated, so a fixture is never
+// re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
+// is over" choice screen. ROOM_LEAGUE_REVEALED_THROUGH is ROOM_REVEALED's own
 // analogue for a league room's round-robin, which needs a COUNT rather than a stage
 // name -- every one of its fixtures shares the literal stage "league", not a unique
-// label like "Semi-final 1". All four reset per room in enterRoom.
+// label like "Semi-final 1". All of them reset per room in enterRoom.
 // Auto-advance. The host used to be a required CLICK on every step -- 74 of them for a
 // ten-seat league room, each one blocking all nine other seats on "Waiting for the host
 // to continue…". The tournament's result is already fully computed by then (revealing is
@@ -209,7 +212,12 @@ function roomAutoNow(){
   fire();
 }
 
-let ROOM_REVEAL_ACTIVE = null, ROOM_REVEALED_STAGE = null, ROOM_SPECTATE_SHOWN = false;
+let ROOM_REVEAL_ACTIVE = null, ROOM_SPECTATE_SHOWN = false;
+// [A149] Every playoff stage this viewer has already watched (or was never going to):
+// a SET, because everyone now watches every match and a round can hold two at once.
+// ROOM_REVEAL_SYNCED marks the first match payload of a visit, which is taken as
+// already seen -- see roomSyncSeen.
+let ROOM_REVEALED = new Set(), ROOM_REVEAL_SYNCED = false;
 let ROOM_LEAGUE_REVEALED_THROUGH = 0;
 // Bumped ONLY by a mutation (toss/advance/pick/kick/start) -- never by pollRoom itself.
 // A poll captures the CURRENT generation before its request and only applies its result
@@ -276,12 +284,14 @@ document.addEventListener('DOMContentLoaded', () => {
 function enterRoom(code, playerId){
   saveRoomSession(code, playerId);
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
-  ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
+  ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
+  ROOM_SPECTATE_SHOWN = false;
   ROOM_LEAGUE_REVEALED_THROUGH = 0;
   // Reset per ROOM, not per session: versions are counted per room row, so a version
   // carried over from a room we just left would silently reject the new room's early
   // states until it happened to climb past it.
   ROOM_VERSION_SEEN = -1;
+  ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
   ROOM_POLL_FAILS = 0;
   ROOM_POLL_INFLIGHT = false; ROOM_POLL_STARTED = 0;
   ROOM_TIMER_BASE = null;
@@ -394,7 +404,21 @@ async function pollRoomNow(){
     const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID),
                                {timeoutMs: ROOM_POLL_STUCK_MS});
     if (myGen !== ROOM_GEN) return;
-    if (!applyRoom(room)) return;     // an older read than one already applied
+    const fresh = applyRoom(room);
+    // [A149] A poll whose room version is not new used to stop here, and the match data
+    // was only ever fetched on a NEW version. That froze a room for good: when a poll
+    // stored a new version but was then superseded by a mutation before it could store
+    // the match data (the host's own countdown firing, say, and being refused), the page
+    // held a match older than its version with no reason ever to ask again. And because
+    // the server's own inactivity failsafe (A122) runs only when somebody asks for the
+    // match, a room whose pages were all waiting on a version change nobody would make
+    // never advanced at all. So the match is fetched when it is BEHIND the version it
+    // belongs to, and re-checked every ROOM_MATCH_RECHECK_MS while the tournament runs.
+    const matchStale = !!ROOM && ROOM.status === 'complete' && (
+      ROOM_MATCH_AT < ROOM_VERSION_SEEN ||
+      (!(ROOM_MATCH_DATA && ROOM_MATCH_DATA.complete)
+        && Date.now() - ROOM_MATCH_FETCHED > ROOM_MATCH_RECHECK_MS));
+    if (!fresh && !matchStale) return;     // an older read than one already applied
     roomOnline(true);
     if (ROOM.status === 'complete'){
       // The match phase keeps polling on the SAME interval as the draft -- a toss
@@ -411,6 +435,8 @@ async function pollRoomNow(){
       // newer poll has already fetched a fresher match than this one.
       if (at !== ROOM_VERSION_SEEN) return;
       ROOM_MATCH_DATA = m;
+      ROOM_MATCH_AT = at;
+      ROOM_MATCH_FETCHED = Date.now();
     }
     renderRoom();
   } catch(e){
@@ -1036,6 +1062,7 @@ function roomSpectateChoiceHtml(){
       <button class="act lead" onclick="roomChooseSpectateExit('card')">See your journey card</button>
       <button class="act" onclick="roomChooseSpectateExit('follow')">Follow the tournament</button>
     </div>
+    <div class="margin" id="roomAutoLine"></div>
   </div>`;
 }
 
@@ -1050,34 +1077,38 @@ function roomChooseSpectateExit(choice){
 // fixture at once, so the existing singleton is reused as-is, just fed room data and a
 // room-specific onDone.
 
-// Finds the viewer's own fixture that still needs its reveal played, or null if there
-// isn't one. `current_matches` covers every ordinary case (toss still pending, or
-// resolved but not yet advanced past) -- but the tournament's very LAST fixture in
-// every format (`replay_room_matches`'s final branch for 'final'/'cup'/'league' alike)
-// skips the paused, advance-gated stopover every earlier round gets and jumps straight
-// to `complete`, emptying `current_matches` in the same response that resolved it. Without
-// this fallback that fixture's scoreline would appear for both sides with no reveal at
-// all -- `results` still carries it, with full innings data, so it's read from there
-// instead once it's no longer in `current_matches`. Shared by showRoomMatch (the polling
-// path, for whichever side didn't call the toss) and roomSubmitTossReveal (the side that
-// did), so both agree on where a fixture's result can still be found.
-function roomMyMatchToReveal(m){
-  // While the league group stage is still being revealed, every one of its seventy
-  // fixtures shares the literal stage string "league" (ROOM_LEAGUE_REVEALED_THROUGH's
-  // own comment has the why), so the `ROOM_REVEALED_STAGE !== last.stage` check below
-  // can only ever fire once for the viewer's OWN first league fixture and then goes
-  // permanently inert -- it cannot tell two different league fixtures apart. The
-  // dedicated league branch in showRoomMatch (ROOM_LEAGUE_REVEALED_THROUGH, a real
-  // counter) is what actually paces that phase; this function must sit out entirely
-  // while it's running rather than risk firing on a stale cached fixture.
+// [A149] Everyone watches every match, not just their own. This finds the next fixture
+// this viewer still owes a reveal, or null:
+//   * their OWN fixture's toss call, first -- only they can make it;
+//   * then any resolved playoff fixture not yet watched, their own ahead of the rest, so a
+//     round holding two (Qualifier 1 and the Eliminator, a cup's two semis) plays both,
+//     one after the other.
+// A resolved fixture is looked for in `current_matches` AND in `results`, because the
+// tournament's very LAST fixture in every format completes the room in the same response
+// that resolves it and so leaves `current_matches` empty (A83); `results` still carries
+// it, full innings and all. The league's seventy group matches are paced by their own
+// counter in showRoomMatch, and all share the stage name "league", so they are left out
+// here entirely while the group stage is still being revealed.
+function roomNextToReveal(m){
   if (m.league_revealed != null && m.league_revealed < m.league_total) return null;
-  const cur = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
+  const isMine = f => f.a_pid !== undefined ? (f.a_pid === MY_PID || f.b_pid === MY_PID)
+                                            : !!f.result.yours;
+  const cur = m.current_matches.find(isMine);
   if (cur && cur.result === null && cur.you_decide_toss) return cur;
-  if (cur && cur.result && ROOM_REVEALED_STAGE !== cur.stage) return cur;
-  if (cur) return null;   // it's mine but still waiting on someone else's toss
-  const mine = m.results.filter(e => e.result.yours);
-  const last = mine[mine.length - 1];
-  return (last && ROOM_REVEALED_STAGE !== last.stage) ? last : null;
+  const done = [...m.current_matches.filter(f => f.result),
+                ...m.results.filter(e => e.stage !== 'league')];
+  const unseen = done.filter(f => !ROOM_REVEALED.has(f.stage));
+  return unseen.find(isMine) || unseen[0] || null;
+}
+
+// The first match payload of a visit -- a reload, or rejoining mid-tournament -- marks
+// every playoff fixture from an EARLIER round as already seen, so coming back does not
+// replay the whole bracket. The round still open is left unseen and plays as normal.
+function roomSyncSeen(m){
+  if (ROOM_REVEAL_SYNCED) return;
+  ROOM_REVEAL_SYNCED = true;
+  const open = new Set(m.current_matches.map(f => f.stage));
+  (m.results || []).forEach(e => { if (!open.has(e.stage)) ROOM_REVEALED.add(e.stage); });
 }
 
 function roomEnterReveal(myMatch){
@@ -1105,7 +1136,7 @@ async function roomSubmitTossReveal(elects, ctrl){
         body: JSON.stringify({player_id: MY_PID, stage, elects})});
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
-      const fresh = roomMyMatchToReveal(m);
+      const fresh = roomNextToReveal(m);
       if (fresh && fresh.stage === stage) roomStartReveal(fresh);
       else { ROOM_REVEAL_ACTIVE = null; go('room'); showRoomMatch(m); }
     } catch(e){ slip(e.message); }
@@ -1162,7 +1193,7 @@ function roomSkipThisMatch(){
 
 function roomFinishReveal(myMatch){
   ROOM_REVEAL_ACTIVE = null;
-  ROOM_REVEALED_STAGE = myMatch.stage;
+  ROOM_REVEALED.add(myMatch.stage);
   go('room');
   showRoomMatch(ROOM_MATCH_DATA);
 }
@@ -1209,6 +1240,7 @@ function showRoomMatch(m){
   // A countdown must never outlive the screen it belongs to: the host watching their own
   // match must not have the next round advance out from under them.
   if (ROOM_REVEAL_ACTIVE){ roomDisarmAuto(); return; }
+  roomSyncSeen(m);
 
   // Every seat reviews its own finished twelve -- and the three ratings that come with
   // it -- before a single ball is bowled. Nothing below this point (not even a first
@@ -1218,37 +1250,32 @@ function showRoomMatch(m){
   // step, so nothing counts down behind it.
   if (m.awaiting_start){ roomDisarmAuto(); renderRoomStartReview(m); return; }
 
-  // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
+  // A league room's group-stage reveal: checked before roomNextToReveal, since a
   // round-robin fixture isn't participant-scoped the way a knockout fixture is -- the
   // shared pacing cursor (host-driven Continue/Skip ahead, same mechanism and same
   // performance profile as before) walks every viewer through the same seventy
-  // fixtures together, but the ANIMATION is personal: only a viewer who actually played
-  // in the fixture the cursor just landed on gets the ball-by-ball reveal for it.
-  // Everyone else just watches the table tick up. `result.yours` already exists
-  // per-caller on every result (`_room_result_out`).
-  // ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED_STAGE) tracks how far THIS client
+  // fixtures together, and every viewer watches each one as the cursor lands on it.
+  // ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED) tracks how far THIS client
   // has already watched, since every round-robin entry shares the literal stage
   // "league" and can't be told apart by name the way "Semi-final 1" can.
   if (m.league_revealed != null && m.league_next_result &&
       m.league_revealed > ROOM_LEAGUE_REVEALED_THROUGH){
     ROOM_LEAGUE_REVEALED_THROUGH = m.league_revealed;
-    if (m.league_next_result.result.yours){
-      roomDisarmAuto();
-      roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
-      return;
-    }
-    // Not the viewer's own fixture -- fall through to the ordinary shared waiting
-    // view (table + progress + Continue/Skip ahead) below instead of forcing them
-    // through a match they have no stake in. roomMyMatchToReveal is safely inert
-    // during this phase (its own guard, above), so falling through here cannot
-    // misfire into an unrelated animation.
+    // [A149] Every viewer watches the fixture the cursor just landed on, not only the two
+    // who played in it (A100's rule, reversed at the user's request). The host's own
+    // auto-advance is disarmed while any reveal runs, so the room moves on once the host
+    // has watched it -- and a viewer who wants less can Skip match or change the speed,
+    // both of which touch only their own screen.
+    roomDisarmAuto();
+    roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
+    return;
   }
 
   // Checked BEFORE `m.complete`, not after: the tournament's very last fixture can
-  // resolve and complete the whole room in the same response (roomMyMatchToReveal's own
+  // resolve and complete the whole room in the same response (roomNextToReveal's own
   // comment has the why), so a straight `if (m.complete)` check here would show that
   // fixture's scoreline with no reveal at all, for both sides.
-  const toReveal = roomMyMatchToReveal(m);
+  const toReveal = roomNextToReveal(m);
   if (toReveal){ roomDisarmAuto(); roomEnterReveal(toReveal); return; }
 
   if (m.complete){ roomDisarmAuto(); showRoomMatchComplete(m); return; }
@@ -1266,8 +1293,12 @@ function showRoomMatch(m){
   const gap = gapBody ? `<div class="room-gap">${gapBody}</div>` : '';
 
   if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
-    roomDisarmAuto();
     el.innerHTML = roomSpectateChoiceHtml() + gap;
+    // [A149] A knocked-out HOST still paces the room. This used to disarm, so the whole
+    // room waited on the host answering "your run is over" (or on the server's 90-second
+    // fallback) -- and with everyone watching every match, a knocked-out host is the
+    // ordinary case, not a corner.
+    roomSyncAuto(m);
     return;
   }
 
@@ -1410,8 +1441,9 @@ async function roomPlayAgain(ctrl){
       // left stale, so a later completion can never be masked by this game's leftovers
       // (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut would
       // otherwise show the game just finished instead of the new one).
-      ROOM_MATCH_DATA = null;
-      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null;
+      ROOM_MATCH_DATA = null; ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
+      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null;
+      ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
       ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
       ROOM_SAVE_ATTEMPTED = false;
       renderRoom();
@@ -1492,13 +1524,12 @@ async function roomSkipTo(target, ctrl){
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
       // A skip is a decision to stop watching, so it must not land back in a reveal.
-      // ROOM_REVEALED_STAGE/ROOM_LEAGUE_REVEALED_THROUGH are what showRoomMatch consults
+      // ROOM_REVEALED/ROOM_LEAGUE_REVEALED_THROUGH are what showRoomMatch consults
       // to decide whether a fixture still owes this viewer an animation; without moving
       // them forward, skipping to the end would immediately start playing the final.
       ROOM_REVEAL_ACTIVE = null;
       if (m.league_total != null) ROOM_LEAGUE_REVEALED_THROUGH = m.league_total;
-      const mine = (m.results || []).filter(e => e.result.yours);
-      if (mine.length) ROOM_REVEALED_STAGE = mine[mine.length - 1].stage;
+      (m.results || []).forEach(e => ROOM_REVEALED.add(e.stage));
       go('room');
       showRoomMatch(m);
     } catch(e){ slip(e.message); }

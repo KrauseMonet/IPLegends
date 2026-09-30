@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flashback · The Legends Almanack</title>
-<meta name="description" content="Guess the real IPL season from three real facts -- leading scorer, leading wicket-taker, match record. No login, no fabricated clues.">
+<meta name="description" content="A ten-question IPL quiz on nineteen real seasons. Every figure is real, and so is every wrong answer. Challenge a friend to the same ten.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="Guess the real IPL season from three real facts.">
+<meta property="og:description" content="Ten questions on nineteen real IPL seasons. Can you beat my score?">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -22,7 +22,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=da0a68ed79">
+<link rel="stylesheet" href="/static/style.css?v=7be752f638">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -53,35 +53,64 @@
 
 
   <!-- ============ FLASHBACK ============ -->
-  <section id="flashback" class="prose-page">
-    <div class="report">
-      <div class="over-line">THE LEGENDS ALMANACK</div>
-      <div class="call">Flashback</div>
-    </div>
-    <p class="prose" style="padding-top:0;margin-bottom:26px;max-width:64ch">Three real
-      facts about one real IPL season -- guess the year. Every clue is a real archive
-      figure; nothing here is invented. Decoy years are always the same franchise, so
-      the clues have to do the work.</p>
-
-    <div class="an-panel" id="fbCard">
-      <div class="an-panel-head"><div>
-        <h3 id="fbFranchise">Loading…</h3>
-        <p>Which season produced this?</p>
-      </div></div>
-
-      <ul class="fb-clues" id="fbClues"></ul>
-
-      <div class="fb-choices" id="fbChoices"></div>
-
-      <div id="fbVerdict"></div>
-
-      <div class="foot-actions" style="padding-top:22px">
-        <button class="act lead" id="fbNext" onclick="fbNewRound()">New round</button>
+  <section id="flashback" class="prose-page qz">
+    <!-- Start -->
+    <div id="qzStart" class="qz-start">
+      <div class="report">
+        <div class="over-line">THE LEGENDS ALMANACK</div>
+        <div class="call">Flashback</div>
+      </div>
+      <p class="qz-lede">Ten questions on nineteen seasons of the IPL. Twenty seconds each.
+        Every figure is a real one from the ball-by-ball record, and so is every wrong answer.</p>
+      <div class="qz-challenge hide" id="qzChallenge"></div>
+      <ul class="qz-rules">
+        <li><b>100</b><span>for a right answer</span></li>
+        <li><b>+50</b><span>for answering fast</span></li>
+        <li><b>+20</b><span>for each answer in a streak</span></li>
+      </ul>
+      <div class="qz-best" id="qzBest"></div>
+      <div class="foot-actions" style="justify-content:flex-start;padding-top:10px">
+        <button class="act lead qz-go" id="qzStartBtn" onclick="qzStart(this)">Start the quiz</button>
       </div>
     </div>
 
-    <div class="foot-actions" style="justify-content:center;padding:20px 0 30px">
-      <a class="act" href="/">Home</a>
+    <!-- Playing -->
+    <div id="qzPlay" class="qz-play hide">
+      <div class="qz-hud">
+        <div class="qz-dots" id="qzDots"></div>
+        <div class="qz-score"><span id="qzStreak" class="qz-streak"></span><b id="qzScore">0</b><i>pts</i></div>
+      </div>
+      <div class="qz-timer"><i id="qzTimer"></i></div>
+      <div class="qz-card" id="qzCard">
+        <div class="qz-num" id="qzNum"></div>
+        <div class="qz-q"><span id="qzCrest"></span><h2 id="qzPrompt"></h2></div>
+        <ul class="qz-clues" id="qzClues"></ul>
+        <div class="qz-options" id="qzOptions"></div>
+        <div class="qz-after hide" id="qzAfter">
+          <div class="qz-verdict" id="qzVerdict"></div>
+          <p class="qz-reveal" id="qzReveal"></p>
+          <button class="act lead" id="qzNext" onclick="qzNext()">Next question</button>
+        </div>
+      </div>
+      <p class="qz-keys">Keys: 1&ndash;4 to answer, Enter for the next question.</p>
+    </div>
+
+    <!-- Done -->
+    <div id="qzDone" class="qz-done hide">
+      <div class="over-line qz-over">FLASHBACK &middot; QUIZ <span id="qzSeedLabel"></span></div>
+      <div class="qz-title" id="qzTitle"></div>
+      <div class="qz-final"><b id="qzFinal">0</b><span>points</span></div>
+      <div class="qz-grid" id="qzGrid"></div>
+      <div class="qz-stats" id="qzStats"></div>
+      <div class="qz-vs hide" id="qzVs"></div>
+      <div class="foot-actions" style="justify-content:flex-start">
+        <button class="act lead" onclick="qzShare()">Challenge a friend</button>
+        <button class="act" onclick="qzAgain(this)">New quiz</button>
+      </div>
+      <div class="an-panel qz-review">
+        <div class="an-panel-head"><div><h3>The answers</h3></div></div>
+        <ol id="qzReview"></ol>
+      </div>
     </div>
   </section>
 
@@ -139,61 +168,6 @@
 
 <script src="/static/common.js?v=5ea8543f44"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script>
-let FB = null;
-let FB_ANSWERED = false;
-
-function fbClueLine(label, value){
-  return value == null ? '' : `<li><b>${label}:</b> ${value}</li>`;
-}
-
-function fbPaint(){
-  const d = FB;
-  $('#fbFranchise').innerHTML = crestImg(d.crest, 'fb-crest') + d.franchise;
-  $('#fbClues').innerHTML = [
-    fbClueLine('Leading run-scorer', d.top_scorer ? `${d.top_scorer} (${d.top_scorer_runs} runs)` : null),
-    fbClueLine('Leading wicket-taker', d.top_wicket_taker ? `${d.top_wicket_taker} (${d.top_wicket_taker_wickets} wickets)` : null),
-    fbClueLine('Real match record that season', `Played ${d.matches_played}, won ${d.matches_won}`),
-  ].join('');
-  $('#fbChoices').innerHTML = d.candidates.map(y =>
-    `<button class="fb-choice" onclick="fbGuess(${y}, this)">${y}</button>`).join('');
-  $('#fbVerdict').innerHTML = '';
-  FB_ANSWERED = false;
-}
-
-function fbGuess(year, ctrl){
-  if (FB_ANSWERED) return;
-  FB_ANSWERED = true;
-  const right = year === FB.correct_year;
-  document.querySelectorAll('#fbChoices .fb-choice').forEach(b => {
-    b.disabled = true;
-    if (Number(b.textContent) === FB.correct_year) b.classList.add('correct');
-    else if (b === ctrl) b.classList.add('wrong');
-  });
-  $('#fbVerdict').innerHTML = `<div class="fb-verdict ${right ? 'good' : 'bad'}">
-    ${right ? 'Correct.' : 'Not quite.'} It was ${FB.franchise} ${FB.correct_year}.</div>`;
-}
-
-async function fbNewRound(){
-  await busyClick($('#fbNext'), 'Dealing…', async () => {
-    try {
-      $('#fbFranchise').textContent = 'Loading…';
-      $('#fbClues').innerHTML = '';
-      $('#fbChoices').innerHTML = '';
-      $('#fbVerdict').innerHTML = '';
-      FB = await api('/api/flashback');
-      fbPaint();
-    } catch(e){ slip(e.message); }
-  });
-}
-
-async function boot(){
-  loadMe();
-  const m = await loadMeta();
-  renderDeckStats(m);
-  fbNewRound();
-}
-boot();
-</script>
+<script src="/static/flashback.js?v=1bb694a554"></script>
 </body>
 </html>

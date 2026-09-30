@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
-from game import analysis, auction, records
+from game import analysis, auction, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -40,7 +40,6 @@ from web import room_auction
 from web import auth
 from web import daily as daily_lib
 from web import db
-from web import flashback as flashback_lib
 from web import room_match as room_match_lib
 from web import rooms
 from tools import snapshot_deck
@@ -1008,23 +1007,30 @@ class RecordsOut(BaseModel):
     best_economy: list[AnalysisLeaderOut]
 
 
-class FlashbackOut(BaseModel):
-    """One `web.flashback` trivia round. The answer (`correct_year`) rides in the same
-    payload rather than a second reveal round trip -- there is no leaderboard or saved
-    result here to protect (unlike the daily challenge), so nothing is lost by sending
-    it up front; the frontend simply doesn't render it until a guess is made."""
+class QuizOptionOut(BaseModel):
+    label: str
+    detail: str = Field(default="", description="shown once the question is answered")
+    crest: str | None = None
 
-    franchise: str
-    correct_year: int
-    candidates: list[int]
-    crest: str | None = Field(default=None, description="null where the name wore more than "
-                              "one crest -- either one would give the year away")
-    top_scorer: str | None = None
-    top_scorer_runs: int | None = None
-    top_wicket_taker: str | None = None
-    top_wicket_taker_wickets: int | None = None
-    matches_played: int
-    matches_won: int
+
+class QuizQuestionOut(BaseModel):
+    kind: str
+    prompt: str
+    clues: list[str]
+    crest: str | None = None
+    options: list[QuizOptionOut]
+    answer: int
+    reveal: str
+
+
+class QuizOut(BaseModel):
+    """[A147] A whole Flashback quiz. The answers ride along: there is no leaderboard or
+    saved result to protect (unlike the daily), so nothing is gained by a round trip per
+    question, and ten questions answered with no server call cannot stall on one."""
+
+    seed: int
+    seconds_per_question: int
+    questions: list[QuizQuestionOut]
 
 
 class PhaseBowlerOut(BaseModel):
@@ -1309,21 +1315,34 @@ def records_route() -> RecordsOut:
     )
 
 
-@app.get("/api/flashback", response_model=FlashbackOut)
-def flashback_route() -> FlashbackOut:
-    """A fresh guess-the-season round. Genuinely random each call -- there is no seed to
-    replay and nothing to save, so unlike the draft/season/daily routes this one has no
-    determinism contract at all. Touches the database directly (`matches`/`deliveries`
-    aren't in the deck snapshot, A107), same as rooms and accounts."""
-    with _db() as conn:
-        r = flashback_lib.random_round(conn)
-    return FlashbackOut(
-        franchise=r.franchise, correct_year=r.correct_year, candidates=r.candidates,
-        crest=unambiguous_crest(r.franchise),
-        top_scorer=r.top_scorer, top_scorer_runs=r.top_scorer_runs,
-        top_wicket_taker=r.top_wicket_taker, top_wicket_taker_wickets=r.top_wicket_taker_wickets,
-        matches_played=r.matches_played, matches_won=r.matches_won,
-    )
+# Long enough to answer and read the reveal line, short enough to keep it moving.
+QUIZ_SECONDS = 20
+
+
+@app.get("/api/flashback", response_model=QuizOut)
+def flashback_route(response: Response, seed: int | None = None) -> QuizOut:
+    """A ten-question Flashback quiz [A147]. Pass the seed from a shared link to play the
+    same ten questions as a friend. A pure function of the deck (A107) and the seed -- no
+    database -- so a seeded quiz is cached at the edge."""
+    chosen = quiz.new_seed() if seed is None else seed
+    q = quiz.make_quiz(STATE["deck"], chosen)
+    if seed is not None:
+        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store"
+
+    def crest(franchise, year, hidden=False):
+        if not franchise:
+            return None
+        return unambiguous_crest(franchise) if hidden or year is None else crest_url(franchise, year)
+
+    return QuizOut(seed=q.seed, seconds_per_question=QUIZ_SECONDS, questions=[
+        QuizQuestionOut(
+            kind=x.kind, prompt=x.prompt, clues=x.clues, answer=x.answer, reveal=x.reveal,
+            crest=crest(x.franchise, x.year, x.year_hidden),
+            options=[QuizOptionOut(label=o.label, detail=o.detail,
+                                   crest=crest(o.franchise, o.year)) for o in x.options])
+        for x in q.questions])
 
 
 @app.post("/api/draft", response_model=SessionOut)

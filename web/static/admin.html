@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Profile · The Legends Almanack</title>
+<title>Admin · The Legends Almanack</title>
+<meta name="robots" content="noindex">
 <meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
@@ -57,49 +58,63 @@
 <div class="sheet">
 
 
-  <!-- ============ PROFILE ============ -->
-  <!-- The two lists here ARE the Orange Cap and the Purple Cap -- the IPL's own real
-       season-long awards -- so they are named and coloured as such rather than as two
-       generic "top N" tables. --cap-orange/--cap-purple already existed as tokens for
-       exactly this reason; nothing new was invented to make this page louder. -->
-  <section id="profile" class="prose-page">
+  <!-- ============ ADMIN [A154] ============ -->
+  <!-- Empty until /api/admin/overview answers. Nothing on this page is secret: every
+       figure comes from /api/admin/*, which is 404 to anyone who is not an admin. -->
+  <section id="admin" class="prose-page">
     <div class="report">
-      <div class="over-line">Player card</div>
-      <div class="call" id="profileUsername"></div>
-      <!-- [A151] the kit your drafted sides wear, saved to this account -->
-      <div id="profileKit"></div>
+      <div class="over-line">Admin console</div>
+      <div class="call">Site control</div>
     </div>
 
-    <div class="career-band">
-      <div><b id="profileGames">–</b><span>Games played</span></div>
-      <div><b id="profileTitles">–</b><span>Titles won</span></div>
-      <div><b id="profileRate">–</b><span>Title rate</span></div>
-    </div>
-
-    <div class="career-grid">
-      <div><b id="totRuns">–</b><span>Total runs scored</span></div>
-      <div><b id="totWickets">–</b><span>Total wickets taken</span></div>
-      <div><b id="totMatches">–</b><span>Total matches won</span></div>
-      <div><b id="totFriendMatches">–</b><span>Friend matches won</span></div>
-      <div><b id="totLeagues">–</b><span>Total leagues won</span></div>
-      <div><b id="totFriendLeagues">–</b><span>Friend titles won</span></div>
-    </div>
-
-    <div class="caps">
-      <div class="cap-col orange">
-        <div class="cap-head"><span class="dot"></span>Orange Cap<em>most runs</em></div>
-        <div id="profileBatters"></div>
-      </div>
-      <div class="cap-col purple">
-        <div class="cap-head"><span class="dot"></span>Purple Cap<em>most wickets</em></div>
-        <div id="profileBowlers"></div>
-      </div>
-    </div>
-
-    <div class="foot-actions" style="justify-content:center;padding:34px 0 30px">
+    <div id="adminDenied" class="hide adm-denied">
+      <p>This page is for the site's admins. Sign in with an admin account to use it.</p>
       <a class="act" href="/">Home</a>
     </div>
+
+    <div id="adminBody" class="hide">
+      <div class="room-choices adm-tabs" id="adminTabs">
+        <button class="room-choice sel" data-tab="overview" onclick="adminTab('overview')">Overview</button>
+        <button class="room-choice" data-tab="accounts" onclick="adminTab('accounts')">Accounts</button>
+        <button class="room-choice" data-tab="daily" onclick="adminTab('daily')">Daily</button>
+        <button class="room-choice" data-tab="rooms" onclick="adminTab('rooms')">Rooms</button>
+      </div>
+
+      <div id="tab-overview" class="adm-panel"></div>
+
+      <div id="tab-accounts" class="adm-panel hide">
+        <form class="adm-search" onsubmit="event.preventDefault(); adminSearch()">
+          <input id="adminQuery" class="room-input" placeholder="Search username, email or account id"
+            autocomplete="off">
+          <button class="act" type="submit">Search</button>
+        </form>
+        <div id="adminAccounts"></div>
+      </div>
+
+      <div id="tab-daily" class="adm-panel hide">
+        <form class="adm-search" onsubmit="event.preventDefault(); loadDaily()">
+          <input id="adminDailyDate" class="room-input" type="date">
+          <button class="act" type="submit">Show</button>
+        </form>
+        <div id="adminDaily"></div>
+      </div>
+
+      <div id="tab-rooms" class="adm-panel hide">
+        <div class="adm-toolbar"><button class="act minor" onclick="loadRooms()">Refresh</button></div>
+        <div id="adminRooms"></div>
+      </div>
+    </div>
   </section>
+
+  <!-- One account, opened from the Accounts tab. -->
+  <div id="adminAccountOverlay" class="card-overlay hide" onclick="closeAccount(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame" id="adminAccountBody"></div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAccount()">Close</button>
+      </div>
+    </div>
+  </div>
 
   <!-- shell:auth -->
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
@@ -156,6 +171,6 @@
 
 <script src="/static/common.js?v=0d6c2dff60"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/profile.js?v=a49f17742a"></script>
+<script src="/static/admin.js?v=c1c7a91a7a"></script>
 </body>
 </html>

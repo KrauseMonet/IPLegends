@@ -9,7 +9,7 @@
 
 Lives here rather than in `tools.build_crests` because two things now need it: the crest
 build, which finds a crest's hue from its pixels, and `web.kit`, which starts from a hue a
-player chose [A146]. One derivation, so a kit and a crest of the same hue carry the same
+player chose [A151]. One derivation, so a kit and a crest of the same hue carry the same
 three shades and the two can never look like they come from different systems.
 
 Pure -- no image library -- so the web app can import it.

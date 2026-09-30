@@ -634,10 +634,14 @@ function jumpLimit(lakh){
   renderLimit();
 }
 
-// Room mode: what a single-player move means as a ROOM move.
+// Room mode: what a single-player move means as a ROOM move. Each names the lot on screen
+// [A146], so one that arrives after that lot closed is refused rather than landing on the
+// next player -- and so the room can safely retry it if the answer is lost.
 function roomMove(path, body){
-  if (path === 'bid' && body.done) return ['limit', {max: body.ceiling}];
-  if (path === 'bid') return ['bid', {price: body.ceiling}];
+  const on = (A && A.lot) ? {lot: A.lot.lot, round: A.lot.round} : {};
+  if (path === 'bid' && body.done) return ['limit', {max: body.ceiling, ...on}];
+  if (path === 'bid') return ['bid', {price: body.ceiling, ...on}];
+  if (path === 'pass') return ['pass', {...body, ...on}];
   return [path, body];
 }
 
@@ -936,6 +940,8 @@ function renderTwelve(){
   const d = A;
   // In a room the season waits for everybody's twelve, so the button only locks yours in.
   if (AUCTION_ROOM) $('#aucSeasonBtn').textContent = 'Lock in my twelve';
+  const sim = $('#aucSimMode');
+  if (sim) sim.classList.toggle('hide', AUCTION_ROOM);
   if (!TWELVE) TWELVE = (d.twelve || d.suggestion || []).slice();
   drawTwelve();
 }
@@ -992,6 +998,18 @@ function benchTap(si){
   drawTwelve();
 }
 
+// [A148] How the season plays once the twelve is in -- the draft's own three choices. This
+// was hard-coded to 'whole' when the auction was built, so an auction season went straight
+// to the final table and nobody ever saw a toss or a ball of it. A room plays its own match
+// phase instead, so the choice is single-player only (renderTwelve hides it in a room).
+let AUC_SIM_MODE = 'whole';
+
+function setAucSimMode(mode){
+  AUC_SIM_MODE = mode;
+  document.querySelectorAll('#aucSimModeChoices .room-choice').forEach(b =>
+    b.classList.toggle('sel', b.dataset.simmode === mode));
+}
+
 function playSeason(ctrl){
   if (AUCTION_ROOM){
     busyClick(ctrl, 'Sending your twelve…', async () => {
@@ -1008,7 +1026,7 @@ function playSeason(ctrl){
       const d = await api(`/api/auction/${A.state}/twelve`, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({order: TWELVE.slice(0, 11), impact: TWELVE[11]})});
-      location.href = `/season?enter=whole#${d.state}`;
+      location.href = `/season?enter=${seasonEnterFor(AUC_SIM_MODE)}#${d.state}`;
     } catch(e){ slip(e.message); }
   });
 }

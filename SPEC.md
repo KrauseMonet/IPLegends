@@ -1771,9 +1771,9 @@ dependency runs one way and the pipeline is exactly as testable as it was.
 - Any franchise logo, crest, kit colour or player photograph. IPL and BCCI marks are
   aggressively enforced and player likeness rights are live litigation territory in India.
   **Text only.**
-  **[Overtaken by A145 and A146, recorded rather than deleted.]** A145 added franchise
+  **[Overtaken by A145 and A151, recorded rather than deleted.]** A145 added franchise
   crests at the user's decision, on a non-commercial fan-site basis with no licence (see
-  CREDITS.md). A146's team kits are a different thing and raise none of this: a name,
+  CREDITS.md). A151's team kits are a different thing and raise none of this: a name,
   monogram and colour the PLAYER chooses for their own drafted side, never a franchise's
   mark. Player photographs remain out.
 
@@ -2509,7 +2509,7 @@ Chennai Super Kings, for 29 crore") through the browser's own speech synthesis, 
 an Indian English voice. Sound and voice are separate switches on the floor, remembered per
 browser; browsers allow no sound before the first click, so nothing plays until then.
 
-## 16. Team kits [A146]
+## 16. Team kits [A151]
 
 A drafted twelve is a mix of franchises, so it has no crest. It wears a **kit** instead: a
 team name (1-24 characters), a monogram (1-3 letters or digits, drawn in capitals) and one

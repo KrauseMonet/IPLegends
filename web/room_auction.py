@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 
 import game.auction as au
 from etl.feasibility import Card, Deck, order_errors
+from web.rooms import CLOCK_GRACE_S, StaleMove
 
 LOT_SECONDS = 15         # ratified by the user: fifteen seconds a lot...
 BID_EXTEND = 5           # ...and five more for every bid
@@ -61,11 +62,16 @@ class AuctionRoomError(ValueError):
     """A move this room cannot accept -- refused with a 4xx, never a 500."""
 
 
+class StaleAuctionMove(StaleMove, AuctionRoomError):
+    """`submit`'s refusal: still an AuctionRoomError to anyone catching one, and a
+    `rooms.StaleMove` carrying the caught-up room to the route that answers it [A146]."""
+
+
 @dataclass
 class RoomAuctionReplay:
     auction: au.Auction
     team_of: dict[str, int]                 # human player_id -> team index
-    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete
+    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete | failed
     lot: au.Lot | None = None
     round_no: int = 0
     bids: list[au.Bid] = field(default_factory=list)
@@ -80,6 +86,7 @@ class RoomAuctionReplay:
     rtm_team: int | None = None             # the human being asked
     rtm_other: int | None = None            # the winner (use, match) or holder (raise)
     rtm_price: int | None = None
+    failed_team: int | None = None          # [A150] a team with no legal twelve
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -234,6 +241,18 @@ class _RoomRtm(au.Human):
         return bool(self._take("rtm_match", team, winner, price)["yes"])
 
 
+_RESERVE: dict[int, list[Card]] = {}
+
+
+def _reserve(deck: Deck) -> list[Card]:
+    """Every card in the deck, built once per deck rather than once per replay."""
+    key = id(deck)
+    if key not in _RESERVE:
+        _RESERVE.clear()
+        _RESERVE[key] = au.reserve_of(deck)
+    return _RESERVE[key]
+
+
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             mega: bool = False) -> RoomAuctionReplay:
     teams = au.make_teams(seed, humans=frozenset(humans.values()))
@@ -281,7 +300,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     lots = au.build_catalogue(deck, seed, frozenset(kept))
     listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = au.Auction(seed, lots, teams, mega=mega, register=register)
+    auction = au.Auction(seed, lots, teams, mega=mega, register=register,
+                         reserve=_reserve(deck))
     if mega:
         auction.retention_lost = lost
     flags: dict[int, set] = {i: set() for i in human_idx}
@@ -350,18 +370,15 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             auction.sales.append(au.Sale(lot, round_name, buyer, price, list(state.bids), event))
 
     # The fill round: every team still short takes a player at the minimum price,
-    # fewest-players first, exactly as `game.auction._fill` does it.
+    # fewest-players first, from `game.auction.fill_options` -- the one rule both the
+    # single-player auction and a room use, so the two cannot drift [A150].
     stranded: set[int] = set()
     while True:
         short = [t for t in teams if t.open_places > 0 and t.index not in stranded]
         if not short:
             break
         team = min(short, key=lambda t: (len(t.squad), t.index))
-        taken = {c.person_id for t in teams for c in t.squad}
-        pool = [lot.card for lot in auction.unsold] + auction.register
-        options = sorted((c for c in pool if c.person_id not in taken
-                          and team.may_buy(c) and team.purse >= au.MIN_PRICE),
-                         key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
+        options = au.fill_options(auction, team)
         if not options:
             stranded.add(team.index)
             auction.stranded.append(team.index)
@@ -387,6 +404,17 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                    au.Lot(-1, card, "REG", au.MIN_PRICE))
         auction.sales.append(au.Sale(lot, "fill", team.index, au.MIN_PRICE,
                                      [au.Bid(team.index, au.MIN_PRICE)]))
+
+    # [A150] The last line of defence. `fill_options` widens to the whole deck, so a team
+    # left without a legal twelve should not happen -- but if one ever is, the room ENDS
+    # with a reason rather than raising on every poll (the twelve step and `room_sides`
+    # both need a legal twelve for every team, human or computer, and would crash).
+    # `twelve_feasible(squad, 0)` is the exact legality test (no wildcard places left to
+    # assume anything about), and ~500x cheaper than building the best twelve itself --
+    # measured 0.03 ms a team against 16 ms, on every uncached replay of this phase.
+    unfieldable = [t for t in teams if not au.twelve_feasible(t.squad, 0)]
+    if unfieldable:
+        return RoomAuctionReplay(auction, team_of, "failed", failed_team=unfieldable[0].index)
 
     # Every human picks a twelve, in any order.
     result = RoomAuctionReplay(auction, team_of, "twelve")
@@ -451,8 +479,10 @@ def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctio
     now = time.time() if now is None else now
     before = replay(room, deck)
     room.moves = room.moves + [move]
-    after = replay(room, deck)                 # raises, leaving the log untouched, if invalid
-    if after.phase == "complete":
+    after = replay(room, deck)                 # raises if invalid; `submit` restores the log
+    if after.phase == "failed":
+        _fail(room, after)
+    elif after.phase == "complete":
         room.status = "complete"
     elif after.stage() != before.stage():
         room.turn_started_at = now + _stage_seconds(after)
@@ -461,18 +491,43 @@ def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctio
     return after
 
 
+def _fail(room, r: RoomAuctionReplay) -> None:
+    """[A150] End the room: a team that cannot field a legal twelve cannot play a season,
+    and every step after this one needs its twelve. Reported to every seat, never a crash."""
+    team = r.auction.teams[r.failed_team]
+    room.status = "failed"
+    room.failure_reason = (f"{team.franchise} could not field a legal twelve from its squad, "
+                           f"so the season cannot be played")
+
+
 def _seat(r: RoomAuctionReplay, player_id: str) -> au.Team:
     if player_id not in r.team_of:
         raise AuctionRoomError("you are not bidding in this room")
     return r.auction.teams[r.team_of[player_id]]
 
 
-def bid(room, deck: Deck, player_id: str, price: int) -> RoomAuctionReplay:
+def _check_lot(r: RoomAuctionReplay, lot: int | None, round_name: str | None) -> None:
+    """[A146] A bid, limit or pass is ABOUT one lot. Without saying which, a click that
+    arrives after its lot closed -- by the clock, or because the last other person passed
+    -- landed on the NEXT one: a pass on a player never seen, a limit on the wrong man, and
+    even a bid, whenever the next lot happened to open at the same price. The page sends
+    the lot it was showing; an old client that sends nothing is checked as before."""
+    if r.phase != "bid":
+        raise AuctionRoomError("that lot has closed")
+    if lot is not None and (lot != r.lot.index
+                            or (round_name is not None and round_name != au.ROUNDS[r.round_no])):
+        raise AuctionRoomError("that lot has closed")
+
+
+def bid(room, deck: Deck, player_id: str, price: int, lot: int | None = None,
+        round_name: str | None = None) -> RoomAuctionReplay:
     r = replay(room, deck)
     team = _seat(r, player_id)
-    if r.phase != "bid":
-        raise AuctionRoomError("no lot is being bid on")
+    _check_lot(r, lot, round_name)
     if price != r.next_price:
+        # Your own bid already in (a retry after a lost response) is not an error.
+        if r.bids and r.bids[-1].team == team.index and r.bids[-1].price == price:
+            return r
         raise AuctionRoomError("outbid -- the price has moved")
     if not r.can_bid(team):
         raise AuctionRoomError("you cannot bid on this lot")
@@ -480,11 +535,13 @@ def bid(room, deck: Deck, player_id: str, price: int) -> RoomAuctionReplay:
                                "r": r.round_no, "p": price})
 
 
-def limit(room, deck: Deck, player_id: str, maximum: int) -> RoomAuctionReplay:
+def limit(room, deck: Deck, player_id: str, maximum: int, lot: int | None = None,
+          round_name: str | None = None) -> RoomAuctionReplay:
     r = replay(room, deck)
     team = _seat(r, player_id)
-    if r.phase != "bid":
-        raise AuctionRoomError("no lot is being bid on")
+    _check_lot(r, lot, round_name)
+    if r.proxies.get(team.index) == min(maximum, team.max_bid()):
+        return r                              # already set: a retried request, not a move
     if not r.can_bid(team) or maximum < r.next_price:
         raise AuctionRoomError("that limit is below the next bid")
     if team.index in r.proxies and maximum < r.proxies[team.index]:
@@ -493,11 +550,13 @@ def limit(room, deck: Deck, player_id: str, maximum: int) -> RoomAuctionReplay:
                                "r": r.round_no, "max": maximum})
 
 
-def pass_lot(room, deck: Deck, player_id: str, scope: str) -> RoomAuctionReplay:
+def pass_lot(room, deck: Deck, player_id: str, scope: str, lot: int | None = None,
+             round_name: str | None = None) -> RoomAuctionReplay:
     r = replay(room, deck)
-    _seat(r, player_id)
-    if r.phase != "bid":
-        raise AuctionRoomError("no lot is being bid on")
+    team = _seat(r, player_id)
+    _check_lot(r, lot, round_name)
+    if scope == "lot" and team.index in r.passed:
+        return r                              # already passed: a retried request
     kind = {"lot": "pass", "set": "pass_set", "all": "pass_all"}[scope]
     return record(room, deck, {"k": kind, "seat": player_id, "lot": r.lot.index,
                                "r": r.round_no})
@@ -575,8 +634,14 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
     whether anything changed."""
     now = time.time() if now is None else now
     changed = False
-    while room.status == "auctioning" and now > room.turn_started_at:
+    # [A146] Closed only once the grace is also gone, so a bid made in the lot's last
+    # second still lands on it rather than finding the next lot open.
+    while room.status == "auctioning" and now > room.turn_started_at + CLOCK_GRACE_S:
         r = replay(room, deck)
+        if r.phase == "failed":
+            _fail(room, r)
+            changed = True
+            break
         if r.phase == "bid":
             record(room, deck, {"k": "close", "lot": r.lot.index, "r": r.round_no}, now)
         elif r.phase == "fill":
@@ -608,16 +673,30 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
 def submit(conn, code: str, deck: Deck, action, player_id: str, *args):
     """One human move, under the room's row lock: catch the room up with the clock first
     (so a bid lands on the lot that is REALLY open, not one whose time already ran out),
-    then apply the move and save. A move the room refuses raises before anything is
-    written; the clock catch-up it skipped is simply redone by the next request."""
+    then apply the move and save.
+
+    A move the room refuses raises `rooms.StaleMove` carrying the caught-up room [A146],
+    and that catch-up is SAVED first if it changed anything: a late bid is exactly the
+    moment the lot's close most needs recording, and the page is handed the room as it
+    really is so it can redraw at once rather than on its next poll."""
     from web import rooms
     room = rooms._load_room(conn, code)
     if not is_auction(room):
         raise AuctionRoomError("this is not an auction room")
+    before = rooms._mutable_state(room)
     resolve(room, deck)
-    if room.status != "auctioning":
-        raise AuctionRoomError("the auction is over")
-    action(room, deck, player_id, *args)
+    # `record` appends to the log BEFORE validating it, so a refused move leaves itself on
+    # the object; put the caught-up state back before anything is saved.
+    caught_up = (room.moves, room.status, room.turn_started_at)
+    try:
+        if room.status != "auctioning":
+            raise AuctionRoomError("the auction is over")
+        action(room, deck, player_id, *args)
+    except AuctionRoomError as exc:
+        room.moves, room.status, room.turn_started_at = caught_up
+        if rooms._mutable_state(room) != before:
+            rooms._save_room(conn, room)
+        raise StaleAuctionMove(str(exc), room) from exc
     rooms._save_room(conn, room)
     return room
 
@@ -628,6 +707,8 @@ def start(room, deck: Deck, now: float | None = None) -> None:
     r = replay(room, deck)
     room.status = "complete" if r.phase == "complete" else "auctioning"
     room.turn_started_at = now + _stage_seconds(r)
+    if r.phase == "failed":
+        _fail(room, r)
 
 
 def room_sides(room, deck: Deck):

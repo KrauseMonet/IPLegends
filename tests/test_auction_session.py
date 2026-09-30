@@ -275,7 +275,7 @@ def test_as_the_winner_your_final_raise_is_recorded_and_cannot_undercut_the_hamm
 
 
 def test_an_auction_season_reports_its_franchise_crest_for_your_side(deck):
-    """[A146] An auction side IS its franchise, so the season response names your side's
+    """[A151] An auction side IS its franchise, so the season response names your side's
     crest -- which is what stops the page drawing a drafted side's kit over it."""
     from web import season_session as ss
     from web.app import _season_progress_out

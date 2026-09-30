@@ -91,7 +91,7 @@ async function maybeSaveSeason(d){
   catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
 }
 
-// [A146] Your side as every screen here draws it. An auction season is a real franchise
+// [A151] Your side as every screen here draws it. An auction season is a real franchise
 // and keeps its crest; a drafted twelve wears your kit. Set from each response, and again
 // when the kit changes (you edited it, or signing in brought your account's).
 function setMySide(d){
@@ -469,6 +469,7 @@ boot().then(async () => {
   SEASON_STATE = hash;
   if (isAuctionState(hash)){
     document.querySelectorAll('[onclick^="newDraft"]').forEach(b => b.textContent = 'Another auction');
+    markCurrentNav('/auction');
   }
   // The `?enter=` marker is a one-time navigation instruction (mirrors draft's own
   // `?mode=` convention) -- strip it immediately so a later reload of this exact URL

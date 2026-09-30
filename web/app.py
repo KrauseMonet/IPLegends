@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
-from game import analysis, auction, records
+from game import analysis, auction, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -40,7 +40,6 @@ from web import room_auction
 from web import auth
 from web import daily as daily_lib
 from web import db
-from web import flashback as flashback_lib
 from web import kit as kit_lib
 from web import room_match as room_match_lib
 from web import rooms
@@ -469,7 +468,7 @@ class InningsOut(BaseModel):
 
 
 class KitOut(BaseModel):
-    """A drafted side's team kit [A146]. `colour` is a key into `/api/meta`'s `kits`."""
+    """A drafted side's team kit [A151]. `colour` is a key into `/api/meta`'s `kits`."""
     name: str
     monogram: str
     colour: str
@@ -490,7 +489,7 @@ class StandingOut(BaseModel):
     name: str
     short: str
     crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
-    kit: KitOut | None = Field(default=None, description="a room's drafted side's kit [A146]")
+    kit: KitOut | None = Field(default=None, description="a room's drafted side's kit [A151]")
     you: bool
     played: int
     won: int
@@ -527,7 +526,7 @@ class ResultOut(BaseModel):
     home_crest: str | None = None
     away_crest: str | None = None
     home_kit: KitOut | None = Field(default=None, description="a room's drafted side's "
-                                    "kit [A146]; null for a franchise, and in solo, where "
+                                    "kit [A151]; null for a franchise, and in solo, where "
                                     "the page supplies the player's own")
     away_kit: KitOut | None = None
     home_score: str
@@ -606,7 +605,7 @@ class SeasonProgressOut(BaseModel):
     your_side: str
     your_crest: str | None = Field(
         default=None, description="your franchise's crest in an auction season; null "
-                    "for a drafted twelve, which wears the player's own kit instead [A146]")
+                    "for a drafted twelve, which wears the player's own kit instead [A151]")
     table: list[StandingOut] = Field(
         description="empty until the league stage is fully resolved")
     your_results: list[ResultOut] = Field(description="your completed matches so far")
@@ -667,14 +666,14 @@ class CreateRoomIn(BaseModel):
     game: Literal["draft", "auction", "mega"] = Field(
         default="draft", description="'auction' plays a live auction [A139]; 'mega' adds "
                                      "retentions and Right to Match [A140]; league only")
-    kit: KitIn | None = Field(default=None, description="the host's kit [A146]; draft "
+    kit: KitIn | None = Field(default=None, description="the host's kit [A151]; draft "
                               "rooms only, dropped if invalid")
 
 
 class JoinRoomIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     kit: KitIn | None = Field(default=None, description="the kit the player brings from "
-                              "their account or browser [A146]; dropped if invalid")
+                              "their account or browser [A151]; dropped if invalid")
 
 
 class HostActionIn(BaseModel):
@@ -690,6 +689,8 @@ class RoomPickIn(BaseModel):
     player_id: str
     index: int = Field(ge=0, description="an index into THIS seat's own current deal")
     slot: int = Field(ge=1, description="1-11 a batting position, or 12 for Impact")
+    picks_made: int | None = Field(
+        default=None, description="this seat's pick count when the choice was made [A146]")
 
 
 class RoomPlayerOut(BaseModel):
@@ -698,7 +699,7 @@ class RoomPlayerOut(BaseModel):
     is_cpu: bool
     franchise: str | None = Field(default=None, description="auction rooms only [A139]")
     kit: KitOut | None = Field(default=None, description="a draft room seat's team kit "
-                               "[A146] -- chosen, or the default it wears until then; "
+                               "[A151] -- chosen, or the default it wears until then; "
                                "null for filler and auction seats, which have crests")
     crest: str | None = Field(default=None, description="the franchise's crest image for that season; null for a side that is no single franchise")
     picks_made: int
@@ -916,7 +917,7 @@ class MeOut(BaseModel):
                     "401s, since every page calls it unconditionally on boot and a "
                     "no-login-wall app can't need special-case handling for that")
     username: str | None = None
-    kit: KitOut | None = Field(default=None, description="the account's team kit [A146]; "
+    kit: KitOut | None = Field(default=None, description="the account's team kit [A151]; "
                                                          "null if none was ever chosen")
 
 
@@ -1044,23 +1045,30 @@ class RecordsOut(BaseModel):
     best_economy: list[AnalysisLeaderOut]
 
 
-class FlashbackOut(BaseModel):
-    """One `web.flashback` trivia round. The answer (`correct_year`) rides in the same
-    payload rather than a second reveal round trip -- there is no leaderboard or saved
-    result here to protect (unlike the daily challenge), so nothing is lost by sending
-    it up front; the frontend simply doesn't render it until a guess is made."""
+class QuizOptionOut(BaseModel):
+    label: str
+    detail: str = Field(default="", description="shown once the question is answered")
+    crest: str | None = None
 
-    franchise: str
-    correct_year: int
-    candidates: list[int]
-    crest: str | None = Field(default=None, description="null where the name wore more than "
-                              "one crest -- either one would give the year away")
-    top_scorer: str | None = None
-    top_scorer_runs: int | None = None
-    top_wicket_taker: str | None = None
-    top_wicket_taker_wickets: int | None = None
-    matches_played: int
-    matches_won: int
+
+class QuizQuestionOut(BaseModel):
+    kind: str
+    prompt: str
+    clues: list[str]
+    crest: str | None = None
+    options: list[QuizOptionOut]
+    answer: int
+    reveal: str
+
+
+class QuizOut(BaseModel):
+    """[A147] A whole Flashback quiz. The answers ride along: there is no leaderboard or
+    saved result to protect (unlike the daily), so nothing is gained by a round trip per
+    question, and ten questions answered with no server call cannot stall on one."""
+
+    seed: int
+    seconds_per_question: int
+    questions: list[QuizQuestionOut]
 
 
 class PhaseBowlerOut(BaseModel):
@@ -1294,7 +1302,7 @@ def meta() -> dict:
         "seasons": sorted(s for s in seasons if s),
         "showcase": _showcase(deck),
         "crests": all_crests(),
-        # [A146] the team-kit palette, each colour with its derived shades, and the kit
+        # [A151] the team-kit palette, each colour with its derived shades, and the kit
         # a solo side wears before its player chooses one.
         "kits": kit_lib.palette(),
         "kit_default": kit_lib.SOLO_DEFAULT,
@@ -1349,21 +1357,34 @@ def records_route() -> RecordsOut:
     )
 
 
-@app.get("/api/flashback", response_model=FlashbackOut)
-def flashback_route() -> FlashbackOut:
-    """A fresh guess-the-season round. Genuinely random each call -- there is no seed to
-    replay and nothing to save, so unlike the draft/season/daily routes this one has no
-    determinism contract at all. Touches the database directly (`matches`/`deliveries`
-    aren't in the deck snapshot, A107), same as rooms and accounts."""
-    with _db() as conn:
-        r = flashback_lib.random_round(conn)
-    return FlashbackOut(
-        franchise=r.franchise, correct_year=r.correct_year, candidates=r.candidates,
-        crest=unambiguous_crest(r.franchise),
-        top_scorer=r.top_scorer, top_scorer_runs=r.top_scorer_runs,
-        top_wicket_taker=r.top_wicket_taker, top_wicket_taker_wickets=r.top_wicket_taker_wickets,
-        matches_played=r.matches_played, matches_won=r.matches_won,
-    )
+# Long enough to answer and read the reveal line, short enough to keep it moving.
+QUIZ_SECONDS = 20
+
+
+@app.get("/api/flashback", response_model=QuizOut)
+def flashback_route(response: Response, seed: int | None = None) -> QuizOut:
+    """A ten-question Flashback quiz [A147]. Pass the seed from a shared link to play the
+    same ten questions as a friend. A pure function of the deck (A107) and the seed -- no
+    database -- so a seeded quiz is cached at the edge."""
+    chosen = quiz.new_seed() if seed is None else seed
+    q = quiz.make_quiz(STATE["deck"], chosen)
+    if seed is not None:
+        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store"
+
+    def crest(franchise, year, hidden=False):
+        if not franchise:
+            return None
+        return unambiguous_crest(franchise) if hidden or year is None else crest_url(franchise, year)
+
+    return QuizOut(seed=q.seed, seconds_per_question=QUIZ_SECONDS, questions=[
+        QuizQuestionOut(
+            kind=x.kind, prompt=x.prompt, clues=x.clues, answer=x.answer, reveal=x.reveal,
+            crest=crest(x.franchise, x.year, x.year_hidden),
+            options=[QuizOptionOut(label=o.label, detail=o.detail,
+                                   crest=crest(o.franchise, o.year)) for o in x.options])
+        for x in q.questions])
 
 
 @app.post("/api/draft", response_model=SessionOut)
@@ -2211,7 +2232,7 @@ def me(request: Request) -> MeOut:
 
 @app.put("/api/account/kit", response_model=KitOut)
 def save_account_kit(body: KitIn, request: Request) -> KitOut:
-    """[A146] Save the signed-in player's team kit, so it follows them between devices.
+    """[A151] Save the signed-in player's team kit, so it follows them between devices.
     Signed out, the page keeps it in the browser instead and never calls this."""
     account_id = _current_account_id(request)
     if account_id is None:
@@ -2632,7 +2653,7 @@ def _daily_match_out(play, scenario) -> dict:
                   if first.runs != second.runs else None,
         "margin": play.outcome.summary,
         "yours": True,
-        # [A146] which side is the player's, so the page can put their kit on it.
+        # [A151] which side is the player's, so the page can put their kit on it.
         "you_home": player_is_first,
         "home_innings": _daily_innings_out(first, bowled_by_a_player=play.first_real_bowling),
         "away_innings": _daily_innings_out(second, bowled_by_a_player=play.second_real_bowling),
@@ -3005,18 +3026,36 @@ def get_room(code: str, player_id: str | None = None) -> RoomStateOut:
             room = rooms.room_state(conn, code, STATE["deck"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=player_id)
+    # After the commit: a poll that caught the room up took the row lock to do it [A146].
+    return _room_state_out(room, STATE["deck"], caller_id=player_id)
+
+
+def _stale_move_response(exc: rooms.StaleMove, caller_id: str) -> JSONResponse:
+    """[A146] A refused move answers 409 WITH the room as it really is now, so the page
+    redraws on this response instead of sitting on the state the player clicked against
+    until its next poll -- which is most of what "my bid wasn't taken" looked like: the
+    refusal arrived and the stale price stayed on screen."""
+    out = _room_state_out(exc.room, STATE["deck"], caller_id=caller_id)
+    return JSONResponse(status_code=409,
+                        content={"detail": str(exc), "room": out.model_dump(mode="json")})
 
 
 @app.post("/api/rooms/{code}/pick", response_model=RoomStateOut)
-def room_pick(code: str, body: RoomPickIn) -> RoomStateOut:
+def room_pick(code: str, body: RoomPickIn):
+    # The response is built AFTER the `with` block, i.e. after the commit that releases
+    # the room's row lock [A146]: building it holds nothing the next seat's request needs.
     with _db() as conn:
         try:
-            room = rooms.submit_pick(
-                conn, code, body.player_id, body.index, body.slot, STATE["deck"])
+            room = rooms.submit_pick(conn, code, body.player_id, body.index, body.slot,
+                                     STATE["deck"], picks_made=body.picks_made)
+            stale = None
+        except rooms.StaleMove as exc:
+            stale = exc
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+    if stale is not None:
+        return _stale_move_response(stale, body.player_id)
+    return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 class FranchiseIn(BaseModel):
@@ -3028,18 +3067,24 @@ class RoomKitIn(KitIn):
     player_id: str
 
 
-class RoomBidIn(BaseModel):
+class _LotMoveIn(BaseModel):
     player_id: str
+    # [A146] Which lot the page was showing. Optional so an older page still works; when
+    # given, a move that arrives after its lot closed is refused rather than landing on
+    # the next one.
+    lot: int | None = None
+    round: str | None = None
+
+
+class RoomBidIn(_LotMoveIn):
     price: int = Field(description="the price you raise to: must be the current next bid")
 
 
-class RoomLimitIn(BaseModel):
-    player_id: str
+class RoomLimitIn(_LotMoveIn):
     max: int = Field(description="lakh; the server bids for you up to this")
 
 
-class RoomPassIn(BaseModel):
-    player_id: str
+class RoomPassIn(_LotMoveIn):
     scope: Literal["lot", "set", "all"]
 
 
@@ -3077,7 +3122,7 @@ def room_franchise(code: str, body: FranchiseIn) -> RoomStateOut:
 
 @app.post("/api/rooms/{code}/kit", response_model=RoomStateOut)
 def room_kit(code: str, body: RoomKitIn) -> RoomStateOut:
-    """[A146] A draft room seat chooses its team kit -- until the matches start."""
+    """[A151] A draft room seat chooses its team kit -- until the matches start."""
     with _db() as conn:
         try:
             room = rooms.set_kit(conn, code, body.player_id,
@@ -3088,50 +3133,59 @@ def room_kit(code: str, body: RoomKitIn) -> RoomStateOut:
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
-def _auction_move(code: str, player_id: str, action, *args) -> RoomStateOut:
+def _auction_move(code: str, player_id: str, action, *args):
     """Every auction-room move goes through `room_auction.submit`, under the row lock.
     A refusal is a 409 -- the move was reasonable when sent, but the room moved on (most
-    often "outbid") -- so the page refetches rather than treating it as a mistake."""
+    often "outbid") -- and carries the room as it now is, so the page redraws at once.
+    The response is built after the commit, so the lock is not held while it is [A146]."""
     with _db() as conn:
         try:
             room = room_auction.submit(conn, code, STATE["deck"], action, player_id, *args)
+            stale = None
+        except rooms.StaleMove as exc:
+            stale = exc
         except (room_auction.AuctionRoomError, rooms.RoomError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return _room_state_out(room, STATE["deck"], caller_id=player_id)
+    if stale is not None:
+        return _stale_move_response(stale, player_id)
+    return _room_state_out(room, STATE["deck"], caller_id=player_id)
 
 
 @app.post("/api/rooms/{code}/auction/bid", response_model=RoomStateOut)
-def room_auction_bid(code: str, body: RoomBidIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.bid, body.price)
+def room_auction_bid(code: str, body: RoomBidIn):
+    return _auction_move(code, body.player_id, room_auction.bid, body.price, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/limit", response_model=RoomStateOut)
-def room_auction_limit(code: str, body: RoomLimitIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.limit, body.max)
+def room_auction_limit(code: str, body: RoomLimitIn):
+    return _auction_move(code, body.player_id, room_auction.limit, body.max, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/pass", response_model=RoomStateOut)
-def room_auction_pass(code: str, body: RoomPassIn) -> RoomStateOut:
-    return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope)
+def room_auction_pass(code: str, body: RoomPassIn):
+    return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope, body.lot,
+                         body.round)
 
 
 @app.post("/api/rooms/{code}/auction/fill", response_model=RoomStateOut)
-def room_auction_fill(code: str, body: RoomFillIn) -> RoomStateOut:
+def room_auction_fill(code: str, body: RoomFillIn):
     return _auction_move(code, body.player_id, room_auction.fill, body.index)
 
 
 @app.post("/api/rooms/{code}/auction/retain", response_model=RoomStateOut)
-def room_auction_retain(code: str, body: RoomRetainIn) -> RoomStateOut:
+def room_auction_retain(code: str, body: RoomRetainIn):
     return _auction_move(code, body.player_id, room_auction.retain, body.picks)
 
 
 @app.post("/api/rooms/{code}/auction/rtm", response_model=RoomStateOut)
-def room_auction_rtm(code: str, body: RoomRtmIn) -> RoomStateOut:
+def room_auction_rtm(code: str, body: RoomRtmIn):
     return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price)
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)
-def room_auction_twelve(code: str, body: RoomTwelveIn) -> RoomStateOut:
+def room_auction_twelve(code: str, body: RoomTwelveIn):
     return _auction_move(code, body.player_id, room_auction.twelve, body.order, body.impact)
 
 
@@ -3222,7 +3276,7 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     # can drift back to the raw stored placeholder ("CPU 1") the way
     # `_room_current_match_out` used to.
     sides = rooms.room_sides(room, deck)
-    # [A146] A drafted side is named by its kit, the same name `_sides_with_pid` gave it
+    # [A151] A drafted side is named by its kit, the same name `_sides_with_pid` gave it
     # on the scoreboard -- the champion banner must not call it something else.
     kits = rooms.seat_kits(room)
     display_names = {pid: (kits[pid].name if pid in kits else p.name)

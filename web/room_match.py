@@ -182,7 +182,7 @@ def _short_name(name: str, pid: str) -> str:
 
 
 def _sides_with_pid(room: Room, deck) -> list[tuple[str, Side]]:
-    # [A146] A drafted side plays under its kit: the team name, and the monogram as its
+    # [A151] A drafted side plays under its kit: the team name, and the monogram as its
     # scoreboard short. Monograms are unique within a room (`rooms.seat_kits`), and a
     # filler's short always carries its season ("CSK 2010"), so no two sides share one.
     # Kits lock when the matches start, so every replay of a tournament names its sides

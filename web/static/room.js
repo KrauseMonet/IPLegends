@@ -6,6 +6,9 @@
 
 /* --- a room's own completed match: renderScorecard/copyRoomCode's data source --- */
 let ROOM_MATCH_DATA = null;
+// [A149] The room version ROOM_MATCH_DATA was fetched at, and when -- see pollRoomNow.
+let ROOM_MATCH_AT = -1, ROOM_MATCH_FETCHED = 0;
+const ROOM_MATCH_RECHECK_MS = 10000;
 
 function showRoomScorecard(i){
   renderScorecard(ROOM_MATCH_DATA.results[i].result);
@@ -94,6 +97,45 @@ async function roomApi(path, opts){
   }
   return body;
 }
+
+// [A146] A live move -- a pick, a bid, a pass. Three things the plain fetch did not do,
+// and each was a way a move the player made simply did not happen:
+//  * It gives up after ROOM_MOVE_TIMEOUT_MS, not the page-load 15s: a 15-second lot cannot
+//    afford a request that hangs for all of it.
+//  * With `retry`, a request that never got an answer (a timeout, a dropped connection, a
+//    503 while the room was busy) is sent once more. That is only safe because every
+//    retried move names what it was about -- a pick its pick count, a bid its lot and
+//    price -- so a repeat of a move that DID land is refused or ignored, never doubled.
+//    And a refusal of the retry is exactly that case, so it is treated as success.
+//  * A 409 refusal now carries the room as it really is, which is applied at once, so the
+//    screen shows why ("outbid", "that lot has closed") instead of the stale state the
+//    player clicked against sitting there until the next poll.
+const ROOM_MOVE_TIMEOUT_MS = 7000;
+async function roomPost(path, payload, retry){
+  const opts = {method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({player_id: MY_PID, ...payload}),
+                timeoutMs: ROOM_MOVE_TIMEOUT_MS};
+  for (let attempt = 0; ; attempt++){
+    try {
+      return await roomApi(path, opts);
+    } catch(e){
+      const room = e.status === 409 && e.body && e.body.room;
+      if (room){
+        applyRoom(room);
+        if (attempt > 0) return room;     // the first attempt landed after all
+        e.room = room;
+        throw e;
+      }
+      const transient = e.timeout || e.status === 503 || e.status === undefined;
+      if (retry && transient && attempt === 0){
+        await new Promise(r => setTimeout(r, 400));
+        continue;
+      }
+      if (transient) pollRoom(true);      // show where the room really is meanwhile
+      throw e;
+    }
+  }
+}
 // Whose squad the "Batting order" column shows during someone else's turn: false = the
 // active player's (the default), true = my own. Resets whenever the active player changes
 // so a stale choice doesn't linger into the next person's turn.
@@ -102,12 +144,12 @@ let ROOM_VIEW_MINE = false, ROOM_VIEW_LAST_ACTIVE = null;
 // viewer right now (or null) -- while set, incoming polls are ignored for rendering so
 // a live over-by-over stepper is never restarted out from under the viewer; the fresh
 // data still lands in ROOM_MATCH_DATA and is read the moment the reveal finishes.
-// ROOM_REVEALED_STAGE remembers the last stage we've already animated, so a fixture is
-// never re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
-// is over" choice screen. ROOM_LEAGUE_REVEALED_THROUGH is ROOM_REVEALED_STAGE's own
+// ROOM_REVEALED holds every playoff stage already animated, so a fixture is never
+// re-revealed on a later poll. ROOM_SPECTATE_SHOWN gates the one-time "your run
+// is over" choice screen. ROOM_LEAGUE_REVEALED_THROUGH is ROOM_REVEALED's own
 // analogue for a league room's round-robin, which needs a COUNT rather than a stage
 // name -- every one of its fixtures shares the literal stage "league", not a unique
-// label like "Semi-final 1". All four reset per room in enterRoom.
+// label like "Semi-final 1". All of them reset per room in enterRoom.
 // Auto-advance. The host used to be a required CLICK on every step -- 74 of them for a
 // ten-seat league room, each one blocking all nine other seats on "Waiting for the host
 // to continue…". The tournament's result is already fully computed by then (revealing is
@@ -170,7 +212,12 @@ function roomAutoNow(){
   fire();
 }
 
-let ROOM_REVEAL_ACTIVE = null, ROOM_REVEALED_STAGE = null, ROOM_SPECTATE_SHOWN = false;
+let ROOM_REVEAL_ACTIVE = null, ROOM_SPECTATE_SHOWN = false;
+// [A149] Every playoff stage this viewer has already watched (or was never going to):
+// a SET, because everyone now watches every match and a round can hold two at once.
+// ROOM_REVEAL_SYNCED marks the first match payload of a visit, which is taken as
+// already seen -- see roomSyncSeen.
+let ROOM_REVEALED = new Set(), ROOM_REVEAL_SYNCED = false;
 let ROOM_LEAGUE_REVEALED_THROUGH = 0;
 // Bumped ONLY by a mutation (toss/advance/pick/kick/start) -- never by pollRoom itself.
 // A poll captures the CURRENT generation before its request and only applies its result
@@ -237,22 +284,25 @@ document.addEventListener('DOMContentLoaded', () => {
 function enterRoom(code, playerId){
   saveRoomSession(code, playerId);
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
-  ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null; ROOM_SPECTATE_SHOWN = false;
+  ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
+  ROOM_SPECTATE_SHOWN = false;
   ROOM_LEAGUE_REVEALED_THROUGH = 0;
   // Reset per ROOM, not per session: versions are counted per room row, so a version
   // carried over from a room we just left would silently reject the new room's early
   // states until it happened to climb past it.
   ROOM_VERSION_SEEN = -1;
+  ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
   ROOM_POLL_FAILS = 0;
+  ROOM_POLL_INFLIGHT = false; ROOM_POLL_STARTED = 0;
   ROOM_TIMER_BASE = null;
   // Re-measured per room rather than kept for the tab's lifetime: the best-RTT sample is
   // sticky by design, and a lucky sample from an earlier session is not evidence about
   // this one (the device may have changed network entirely between the two).
   ROOM_CLOCK_OFFSET = 0; ROOM_CLOCK_BEST_RTT = Infinity;
   go('room');
-  pollRoom();
+  pollRoom(true);
   if (ROOM_POLL) clearInterval(ROOM_POLL);
-  ROOM_POLL = setInterval(pollRoom, 2000);
+  ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
   if (ROOM_TIMER_TICK) clearInterval(ROOM_TIMER_TICK);
   ROOM_TIMER_TICK = setInterval(tickRoomTimer, 1000);
   watchRoomVisibility();
@@ -278,8 +328,8 @@ function watchRoomVisibility(){
       // Not on a FAILED room: `renderRoomFailed` stops polling deliberately, and there
       // is nothing further to learn about a room that has stranded. Every other status
       // resumes, 'complete' included -- the match phase polls on this same interval.
-      pollRoom();
-      ROOM_POLL = setInterval(pollRoom, 2000);
+      pollRoom(true);
+      ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
       // The countdown is derived from the server's own clock rather than counted down
       // locally, so it needs no catch-up of its own here -- re-rendering it is enough,
       // and it will already show the correct (probably expired) value.
@@ -288,7 +338,7 @@ function watchRoomVisibility(){
   });
   // A phone waking or a network coming back does not always fire visibilitychange, and
   // a poll that fires while offline fails silently and waits a full interval to retry.
-  window.addEventListener('online', () => { if (ROOM_CODE) pollRoom(); });
+  window.addEventListener('online', () => { if (ROOM_CODE) pollRoom(true); });
 }
 
 // Apply a room payload only if it is NEWER than whatever we last applied. Returns
@@ -316,15 +366,59 @@ function applyRoom(room){
   return true;
 }
 
-async function pollRoom(){
+// [A146] Polling ticks every second but only fetches every second while a clock is live
+// (a draft turn, a lot on the floor) -- everywhere else every two, as before. A second
+// matters there: an opponent's bid seen two seconds late was a bid answered against a
+// stale price, and a turn noticed two seconds late was two seconds off a 15-second clock.
+//
+// And never more than one poll in flight. A poll used to fire every interval whether or
+// not the last had answered, so a slow moment -- a cold server, a phone on a weak signal
+// -- stacked requests on top of each other, each one making the next slower: exactly the
+// moment a room felt stuck. A poll that has had no answer for ROOM_POLL_STUCK_MS is given
+// up on, so one lost request can never stop polling altogether.
+const ROOM_POLL_TICK_MS = 1000, ROOM_POLL_IDLE_MS = 2000, ROOM_POLL_STUCK_MS = 8000;
+let ROOM_POLL_STARTED = 0, ROOM_POLL_INFLIGHT = false;
+function roomClockLive(){
+  return !!ROOM && (ROOM.status === 'drafting' || ROOM.status === 'auctioning');
+}
+
+// `now` skips the idle-phase spacing (not the in-flight guard): a tab coming back, the
+// network returning, a move that failed -- each wants the room immediately.
+async function pollRoom(now){
   if (!ROOM_CODE) return;
+  const since = Date.now() - ROOM_POLL_STARTED;
+  if (ROOM_POLL_INFLIGHT && since < ROOM_POLL_STUCK_MS) return;
+  if (now !== true && !roomClockLive() && since < ROOM_POLL_IDLE_MS - 100) return;
+  ROOM_POLL_INFLIGHT = true;
+  ROOM_POLL_STARTED = Date.now();
+  const started = ROOM_POLL_STARTED;
+  try { await pollRoomNow(); }
+  finally { if (ROOM_POLL_STARTED === started) ROOM_POLL_INFLIGHT = false; }
+}
+
+async function pollRoomNow(){
   const myGen = ROOM_GEN;   // a mutation started after this poll was issued supersedes it
   try {
     // player_id identifies the caller so the server knows whose options (if anyone's)
     // to include -- only the currently active seat's own caller ever sees them.
-    const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID));
+    const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID),
+                               {timeoutMs: ROOM_POLL_STUCK_MS});
     if (myGen !== ROOM_GEN) return;
-    if (!applyRoom(room)) return;     // an older read than one already applied
+    const fresh = applyRoom(room);
+    // [A149] A poll whose room version is not new used to stop here, and the match data
+    // was only ever fetched on a NEW version. That froze a room for good: when a poll
+    // stored a new version but was then superseded by a mutation before it could store
+    // the match data (the host's own countdown firing, say, and being refused), the page
+    // held a match older than its version with no reason ever to ask again. And because
+    // the server's own inactivity failsafe (A122) runs only when somebody asks for the
+    // match, a room whose pages were all waiting on a version change nobody would make
+    // never advanced at all. So the match is fetched when it is BEHIND the version it
+    // belongs to, and re-checked every ROOM_MATCH_RECHECK_MS while the tournament runs.
+    const matchStale = !!ROOM && ROOM.status === 'complete' && (
+      ROOM_MATCH_AT < ROOM_VERSION_SEEN ||
+      (!(ROOM_MATCH_DATA && ROOM_MATCH_DATA.complete)
+        && Date.now() - ROOM_MATCH_FETCHED > ROOM_MATCH_RECHECK_MS));
+    if (!fresh && !matchStale) return;     // an older read than one already applied
     roomOnline(true);
     if (ROOM.status === 'complete'){
       // The match phase keeps polling on the SAME interval as the draft -- a toss
@@ -341,6 +435,8 @@ async function pollRoom(){
       // newer poll has already fetched a fresher match than this one.
       if (at !== ROOM_VERSION_SEEN) return;
       ROOM_MATCH_DATA = m;
+      ROOM_MATCH_AT = at;
+      ROOM_MATCH_FETCHED = Date.now();
     }
     renderRoom();
   } catch(e){
@@ -425,23 +521,25 @@ function roomOpenPickSheet(me){
     name: card.name,
     status: `${me.picks_made} of 12 chosen` + (cap ? ` · ${overseas} of ${cap} overseas` : ''),
     slots,
-    onChoose: slot => roomSubmitPick(index, slot, null),
+    onChoose: slot => roomSubmitPick(index, slot, null, ROOM_PENDING && ROOM_PENDING.at),
     onCancel: () => { ROOM_PENDING = null; renderRoom(); },
   });
 }
 
 function roomRowClick(slot, ctrl){
   if (!ROOM_PENDING) return;
-  roomSubmitPick(ROOM_PENDING.index, slot, ctrl);
+  roomSubmitPick(ROOM_PENDING.index, slot, ctrl, ROOM_PENDING.at);
 }
 
-async function roomSubmitPick(index, slot, ctrl){
+// `at` is this seat's pick count when the card was chosen [A146]: the server refuses the
+// pick if the clock has since picked for this seat, rather than applying the index to a
+// fresh deal the player never saw.
+async function roomSubmitPick(index, slot, ctrl, at){
   await busyClick(ctrl, 'Taking…', async () => {
     const myGen = ++ROOM_GEN;
     try {
-      const room = await roomApi(`/api/rooms/${ROOM_CODE}/pick`, {method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({player_id: MY_PID, index, slot})});
+      const room = await roomPost(`/api/rooms/${ROOM_CODE}/pick`,
+        {index, slot, picks_made: (typeof at === 'number') ? at : null}, true);
       if (myGen !== ROOM_GEN) return;
       applyRoom(room);
       // Cleared unconditionally, not only when applyRoom accepted: the selection this
@@ -449,7 +547,10 @@ async function roomSubmitPick(index, slot, ctrl){
       // resubmit an index against a deal the server has already moved past.
       ROOM_PENDING = null;
       renderRoom();
-    } catch(e){ slip(e.message); }
+    } catch(e){
+      if (e.room){ ROOM_PENDING = null; renderRoom(); }
+      slip(e.message);
+    }
   });
 }
 
@@ -508,7 +609,7 @@ function renderRoomLobby(r){
   $('#lobbyStartBtn').classList.toggle('hide', !amHost);
 }
 
-// --- team kits [A146] ------------------------------------------------------------------------
+// --- team kits [A151] ------------------------------------------------------------------------
 //
 // Each drafted side in a draft room wears a kit -- chosen, or a distinct default the server
 // hands out -- and everyone sees everyone's. Auction and filler seats are franchises and
@@ -578,32 +679,62 @@ async function chooseRoomFranchise(short, ctrl){
   });
 }
 
-// auction.js draws the floor; this only feeds it. Updates are chained so an exchange that
-// is still animating is never cut off by the next poll's -- they play one after another.
-let AUCTION_CHAIN = Promise.resolve();
+// auction.js draws the floor; this only feeds it. An exchange that is still animating is
+// never cut off by the next update -- but updates are COALESCED rather than queued [A146].
+// Each exchange takes ~2s to play and polls arrive every second, so a queue of them fell
+// further behind the real room with every opponent bid: the floor showed a price seconds
+// old, a bid against it came back "outbid", and the room looked frozen. Now only the
+// newest view waits; when the current animation ends it plays straight to that one, the
+// bids in between compressed into the same couple of seconds.
+let AUCTION_NEXT = null, AUCTION_DRAIN = null;
 let AUCTION_SEEN = 0;
+function queueAuctionView(view){
+  AUCTION_NEXT = view;
+  if (!AUCTION_DRAIN){
+    AUCTION_DRAIN = (async () => {
+      try {
+        while (AUCTION_NEXT){
+          const v = AUCTION_NEXT;
+          AUCTION_NEXT = null;
+          try { await apply(v, !!A); } catch(e){ slip(e.message); }
+        }
+      } finally { AUCTION_DRAIN = null; }
+    })();
+  }
+  return AUCTION_DRAIN;
+}
 function renderRoomAuction(r){
   if (!r.auction || r.version <= AUCTION_SEEN) return;
   AUCTION_SEEN = r.version;
-  const view = r.auction, first = !A;
-  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, !first)).catch(e => slip(e.message));
+  queueAuctionView(r.auction);
 }
+
+// Only these are retried: each names its lot, so a repeat can never land on another one.
+const AUCTION_RETRYABLE = new Set(['bid', 'limit', 'pass']);
 
 // The two hooks auction.js calls in room mode.
 window.roomAuctionPost = async (path, body) => {
   const myGen = ++ROOM_GEN;
-  const room = await roomApi(`/api/rooms/${ROOM_CODE}/auction/${path}`, {method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({player_id: MY_PID, ...body})});
+  let room;
+  try {
+    room = await roomPost(`/api/rooms/${ROOM_CODE}/auction/${path}`, body,
+                          AUCTION_RETRYABLE.has(path));
+  } catch(e){
+    // A refusal carries the room as it now is: draw it before the message shows, so
+    // "outbid" arrives with the new price already on the floor.
+    if (e.room && myGen === ROOM_GEN){
+      AUCTION_SEEN = Math.max(AUCTION_SEEN, e.room.version);
+      if (e.room.status === 'auctioning' && e.room.auction) await queueAuctionView(e.room.auction);
+      else renderRoom();
+    }
+    throw e;
+  }
   if (myGen !== ROOM_GEN) return null;
-  applyRoom(room);
   AUCTION_SEEN = Math.max(AUCTION_SEEN, room.version);
   if (room.status !== 'auctioning'){ renderRoom(); return null; }
-  // Through the same chain as a poll's update, so your own exchange never plays over the
-  // top of one still animating. Returns null: the chain has already drawn it.
-  const view = room.auction;
-  AUCTION_CHAIN = AUCTION_CHAIN.then(() => apply(view, true)).catch(e => slip(e.message));
-  await AUCTION_CHAIN;
+  // Through the same queue as a poll's update, so your own exchange never plays over the
+  // top of one still animating. Returns null: the queue has already drawn it.
+  await queueAuctionView(room.auction);
   return null;
 };
 window.roomAuctionDeadline = () => (ROOM ? ROOM.turn_started_at - serverClock() : 0);
@@ -983,6 +1114,7 @@ function roomSpectateChoiceHtml(){
       <button class="act lead" onclick="roomChooseSpectateExit('card')">See your journey card</button>
       <button class="act" onclick="roomChooseSpectateExit('follow')">Follow the tournament</button>
     </div>
+    <div class="margin" id="roomAutoLine"></div>
   </div>`;
 }
 
@@ -997,34 +1129,38 @@ function roomChooseSpectateExit(choice){
 // fixture at once, so the existing singleton is reused as-is, just fed room data and a
 // room-specific onDone.
 
-// Finds the viewer's own fixture that still needs its reveal played, or null if there
-// isn't one. `current_matches` covers every ordinary case (toss still pending, or
-// resolved but not yet advanced past) -- but the tournament's very LAST fixture in
-// every format (`replay_room_matches`'s final branch for 'final'/'cup'/'league' alike)
-// skips the paused, advance-gated stopover every earlier round gets and jumps straight
-// to `complete`, emptying `current_matches` in the same response that resolved it. Without
-// this fallback that fixture's scoreline would appear for both sides with no reveal at
-// all -- `results` still carries it, with full innings data, so it's read from there
-// instead once it's no longer in `current_matches`. Shared by showRoomMatch (the polling
-// path, for whichever side didn't call the toss) and roomSubmitTossReveal (the side that
-// did), so both agree on where a fixture's result can still be found.
-function roomMyMatchToReveal(m){
-  // While the league group stage is still being revealed, every one of its seventy
-  // fixtures shares the literal stage string "league" (ROOM_LEAGUE_REVEALED_THROUGH's
-  // own comment has the why), so the `ROOM_REVEALED_STAGE !== last.stage` check below
-  // can only ever fire once for the viewer's OWN first league fixture and then goes
-  // permanently inert -- it cannot tell two different league fixtures apart. The
-  // dedicated league branch in showRoomMatch (ROOM_LEAGUE_REVEALED_THROUGH, a real
-  // counter) is what actually paces that phase; this function must sit out entirely
-  // while it's running rather than risk firing on a stale cached fixture.
+// [A149] Everyone watches every match, not just their own. This finds the next fixture
+// this viewer still owes a reveal, or null:
+//   * their OWN fixture's toss call, first -- only they can make it;
+//   * then any resolved playoff fixture not yet watched, their own ahead of the rest, so a
+//     round holding two (Qualifier 1 and the Eliminator, a cup's two semis) plays both,
+//     one after the other.
+// A resolved fixture is looked for in `current_matches` AND in `results`, because the
+// tournament's very LAST fixture in every format completes the room in the same response
+// that resolves it and so leaves `current_matches` empty (A83); `results` still carries
+// it, full innings and all. The league's seventy group matches are paced by their own
+// counter in showRoomMatch, and all share the stage name "league", so they are left out
+// here entirely while the group stage is still being revealed.
+function roomNextToReveal(m){
   if (m.league_revealed != null && m.league_revealed < m.league_total) return null;
-  const cur = m.current_matches.find(cm => cm.a_pid === MY_PID || cm.b_pid === MY_PID);
+  const isMine = f => f.a_pid !== undefined ? (f.a_pid === MY_PID || f.b_pid === MY_PID)
+                                            : !!f.result.yours;
+  const cur = m.current_matches.find(isMine);
   if (cur && cur.result === null && cur.you_decide_toss) return cur;
-  if (cur && cur.result && ROOM_REVEALED_STAGE !== cur.stage) return cur;
-  if (cur) return null;   // it's mine but still waiting on someone else's toss
-  const mine = m.results.filter(e => e.result.yours);
-  const last = mine[mine.length - 1];
-  return (last && ROOM_REVEALED_STAGE !== last.stage) ? last : null;
+  const done = [...m.current_matches.filter(f => f.result),
+                ...m.results.filter(e => e.stage !== 'league')];
+  const unseen = done.filter(f => !ROOM_REVEALED.has(f.stage));
+  return unseen.find(isMine) || unseen[0] || null;
+}
+
+// The first match payload of a visit -- a reload, or rejoining mid-tournament -- marks
+// every playoff fixture from an EARLIER round as already seen, so coming back does not
+// replay the whole bracket. The round still open is left unseen and plays as normal.
+function roomSyncSeen(m){
+  if (ROOM_REVEAL_SYNCED) return;
+  ROOM_REVEAL_SYNCED = true;
+  const open = new Set(m.current_matches.map(f => f.stage));
+  (m.results || []).forEach(e => { if (!open.has(e.stage)) ROOM_REVEALED.add(e.stage); });
 }
 
 function roomEnterReveal(myMatch){
@@ -1054,7 +1190,7 @@ async function roomSubmitTossReveal(elects, ctrl){
         body: JSON.stringify({player_id: MY_PID, stage, elects})});
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
-      const fresh = roomMyMatchToReveal(m);
+      const fresh = roomNextToReveal(m);
       if (fresh && fresh.stage === stage) roomStartReveal(fresh);
       else { ROOM_REVEAL_ACTIVE = null; go('room'); showRoomMatch(m); }
     } catch(e){ slip(e.message); }
@@ -1112,7 +1248,7 @@ function roomSkipThisMatch(){
 
 function roomFinishReveal(myMatch){
   ROOM_REVEAL_ACTIVE = null;
-  ROOM_REVEALED_STAGE = myMatch.stage;
+  ROOM_REVEALED.add(myMatch.stage);
   go('room');
   showRoomMatch(ROOM_MATCH_DATA);
 }
@@ -1159,6 +1295,7 @@ function showRoomMatch(m){
   // A countdown must never outlive the screen it belongs to: the host watching their own
   // match must not have the next round advance out from under them.
   if (ROOM_REVEAL_ACTIVE){ roomDisarmAuto(); return; }
+  roomSyncSeen(m);
 
   // Every seat reviews its own finished twelve -- and the three ratings that come with
   // it -- before a single ball is bowled. Nothing below this point (not even a first
@@ -1168,37 +1305,32 @@ function showRoomMatch(m){
   // step, so nothing counts down behind it.
   if (m.awaiting_start){ roomDisarmAuto(); renderRoomStartReview(m); return; }
 
-  // A league room's group-stage reveal: checked before roomMyMatchToReveal, since a
+  // A league room's group-stage reveal: checked before roomNextToReveal, since a
   // round-robin fixture isn't participant-scoped the way a knockout fixture is -- the
   // shared pacing cursor (host-driven Continue/Skip ahead, same mechanism and same
   // performance profile as before) walks every viewer through the same seventy
-  // fixtures together, but the ANIMATION is personal: only a viewer who actually played
-  // in the fixture the cursor just landed on gets the ball-by-ball reveal for it.
-  // Everyone else just watches the table tick up. `result.yours` already exists
-  // per-caller on every result (`_room_result_out`).
-  // ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED_STAGE) tracks how far THIS client
+  // fixtures together, and every viewer watches each one as the cursor lands on it.
+  // ROOM_LEAGUE_REVEALED_THROUGH (not ROOM_REVEALED) tracks how far THIS client
   // has already watched, since every round-robin entry shares the literal stage
   // "league" and can't be told apart by name the way "Semi-final 1" can.
   if (m.league_revealed != null && m.league_next_result &&
       m.league_revealed > ROOM_LEAGUE_REVEALED_THROUGH){
     ROOM_LEAGUE_REVEALED_THROUGH = m.league_revealed;
-    if (m.league_next_result.result.yours){
-      roomDisarmAuto();
-      roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
-      return;
-    }
-    // Not the viewer's own fixture -- fall through to the ordinary shared waiting
-    // view (table + progress + Continue/Skip ahead) below instead of forcing them
-    // through a match they have no stake in. roomMyMatchToReveal is safely inert
-    // during this phase (its own guard, above), so falling through here cannot
-    // misfire into an unrelated animation.
+    // [A149] Every viewer watches the fixture the cursor just landed on, not only the two
+    // who played in it (A100's rule, reversed at the user's request). The host's own
+    // auto-advance is disarmed while any reveal runs, so the room moves on once the host
+    // has watched it -- and a viewer who wants less can Skip match or change the speed,
+    // both of which touch only their own screen.
+    roomDisarmAuto();
+    roomEnterReveal(m.league_next_result);   // the exact same playoff reveal engine, unmodified
+    return;
   }
 
   // Checked BEFORE `m.complete`, not after: the tournament's very last fixture can
-  // resolve and complete the whole room in the same response (roomMyMatchToReveal's own
+  // resolve and complete the whole room in the same response (roomNextToReveal's own
   // comment has the why), so a straight `if (m.complete)` check here would show that
   // fixture's scoreline with no reveal at all, for both sides.
-  const toReveal = roomMyMatchToReveal(m);
+  const toReveal = roomNextToReveal(m);
   if (toReveal){ roomDisarmAuto(); roomEnterReveal(toReveal); return; }
 
   if (m.complete){ roomDisarmAuto(); showRoomMatchComplete(m); return; }
@@ -1216,8 +1348,12 @@ function showRoomMatch(m){
   const gap = gapBody ? `<div class="room-gap">${gapBody}</div>` : '';
 
   if (m.you_are_out && !ROOM_SPECTATE_SHOWN){
-    roomDisarmAuto();
     el.innerHTML = roomSpectateChoiceHtml() + gap;
+    // [A149] A knocked-out HOST still paces the room. This used to disarm, so the whole
+    // room waited on the host answering "your run is over" (or on the server's 90-second
+    // fallback) -- and with everyone watching every match, a knocked-out host is the
+    // ordinary case, not a corner.
+    roomSyncAuto(m);
     return;
   }
 
@@ -1362,8 +1498,9 @@ async function roomPlayAgain(ctrl){
       // left stale, so a later completion can never be masked by this game's leftovers
       // (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut would
       // otherwise show the game just finished instead of the new one).
-      ROOM_MATCH_DATA = null;
-      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED_STAGE = null;
+      ROOM_MATCH_DATA = null; ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
+      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null;
+      ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
       ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
       ROOM_SAVE_ATTEMPTED = false;
       renderRoom();
@@ -1375,7 +1512,7 @@ function showRoomJourneyCard(){
   // ROOM_MATCH_DATA already carries the journey card's own numbers once complete --
   // no second fetch, same reasoning as solo's own showJourneyCard.
   if (!ROOM_MATCH_DATA || !ROOM_MATCH_DATA.squad){ slip('Play the match first.'); return; }
-  // [A146] Your own side, as the room knows it: a franchise's crest in an auction room, the
+  // [A151] Your own side, as the room knows it: a franchise's crest in an auction room, the
   // kit in a draft room.
   const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
   const side = me ? {name: me.kit ? me.kit.name : (me.franchise || me.name),
@@ -1449,13 +1586,12 @@ async function roomSkipTo(target, ctrl){
       if (myGen !== ROOM_GEN) return;
       ROOM_MATCH_DATA = m;
       // A skip is a decision to stop watching, so it must not land back in a reveal.
-      // ROOM_REVEALED_STAGE/ROOM_LEAGUE_REVEALED_THROUGH are what showRoomMatch consults
+      // ROOM_REVEALED/ROOM_LEAGUE_REVEALED_THROUGH are what showRoomMatch consults
       // to decide whether a fixture still owes this viewer an animation; without moving
       // them forward, skipping to the end would immediately start playing the final.
       ROOM_REVEAL_ACTIVE = null;
       if (m.league_total != null) ROOM_LEAGUE_REVEALED_THROUGH = m.league_total;
-      const mine = (m.results || []).filter(e => e.result.yours);
-      if (mine.length) ROOM_REVEALED_STAGE = mine[mine.length - 1].stage;
+      (m.results || []).forEach(e => ROOM_REVEALED.add(e.stage));
       go('room');
       showRoomMatch(m);
     } catch(e){ slip(e.message); }

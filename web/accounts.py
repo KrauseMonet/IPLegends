@@ -28,7 +28,7 @@ class Account:
     account_id: int
     username: str
     email: str
-    kit: Kit | None = None     # migration 036 [A146] -- read by get_account only
+    kit: Kit | None = None     # migration 036 [A151] -- read by get_account only
 
 
 def create_account(conn, username: str, email: str, password: str) -> Account:
@@ -101,7 +101,7 @@ def get_account(conn, account_id: int) -> Account | None:
 
 
 def set_kit(conn, account_id: int, kit: Kit) -> None:
-    """The account's team kit [A146]. The caller has already validated it (web/kit.py
+    """The account's team kit [A151]. The caller has already validated it (web/kit.py
     parse_kit); migration 036's CHECKs are the backstop for its shape."""
     conn.execute(
         "update accounts set kit_name = %s, kit_monogram = %s, kit_colour = %s"

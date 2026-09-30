@@ -475,7 +475,7 @@ def test_the_two_leader_models_stay_distinct():
     assert set(AnalysisLeaderOut.model_fields) == {"name", "value", "detail", "team", "crest"}
 
 
-# --- team kits [A146] ---------------------------------------------------------------
+# --- team kits [A151] ---------------------------------------------------------------
 
 def test_an_account_has_no_kit_until_one_is_set():
     conn = FakeConn()

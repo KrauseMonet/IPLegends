@@ -27,14 +27,18 @@ let API_HEADERS = {};
 
 async function api(path, opts){
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  // `timeoutMs` lets a live move (a bid, a pick) give up sooner than a page load would,
+  // so it can be retried while its clock is still running [A146].
+  const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || API_TIMEOUT_MS);
   let r;
   try {
     r = await fetch(path, {...opts, headers: {...API_HEADERS, ...(opts && opts.headers)},
                            signal: ctrl.signal});
   } catch(e){
     if (e.name === 'AbortError'){
-      throw new Error('That took too long to respond -- the server may be busy. Try again.');
+      const err = new Error('That took too long to respond -- the server may be busy. Try again.');
+      err.timeout = true;
+      throw err;
     }
     throw e;
   } finally {
@@ -47,6 +51,8 @@ async function api(path, opts){
     // from "the server is busy" or a transient network blip, without parsing prose.
     const err = new Error(body.detail || r.statusText);
     err.status = r.status;
+    // The whole body too: a room's 409 carries the room as it now is [A146].
+    err.body = body;
     throw err;
   }
   return body;
@@ -54,6 +60,13 @@ async function api(path, opts){
 
 // [A136] A season can come from a draft ('7-3:4.0:12') or an auction ('A662026-KKR-...');
 // the season, journey card and copy-link all label and link it by where it came from.
+// The season page's `?enter=` instruction for each "Simulate" choice. Shared by the draft and
+// the auction, which both hand a finished twelve to /season: one mapping, so the two
+// finish screens cannot drift apart on what a choice means [A148].
+function seasonEnterFor(mode){
+  return mode === 'matchbymatch' ? 'reveal' : mode === 'groupstage' ? 'groupstage' : 'whole';
+}
+
 function isAuctionState(state){ return (state || '').startsWith('A'); }
 function stateLabel(state){
   const head = (state || '').split('-')[0];
@@ -168,7 +181,7 @@ let META = null;
 // could pin an old shape indefinitely.
 // v2: the shape grew `showcase` and `crests` for the home page. A new key rather than a
 // tolerant reader, so a copy cached before them is never rendered as though complete.
-// v3: `kits` and `kit_default`, the team-kit palette [A146].
+// v3: `kits` and `kit_default`, the team-kit palette [A151].
 const META_CACHE_KEY = 'iplegends_meta_v3';
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -520,7 +533,7 @@ function crestImg(url, cls = 'crest-img', fallback = ''){
   return url ? `<img class="${cls}" src="${url}" alt="" loading="lazy">` : fallback;
 }
 
-// --- team kits [A146] -----------------------------------------------------------------------
+// --- team kits [A151] -----------------------------------------------------------------------
 //
 // A drafted twelve is a mix of franchises, so it has no crest; it wears a kit instead -- a
 // team name, a 1-3 letter monogram and a colour from the palette `/api/meta` serves (web/
@@ -708,8 +721,9 @@ function sideBadge(side, cls = ''){
   return `<span class="team-badge ${cls}" style="background:hsl(${h % 360} 60% 52%)">${esc(short.slice(0, 2).toUpperCase())}</span>`;
 }
 
-function markCurrentNav(){
-  const path = location.pathname;
+// `path` defaults to the page's own; the season page passes '/auction' for an auction's
+// season, which lives at /season but belongs to the auction [A148].
+function markCurrentNav(path = location.pathname){
   document.querySelectorAll('.topnav-links a[data-match]').forEach(a => {
     const on = a.dataset.match.split(' ').some(m => path === m || path.startsWith(m + '/'));
     a.classList.toggle('on', on);

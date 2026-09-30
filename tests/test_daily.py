@@ -1242,7 +1242,7 @@ def test_every_recorded_attempt_still_verifies_under_the_account_it_was_played_b
 @pytest.mark.parametrize("kind", ["defend_by", "win_by_runs", "chase", "win_by_wickets",
                                   "chase_in_overs"])
 def test_you_home_names_the_players_own_side(kind):
-    """[A146] The page puts the player's kit on whichever side `you_home` names, so it has
+    """[A151] The page puts the player's kit on whichever side `you_home` names, so it has
     to be the side labelled "You" whether the player batted first or second."""
     import web.app as app
     from game.scenarios import Outcome

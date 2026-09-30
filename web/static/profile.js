@@ -53,7 +53,7 @@ function render(p){
 // `loadMe()` was being awaited for. Firing it immediately costs a wasted request in the
 // signed-out case -- who is redirected away anyway -- and saves two round trips in the
 // case that matters.
-// [A146] Your team kit -- what your drafted sides wear in solo, the daily and rooms. This
+// [A151] Your team kit -- what your drafted sides wear in solo, the daily and rooms. This
 // page is signed-in only, so saving here always saves to the account.
 function renderProfileKit(){
   $('#profileKit').innerHTML = kitStripHtml(myKit(), 'Your team kit', 'editMyKit()');

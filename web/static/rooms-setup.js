@@ -209,7 +209,7 @@ async function createRoom(ctrl){
           game: CHOSEN_FORMAT !== 'auction' ? 'draft' : (CHOSEN_MEGA ? 'mega' : 'auction'),
           timer_seconds: CHOSEN_TIMER, host_name: name,
           draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY,
-          // [A146] Your saved kit, if you have one; an auction room ignores it.
+          // [A151] Your saved kit, if you have one; an auction room ignores it.
           kit: savedKit()})});
       enterRoom(r.room.code, r.player_id);
     } catch(e){ slip(e.message); }

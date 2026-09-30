@@ -15,7 +15,7 @@ async function loadMe(){
   ME = await api('/api/auth/me');
   renderAuthArea();
   syncKitToAccount();
-  // [A146] A page showing your kit repaints: the account's copy wins over this browser's.
+  // [A151] A page showing your kit repaints: the account's copy wins over this browser's.
   document.dispatchEvent(new Event('kitchange'));
   return ME;
 }

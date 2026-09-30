@@ -107,7 +107,7 @@ async function dailySubmit(ctrl){
 // "bowl first" day is the opposition -- their innings is the one your own five bowlers
 // held down, and it is what makes the target mean something rather than being a number in
 // a banner.
-// [A146] The engine calls your side 'You'; every screen here draws your kit instead.
+// [A151] The engine calls your side 'You'; every screen here draws your kit instead.
 // `you_home` says which side that is, so the lookup never depends on the label text alone.
 function setDailySide(m){
   const k = myKit();
@@ -270,6 +270,10 @@ async function showDone(){
       : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</div>`;
 }
 
+// The reveal speed is one preference across every page [A148]: Normal until the player
+// changes it, and whatever they chose from then on. This page used to skip the restore,
+// so a player who had picked Fast on a season still watched their daily at Normal.
+restoreOverSpeed();
 boot().then(async () => {
   let d;
   try {

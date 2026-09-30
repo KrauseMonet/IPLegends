@@ -56,7 +56,7 @@ function inningsTopBowler(inn){
 // season.py), so the prior innings is always the one already fully known.
 // `matchup` is {bat, bowl}, each {name, crest, kit} -- who is batting and who is bowling
 // this innings, for the two team panels. A real franchise shows its crest, a drafted side
-// its kit [A146]; optional, so a caller without it still gets a working reveal.
+// its kit [A151]; optional, so a caller without it still gets a working reveal.
 function startOverStepper(innings, stageText, onDone, priorContext, matchup){
   hideAllRevealScreens();
   renderOverMatchup(matchup);
@@ -231,7 +231,12 @@ function toggleOverPause(){
 // The speed setting is a preference, not a per-match choice -- it used to reset to
 // Normal on every page load, so anyone who prefers Fast re-picked it at the start of
 // every session (and a league room shows a viewer fifteen of their own matches). Stored
-// under the same key both pages read, so solo and a room agree on it.
+// under the one key every reveal page reads -- season, room and daily [A148].
+//
+// A first-time player has nothing stored, so they get NORMAL: the markup's `selected`
+// option, never a value this code picks. Nothing is written until the player changes the
+// control (`setOverSpeed`), so merely watching at Normal never pins it, and the selects
+// carry autocomplete="off" so a browser's own form restore cannot stand in for a choice.
 const OVER_SPEED_KEY = 'iplegends_reveal_speed';
 
 function restoreOverSpeed(){
@@ -266,7 +271,7 @@ function finishOverStepper(){
   if (onDone) onDone();
 }
 
-/* --- whose side is whose [A146] --------------------------------------------------------- */
+/* --- whose side is whose [A151] --------------------------------------------------------- */
 
 // The viewer's own side as this page knows it -- {short, name, crest, kit}. The engine
 // calls a solo side 'YOU' and a daily side 'You'; the page sets this so every screen that
@@ -415,7 +420,7 @@ function nrrCell(v){
 }
 
 // A table or results row's badge. A real franchise shows its crest; a drafted side its
-// kit [A146] -- passed in for another player's side in a room, and your own kit when the
+// kit [A151] -- passed in for another player's side in a room, and your own kit when the
 // row is yours and has no crest (an auction side keeps its franchise's crest). Anything
 // else falls back to a colour hashed from its name.
 function teamBadge(short, isYou, crest, kit){
@@ -513,7 +518,7 @@ function loadImages(urls){
 }
 
 // `side` is the team the card is about -- {name, crest} for a franchise, {name, kit} for a
-// drafted twelve [A146]. Its colour rims the card and its badge heads the squad list.
+// drafted twelve [A151]. Its colour rims the card and its badge heads the squad list.
 async function drawJourneyCard(d, header, side){
   const [sideCrest] = await loadImages([side && side.crest]);
   const crestImgs = await loadImages(d.squad.map(c => c.crest));

@@ -897,7 +897,7 @@ def test_sides_actually_use_the_fixed_abbreviation(monkeypatch):
     monkeypatch.setattr(rooms_mod, "room_sides", fake_room_sides)
     room = _kit_room(rooms_mod, kit=None)
     shorts = {pid: side.short for pid, side in room_match._sides_with_pid(room, None)}
-    # [A146] A seat with no chosen kit wears a default whose monogram is these same
+    # [A151] A seat with no chosen kit wears a default whose monogram is these same
     # initials, so the short reads exactly as it did before kits existed.
     assert shorts == {"p1": "KRA", "p2": "CSK 2010"}, shorts
 
@@ -911,7 +911,7 @@ def _kit_room(rooms_mod, kit):
 
 
 def test_a_drafted_side_plays_under_its_chosen_kit(monkeypatch):
-    """[A146] The kit's name and monogram are what reach the scorecard -- a filler, which
+    """[A151] The kit's name and monogram are what reach the scorecard -- a filler, which
     is a historical franchise, keeps its own name however the room is set up."""
     from web import room_match, rooms as rooms_mod
     from web.kit import Kit
@@ -1155,7 +1155,7 @@ def test_skip_to_end_is_idempotent_on_a_finished_room(conn):
     assert again.version == settled.version, "a repeat skip wrote to the room"
 
 
-# --- team kits lock when the matches start [A146] ----------------------------------------
+# --- team kits lock when the matches start [A151] ----------------------------------------
 
 def test_a_kit_can_still_change_at_squad_review(conn):
     room, host_id, _guest = _drafted_but_not_started(conn)

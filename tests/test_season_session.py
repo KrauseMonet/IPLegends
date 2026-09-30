@@ -261,7 +261,7 @@ def test_an_incomplete_draft_is_refused_before_the_season_ever_starts():
 
 
 def test_a_drafted_season_has_no_crest_of_its_own():
-    """[A146] A drafted twelve is no single franchise, so the page draws the player's kit
+    """[A151] A drafted twelve is no single franchise, so the page draws the player's kit
     for it -- `your_crest` must be null for exactly that to happen."""
     from web.app import _season_progress_out
     played = walk(11)

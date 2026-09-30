@@ -1,4 +1,4 @@
-"""A drafted side's own identity: a team name, a monogram and a colour [A146].
+"""A drafted side's own identity: a team name, a monogram and a colour [A151].
 
 A drafted twelve is a mix of franchises and so has no crest; a kit is what it wears in
 their place -- on the scoreboard, in the table, on results rows and the journey card.

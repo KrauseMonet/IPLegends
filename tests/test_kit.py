@@ -1,4 +1,4 @@
-"""Team kits [A146]: what web/kit.py accepts, what it hands out by default, and whether
+"""Team kits [A151]: what web/kit.py accepts, what it hands out by default, and whether
 migration 036's constraints accept everything it can produce."""
 
 from __future__ import annotations

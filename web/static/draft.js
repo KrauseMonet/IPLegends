@@ -140,7 +140,7 @@ async function rerollDeal(kind, ctrl){
   });
 }
 
-// [A146] A kit edited here (or brought in by signing in) repaints the finished squad.
+// [A151] A kit edited here (or brought in by signing in) repaints the finished squad.
 document.addEventListener('kitchange', () => { if (S && S.squad_complete) render(S); });
 
 function render(s){
@@ -309,9 +309,7 @@ function setSimMode(mode){
 
 function simulate(ctrl){
   busyClick(ctrl, 'Playing the season…', async () => {
-    const enter = SIM_MODE === 'matchbymatch' ? 'reveal'
-                : SIM_MODE === 'groupstage' ? 'groupstage' : 'whole';
-    location.href = `/season?enter=${enter}#${S.state}`;
+    location.href = `/season?enter=${seasonEnterFor(SIM_MODE)}#${S.state}`;
   });
 }
 

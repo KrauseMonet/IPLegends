@@ -104,7 +104,7 @@ class RoomPlayer:
     name: str
     is_cpu: bool
     franchise: str | None = None    # migration 033 -- auction rooms only
-    kit: Kit | None = None          # migration 036 -- a draft room seat's chosen kit [A146]
+    kit: Kit | None = None          # migration 036 -- a draft room seat's chosen kit [A151]
 
 
 @dataclass
@@ -188,6 +188,15 @@ OPEN_ROOM_IDLE_MINUTES = 15
 # many seats are polling and however often, against the ~0.5 writes/second/seat that
 # updating on every poll would have cost.
 PRESENCE_HEARTBEAT_MINUTES = 5
+
+# [A146] How long past a clock's displayed zero the server still accepts the move. A click
+# made with a second on the clock reaches the server a round trip later -- ~0.4s from
+# India to the function's region on a warm path, more on a cold one -- and used to find
+# the turn already auto-picked (or the lot already closed), so the move the player SAW
+# themselves make was refused or, worse, never happened. Every page shows the clock
+# reaching zero at the real deadline; only the server's own cut-off moves, so nobody sees
+# a longer turn, they just stop losing the last second of it.
+CLOCK_GRACE_S = 2.0
 
 
 def _sweep_stale_rooms(conn) -> None:
@@ -386,7 +395,7 @@ def join_room(conn, code: str, name: str, deck: Deck,
     return room, player_id
 
 
-# --- team kits [A146] ------------------------------------------------------------------
+# --- team kits [A151] ------------------------------------------------------------------
 #
 # A draft room's drafted sides are mixes of franchises and so have no crest; each wears a
 # kit instead (web/kit.py). A seat that never chose one wears a default computed on read,
@@ -872,8 +881,8 @@ def _resolve(room: Room, deck: Deck) -> None:
             return
 
         pid = replay.pending_seat_id
-        if time.time() - room.turn_started_at <= room.timer_seconds:
-            return  # still within this seat's own window
+        if time.time() - room.turn_started_at <= room.timer_seconds + CLOCK_GRACE_S:
+            return  # still within this seat's own window (and its grace, A146)
 
         fs_id, candidates = replay.pending_deal
         seat = replay.seats[pid]
@@ -904,9 +913,34 @@ def _mutable_state(room: Room):
     return (room.status, room.turn_started_at, len(room.moves), room.failure_reason)
 
 
-def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: Deck) -> Room:
+class StaleMove(RoomError):
+    """[A146] The move was made against a state the room has since left -- the clock
+    auto-picked for this seat, or a lot closed -- so it is refused rather than applied to a
+    deal the player never saw. Carries the caught-up room, so the page can show where the
+    room really is at once instead of waiting for its next poll."""
+
+    def __init__(self, message: str, room: "Room"):
+        super().__init__(message)
+        self.room = room
+
+
+def submit_pick(conn, code: str, player_id: str, index: int, slot: int, deck: Deck,
+                picks_made: int | None = None) -> Room:
+    """`picks_made` is how many picks this seat had when the player chose [A146]. An index
+    only means something against the deal it was read from, and in a snake draft the same
+    seat can be on the clock twice running (A-B-B-A), so a pick that arrives after the
+    clock auto-picked for it would otherwise land on the NEXT deal -- a player the person
+    never clicked. With it, that pick is refused as stale instead. Optional so an old
+    client still works exactly as before."""
     room = _load_room(conn, code)
+    before = _mutable_state(room)
     _resolve(room, deck)
+    if picks_made is not None and player_id in room.players:
+        seat = replay_room(room, deck).seats.get(player_id)
+        if seat is not None and len(seat.picks) != picks_made:
+            if _mutable_state(room) != before:
+                _save_room(conn, room)     # the catch-up is real whatever this pick does
+            raise StaleMove("the clock ran out and a pick was made for you", room)
     if room.status != "drafting":
         raise RoomError(f"this room is not drafting (status: {room.status})")
     player = room.players.get(player_id)
@@ -981,14 +1015,15 @@ def room_state(conn, code: str, deck: Deck) -> Room:
         _touch_room(conn, room)
     if room.status == "auctioning":
         # `turn_started_at` is a DEADLINE in an auction room, not a start time.
-        if time.time() <= room.turn_started_at:
+        if time.time() <= room.turn_started_at + CLOCK_GRACE_S:
             return room
         from web import room_auction
         room = _load_room(conn, code, lock=True)
         if room_auction.resolve(room, deck):
             _save_room(conn, room)
         return room
-    if room.status != "drafting" or time.time() - room.turn_started_at <= room.timer_seconds:
+    if (room.status != "drafting"
+            or time.time() - room.turn_started_at <= room.timer_seconds + CLOCK_GRACE_S):
         return room
     room = _load_room(conn, code, lock=True)
     before = _mutable_state(room)

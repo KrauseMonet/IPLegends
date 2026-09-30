@@ -305,9 +305,7 @@ function setSimMode(mode){
 
 function simulate(ctrl){
   busyClick(ctrl, 'Playing the season…', async () => {
-    const enter = SIM_MODE === 'matchbymatch' ? 'reveal'
-                : SIM_MODE === 'groupstage' ? 'groupstage' : 'whole';
-    location.href = `/season?enter=${enter}#${S.state}`;
+    location.href = `/season?enter=${seasonEnterFor(SIM_MODE)}#${S.state}`;
   });
 }
 

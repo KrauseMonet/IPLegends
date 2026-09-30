@@ -1788,7 +1788,7 @@ body{
 .auc-squad{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:12px}
 .auc-slot{min-height:54px;border:1px dashed var(--line-strong);border-radius:8px;opacity:.5}
 .auc-slot.filled{opacity:1;border:1px solid var(--line);background:var(--panel-2);padding:8px 9px;
-  display:flex;flex-direction:column;gap:2px;cursor:pointer;animation:chipIn .3s ease-out}
+  display:flex;flex-direction:column;gap:2px;cursor:pointer;min-width:0}
 .auc-slot.filled span{font-size:12.5px;font-weight:700;line-height:1.2;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .auc-slot.filled b{font-family:var(--mono);font-size:11px;color:var(--mint)}
@@ -2307,3 +2307,96 @@ html{scroll-padding-top:80px}
   .qz-dots i{width:16px}
 }
 .qz-q > span:empty{display:none}
+
+/* --- the auction: the bidding war and your squad [A154] ------------------------------------
+   Colours come from the crest-derived `.crest-KEY` variables, never picked here. */
+.auc-price.tier-high{color:var(--gold)}
+.auc-price.tier-hot{color:var(--hot);text-shadow:0 0 28px rgba(255,74,53,.35)}
+.auc-feed-row b.tier-high,.auc-slot.filled b.tier-high{color:var(--gold)}
+.auc-feed-row b.tier-hot,.auc-slot.filled b.tier-hot{color:var(--hot)}
+
+/* The leader's colour glows behind the price and changes hands with every bid. */
+.auc-bidbox{position:relative;overflow:hidden;transition:border-color .25s}
+.auc-bidbox::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(360px 180px at 12% 0%,color-mix(in srgb,var(--team,transparent) 26%,transparent),transparent 72%);
+  transition:opacity .25s}
+.auc-bidbox > *{position:relative}
+.auc-bidbox.has-lead::before{opacity:1}
+.auc-bidbox.has-lead{border-color:color-mix(in srgb,var(--team,#fff) 45%,var(--line))}
+.auc-bidbox.lead-flash::before{animation:leadFlash .35s ease-out}
+@keyframes leadFlash{from{opacity:1;filter:brightness(1.9)}to{opacity:1;filter:none}}
+
+.auc-trail{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px;
+  margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.auc-trail-sum{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);white-space:nowrap}
+.auc-trail-sum b{color:var(--ink);font-size:12px;letter-spacing:0}
+.auc-trail-bids{display:flex;gap:5px;overflow:hidden;justify-content:flex-end;min-width:0}
+.auc-trail-bid{display:inline-flex;align-items:center;gap:4px;flex:none;font-family:var(--mono);
+  font-size:10.5px;font-weight:700;padding:3px 7px 3px 4px;border-radius:6px;opacity:.6;
+  background:var(--team-deep,#223);color:var(--team-ink,#fff);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--team,#fff) 40%,transparent)}
+.auc-trail-bid:last-child{opacity:1}
+.auc-trail-bid.mine{box-shadow:inset 0 0 0 1px var(--gold)}
+.auc-trail-bid img{height:15px;width:17px;object-fit:contain}
+.auc-trail-bid i{font-style:normal}
+.auc-trail-bid.new{animation:trailIn .18s ease-out}
+@keyframes trailIn{from{transform:translateX(10px);opacity:0}to{transform:none;opacity:1}}
+
+/* The room panel: who is in this lot, who leads, who just raised. */
+.auc-team{transition:background .2s,opacity .2s}
+.auc-team.in-lot{box-shadow:inset 3px 0 0 color-mix(in srgb,var(--gold) 55%,transparent)}
+.auc-team.leading{background:color-mix(in srgb,var(--gold) 10%,transparent);box-shadow:inset 3px 0 0 var(--gold)}
+.auc-team.bid-flash{animation:rowFlash .45s ease-out}
+@keyframes rowFlash{from{background:color-mix(in srgb,var(--gold) 30%,transparent)}}
+
+/* Your squad: the purse split, what a legal twelve still needs, and the places themselves. */
+.auc-squad-needs{padding:12px 12px 0;display:flex;flex-direction:column;gap:10px}
+.auc-spend-bar{display:flex;height:8px;border-radius:4px;background:var(--panel-3);overflow:hidden}
+.auc-spend-bar i{display:block;height:100%;transition:width .5s ease}
+/* Kept is the team colour STRIPED and bought the same colour solid, so the two stay apart
+   for every franchise -- a fixed gold for "kept" vanished against KKR's own gold. */
+.auc-spend-bar i.kept,.auc-spend-key .kept::before{background:repeating-linear-gradient(135deg,
+  var(--team,var(--gold)) 0 3px,color-mix(in srgb,var(--team,var(--gold)) 35%,transparent) 3px 6px)}
+.auc-spend-bar i.bought{background:var(--team,var(--mint))}
+.auc-spend-key{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-family:var(--mono);
+  font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.auc-spend-key b{color:var(--ink);letter-spacing:0;margin-left:4px}
+.auc-spend-key span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;
+  margin-right:6px;vertical-align:0;background:var(--panel-3)}
+.auc-spend-key .bought::before{background:var(--team,var(--mint))}
+.auc-needs{display:flex;gap:6px;flex-wrap:wrap}
+.auc-need{display:inline-flex;align-items:baseline;gap:6px;font-size:12px;color:var(--ink-2);
+  border:1px solid var(--line-strong);border-radius:999px;padding:4px 11px}
+.auc-need b{font-family:var(--mono);font-size:12px;color:var(--ink)}
+.auc-need.want{border-color:color-mix(in srgb,var(--hot) 55%,transparent)}
+.auc-need.want b{color:var(--red-2)}
+.auc-need.ok{border-color:color-mix(in srgb,var(--mint) 55%,transparent)}
+.auc-need.ok b{color:var(--mint)}
+.auc-need.full{border-color:color-mix(in srgb,var(--gold) 55%,transparent)}
+.auc-need.full b{color:var(--gold)}
+.auc-need.plain{border-style:dashed}
+
+.auc-slot.filled{box-shadow:inset 3px 0 0 var(--team,var(--line-strong))}
+.auc-slot.filled.new{animation:chipIn .3s ease-out}
+.auc-slot-top{display:flex;align-items:center;gap:5px;min-height:18px}
+.auc-slot-top .ic{margin:0}
+.auc-slot-os{font-style:normal;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--mint);
+  border:1px solid rgba(61,220,151,.45);border-radius:3px;padding:0 4px}
+.auc-slot-rt{margin-left:auto;font-style:normal;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink-2)}
+.auc-slot.want{opacity:1;border-color:color-mix(in srgb,var(--hot) 45%,transparent);display:flex;
+  flex-direction:column;justify-content:center;align-items:center;gap:1px}
+.auc-slot.want span{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--red-2)}
+.auc-slot.want em{font-style:normal;font-size:10.5px;color:var(--ink-3)}
+
+@media (max-width:900px){
+  /* The strip takes its own line under the count on a phone rather than clipping a chip. */
+  .auc-trail{flex-wrap:wrap;row-gap:6px}
+  .auc-trail-bids{justify-content:flex-start;width:100%}
+  .auc-trail-bid:nth-last-child(n+4){display:none}
+  /* The global phone rule stacks every .actions row; these three belong side by side. */
+  .auc-bidbox .actions.minor-row{flex-direction:row}
+}
+@media (prefers-reduced-motion:reduce){
+  .auc-bidbox.lead-flash::before,.auc-trail-bid.new,.auc-team.bid-flash,.auc-slot.filled.new{animation:none}
+}

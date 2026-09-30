@@ -191,23 +191,27 @@ async function animateFrom(prev, next){
     bids = sale ? sale.bids : [];
   }
   const fresh = bids.slice(prev.bids.length);
-  await playBids(fresh);
+  await playBids(fresh, bids.slice(0, prev.bids.length));
   if (sale) await stamp(sale);
   else if (stillOpen && fresh.length) announceBid(next.leader, next.price);
 }
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-async function playBids(bids){
+async function playBids(bids, before = []){
   if (!bids.length) return;
+  const shown = before.slice();
   // A lot averages ~30 bids: the whole exchange plays in about two seconds however long
   // it is, a quick patter for a long war and a readable beat for a short one.
   const step = Math.max(55, Math.min(320, 2200 / bids.length));
   $('#aucPriceLabel').textContent = 'Current bid';
   let lastSound = 0;
   for (const b of bids){
+    shown.push(b);
     setPrice(b.price);
-    setLeader(b.team);
+    setLeader(b.team, true);
+    renderTrail(shown, true);
+    markRoom(shown, b.team, true);
     // A long war would machine-gun the speaker; a knock every ~90ms reads as a rattle.
     const now = performance.now();
     if (now - lastSound > 90 || b.team === (A && A.you)){
@@ -219,17 +223,94 @@ async function playBids(bids){
 }
 
 function setPrice(p){
-  const el = $('#aucPrice');
-  el.textContent = cr(p);
+  const el = showPrice(p);
   el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
 }
+function showPrice(p){
+  const el = $('#aucPrice');
+  el.textContent = cr(p);
+  priceTier(el, p);
+  return el;
+}
 
-function setLeader(short){
-  const el = $('#aucLeader');
+// --- the bidding war ----------------------------------------------------------------------
+//
+// Presentation only: everything here reads bids the server already decided, and it runs
+// inside playBids' two-second budget rather than adding time after it [A146].
+
+// A price's colour rises with it, so a ₹25 cr war does not look like a ₹30L sale. The same
+// scale colours the sold feed, which makes the big buys stand out when scanning it.
+const PRICE_TIERS = [[2000, 'tier-hot'], [1000, 'tier-high']];   // lakh: ₹20 cr, ₹10 cr
+function tierOf(p){ const t = p == null ? null : PRICE_TIERS.find(([at]) => p >= at); return t ? t[1] : ''; }
+function priceTier(el, p){
+  el.classList.remove('tier-high', 'tier-hot');
+  const t = tierOf(p);
+  if (t) el.classList.add(t);
+}
+
+// Swap an element's team colours: `.crest-KEY` classes carry --team/--team-deep/--team-ink.
+function setTeamClass(el, short){
+  el.className = el.className.replace(/\bcrest-[A-Z0-9]+\b/g, '').trim();
+  if (short) el.classList.add('crest-' + short);
+}
+
+function setLeader(short, flash){
+  const el = $('#aucLeader'), box = $('#aucBidBox');
+  setTeamClass(box, short);
+  box.classList.toggle('has-lead', !!short);
   if (!short){ el.innerHTML = ''; return; }
   const you = A && short === A.you;
   el.innerHTML = `${chip(short, true)}<span>${you ? 'You lead' : 'Leading'}</span>`;
   el.classList.toggle('you', !!you);
+  if (flash){ box.classList.remove('lead-flash'); void box.offsetWidth; box.classList.add('lead-flash'); }
+}
+
+const TRAIL_SHOWN = 6;
+function trailEl(){
+  let el = $('#aucTrail');
+  if (!el){
+    // Built here rather than in the markup: auction.html and room.html both carry the floor.
+    el = document.createElement('div');
+    el.id = 'aucTrail';
+    el.className = 'auc-trail';
+    $('#aucBidBox .auc-bidrow').after(el);
+  }
+  return el;
+}
+
+// The last few bids as a strip, newest on the right, with a count that says what kind of
+// fight it was: thirty bids between two teams is a war, thirty among six is a scramble.
+function renderTrail(bids, fresh){
+  const el = trailEl();
+  if (!bids || !bids.length){
+    el.innerHTML = '<span class="auc-trail-sum">No bids yet</span>';
+    return;
+  }
+  const teams = [];
+  bids.forEach(b => { if (!teams.includes(b.team)) teams.push(b.team); });
+  const who = teams.length === 2 ? `${teams[0]} v ${teams[1]}`
+            : teams.length === 1 ? teams[0] : `${teams.length} teams`;
+  const last = bids.slice(-TRAIL_SHOWN);
+  el.innerHTML = `<span class="auc-trail-sum"><b>${bids.length}</b> bid${bids.length === 1 ? '' : 's'} · ${who}</span>
+    <span class="auc-trail-bids">${last.map((b, i) => {
+      const url = teamCrestUrl(b.team);
+      const isNew = fresh && i === last.length - 1;
+      return `<span class="auc-trail-bid crest-${b.team}${isNew ? ' new' : ''}${b.team === (A && A.you) ? ' mine' : ''}"
+        title="${b.team} ${cr(b.price)}">${url ? `<img src="${url}" alt="">` : `<i>${b.team}</i>`}${cr(b.price)}</span>`;
+    }).join('')}</span>`;
+}
+
+// Light up the room panel: every team that has bid on this lot is marked as in it, the
+// leader more strongly, and a team's row flashes the moment it raises the paddle.
+function markRoom(bids, bidder, flash){
+  const inLot = new Set((bids || []).map(b => b.team));
+  const leader = bids && bids.length ? bids[bids.length - 1].team : null;
+  document.querySelectorAll('#aucTeams .auc-team[data-team]').forEach(row => {
+    const t = row.dataset.team;
+    row.classList.toggle('in-lot', inLot.has(t));
+    row.classList.toggle('leading', t === leader);
+    if (flash && t === bidder){ row.classList.remove('bid-flash'); void row.offsetWidth; row.classList.add('bid-flash'); }
+  });
 }
 
 async function stamp(sale){
@@ -498,22 +579,24 @@ function renderFloor(){
 
   if (isRtm(d.phase) || d.phase === 'rtm_watch'){
     $('#aucPriceLabel').textContent = 'Hammer';
-    $('#aucPrice').textContent = cr(d.rtm.price);
+    showPrice(d.rtm.price);
     setLeader(d.rtm.kind === 'rtm_raise' ? d.rtm.deciding || d.you : d.rtm.other);
   } else if (d.bids.length){
     $('#aucPriceLabel').textContent = 'Current bid';
-    $('#aucPrice').textContent = cr(d.price);
+    showPrice(d.price);
     setLeader(d.leader);
   } else {
     $('#aucPriceLabel').textContent = 'Base price';
-    $('#aucPrice').textContent = cr(lot.base);
+    showPrice(lot.base);
     setLeader(null);
   }
+  renderTrail(d.bids, false);
 
   $('#aucUpNext').innerHTML = lot.upcoming.length
     ? `<span>Still to come in this set</span> ${lot.upcoming.slice(0, 8).join(' · ')}${lot.upcoming.length > 8 ? ' …' : ''}`
     : '';
   renderSide();
+  markRoom(d.bids, null, false);
   if (d.phase === 'bid') renderBidControls();
   else {
     stopCountdown();
@@ -548,7 +631,7 @@ function renderSide(){
   $('#aucPurseBar').style.width = (100 * you.purse / d.purse_total) + '%';
 
   $('#aucTeams').innerHTML = d.teams.map(t => `
-    <div class="auc-team${t.short === d.you ? ' you' : ''}">
+    <div class="auc-team${t.short === d.you ? ' you' : ''}" data-team="${t.short}">
       ${chip(t.short)}${t.owner ? `<em class="auc-owner">${esc(t.owner)}</em>` : ''}
       <div class="auc-team-bar crest-${t.short}"><i style="width:${100 * t.purse / d.purse_total}%;background:var(--team)"></i></div>
       <b>${cr(t.purse)}</b>
@@ -559,19 +642,94 @@ function renderSide(){
   $('#aucFeed').innerHTML = d.recent.slice().reverse().slice(0, 14).map(s => `
     <div class="auc-feed-row${s.team ? '' : ' unsold'}${s.team === d.you ? ' mine' : ''}">
       <span class="auc-feed-name">${s.name} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
-      ${s.team ? `${chip(s.team)}<b>${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
+      ${s.team ? `${chip(s.team)}<b class="${tierOf(s.price)}">${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
     </div>`).join('') || '<div class="note">Nothing sold yet.</div>';
 
+  renderSquad(d, you);
+}
+
+// --- your squad ------------------------------------------------------------------------------
+//
+// The eighteen places read as a to-do list: what the squad still lacks for a legal twelve
+// (a keeper, five bowling options) is written into the empty places, and the purse is shown
+// split into what was kept, what was bought and what is left. The counts use the same
+// predicates the twelve's legality check does -- `keeper_eligible` and `has_bowl` -- so
+// "5/5 bowling" here cannot disagree with the twelve screen.
+
+const KIND_ORDER = {keeper: 0, batter: 1, allrounder: 2, bowler: 3, unrated: 4};
+let SQUAD_SEEN = new Set();   // person_ids already drawn, so only a new arrival animates
+
+function squadNeedsEl(){
+  let el = $('#aucSquadNeeds');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'aucSquadNeeds';
+    el.className = 'auc-squad-needs';
+    $('#aucSquad').before(el);
+  }
+  return el;
+}
+
+function renderSquad(d, you){
+  const cards = d.squad.map(s => s.card);
+  const bowlNeed = (META && META.bowlers_needed) || 5;
+  const keepers = cards.filter(c => c.keeper_eligible).length;
+  const bowlers = cards.filter(c => c.has_bowl).length;
+  const overseas = cards.filter(c => c.overseas === true).length;
+  const osCap = d.squad_overseas_cap || 6;
+  const open = d.squad_size - cards.length;
+
+  const kept = d.squad.filter(s => s.retained).reduce((n, s) => n + s.price, 0);
+  const bought = d.squad.filter(s => !s.retained).reduce((n, s) => n + s.price, 0);
+  const pct = x => (100 * x / d.purse_total).toFixed(2) + '%';
+  const pill = (label, have, need, cls) =>
+    `<span class="auc-need ${cls}"><b>${have}/${need}</b>${label}</span>`;
+
+  squadNeedsEl().innerHTML = `
+    <div class="auc-spend crest-${d.you}">
+      <div class="auc-spend-bar">
+        ${kept ? `<i class="kept" style="width:${pct(kept)}"></i>` : ''}
+        <i class="bought" style="width:${pct(bought)}"></i>
+      </div>
+      <div class="auc-spend-key">
+        ${d.mega || kept ? `<span class="kept">Kept <b>${cr(kept)}</b></span>` : ''}
+        <span class="bought">Bought <b>${cr(bought)}</b></span>
+        <span class="left">Left <b>${cr(you.purse)}</b></span>
+      </div>
+    </div>
+    <div class="auc-needs">
+      ${pill('keeper', Math.min(keepers, 1), 1, keepers >= 1 ? 'ok' : 'want')}
+      ${pill('bowling options', Math.min(bowlers, bowlNeed), bowlNeed, bowlers >= bowlNeed ? 'ok' : 'want')}
+      ${pill('overseas', overseas, osCap, overseas >= osCap ? 'full' : '')}
+      <span class="auc-need plain"><b>${open}</b>place${open === 1 ? '' : 's'} left</span>
+    </div>`;
+
   $('#aucSquadCount').textContent = `${d.squad.length}/${d.squad_size}`;
-  const slots = [];
-  for (let i = 0; i < d.squad_size; i++){
-    const s = d.squad[i];
-    slots.push(s ? `
-      <div class="auc-slot filled" onclick='showStat(${JSON.stringify(s.card).replace(/'/g, "&#39;")})'>
-        ${ICON[s.card.kind] || ''}<span>${s.card.name}</span><b>${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
-      </div>` : '<div class="auc-slot"></div>');
+  const filled = d.squad.slice().sort((a, b) =>
+    (KIND_ORDER[a.card.kind] ?? 9) - (KIND_ORDER[b.card.kind] ?? 9) || b.price - a.price);
+  // What the empty places are for, in the order a drafter would chase them.
+  const wants = [];
+  if (!keepers) wants.push('Keeper');
+  for (let i = bowlers; i < bowlNeed; i++) wants.push('Bowler');
+
+  const slots = filled.map(s => {
+    const c = s.card, isNew = SQUAD_SEEN.size && !SQUAD_SEEN.has(c.person_id);
+    return `
+      <div class="auc-slot filled ${crestClass(c.crest)}${isNew ? ' new' : ''}"
+        onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+        <div class="auc-slot-top">${ICON[c.kind] || ''}${c.overseas === true ? '<em class="auc-slot-os">OS</em>' : ''}
+          ${c.rating != null ? `<i class="auc-slot-rt">${c.rating}</i>` : ''}</div>
+        <span>${c.name}</span><b class="${tierOf(s.price)}">${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
+      </div>`;
+  });
+  for (let i = 0; i < open; i++){
+    const want = wants[i];
+    slots.push(want ? `<div class="auc-slot want"><span>${want}</span><em>needed</em></div>`
+                    : '<div class="auc-slot"></div>');
   }
   $('#aucSquad').innerHTML = slots.join('');
+  SQUAD_SEEN = new Set(cards.map(c => c.person_id));
+  if (!SQUAD_SEEN.size) SQUAD_SEEN = new Set(['']);   // an empty squad has "seen" nothing yet
 }
 
 // --- bidding -------------------------------------------------------------------------------

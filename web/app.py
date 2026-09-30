@@ -348,6 +348,8 @@ class CardOut(BaseModel):
                     "of his own career. Independent of `kind`/`role`, which always "
                     "reflect THIS season alone.")
     rating: int | None = Field(description="A58/A60's integer 70-99 card rating")
+    has_bowl: bool = Field(default=False, description="counts as one of a twelve's five "
+                           "bowling options -- the predicate order_errors itself uses")
     overseas: bool | None = Field(description="null means unknown, never domestic (A23)")
     positions: list[int] = Field(
         default_factory=list,
@@ -1238,7 +1240,7 @@ def _card(card: Card, blocked: str | None = None) -> CardOut:
         person_id=card.person_id, name=card.name, franchise=card.franchise,
         season_year=card.season_year, crest=crest_url(card.franchise, card.season_year),
         band=card.band, role=card.role,
-        kind=_kind(card), rating=card.display, overseas=card.overseas,
+        kind=_kind(card), rating=card.display, has_bowl=card.has_bowl, overseas=card.overseas,
         keeper_eligible=card.keeper_eligible,
         positions=sorted(card.positions), blocked=blocked,
         bat_runs=card.bat_runs, bat_balls=card.bat_balls, bat_strike_rate=card.strike_rate,
@@ -2077,6 +2079,7 @@ class AuctionOut(BaseModel):
         default=None, description="squad indexes: eleven in batting order, then Impact")
     twelve: list[int] | None = None
     squad_size: int = auction.SQUAD_SIZE
+    squad_overseas_cap: int = auction.SQUAD_OVERSEAS_CAP
     purse_total: int = auction.PURSE
 
 

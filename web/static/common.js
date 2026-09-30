@@ -60,6 +60,13 @@ async function api(path, opts){
 
 // [A136] A season can come from a draft ('7-3:4.0:12') or an auction ('A662026-KKR-...');
 // the season, journey card and copy-link all label and link it by where it came from.
+// The season page's `?enter=` instruction for each "Simulate" choice. Shared by the draft and
+// the auction, which both hand a finished twelve to /season: one mapping, so the two
+// finish screens cannot drift apart on what a choice means [A148].
+function seasonEnterFor(mode){
+  return mode === 'matchbymatch' ? 'reveal' : mode === 'groupstage' ? 'groupstage' : 'whole';
+}
+
 function isAuctionState(state){ return (state || '').startsWith('A'); }
 function stateLabel(state){
   const head = (state || '').split('-')[0];
@@ -525,8 +532,9 @@ function crestImg(url, cls = 'crest-img', fallback = ''){
   return url ? `<img class="${cls}" src="${url}" alt="" loading="lazy">` : fallback;
 }
 
-function markCurrentNav(){
-  const path = location.pathname;
+// `path` defaults to the page's own; the season page passes '/auction' for an auction's
+// season, which lives at /season but belongs to the auction [A148].
+function markCurrentNav(path = location.pathname){
   document.querySelectorAll('.topnav-links a[data-match]').forEach(a => {
     const on = a.dataset.match.split(' ').some(m => path === m || path.startsWith(m + '/'));
     a.classList.toggle('on', on);

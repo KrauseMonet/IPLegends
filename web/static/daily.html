@@ -204,7 +204,7 @@
       </div>
       <div class="actions" style="justify-content:center;margin-top:20px">
         <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
-        <select id="overSpeedSelect" class="room-input" style="width:auto"
+        <select id="overSpeedSelect" class="room-input" style="width:auto" autocomplete="off"
           onchange="setOverSpeed(this.value)">
           <option value="1200">Slow</option>
           <option value="500" selected>Normal</option>
@@ -265,13 +265,13 @@
 <!-- /shell:footer -->
 </div>
 
-<script src="/static/common.js?v=5ea8543f44"></script>
+<script src="/static/common.js?v=d6c31e83d0"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
 <!-- Set BEFORE draft.js: it decides whether draft.js runs its own solo resume-from-hash
      boot. daily.js loads afterwards and cannot answer that question in time. -->
 <script>window.DAILY_PAGE = true;</script>
-<script src="/static/reveal.js?v=0e33d3b771"></script>
-<script src="/static/draft.js?v=d067e940dc"></script>
-<script src="/static/daily.js?v=412f7ff09d"></script>
+<script src="/static/reveal.js?v=007ac4ef1c"></script>
+<script src="/static/draft.js?v=323f32fb77"></script>
+<script src="/static/daily.js?v=64fbbe2db3"></script>
 </body>
 </html>

@@ -226,6 +226,17 @@
         <div class="col-head"><span>Bench</span><em>6</em></div>
         <div id="aucBench"></div>
         <div id="aucTwelveCheck" class="legality note"></div>
+        <div id="aucSimMode">
+          <div class="room-label" style="margin-top:14px">Simulate</div>
+          <div class="room-choices" id="aucSimModeChoices">
+            <button class="room-choice sel" data-simmode="whole" onclick="setAucSimMode('whole')"
+              title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
+            <button class="room-choice" data-simmode="matchbymatch" onclick="setAucSimMode('matchbymatch')"
+              title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
+            <button class="room-choice" data-simmode="groupstage" onclick="setAucSimMode('groupstage')"
+              title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
+          </div>
+        </div>
         <div class="foot-actions">
           <button class="act lead" id="aucSeasonBtn" onclick="playSeason(this)">Play the season</button>
         </div>
@@ -301,8 +312,8 @@
 <!-- /shell:footer -->
 </div>
 
-<script src="/static/common.js?v=5ea8543f44"></script>
+<script src="/static/common.js?v=d6c31e83d0"></script>
 <script src="/static/auth.js?v=3699e815a6"></script>
-<script src="/static/auction.js?v=54ad5e3bfd"></script>
+<script src="/static/auction.js?v=92498c77a4"></script>
 </body>
 </html>

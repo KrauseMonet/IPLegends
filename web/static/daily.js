@@ -259,6 +259,10 @@ async function showDone(){
       : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</div>`;
 }
 
+// The reveal speed is one preference across every page [A148]: Normal until the player
+// changes it, and whatever they chose from then on. This page used to skip the restore,
+// so a player who had picked Fast on a season still watched their daily at Normal.
+restoreOverSpeed();
 boot().then(async () => {
   let d;
   try {

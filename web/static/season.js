@@ -445,6 +445,7 @@ boot().then(async () => {
   SEASON_STATE = hash;
   if (isAuctionState(hash)){
     document.querySelectorAll('[onclick^="newDraft"]').forEach(b => b.textContent = 'Another auction');
+    markCurrentNav('/auction');
   }
   // The `?enter=` marker is a one-time navigation instruction (mirrors draft's own
   // `?mode=` convention) -- strip it immediately so a later reload of this exact URL

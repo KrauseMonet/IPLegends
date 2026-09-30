@@ -195,7 +195,12 @@ function toggleOverPause(){
 // The speed setting is a preference, not a per-match choice -- it used to reset to
 // Normal on every page load, so anyone who prefers Fast re-picked it at the start of
 // every session (and a league room shows a viewer fifteen of their own matches). Stored
-// under the same key both pages read, so solo and a room agree on it.
+// under the one key every reveal page reads -- season, room and daily [A148].
+//
+// A first-time player has nothing stored, so they get NORMAL: the markup's `selected`
+// option, never a value this code picks. Nothing is written until the player changes the
+// control (`setOverSpeed`), so merely watching at Normal never pins it, and the selects
+// carry autocomplete="off" so a browser's own form restore cannot stand in for a choice.
 const OVER_SPEED_KEY = 'iplegends_reveal_speed';
 
 function restoreOverSpeed(){

@@ -226,6 +226,13 @@ matching search: with exactly as many future picks as future open slots, a maxim
 flexible hypothetical future pick can always be matched to *some* remaining slot (Hall's
 theorem), so only the keeper and bowling-depth counts can still be unreachable.
 
+**[Amended — the "no rearranging" above is no longer literal, in two places.]** Already-placed
+picks may swap or move to an open slot while the draft is in progress (a `Reposition` move,
+still bounded by each player's eligibility). And the **daily challenge alone** keeps a
+FINISHED twelve rearrangeable until it is played (A157): swaps only, since every slot is
+full, kept as one `Arrange` segment that holds the whole order, so rearranging never grows
+the state. The solo draft and rooms are unchanged: there, a complete twelve is final.
+
 **Requirements on the final twelve**, unchanged in spirit from the old template: at least
 one wicketkeeper, at least five with a bowling rating, at most four known-overseas (A61).
 There is no keeper "slot," no pace/spin split, no "open" band — a keeper bats wherever his

@@ -109,6 +109,9 @@ def replay_day(full: Deck, challenge_date, player: int | str, deck_fs_ids,
         rerolls_allowed=DAILY_REROLLS,
         fallback_fs_ids=tuple(full.fs_ids),
         unique_deals=unique_deals,
+        # [A157] The finished twelve may be rearranged before it is played: the order is
+        # skill applied to what was dealt, exactly as repositioning mid-draft already is.
+        allow_arrange=True,
     )
 
 
@@ -297,10 +300,10 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it."""
     seed, moves = decode_own_state(state, day.challenge_date, player)
-    session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
-                          rerolls_allowed=DAILY_REROLLS,
-                          fallback_fs_ids=tuple(full.fs_ids),
-                          unique_deals=day.scenario.deal_unique)
+    # Through `replay_day`, the one place a day's replay rules live, so a finished
+    # arrangement is honoured identically when the draft is shown, marked and played.
+    session = replay_day(full, day.challenge_date, player, day.deck_fs_ids, moves,
+                         unique_deals=day.scenario.deal_unique)
     if session.deal is not None:
         raise DailyError("this draft is not finished")
 
@@ -630,10 +633,10 @@ def mark(full: Deck, model: Model, day: "Day", player: int | str,
     (their own deal, a finished draft, a legal twelve) and the same scoring, so an unranked
     result can never be computed differently from a ranked one."""
     seed, moves = decode_own_state(state, day.challenge_date, player)
-    session = sess.replay(deck_for_day(full, day.deck_fs_ids), seed, moves,
-                          rerolls_allowed=DAILY_REROLLS,
-                          fallback_fs_ids=tuple(full.fs_ids),
-                          unique_deals=day.scenario.deal_unique)
+    # Through `replay_day`, the one place a day's replay rules live, so a finished
+    # arrangement is honoured identically when the draft is shown, marked and played.
+    session = replay_day(full, day.challenge_date, player, day.deck_fs_ids, moves,
+                         unique_deals=day.scenario.deal_unique)
     if session.deal is not None:
         raise DailyError("this draft is not finished")
     if session.errors:

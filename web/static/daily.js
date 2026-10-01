@@ -80,6 +80,11 @@ function dailyOnComplete(s){
   const sim = $('#simBtn');
   sim.classList.toggle('hide', !s.squad_complete);
   if (!s.squad_complete) return;
+  // [A157] The order stays open until the match is played: say so, since nothing else on a
+  // finished sheet suggests the rows can still be tapped.
+  $('#legality').insertAdjacentHTML('beforeend',
+    '<div class="note" style="padding:6px 0 0">Tap a player, then another, to swap their ' +
+    'places. The order is yours to set until you play.</div>');
   sim.disabled = !s.playable;
   sim.textContent = s.playable ? "Play today's challenge" : 'Not yet legal';
   sim.onclick = () => dailySubmit(sim);

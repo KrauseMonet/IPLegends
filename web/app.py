@@ -3075,14 +3075,25 @@ def daily_pick(state: str, body: PickIn, request: Request) -> SessionOut:
 @app.post("/api/daily/draft/{state}/reposition", response_model=SessionOut)
 def daily_reposition(state: str, body: RepositionIn, request: Request) -> SessionOut:
     """Rearranging the order IS allowed here, unlike rerolling: it is skill applied to what
-    you were dealt rather than an escape from it. Still bounded by A76 eligibility."""
+    you were dealt rather than an escape from it. Still bounded by A76 eligibility.
+
+    [A157] Also once the twelve is complete, right up until it is played: there every slot
+    is full, so a reposition is a swap, kept as one `Arrange` segment (`sess.with_swap`)
+    rather than appended, so the state cannot outgrow its move cap however long somebody
+    spends on the order. A twelve already submitted is past this: the result screen has no
+    draft to send, and the attempt is recorded once (`daily_results`' primary key)."""
     account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         current = _daily_session(conn, account_id, state, day)
-        if current.squad_complete:
-            raise HTTPException(status_code=409, detail="this squad is already full")
         seed, moves = sess.decode(state)
+        if current.squad_complete:
+            try:
+                arranged = sess.with_swap(current, body.from_slot, body.to_slot)
+            except sess.InvalidState as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return _session_out(_daily_session(conn, account_id,
+                                               sess.encode(seed, arranged), day))
         return _session_out(_daily_session(
             conn, account_id,
             sess.encode(seed, moves + (sess.Reposition(body.from_slot, body.to_slot),)),

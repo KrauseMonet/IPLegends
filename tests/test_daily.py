@@ -174,12 +174,14 @@ def test_replay_day_actually_passes_the_fallback_the_reroll_budget_and_the_deal_
     real = sess.replay
 
     def spy(deck, seed, moves, rerolls_allowed=None, fallback_fs_ids=None,
-            unique_deals=None):
+            unique_deals=None, allow_arrange=None):
         seen["rerolls_allowed"] = rerolls_allowed
         seen["fallback"] = fallback_fs_ids
         seen["unique_deals"] = unique_deals
+        seen["allow_arrange"] = allow_arrange
         return real(deck, seed, moves, rerolls_allowed=rerolls_allowed,
-                    fallback_fs_ids=fallback_fs_ids, unique_deals=unique_deals)
+                    fallback_fs_ids=fallback_fs_ids, unique_deals=unique_deals,
+                    allow_arrange=allow_arrange)
 
     monkeypatch.setattr(daily.sess, "replay", spy)
     daily.replay_day(FULL, DAY, 1, _deck(), (), unique_deals=True)
@@ -189,6 +191,8 @@ def test_replay_day_actually_passes_the_fallback_the_reroll_budget_and_the_deal_
     assert set(seen["fallback"]) == set(FULL.fs_ids), \
         "the fallback must be the whole archive, or it can strand too"
     assert seen["unique_deals"] is True, "the day's deal rule never reached the draft"
+    assert seen["allow_arrange"] is True, \
+        "a finished daily twelve must stay rearrangeable until it is played (A157)"
 
     daily.replay_day(FULL, DAY, 1, _deck(), (), unique_deals=False)
     assert seen["unique_deals"] is False, \
@@ -1255,3 +1259,138 @@ def test_you_home_names_the_players_own_side(kind):
                          player_bats_first=bats_first)
     out = app._daily_match_out(play, scenario)
     assert (out["home"] if out["you_home"] else out["away"]) == "You"
+
+
+# --- rearranging the finished twelve [A157] ------------------------------------------------
+
+def _finished_moves(day_obj=None, player=1):
+    """A complete draft for `player`, as the Pick moves a person would have sent.
+
+    Driven by `pick_rational` through `run_draft` exactly as `replay_day` replays it (same
+    deck, seed, fallback and deal rule), recording which dealt option and slot it took --
+    a hand-written loop over options would have to re-implement the forward check to avoid
+    stranding itself."""
+    fs_ids = day_obj.deck_fs_ids if day_obj else _deck()
+    unique = day_obj.scenario.deal_unique if day_obj else False
+    picks = []
+
+    def recorder(candidates, state, rng):
+        card, slot = pick_rational(candidates, state, rng)
+        picks.append(sess.Pick(candidates.index(card), slot))
+        return card, slot
+
+    result = run_draft(daily.deck_for_day(FULL, fs_ids), recorder,
+                       random.Random(daily.player_seed(DAY, player)),
+                       fallback_fs_ids=tuple(FULL.fs_ids), unique_deals=unique)
+    assert result.completed
+    return fs_ids, unique, tuple(picks)
+
+
+def _swappable_pair(s):
+    """Two filled slots whose players are each eligible for the other's -- the only kind of
+    swap a full twelve allows."""
+    slots = list(s.order) + [s.impact]
+    for a in range(1, 13):
+        for b in range(a + 1, 13):
+            if b in slots[a - 1].slots and a in slots[b - 1].slots:
+                return a, b
+    pytest.skip("no two players in this twelve can trade places")
+
+
+def _slot_cards(s):
+    return list(s.order) + [s.impact]
+
+
+def test_a_finished_twelve_can_be_rearranged():
+    fs_ids, _, moves = _finished_moves()
+    done = daily.replay_day(FULL, DAY, 1, fs_ids, moves)
+    assert done.squad_complete
+    a, b = _swappable_pair(done)
+    arranged = sess.with_swap(done, a, b)
+    after = daily.replay_day(FULL, DAY, 1, fs_ids, arranged)
+    before, now = _slot_cards(done), _slot_cards(after)
+    assert now[a - 1] is before[b - 1] and now[b - 1] is before[a - 1]
+    assert [c for i, c in enumerate(now) if i not in (a - 1, b - 1)] == \
+           [c for i, c in enumerate(before) if i not in (a - 1, b - 1)], "a bystander moved"
+    # and it survives the trip through the state string the page keeps in its address bar
+    seed, decoded = sess.decode(sess.encode(daily.player_seed(DAY, 1), arranged))
+    assert _slot_cards(daily.replay_day(FULL, DAY, 1, fs_ids, decoded)) == now
+
+
+def test_rearranging_never_grows_the_state():
+    """One Arrange however many swaps -- a trail of Repositions would hit MOVE_CAP and turn
+    tinkering into an error. Swapping back to the draft's own order drops it altogether."""
+    fs_ids, _, moves = _finished_moves()
+    s = daily.replay_day(FULL, DAY, 1, fs_ids, moves)
+    a, b = _swappable_pair(s)
+    for _ in range(sess.MOVE_CAP + 5):
+        s = daily.replay_day(FULL, DAY, 1, fs_ids, sess.with_swap(s, a, b))
+        assert len(s.moves) <= len(moves) + 1
+    once = daily.replay_day(FULL, DAY, 1, fs_ids, sess.with_swap(
+        daily.replay_day(FULL, DAY, 1, fs_ids, moves), a, b))
+    back = sess.with_swap(once, a, b)
+    assert back == moves, "swapping back should leave the plain draft, not a no-op Arrange"
+
+
+def test_an_arrangement_that_puts_someone_where_he_cannot_bat_is_refused():
+    fs_ids, _, moves = _finished_moves()
+    done = daily.replay_day(FULL, DAY, 1, fs_ids, moves)
+    cards = _slot_cards(done)
+    bad = next(((a, b) for a in range(1, 12) for b in range(1, 12)
+                if a != b and a not in cards[b - 1].slots), None)
+    if bad is None:
+        pytest.skip("everyone in this twelve can bat everywhere")
+    a, b = bad
+    with pytest.raises(sess.InvalidState):
+        daily.replay_day(FULL, DAY, 1, fs_ids, sess.with_swap(done, a, b))
+
+
+def test_only_the_daily_may_rearrange_and_only_once_the_twelve_is_full():
+    fs_ids, _, moves = _finished_moves()
+    done = daily.replay_day(FULL, DAY, 1, fs_ids, moves)
+    a, b = _swappable_pair(done)
+    arranged = sess.with_swap(done, a, b)
+    # the plain replay -- solo, rooms -- keeps "an arrangement is final" (A73)
+    with pytest.raises(sess.InvalidState):
+        sess.replay(daily.deck_for_day(FULL, fs_ids), daily.player_seed(DAY, 1), arranged,
+                    rerolls_allowed=0, fallback_fs_ids=tuple(FULL.fs_ids))
+    # mid-draft it is not a move at all
+    with pytest.raises(sess.InvalidState):
+        daily.replay_day(FULL, DAY, 1, fs_ids, moves[:5] + (arranged[-1],))
+    # and it must be the last move, alone
+    with pytest.raises(sess.InvalidState):
+        daily.replay_day(FULL, DAY, 1, fs_ids, arranged + (arranged[-1],))
+
+
+def test_a_malformed_arrangement_is_refused_when_read():
+    seed = daily.player_seed(DAY, 1)
+    for bad in ("o1,2,3", "o1,1,3,4,5,6,7,8,9,10,11,12", "o0,2,3,4,5,6,7,8,9,10,11,12",
+                "o13,2,3,4,5,6,7,8,9,10,11,1"):
+        with pytest.raises(sess.InvalidState):
+            sess.decode(f"{seed}-{bad}")
+
+
+def test_the_match_is_played_with_the_rearranged_order(monkeypatch):
+    """Wiring, so it is checked at the seam: the order the engine is handed must be the
+    rearranged one, or the swap is decoration and the match plays the draft's own order."""
+    day_obj = daily._generate_day(FULL, MODEL, DAY)
+    fs_ids, unique, moves = _finished_moves(day_obj)
+    done = daily.replay_day(FULL, DAY, 1, fs_ids, moves, unique_deals=unique)
+    a, b = _swappable_pair(done)
+    arranged = sess.with_swap(done, a, b)
+    want = daily.replay_day(FULL, DAY, 1, fs_ids, arranged, unique_deals=unique)
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def spy(model, scenario, mine, opposition, rng):
+        seen["xi"], seen["impact"] = list(mine.xi), mine.impact
+        raise Stop
+
+    monkeypatch.setattr(daily, "score_day", spy)
+    with pytest.raises(Stop):
+        daily.play_and_score(FULL, MODEL, day_obj, 1,
+                             sess.encode(daily.player_seed(DAY, 1), arranged))
+    assert seen["xi"] == list(want.order) and seen["impact"] is want.impact

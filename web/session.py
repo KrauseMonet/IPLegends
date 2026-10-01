@@ -107,7 +107,20 @@ class Reposition:
     to_slot: int
 
 
-Move = Pick | Reroll | Reposition
+@dataclass(frozen=True)
+class Arrange:
+    """The finished twelve, rearranged: `order[i]` names the slot (1-12, 12 = Impact) whose
+    player now stands at slot i+1 -- a permutation of the twelve as the draft left them.
+
+    Only a mode that allows it may carry one (the daily challenge, A157), and only as the
+    LAST move, after the twelfth pick: it never reaches `run_draft`, which has ended by then.
+    One segment holding the whole arrangement rather than a trail of `Reposition`s, so the
+    state string stays the same length however long somebody spends rearranging -- a trail
+    would hit `MOVE_CAP` after a dozen swaps and turn tinkering into an error."""
+    order: tuple[int, ...]
+
+
+Move = Pick | Reroll | Reposition | Arrange
 
 
 @dataclass(frozen=True)
@@ -165,7 +178,7 @@ class Session:
 # because twelve is a meaningful limit on how often a drafter might rearrange.
 REPOSITIONS_ALLOWED = TWELVE_SIZE
 
-MOVE_CAP = TWELVE_SIZE + REROLLS_ALLOWED + REPOSITIONS_ALLOWED
+MOVE_CAP = TWELVE_SIZE + REROLLS_ALLOWED + REPOSITIONS_ALLOWED + 1   # + one Arrange
 
 # One letter per `REROLL_KINDS` entry, e.g. "rt"/"rs" -- a reroll segment is always two
 # characters and never contains ":", so it can't collide with a `index:slot` Pick segment.
@@ -181,6 +194,8 @@ def encode(seed: int, moves: tuple[Move, ...]) -> str:
             parts.append(f"r{_REROLL_CODE[m.kind]}")
         elif isinstance(m, Reposition):
             parts.append(f"m{m.from_slot}:{m.to_slot}")
+        elif isinstance(m, Arrange):
+            parts.append("o" + ",".join(str(x) for x in m.order))
         else:
             parts.append(f"{m.index}:{m.slot}")
     return f"{seed}-{'.'.join(parts)}" if moves else f"{seed}-"
@@ -192,6 +207,11 @@ def _parse_move(segment: str) -> Move:
         if code not in _REROLL_KIND:
             raise ValueError(f"malformed reroll {segment!r}")
         return Reroll(_REROLL_KIND[code])
+    if segment.startswith("o"):
+        order = tuple(int(x) for x in segment[1:].split(","))
+        if sorted(order) != list(range(1, TWELVE_SIZE + 1)):
+            raise ValueError(f"malformed arrangement {segment!r}: not a permutation of the twelve")
+        return Arrange(order)
     if segment.startswith("m"):
         rest = segment[1:]
         if ":" not in rest:
@@ -263,10 +283,13 @@ def _validate_reposition(move: Reposition, state: DraftState) -> None:
             f"{from_card.name} cannot move to slot {move.to_slot}: not eligible there")
 
 
-def _policy(moves: tuple[Move, ...], rerolls_allowed: int = REROLLS_ALLOWED):
+def _policy(moves, rerolls_allowed: int = REROLLS_ALLOWED):
     """`rerolls_allowed` is a parameter rather than the module constant so a MODE can set
     it. The daily challenge passes 0 -- its picks are meant to be final and from memory --
-    and every other caller keeps the default, so nothing about the ordinary draft moves."""
+    and every other caller keeps the default, so nothing about the ordinary draft moves.
+
+    `moves` may be an iterator the caller keeps, so that `replay` can see what is left once
+    `run_draft` stops asking -- which is where a finished twelve's `Arrange` lives."""
     remaining_moves = iter(moves)
     rerolls_used = 0
 
@@ -289,6 +312,8 @@ def _policy(moves: tuple[Move, ...], rerolls_allowed: int = REROLLS_ALLOWED):
         if isinstance(move, Reposition):
             _validate_reposition(move, state)
             raise RepositionRequested(move.from_slot, move.to_slot)
+        if isinstance(move, Arrange):
+            raise InvalidState("only a finished twelve can be rearranged")
         if not 0 <= move.index < len(candidates):
             raise InvalidState(
                 f"choice {move.index} is not among the {len(candidates)} options dealt")
@@ -306,7 +331,8 @@ def _policy(moves: tuple[Move, ...], rerolls_allowed: int = REROLLS_ALLOWED):
 def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
            rerolls_allowed: int = REROLLS_ALLOWED,
            fallback_fs_ids: tuple[int, ...] | None = None,
-           unique_deals: bool = False) -> Session:
+           unique_deals: bool = False,
+           allow_arrange: bool = False) -> Session:
     """Rebuild a session from scratch on every request (SPEC 11.3).
 
     `Reposition` moves reach `run_draft` exactly like `Reroll` does -- as an exception
@@ -317,8 +343,9 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
     the update, because it IS the same state, not a snapshot rebuilt afterward.
     """
     rng = random.Random(seed)
+    remaining = iter(moves)
     try:
-        result = run_draft(deck, _policy(moves, rerolls_allowed), rng,
+        result = run_draft(deck, _policy(remaining, rerolls_allowed), rng,
                            fallback_fs_ids=fallback_fs_ids,
                            unique_deals=unique_deals)
     except _NeedChoice as pause:
@@ -339,9 +366,52 @@ def replay(deck: Deck, seed: int, moves: tuple[Move, ...],
         # would not, so it is reported rather than treated as impossible.
         raise InvalidState(
             f"this draft cannot be completed - stranded on {result.stranded_on}")
-    return Session(seed, moves, None, result.picks, tuple(result.order), result.impact,
-                   tuple(order_errors(result.order, result.impact, result.picks)),
+    order, impact = list(result.order), result.impact
+    after = list(remaining)
+    arranges = [m for m in after if isinstance(m, Arrange)]
+    if arranges:
+        # Moves left once the twelfth pick lands used to be ignored, and for every other
+        # kind they still are (unchanged behaviour). An Arrange is the exception: it only
+        # ever means something here, so it is checked rather than quietly dropped.
+        if not allow_arrange:
+            raise InvalidState("this draft's twelve cannot be rearranged once complete")
+        if after != [arranges[0]] or moves[-1] is not arranges[0]:
+            raise InvalidState("an arrangement must be the last move, and only one")
+        order, impact = _apply_arrange(arranges[0], order, impact)
+    return Session(seed, moves, None, result.picks, tuple(order), impact,
+                   tuple(order_errors(order, impact, result.picks)),
                    rerolls_allowed=rerolls_allowed)
+
+
+def _apply_arrange(move: Arrange, order: list, impact: Card | None):
+    """Stand each player where the arrangement says, refusing anyone it puts in a slot he
+    is not eligible for (A76) -- replay is the only place a hand-written state is checked."""
+    slots = list(order) + [impact]
+    placed = [slots[src - 1] for src in move.order]
+    for new_slot, card in enumerate(placed, start=1):
+        if card is not None and new_slot not in card.slots:
+            raise InvalidState(f"{card.name} cannot bat at {new_slot}: not eligible there")
+    return placed[:XI_SIZE], placed[XI_SIZE]
+
+
+def with_swap(session: Session, from_slot: int, to_slot: int) -> tuple[Move, ...]:
+    """The moves of a finished `session` with two of its slots swapped, as ONE Arrange.
+
+    The arrangement is rebuilt from the one already there (or from the draft's own order),
+    and dropped altogether when the swaps bring everyone back where the draft put them --
+    so the state string is the plain draft again rather than carrying a no-op."""
+    for slot in (from_slot, to_slot):
+        if not 1 <= slot <= TWELVE_SIZE:
+            raise InvalidState(f"slot {slot} does not exist")
+    if from_slot == to_slot:
+        raise InvalidState(f"slot {from_slot} cannot swap with itself")
+    moves = session.moves
+    base = moves[:-1] if moves and isinstance(moves[-1], Arrange) else moves
+    current = list(moves[-1].order) if len(base) < len(moves) else list(range(1, TWELVE_SIZE + 1))
+    current[from_slot - 1], current[to_slot - 1] = current[to_slot - 1], current[from_slot - 1]
+    if current == list(range(1, TWELVE_SIZE + 1)):
+        return base
+    return base + (Arrange(tuple(current)),)
 
 
 def _blocked(deck: Deck, fs_id: int, state: DraftState) -> list[tuple[Card, str]]:

@@ -115,8 +115,12 @@ def test_repositions_are_still_allowed():
 # fast is also small enough to see none of it -- the first version of these two tests did
 # exactly that and failed on a run where nothing happened to strand. A pinned case either
 # reproduces or the behaviour has genuinely changed.
+#
+# `pick_naive` drafts by rating, so a ratings change can move these: A159 (the softer
+# reputation floor) stopped day 180 stranding and it was replaced by 191, found by the
+# same search. Re-search rather than delete when that happens.
 STRANDING_CASES = ((51, pick_random), (144, pick_random),
-                   (151, pick_naive), (180, pick_naive), (187, pick_naive))
+                   (151, pick_naive), (187, pick_naive), (191, pick_naive))
 
 
 @pytest.mark.parametrize("offset,policy", STRANDING_CASES)

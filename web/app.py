@@ -3036,7 +3036,9 @@ def _daily_session(conn, account_id: int | str, state: str, day) -> sess.Session
     never dealt -- the check `web.daily.decode_own_state` exists for."""
     try:
         seed, moves = daily_lib.decode_own_state(state, day.challenge_date, account_id)
-    except daily_lib.DailyError as exc:
+    except (daily_lib.DailyError, sess.InvalidState) as exc:
+        # InvalidState too: a state that will not even parse is the caller's error (400),
+        # exactly as the solo draft answers it -- it used to escape as a 500.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         return daily_lib.replay_day(STATE["deck"], day.challenge_date, account_id,

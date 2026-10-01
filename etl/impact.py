@@ -20,7 +20,14 @@ The formula, from SPEC 7.1:
 
     impact = (runs - E[runs | state]) - (was_out - P[out | state]) * wicket_cost(state)
 
-reversed in sign for the bowler. **Scoring set is not the fitting set**: second innings and
+reversed in sign for the bowler. **[A160] Each ball is also kept as its two HALVES** - the
+runs half `runs - E[runs | state]` and the dismissal half `was_out - P[out | state]`, in
+outs rather than runs - because the engine plays them separately: a batter who scores fast
+and gets out often is a different player from one who scores slowly and rarely gets out,
+and a single number cannot tell them apart. The total above is what the CARD rates; the
+halves are what the ENGINE plays. `wicket_cost` is no longer `etl.state_model.wicket_cost`
+(the old differenced-final-total reading, which A160 found was more than half selection):
+it is `Costs`, the drop in the engine's own expected remaining runs. **Scoring set is not the fitting set**: second innings and
 miscounted overs are scored but not fitted; reduced and unknown-length innings are neither.
 
 **One state-resolution rule, both halves.** A ball's impact has a runs half and a wicket
@@ -53,8 +60,6 @@ from etl.state_model import (
     MIN_OBSERVATIONS,
     NOT_A_WICKET,
     bucket_of,
-    fetch,
-    wicket_cost,
 )
 
 # Scoring set (SPEC 7.1's table). `not is_super_over` is redundant against the 120 - see
@@ -160,34 +165,63 @@ class Grid:
     def of(self, over: int, wickets: int) -> Cell:
         return self.cells[self.resolve(over, bucket_of(wickets))]
 
+    def peek(self, over: int, wickets: int) -> Cell:
+        """`of` without counting a fallback. For building tables FROM the grid, where every
+        state is visited once by construction and a count would report the table's shape
+        as though it were balls landing in thin states."""
+        counted = Counter(self.fallbacks)
+        cell = self.of(over, wickets)
+        self.fallbacks = counted
+        return cell
+
+
+# [A160] The ball count the remaining-runs chain runs over. Twenty overs of six.
+_BALLS = 120
+
 
 class Costs:
-    """Wicket cost at exact-wicket grain. Same fallback walk as `Grid`, finer grain."""
+    """[A160] The cost of a wicket: how much it lowers the ENGINE'S OWN expected remaining
+    runs. One per (over, exact wickets), all 200 priced, no fallback walk needed.
 
-    def __init__(self, expected) -> None:
+    Worked backwards ball by ball over the same per-ball states the engine draws from:
+
+        V(t, w) = E[runs | t, w] + P[out | t, w] * V(t+1, w+1) + (1 - P) * V(t+1, w)
+
+    with V = 0 at the 120th ball and at ten down, and the cost of a dismissal on ball t
+    taken as `V(t+1, w) - V(t+1, w+1)`, averaged over the six balls of the over.
+
+    **Why this replaced the old reading.** `etl.state_model.wicket_cost` differenced the
+    archive's mean final total between neighbouring wicket counts, and 6.6 of its
+    11.5-run weighted mean was SELECTION: a side one wicket further down had, on average,
+    already scored 6.6 fewer, which the batters' own runs half already counts. A chain
+    over the state model cannot see that selection at all, because nothing in it remembers
+    how a state was reached - so the cost here is what a dismissal does from this point
+    on, and only that. It is also, by construction, exactly what a wicket is worth inside
+    the engine, so the card prices a dismissal at the value the engine plays it at.
+
+    Weighted by where wickets actually fall, it averages **5.8 runs** (A160). Extras are
+    left out of the chain: the engine adds them at a flat rate per ball, so they move only
+    with an all-out, which is too rare to price.
+    """
+
+    def __init__(self, grid: Grid) -> None:
+        value = [[0.0] * 11 for _ in range(_BALLS + 1)]
+        for t in range(_BALLS - 1, -1, -1):
+            for w in range(10):
+                cell = grid.peek(t // 6, w)
+                p = cell.out_rate_any
+                value[t][w] = (cell.runs_per_ball + p * value[t + 1][w + 1]
+                               + (1 - p) * value[t + 1][w])
+        self.remaining = value
         self.priced = {
-            (over, w): cost
+            (over, w): sum(value[6 * over + b + 1][w] - value[6 * over + b + 1][w + 1]
+                           for b in range(6)) / 6
             for over in range(20)
             for w in range(10)
-            if (cost := wicket_cost(expected, over, w)) is not None
         }
-        self.fallbacks: Counter[tuple[int, int]] = Counter()
-        self._resolved: dict[tuple[int, int], tuple[int, int]] = {}
 
     def of(self, over: int, wickets: int) -> float:
-        key = (over, wickets)
-        if key in self.priced:
-            return self.priced[key]
-        if key not in self._resolved:
-            near = sorted((abs(w - wickets), w) for (o, w) in self.priced if o == over)
-            if not near:
-                raise SystemExit(
-                    f"over {over} has no priced wicket transition, so no dismissal in that "
-                    "over can be costed"
-                )
-            self._resolved[key] = (over, near[0][1])
-        self.fallbacks[key] += 1
-        return self.priced[self._resolved[key]]
+        return self.priced[(over, min(wickets, 9))]
 
 
 def fit_grids(conn) -> tuple[Grid, Grid]:
@@ -238,7 +272,10 @@ def fit_grids(conn) -> tuple[Grid, Grid]:
 
 
 class Tally:
-    __slots__ = ("balls", "runs", "outs", "impact", "impact_any")
+    # [A160] `runs_impact` and `outs_excess` are the two halves the engine plays;
+    # `outs_expected` is the denominator that turns the second into a multiplier.
+    __slots__ = ("balls", "runs", "outs", "impact", "impact_any",
+                 "runs_impact", "outs_excess", "outs_expected")
 
     def __init__(self) -> None:
         self.balls = 0
@@ -246,6 +283,9 @@ class Tally:
         self.outs = 0
         self.impact = 0.0
         self.impact_any = 0.0
+        self.runs_impact = 0.0
+        self.outs_excess = 0.0
+        self.outs_expected = 0.0
 
     @property
     def per_ball(self) -> float:
@@ -272,8 +312,8 @@ class Scored(NamedTuple):
     costs: Costs
 
 
-def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
-    costs = Costs(expected)
+def score(conn, bat_grid: Grid, bowl_grid: Grid) -> Scored:
+    costs = Costs(bat_grid)
     bat: dict[tuple[int, int], Tally] = defaultdict(Tally)
     bowl: dict[tuple[int, int], Tally] = defaultdict(Tally)
     bat_careers: dict[int, Tally] = defaultdict(Tally)
@@ -325,7 +365,8 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
             # Expected terms count only on legal balls, actual terms on every delivery:
             # the denominator is legal balls but a no-ball's runs are still conceded.
             residual = charged - (cell.runs_per_ball if legal else 0.0)
-            wickets_residual = bowler_out - (cell.out_rate if legal else 0.0)
+            expected_out = cell.out_rate if legal else 0.0
+            wickets_residual = bowler_out - expected_out
             value = -(residual - wickets_residual * cost)
             for t in (bowl[(bowler, season)], bowl_careers[bowler]):
                 t.balls += int(legal)
@@ -333,6 +374,11 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
                 t.outs += int(bowler_out)
                 t.impact += value
                 t.impact_any += value
+                # [A160] Signed so that positive is GOOD for the bowler in both halves:
+                # runs saved, and wickets above what the states would give an average one.
+                t.runs_impact += -residual
+                t.outs_excess += wickets_residual
+                t.outs_expected += expected_out
             franchises[(bowler, season)].add(bowl_fs)
             if legal:
                 played[(bowler, season)].add(match)
@@ -349,6 +395,10 @@ def score(conn, bat_grid: Grid, bowl_grid: Grid, expected) -> Scored:
                 t.outs += int(striker_out)
                 t.impact += value
                 t.impact_any += diagnostic
+                # [A160] The two halves. Positive `outs_excess` is BAD for a batter.
+                t.runs_impact += runs_part
+                t.outs_excess += striker_out - cell.out_rate
+                t.outs_expected += cell.out_rate
             franchises[(batter, season)].add(bat_fs)
             played[(batter, season)].add(match)
 
@@ -632,9 +682,8 @@ def print_resolution(scored: Scored, total_bat: int, total_bowl: int) -> None:
         print(f"    {name:<18} {used:>7,} of {total:,} balls ({used / total:.2%}) "
               f"resolved to a neighbouring bucket, across "
               f"{len(grid.fallbacks)} thin states")
-    used = sum(scored.costs.fallbacks.values())
-    print(f"    {'wicket cost':<18} {used:>7,} lookups resolved to a neighbouring exact "
-          f"wicket count, {len(scored.costs.priced)} of 180 transitions priced directly")
+    print(f"    {'wicket cost':<18} all {len(scored.costs.priced)} (over, wickets) states "
+          "priced by the remaining-runs chain (A160), so none needs a neighbour")
     print("    nothing is dropped: every scoring-set ball is priced.")
 
 
@@ -872,6 +921,12 @@ def print_reconcile(conn, scored: Scored, name: str) -> None:
     print(f"    {len(truth) - bad} of {len(truth)} seasons reconcile exactly")
 
 
+class _Half(NamedTuple):
+    """[A160] One half of a tally, in the shape the prior builders read."""
+    balls: int
+    impact: float
+
+
 def rows_for(scored: Scored, what: str):
     """Every (franchise-season, person) row for one discipline, gated and priored."""
     seasons = scored.bat if what == "batting" else scored.bowl
@@ -885,6 +940,17 @@ def rows_for(scored: Scored, what: str):
     gated = {key: t for key, t in seasons.items() if t.balls >= floor}
     league, bands = league_means(gated), band_league_means(cohorts, gated)
 
+    # [A160] The two halves are shrunk toward priors of their OWN, built the identical way
+    # from the identical gated population. The view shrinks each half with the same k, so
+    # the halves' shrunk values add to the total's exactly only if the priors do too -
+    # and they do, because a band mean is linear in what it averages.
+    def half(attr):
+        view = {key: _Half(t.balls, getattr(t, attr)) for key, t in seasons.items()}
+        g = {key: h for key, h in view.items() if h.balls >= floor}
+        return view, league_means(g), band_league_means(cohorts, g)
+    runs_view, runs_league, runs_bands = half("runs_impact")
+    outs_view, outs_league, outs_bands = half("outs_excess")
+
     for (person, season), t in sorted(seasons.items()):
         fs = scored.franchises[(person, season)]
         if len(fs) != 1:
@@ -894,11 +960,17 @@ def rows_for(scored: Scored, what: str):
                 "migration 009 keys on franchise_season_id and cannot hold this row"
             )
         prior = RATED_PRIOR(cohorts, seasons, careers, person, season, league, bands)
+        runs_prior = RATED_PRIOR(cohorts, runs_view, careers, person, season,
+                                 runs_league, runs_bands)
+        outs_prior = RATED_PRIOR(cohorts, outs_view, careers, person, season,
+                                 outs_league, outs_bands)
         matches = scored.matches.get((person, season), 0)
         yield (next(iter(fs)), person, what, t.balls, t.impact,
                t.impact_any if what == "batting" else None,
                matches, prior.value, prior.n, prior.source, floor,
-               DRAFT_GATE_MATCHES, gate_reason(t.balls, matches, floor))
+               DRAFT_GATE_MATCHES, gate_reason(t.balls, matches, floor),
+               t.runs_impact, runs_prior.value, t.outs_excess, outs_prior.value,
+               t.outs_expected)
 
 
 def write(conn, scored: Scored) -> int:
@@ -911,7 +983,9 @@ def write(conn, scored: Scored) -> int:
             copy player_season_impact (
                 franchise_season_id, person_id, discipline, balls, impact_total,
                 impact_total_any_wicket, matches, prior_per_ball, prior_balls,
-                prior_source, floor_balls, gate_matches, not_rateable_reason
+                prior_source, floor_balls, gate_matches, not_rateable_reason,
+                runs_total, runs_prior_per_ball, outs_excess_total, outs_prior_per_ball,
+                outs_expected
             ) from stdin
             """
         ) as copy:
@@ -1007,9 +1081,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     with connect(direct=True) as conn:
-        _, expected = fetch(conn)
         bat_grid, bowl_grid = fit_grids(conn)
-        scored = score(conn, bat_grid, bowl_grid, expected)
+        scored = score(conn, bat_grid, bowl_grid)
 
         if args.calibrate:
             print_calibration(scored)

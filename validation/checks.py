@@ -1052,38 +1052,76 @@ def check_21_no_real_xi_fielded_five_overseas(conn) -> Result:
 
 
 def check_22_the_card_and_the_engine_agree(conn) -> Result:
-    """A57. What the drafter reads and what the engine plays are the same claim.
+    """A57, rewritten for A160. The card and the engine are each the claim they say they are.
 
-    The reputation blend is the one term in the project that is not a measurement, and the
-    only thing that keeps it honest is that it reaches BOTH numbers. If it lifted the card
-    without lifting `rated_per_ball`, a drafter would pick a 97 and watch it bowl like a 78
-    -- and would be right to trust neither number afterwards.
+    Until A160 this asserted that the engine played the CARD: `rated_per_ball`, spread over
+    a season's balls, had to integrate back to the card's `blended_merit`, so Player of the
+    Match, the all-rounder term and reputation all moved a ball. A160 split the engine from
+    the card on purpose -- the engine now replays the season as it happened, in two halves,
+    and the card is the drafter's summary of it. So this checks both halves of that
+    contract separately, and each half is falsifiable on its own:
 
-    So this recomputes the identity the view is built on: spread over a player-season's own
-    balls, `rated_per_ball` has to integrate back to exactly `blended_merit`. It is not a
-    restatement of the view's arithmetic, because it re-derives the left side from the
-    per-discipline columns a consumer actually reads, in the grain a consumer reads them.
-    A blend applied to the display alone fails here on every row that has one.
-
-    Also pins the scale to A58's 70-100. A rating outside it means the percentile anchors
-    stopped bracketing the data, which is what a revised archive would do quietly.
-
-    [A71] The identity has a second form now. A71's four reputation-only rows have no
-    in-season balls to integrate `rated_per_ball` over - that is exactly why they needed
-    the branch - so their `rated_per_ball` is `blended_merit` divided by the SAME reference
-    exposure A59 already declares (18 balls a match for batting, 24 for bowling), and the
-    identity to check is the inverse of that division, not the general per-ball integral.
-    Using the general formula on these rows would multiply by `balls = 0` and always
-    integrate to zero regardless of what the card claims, which is a check that cannot fail
-    - the exact failure mode this project's own standing rule refuses.
+    1. **The engine plays the season's own halves.** `scoring_per_ball` and
+       `dismissal_multiplier` are recomputed here from `player_season_impact`'s raw columns
+       -- shrunk with k = 100 toward each half's own prior, centred on the UNWEIGHTED mean
+       of gate-passing seasons, and NOT cohort-adjusted -- and must match the view. A view
+       that folded the card's extras back in, applied a cohort offset, or centred on the
+       wrong population fails here, on the rows it moved.
+    2. **The card is still self-consistent.** `rated_per_ball` integrates to
+       `blended_merit` (or, for A71's reputation-only rows, divides out by the reference
+       exposure) and the display sits inside 70-99. The card's number is no longer what the
+       engine plays, but it is still what the draft's selection logic ranks on.
     """
-    title = "the card's rating and the engine's per-ball value are the same claim"
+    title = "the engine plays the season's own halves; the card integrates to its merit"
     if not _table_exists(conn, "player_season_rating"):
         return skipped(22, title, "player_season_rating absent - apply migration 011")
 
     REF_BALLS_PER_MATCH = {"batting": 18.0, "bowling": 24.0}
-
+    K = 100.0
     offenders: list[str] = []
+
+    # --- 1. the engine's halves, from the raw columns ------------------------------------
+    raw = _rows(conn, """
+        select i.franchise_season_id, i.person_id, i.discipline, f.season_year, i.balls,
+               i.runs_total, i.runs_prior_per_ball, i.outs_excess_total,
+               i.outs_prior_per_ball, i.outs_expected, i.not_rateable_reason
+        from player_season_impact i
+        join franchise_seasons f using (franchise_season_id)
+        where i.balls > 0
+    """)
+    shrunk = {}
+    level: dict[tuple, list[list[float]]] = {}
+    for (fs, pid, disc, year, balls, runs, runs_prior, outs, outs_prior, expected,
+         reason) in raw:
+        r = (runs + K * runs_prior) / (balls + K)
+        o = (outs + K * outs_prior) / (balls + K)
+        shrunk[(fs, pid, disc)] = (year, r, o, expected / balls)
+        if reason is None:
+            level.setdefault((disc, year), []).append([r, o])
+    means = {k: (sum(v[0] for v in vs) / len(vs), sum(v[1] for v in vs) / len(vs))
+             for k, vs in level.items()}
+
+    view = _rows(conn, """
+        select p.primary_name, r.franchise_season_id, r.person_id, r.discipline,
+               r.season_year, r.scoring_per_ball, r.dismissal_multiplier
+        from player_season_rating r join people p using (person_id)
+        where r.prior_source <> 'reputation_floor'
+    """)
+    checked = 0
+    for name, fs, pid, disc, year, scoring, dismissal in view:
+        _, r, o, expected_rate = shrunk[(fs, pid, disc)]
+        mean_r, mean_o = means[(disc, year)]
+        want_s = r - mean_r
+        want_d = max(0.1, 1 + (o - mean_o) / expected_rate)
+        checked += 1
+        if scoring is None or abs(float(scoring) - want_s) > 1e-9:
+            offenders.append(f"{name} {year} {disc}: engine scoring {scoring} but the "
+                             f"season's own half recomputes to {want_s:.6f}")
+        if dismissal is None or abs(float(dismissal) - want_d) > 1e-9:
+            offenders.append(f"{name} {year} {disc}: engine dismissal multiplier "
+                             f"{dismissal} but recomputes to {want_d:.6f}")
+
+    # --- 2. the card integrates to its own merit -----------------------------------------
     rows = _rows(conn, """
         select p.primary_name, r.season_year, r.franchise_season_id, r.person_id,
                r.discipline, r.rated_per_ball, r.balls, r.matches, r.prior_source,
@@ -1092,38 +1130,29 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
         join people p on p.person_id = r.person_id
         order by r.franchise_season_id, r.person_id
     """)
-
     groups: dict[tuple, list[tuple]] = {}
     for row in rows:
         groups.setdefault((row[2], row[3]), []).append(row)
-
-    both = 0
     for (fs_id, person_id), grp in groups.items():
         name, year = grp[0][0], grp[0][1]
-        blended = float(grp[0][9])
-        display = grp[0][10]
+        blended, display = float(grp[0][9]), grp[0][10]
         integrated = 0.0
         for (_, _, _, _, discipline, rated_per_ball, balls, matches,
              prior_source, _, _) in grp:
             if prior_source == "reputation_floor":
-                # [A71] The inverse of how `rated_per_ball` was built for this row: no
-                # season balls to spread over, so the reference exposure stands in.
                 integrated += float(rated_per_ball) * REF_BALLS_PER_MATCH[discipline]
             else:
                 integrated += float(rated_per_ball) * float(balls) / float(matches)
         if abs(integrated - blended) > 1e-6:
-            offenders.append(
-                f"{name} {year}: engine integrates to {integrated:.4f} but the "
-                f"card claims {blended:.4f}")
-        if not 70 <= display <= 100:
-            offenders.append(f"{name} {year}: display_rating {display} is outside 70-100")
-        if len(grp) == 2:
-            both += 1
+            offenders.append(f"{name} {year}: card integrates to {integrated:.4f} but "
+                             f"claims {blended:.4f}")
+        if not 70 <= display <= 99:
+            offenders.append(f"{name} {year}: display_rating {display} is outside 70-99")
 
     return verdict(
         22, title,
-        f"{len(groups):,} player-seasons reconciled, {both:,} of them all-rounders scoring "
-        f"in both disciplines",
+        f"{checked:,} engine rows recomputed from their raw halves; "
+        f"{len(groups):,} cards reconciled to their merit",
         offenders,
     )
 

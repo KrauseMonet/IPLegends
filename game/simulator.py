@@ -1,5 +1,29 @@
 """A T20 innings, ball by ball, drawn from the SPEC 7.1 state model.
 
+**[A160] Read this first: the engine now plays TWO numbers per player per discipline, and
+the paragraphs below describe the single-number design it replaced.** They are kept because
+the tilt is still the instrument, and because why one number was not enough is the reason
+for the change. On every ball:
+
+1. The dismissal chance is the state's own, with its ODDS multiplied by the batter's
+   `bat_dismissal` and the bowler's `bowl_dismissal` -- a batter who got out half as often
+   as an average one in the same states, against a bowler who took wickets at the average
+   rate, is dismissed at half the odds.
+2. The run distribution on a ball he survives is tilted (the same max-entropy tilt) so that
+   runs per ball move by `bat_scoring - bowl_scoring`.
+
+One number could not do this. Tilting over an outcome space with the dismissal priced as
+negative runs means a good rating ALWAYS bought both more runs and fewer dismissals, in a
+proportion fixed by the state -- so Abhishek Sharma's 2024 (struck 53 per 100 balls above
+his season, and was out MORE often) played as +10 and almost never out. Measured over 536
+batter-seasons, the engine reproducing each season's real excess: scoring 0.70 -> 0.99,
+dismissals 0.53 -> 0.98 (correlations). The numbers are the season's own, season-centred,
+with none of the card's extras (Player of the Match, the all-rounder term, reputation):
+the card is the drafter's summary, the engine replays the season as it happened.
+
+An average player (0.0, 1.0) leaves the state untouched, exactly as a zero delta did, so
+`--validate` still tests the state model alone.
+
 The engine is the state model plus one idea. The state model already says what an average
 ball looks like from every (over, wickets) position: a distribution over 0-6 off the bat and
 a dismissal probability. A rating says how far one player's ball departs from that average,
@@ -32,7 +56,8 @@ Known simplifications, all of them visible in the scoreboard rather than hidden:
 - **Extras are a flat rate, not a state.** Two measured scalars, no over-by-over shape.
 - **Batting and bowling ratings add.** They are measured on slightly different denominators
   (A22 balls faced against legal balls), so their sum is an approximation rather than an
-  identity.
+  identity. [A160] For the scoring halves this is still true. The dismissal halves
+  MULTIPLY on the odds, which keeps a probability a probability however good both are.
 """
 
 from __future__ import annotations
@@ -42,7 +67,7 @@ import random
 from dataclasses import dataclass, field
 
 from etl.impact import Cell, Costs, Grid
-from etl.state_model import FITTING_SET, Remaining, bucket_of
+from etl.state_model import FITTING_SET, bucket_of
 
 # Off-the-bat outcomes, in the order the tilt's arrays use. Index 0 is the dismissal, whose
 # value is not a constant -- it is minus the wicket cost of the state the ball was bowled in.
@@ -94,6 +119,14 @@ class Player:
     # than a guess, and anyone `people.bowling_style` does not know -- nobody who bowls
     # today, since A112 filled all 479, but a revised archive can reintroduce one.
     bowling_style: str | None = None
+    # [A160] What the engine actually plays. Defaults are the league-average player, so a
+    # synthetic filler built without them is exactly the identity. `bat`/`bowl` above stay,
+    # and are what selection logic ranks on (who opens, who bowls the death); they are the
+    # card's number and no longer move a ball.
+    bat_scoring: float = 0.0
+    bat_dismissal: float = 1.0
+    bowl_scoring: float = 0.0
+    bowl_dismissal: float = 1.0
 
 
 @dataclass
@@ -110,6 +143,10 @@ class Model:
     extras_rate: float        # non-wide extra runs per ball faced
     unrated_bat: dict[str, float]                    # batting band -> pooled raw per ball
     season_mean: dict[tuple[str, int], float]        # (discipline, season) -> centring const
+    # [A160] The same two fallbacks, for the two halves: a band's pooled raw scoring per
+    # ball and pooled dismissal multiplier, and the scoring half's own centring constant.
+    unrated_split: dict[str, tuple[float, float]] = field(default_factory=dict)
+    season_mean_scoring: dict[tuple[str, int], float] = field(default_factory=dict)
 
     def state(self, over: int, wickets: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """The eight outcome probabilities and their values, for one (over, wickets)."""
@@ -211,6 +248,32 @@ def model_inputs(conn) -> dict:
                 """
             )
         ],
+        # [A160] `unrated_bat`'s twin for the two halves, over the same pooled population.
+        "unrated_split": [
+            [band, float(scoring), float(dismissal)] for band, scoring, dismissal in conn.execute(
+                """
+                select s.batting_band, sum(i.runs_total) / sum(i.balls),
+                       (sum(i.outs_excess_total) + sum(i.outs_expected)) / sum(i.outs_expected)
+                  from player_season_impact i
+                  join squad_members s using (franchise_season_id, person_id)
+                 where i.discipline = 'batting' and i.not_rateable_reason is not null
+                   and s.batting_band is not null
+                 group by 1
+                """
+            )
+        ],
+        # [A160] The scoring half's centring constant, read back out of the view the same
+        # way `season_mean` is, so it cannot drift from the view's own arithmetic.
+        "season_mean_scoring": [
+            [discipline, int(year), float(mean)] for discipline, year, mean in conn.execute(
+                """
+                select discipline, season_year, min(shrunk_runs_per_ball - scoring_per_ball)
+                from player_season_rating
+                where shrunk_runs_per_ball is not null
+                group by discipline, season_year
+                """
+            )
+        ],
     }
 
 
@@ -241,22 +304,27 @@ def build_model(inputs: dict) -> Model:
         outs[(over, bucket)] = dismissals
         cells[(over, bucket)] = Cell(n, runs, dismissals, dismissals)
 
-    expected = {
-        (over, wickets): Remaining(obs, so_far, remaining)
-        for over, wickets, obs, so_far, remaining in inputs["state_runs_remaining"]
-    }
+    # [A160] `state_runs_remaining` is still loaded and snapshotted -- check 20 guards it
+    # and `etl.state_model` prints from it -- but nothing here builds from it any more:
+    # the wicket price is worked out over the per-ball states themselves (`Costs`).
     wide_balls, wide_runs, balls_faced, extras_on_faced = inputs["wide_extras"]
     unrated_bat = {band: raw for band, raw in inputs["unrated_bat"]}
     season_mean = {(discipline, year): mean
                    for discipline, year, mean in inputs["season_mean"]}
+    unrated_split = {band: (scoring, dismissal)
+                     for band, scoring, dismissal in inputs["unrated_split"]}
+    season_mean_scoring = {(discipline, year): mean
+                           for discipline, year, mean in inputs["season_mean_scoring"]}
+    grid = Grid(cells)
 
     return Model(
         dist=dist, faced=faced, outs=outs,
-        grid=Grid(cells), costs=Costs(expected),
+        grid=grid, costs=Costs(grid),
         wide_rate=wide_balls / balls_faced,
         wide_runs=wide_runs / wide_balls,
         extras_rate=extras_on_faced / balls_faced,
         unrated_bat=unrated_bat, season_mean=season_mean,
+        unrated_split=unrated_split, season_mean_scoring=season_mean_scoring,
     )
 
 
@@ -299,6 +367,32 @@ def tilt(probs: tuple[float, ...], values: tuple[float, ...],
     weights = [p * math.exp(theta * v - peak) for p, v in zip(probs, values)]
     total = sum(weights)
     return tuple(w / total for w in weights)
+
+
+def split_ball(probs: tuple[float, ...], values: tuple[float, ...],
+               scoring: float, dismissal: float) -> tuple[float, ...]:
+    """[A160] One ball's outcome probabilities for a given batter and bowler.
+
+    The dismissal chance keeps the state's own ODDS times `dismissal` (batter's times
+    bowler's), which stays a probability however extreme both are. The run distribution
+    on the balls he survives is tilted -- the same max-entropy tilt as before, now over
+    runs alone -- so that runs per ball move by `scoring`. Runs per ball means per ball
+    FACED, dismissals included, which is how the runs half was measured; so the target on
+    the surviving balls is that mean divided by the chance of surviving.
+
+    `(0.0, 1.0)` returns `probs` unchanged, which is what keeps `--validate` a test of the
+    state model alone.
+    """
+    p = probs[0]
+    if p >= 1.0:          # a state where every ball is a wicket stays one: odds are infinite
+        return probs
+    odds = p / (1 - p) * dismissal
+    out = odds / (1 + odds)
+    runs = values[1:]
+    unconditional = sum(q * v for q, v in zip(probs[1:], runs))
+    survived = tuple(q / (1 - p) for q in probs[1:])
+    tilted = tilt(survived, runs, (unconditional + scoring) / (1 - out))
+    return (out,) + tuple((1 - out) * q for q in tilted)
 
 
 def draw(probs: tuple[float, ...], rng: random.Random) -> int:
@@ -476,9 +570,11 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
             probs, values = model.state(
                 over if state_over is None else state_over, innings.wickets)
-            baseline = sum(p * v for p, v in zip(probs, values))
-            delta = striker.player.bat - (bowler.player.bowl or 0.0)
-            outcome = draw(tilt(probs, values, baseline + delta), rng)
+            outcome = draw(split_ball(
+                probs, values,
+                striker.player.bat_scoring - bowler.player.bowl_scoring,
+                striker.player.bat_dismissal * bowler.player.bowl_dismissal,
+            ), rng)
 
             innings.balls += 1
             striker.balls += 1

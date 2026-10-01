@@ -1012,6 +1012,28 @@ For each state compute:
 - Expected runs remaining in the innings, at that state and at that state with one more
   wicket down.
 
+**[A160, corrected 2026-10-02] The cost of a wicket is the drop in the ENGINE'S expected
+REMAINING runs, worked backwards ball by ball over the state model -- not the A31 rule
+below.** A31 was right that differencing runs remaining measures selection; its own fix
+measured selection too, in the opposite direction. A side one wicket further down has, on
+average, already scored **6.6 fewer runs** -- of a weighted mean cost of **11.5** -- and
+those runs are already in the batters' runs half, so A31 charged most dismissals twice.
+The rule now:
+
+```
+V(t, w) = E[runs | t, w] + P[out | t, w] · V(t+1, w+1) + (1 − P) · V(t+1, w)
+cost(over, w) = mean over the over's six balls of  V(t+1, w) − V(t+1, w+1)
+```
+
+with V = 0 at ball 120 and at ten down. A chain cannot see how a state was reached, so it
+carries no selection; and it is, by construction, exactly what a wicket is worth inside the
+engine. Weighted by where wickets fall it averages **5.8 runs**; the full engine measured
+**6.2** at the margin (dismissal odds ±3%, paired seeds), the gap being extras the chain
+omits. An earlier figure of **7.8** came from a ±15% change, which compounds into extra
+collapses and overstates the marginal -- named here because it was briefly the figure a
+decision was about to rest on. `etl.impact.Costs` implements it; `wicket_cost` below is a
+printed diagnostic only. The paragraph that follows is A31's, kept as the record.
+
 **[A31, corrected 2026-07-30] The cost of a wicket is the drop in expected FINAL total, not
 the difference in expected runs remaining.** This paragraph previously read "the difference
 is the cost of a wicket there", pointing at runs remaining. That is wrong, and wrong in a
@@ -1789,6 +1811,25 @@ dependency runs one way and the pipeline is exactly as testable as it was.
 `uv run python -m game` drafts two squads off the real deck, picks two XIs and plays twenty
 overs a side. It is the consumer §7's ratings were missing. It reads the stored §7.1 grids
 and the `player_season_rating` view; it fits nothing and writes nothing.
+
+**[A160] Two numbers per player per discipline, not one.** §10.2's single tilt could only
+ever make a good batter score faster AND get out less, in a proportion fixed by the state.
+Since A160 a ball is played as:
+
+1. the state's dismissal ODDS times the batter's `bat_dismissal` times the bowler's
+   `bowl_dismissal` (the view's `dismissal_multiplier`);
+2. the run distribution on surviving balls tilted (§10.2's tilt, over runs alone) so that
+   runs per ball faced move by `bat_scoring − bowl_scoring` (the view's `scoring_per_ball`).
+
+Both are the season's own halves, season-centred, **not cohort-adjusted** (the engine
+replays real states, so an opener's real dismissal rate is what it must reproduce) and with
+**none of the card's extras** -- Player of the Match, the all-rounder term and reputation
+stay on the card and no longer move a ball (this reverses A57's second guard; check 22 now
+checks each side of the split separately). Measured over 536 batter- and 588 bowler-seasons,
+how well the engine reproduces each season's real excess (correlation, before → after):
+scoring 0.70 → 0.99, dismissals 0.53 → 0.98, economy 0.66 → 0.99, wickets 0.66 → 0.99.
+§10.2 is kept below as the record of the single-number design and because its tilt is still
+the instrument.
 
 ### 10.1 The outcome space
 

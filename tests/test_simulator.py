@@ -453,3 +453,95 @@ def test_counting_boundaries_consumes_no_rng_draw():
     assert innings.balls == OVERS * BALLS_PER_OVER      # no wicket, so a full innings
     assert innings.fours > 0 and innings.sixes > 0      # boundaries really were tallied
     assert rng.draws == 3 * innings.balls
+
+
+# --- [A160] two numbers per player: the dismissal odds and the scoring tilt ----------------
+
+from game.__main__ import bat_split  # noqa: E402
+import game.simulator as simulator  # noqa: E402
+from game.simulator import split_ball  # noqa: E402
+
+RUNS = VALUES[1:]
+
+
+def runs_per_ball(probs) -> float:
+    """Runs per ball FACED: a dismissal scores nothing, which is how the half is measured."""
+    return sum(p * v for p, v in zip(probs[1:], RUNS))
+
+
+def test_an_average_player_leaves_the_state_alone():
+    """(0, 1) must be the identity or `--validate` stops testing the state model alone."""
+    assert split_ball(PROBS, VALUES, 0.0, 1.0) == pytest.approx(PROBS, abs=1e-9)
+
+
+@pytest.mark.parametrize("dismissal", [0.25, 0.5, 1.6, 3.0])
+def test_the_dismissal_multiplier_scales_the_odds_exactly(dismissal):
+    out = split_ball(PROBS, VALUES, 0.0, dismissal)[0]
+    p = PROBS[0]
+    assert out / (1 - out) == pytest.approx(dismissal * p / (1 - p))
+
+
+@pytest.mark.parametrize("scoring,dismissal", [(0.4, 1.0), (-0.3, 1.0), (0.4, 1.6),
+                                               (0.4, 0.5), (-0.2, 2.0)])
+def test_scoring_lands_on_its_target_whatever_the_dismissal_multiplier(scoring, dismissal):
+    """Runs per ball faced move by exactly `scoring` -- including when the player also gets
+    out more or less often. The two halves are independent dials, which is the point."""
+    got = split_ball(PROBS, VALUES, scoring, dismissal)
+    assert runs_per_ball(got) == pytest.approx(runs_per_ball(PROBS) + scoring, abs=1e-6)
+    assert sum(got) == pytest.approx(1.0)
+
+
+def test_scoring_does_not_move_the_dismissal_chance():
+    """The single-number engine could not do this: a better rating always bought fewer
+    dismissals too. A hitter who scores faster is NOT thereby harder to get out."""
+    assert split_ball(PROBS, VALUES, 0.6, 1.0)[0] == pytest.approx(PROBS[0])
+
+
+def test_a_fast_scorer_who_gets_out_often_is_both():
+    """Abhishek Sharma 2024's shape: strike fast AND be dismissed more. One number could
+    only ever make him the opposite of the second half."""
+    got = split_ball(PROBS, VALUES, 0.5, 1.5)
+    assert runs_per_ball(got) > runs_per_ball(PROBS)
+    assert got[0] > PROBS[0]
+
+
+def test_play_innings_plays_the_strikers_and_bowlers_halves_together(monkeypatch):
+    """The wiring, captured at the seam (A126/A131): the arithmetic above is worth nothing
+    if the innings hands it the wrong player, the card's number, or the halves added where
+    they should multiply."""
+    seen = []
+    real = simulator.split_ball
+
+    def spy(probs, values, scoring, dismissal):
+        seen.append((scoring, dismissal))
+        return real(probs, values, scoring, dismissal)
+
+    monkeypatch.setattr(simulator, "split_ball", spy)
+    bat = [Player(f"b{i}", 9.9, bat_scoring=0.3, bat_dismissal=0.5) for i in range(11)]
+    bowl = [Player(f"w{i}", 0.0, bowl=9.9, bowl_scoring=0.1, bowl_dismissal=1.4)
+            for i in range(5)]
+    play_innings(ALL_SINGLES, bat, bowl, random.Random(1))
+    assert seen and all(s == pytest.approx(0.3 - 0.1) for s, _ in seen)
+    assert all(d == pytest.approx(0.5 * 1.4) for _, d in seen)
+
+
+class _SplitModel:
+    unrated_split = {"tail": (-0.50, 1.80), "middle": (-0.20, 1.20)}
+    season_mean_scoring = {("batting", 2016): 0.05}
+    unrated_bat = {"tail": -0.6}
+    season_mean = {("batting", 2016): 0.0}
+
+
+def test_a_card_with_its_own_halves_plays_them():
+    card = Card(1, "x", "x", bat=0.1, band="middle", season_year=2016,
+                bat_scoring=0.21, bat_dismissal=0.7)
+    assert bat_split(card, _SplitModel()) == (0.21, 0.7)
+
+
+def test_a_bowler_who_never_batted_bats_at_his_bands_pooled_level_not_at_average():
+    """A23 again: zero/one would be league average, which for a number 10 is wrong in the
+    direction that flatters him. The band's pooled halves, centred like everyone else's."""
+    card = Card(1, "x", "x", band=None, season_year=2016)
+    assert bat_split(card, _SplitModel()) == pytest.approx((-0.50 - 0.05, 1.80))
+    card = Card(1, "x", "x", band="middle", season_year=2016)
+    assert bat_split(card, _SplitModel()) == pytest.approx((-0.20 - 0.05, 1.20))

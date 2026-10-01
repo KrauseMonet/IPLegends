@@ -195,10 +195,16 @@ def mean_remaining(expected, over: int, wickets: int) -> float | None:
 
 
 def wicket_cost(expected, over: int, wickets: int) -> float | None:
-    """**The** cost of a wicket: the drop in expected final total. SPEC 7.1, A31.
+    """The drop in the archive's mean final total between neighbouring wicket counts.
 
-    Verified strictly positive on all 99 transitions with at least MIN_OBSERVATIONS either
-    side - range 2.7 to 24.8 runs, mean 12.3 - and monotone in wickets at every over.
+    **[A160] No longer what prices a wicket. Kept as a printed diagnostic only.** A31 chose
+    it over `confounded_wicket_cost` below, which was right as far as it went, but it is
+    confounded too, in the opposite direction: a side one wicket further down has usually
+    already scored less - 6.6 runs on average, of an 11.5-run weighted mean - and those
+    runs are already in the batters' own runs half, so the old cost charged most dismissals
+    twice. `etl.impact.Costs` replaces it with the drop in expected remaining runs worked
+    backwards over the state model, which cannot see how a state was reached and so cannot
+    pick up the selection. Positive on all 99 transitions here, 2.7 to 24.8 runs.
     """
     here, worse = _seen(expected, over, wickets), _seen(expected, over, wickets + 1)
     return None if here is None or worse is None else here.mean_final - worse.mean_final
@@ -325,7 +331,7 @@ def report(cells: list[Cell], expected, show_cells: bool) -> None:
           f"{every - struck:,} ({(every - struck) / every:.2%}) belong to somebody else "
           "and are\n    kept only as the labelled diagnostic column.")
 
-    print("\nexpected FINAL total at exact wickets, and the cost of a wicket (A31)")
+    print("\nexpected FINAL total at exact wickets, and the OLD A31 wicket cost (diagnostic since A160)")
     print(f"    {'over':<6}{'0 down':>10}{'2 down':>10}{'4 down':>10}{'6 down':>10}"
           f"{'cost@2':>10}{'confounded':>12}")
     for over in range(0, 20, 2):

@@ -62,7 +62,7 @@ SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "deck_snaps
 
 # Bumped only when the FILE FORMAT changes -- not when the data does. A loader seeing an
 # unknown version falls back to the database rather than guessing at the layout.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2   # [A160] cards carry the two engine halves; model inputs gained two lists
 
 
 def _card_doc(c: Card) -> dict:
@@ -106,7 +106,8 @@ def _sorted_inputs(inputs: dict) -> dict:
     -- so which one wins is arbitrary and unobservable, and the query's own comment ("the
     centring constant is `shrunk - centred` for ANY row of that season") is correct.
     """
-    ROW_LISTS = ("state_ball_outcomes", "state_runs_remaining", "unrated_bat", "season_mean")
+    ROW_LISTS = ("state_ball_outcomes", "state_runs_remaining", "unrated_bat", "season_mean",
+                 "unrated_split", "season_mean_scoring")
     # Named explicitly rather than "sort every list", which is what the first version did
     # and which is WRONG: `wide_extras` is four POSITIONAL scalars, not rows, and sorting
     # them reassigns their meanings -- it put `wide_rate` at 29.1 instead of 0.034. Caught

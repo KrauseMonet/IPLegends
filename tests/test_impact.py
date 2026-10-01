@@ -20,7 +20,7 @@ from etl.impact import (
     gate_reason,
     shrink,
 )
-from etl.state_model import MIN_OBSERVATIONS, Remaining
+from etl.state_model import MIN_OBSERVATIONS
 
 
 def grid(**cells) -> Grid:
@@ -74,24 +74,50 @@ def test_an_over_with_nothing_to_fall_back_to_fails_loudly_rather_than_dropping_
         g.of(4, 0)
 
 
-def test_both_halves_of_a_ball_resolve_within_the_same_over():
-    """The A37 invariant: runs and wicket cost may not be priced against different overs.
+def _full_grid(runs_per_ball: float, out_rate: float, thin: tuple[int, str] | None = None):
+    """Every over and bucket, uniform -- the smallest grid the remaining-runs chain accepts.
+    `Cell(balls, runs, outs, outs_any)`: the chain reads `outs_any`, every wicket."""
+    n = 10_000
+    cells = {(o, b): Cell(n, round(runs_per_ball * n), 0, round(out_rate * n))
+             for o in range(20) for b in ("0-1", "2-3", "4-5", "6+")}
+    if thin:
+        cells[thin] = Cell(1, 6, 0, 1)
+    return Grid(cells)
 
-    Grids walk at bucketed grain and costs at exact grain (A31), so they can land on
-    different wicket counts - but never on a different over, or the two halves of one
-    ball are describing two different moments of the innings.
-    """
-    g = grid(o7_01=MIN_OBSERVATIONS, o7_23=1, o7_45=MIN_OBSERVATIONS)
-    expected = {
-        (7, 0): Remaining(500, 40, 120),
-        (7, 1): Remaining(500, 45, 100),
-        (7, 8): Remaining(500, 60, 30),
-        (7, 9): Remaining(500, 65, 20),
-    }
-    costs = Costs(expected)
-    for wickets in range(10):
-        assert g.resolve(7, "2-3" if 2 <= wickets <= 3 else "0-1")[0] == 7
-        costs.of(7, wickets)  # must not raise: every wicket count is priceable in over 7
+
+def test_with_no_dismissals_only_the_last_wicket_costs_anything():
+    """[A160] The chain's arithmetic, pinned where it has a closed form. If nobody can get
+    out, losing a wicket changes nothing about what is still to come -- EXCEPT the tenth,
+    which ends the innings and forfeits every remaining ball. Exactly the runs left."""
+    r = 1.3
+    costs = Costs(_full_grid(r, 0.0))
+    for over in (0, 7, 19):
+        for w in range(9):
+            assert costs.of(over, w) == pytest.approx(0.0, abs=1e-12)
+        # balls t+1 for the six balls of the over are 6o+1 .. 6o+6; runs left = r*(120-(t+1))
+        left = sum(r * (120 - (6 * over + b + 1)) for b in range(6)) / 6
+        assert costs.of(over, 9) == pytest.approx(left)
+
+
+def test_a_wicket_costs_more_early_than_late_and_never_less_than_nothing():
+    costs = Costs(_full_grid(1.3, 0.05))
+    assert all(c >= 0 for c in costs.priced.values())
+    assert costs.of(0, 0) > costs.of(10, 0) > costs.of(19, 0)
+    assert len(costs.priced) == 200, "every (over, exact wickets) state is priced"
+
+
+def test_the_price_reads_the_same_resolved_cell_the_runs_half_does_and_counts_nothing():
+    """[A37, carried into A160] Both halves of a ball are priced against one state. The price
+    is now BUILT from the grid, through the same walk, so a thin cell's dismissal rate is
+    its trustworthy neighbour's -- and building the table is not balls landing in thin
+    states, so it must leave the fallback count untouched."""
+    g = _full_grid(1.3, 0.05, thin=(7, "2-3"))
+    costs = Costs(g)
+    assert not g.fallbacks, "building the price table counted itself as fallbacks"
+    # The thin cell scores 6 a ball and is out every ball; if the chain read it raw, the
+    # cost of a wicket at 1 down in over 7 (which moves INTO the thin bucket) would jump.
+    uniform = Costs(_full_grid(1.3, 0.05))
+    assert costs.of(7, 1) == pytest.approx(uniform.of(7, 1))
 
 
 # --- A33: the gate the loader computes must be the gate the CHECK enforces -----------

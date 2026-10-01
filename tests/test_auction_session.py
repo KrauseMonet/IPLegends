@@ -168,8 +168,19 @@ def test_a_mega_auction_opens_on_the_retention_screen(deck):
                                     for c in r.retention_pool)
 
 
+def _two_players(deck):
+    """The first two retention options that are DIFFERENT people. The pool is ordered by
+    rating, so its top two can be two seasons of one man (A160 put Kohli 2016 and 2024
+    there) -- which the rules rightly refuse. Hard-coding [0, 1] pinned the test to
+    whatever the ratings happened to be rather than to the rule it tests."""
+    pool = A.replay(deck, A.new_state(3, "RCB", mega=True)).retention_pool
+    first = 0
+    second = next(j for j in range(1, len(pool)) if pool[j].person_id != pool[0].person_id)
+    return [first, second]
+
+
 def test_retaining_charges_the_slabs_and_leaves_the_rest_as_cards(deck):
-    r = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1])
+    r = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck))
     you = r.you
     assert you.squad[:2] == [r.auction.teams[you.index].squad[0], you.squad[1]]
     assert you.paid[:2] == list(au.RETENTION_SLABS[:2])
@@ -198,7 +209,7 @@ def _walk_to(deck, state, phase, answer=True):
 
 
 def test_a_right_to_match_question_is_about_your_own_franchise_s_player(deck):
-    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck)).state
     r = _walk_to(deck, start, "rtm_use")
     assert r is not None
     assert au.franchise_of(r.lot.card) == "Royal Challengers Bengaluru"
@@ -208,7 +219,7 @@ def test_a_right_to_match_question_is_about_your_own_franchise_s_player(deck):
 def test_a_right_to_match_question_shows_the_bidding_that_led_to_it(deck):
     """The bids shown with the question end at the hammer, in the winner's name, and are
     exactly what is recorded for the lot once the question is answered."""
-    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck)).state
     r = _walk_to(deck, start, "rtm_use")
     shown = r.preview()
     assert shown, "the bidding that led to the hammer is missing"
@@ -220,7 +231,7 @@ def test_a_right_to_match_question_shows_the_bidding_that_led_to_it(deck):
 
 
 def test_using_and_matching_a_card_takes_the_player_and_spends_it(deck):
-    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck)).state
     r = _walk_to(deck, start, "rtm_use")
     lot, cards = r.lot, r.you.rtm
     r = A.rtm(deck, r.state, True)
@@ -231,7 +242,7 @@ def test_using_and_matching_a_card_takes_the_player_and_spends_it(deck):
 
 
 def test_declining_a_card_leaves_the_player_with_the_winner(deck):
-    start = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1]).state
+    start = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck)).state
     r = _walk_to(deck, start, "rtm_use")
     lot, cards, winner = r.lot, r.you.rtm, r.rtm_other.short
     r = A.rtm(deck, r.state, False)
@@ -242,7 +253,7 @@ def test_declining_a_card_leaves_the_player_with_the_winner(deck):
 
 
 def test_passing_on_everything_declines_every_card_without_asking(deck):
-    r = A.retain(deck, A.new_state(3, "RCB", mega=True), [0, 1])
+    r = A.retain(deck, A.new_state(3, "RCB", mega=True), _two_players(deck))
     r = A.pass_lots(deck, r.state, "all")
     assert r.phase in ("fill", "twelve")
     assert r.you.rtm == au.RTM_PLACES - 2

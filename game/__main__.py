@@ -74,11 +74,40 @@ def bat_delta(card: Card, model: Model) -> tuple[float, bool]:
     return model.unrated_bat[band] - model.season_mean[("batting", card.season_year)], False
 
 
+def bat_split(card: Card, model: Model) -> tuple[float, float]:
+    """[A160] The two batting numbers the engine plays: (scoring, dismissal multiplier).
+
+    A card with its own season halves uses them. One without -- a bowler who never batted
+    this season, or one of A71's zero-evidence cards -- bats at his band's POOLED level for
+    both halves, for `bat_delta`'s reason: zero would be league average, which for a
+    number 10 is the A23 failure. A card with no band takes `tail`'s.
+
+    A model built without the A160 inputs at all (the hand-made fakes in the room and
+    season tests, which never ask the engine a fidelity question) plays him as average.
+    Production always has them: they are model inputs, snapshotted with the rest.
+    """
+    if card.bat_scoring is not None:
+        return card.bat_scoring, card.bat_dismissal
+    split = getattr(model, "unrated_split", None)
+    if not split:
+        return 0.0, 1.0
+    band = card.band if card.band in split else "tail"
+    raw, dismissal = split[band]
+    return raw - model.season_mean_scoring[("batting", card.season_year)], dismissal
+
+
 def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
     delta, rated = bat_delta(card, model)
+    scoring, dismissal = bat_split(card, model)
     return Player(name=card.name, bat=delta, bowl=card.bowl, rated_bat=rated,
                   is_impact=is_impact, person_id=card.person_id,
-                  bowling_style=card.bowling_style)
+                  bowling_style=card.bowling_style,
+                  bat_scoring=scoring, bat_dismissal=dismissal,
+                  # A bowler with no season halves (A71's zero-evidence cards bowled no
+                  # ball either) bowls as average; anyone else has his own.
+                  bowl_scoring=card.bowl_scoring if card.bowl_scoring is not None else 0.0,
+                  bowl_dismissal=(card.bowl_dismissal if card.bowl_dismissal is not None
+                                  else 1.0))
 
 
 OVERSEAS_LIMIT = 4

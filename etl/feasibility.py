@@ -191,6 +191,17 @@ class Card:
     bowl_runs: int | None = None
     bowl_balls: int | None = None
 
+    # [A160] What the ENGINE plays, per discipline: runs per ball above the season's
+    # average batter in the same states (bowling: runs SAVED), and a multiplier on the
+    # chance of a dismissal (batting: >1 gets out more; bowling: >1 takes more wickets).
+    # Season-centred, NOT cohort-adjusted, and with none of the card's extras -- the engine
+    # replays the season as it happened; `bat`/`bowl`/`display` are the card's. None when
+    # the player had no such discipline this season, exactly like `bat`/`bowl`.
+    bat_scoring: float | None = None
+    bat_dismissal: float | None = None
+    bowl_scoring: float | None = None
+    bowl_dismissal: float | None = None
+
     @property
     def strike_rate(self) -> float | None:
         return round(self.bat_runs * 100 / self.bat_balls, 1) if self.bat_balls else None
@@ -307,7 +318,11 @@ def load_deck(conn) -> Deck:
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,
                max(r.rated_per_ball) filter (where r.discipline = 'bowling') as bowl,
                max(r.display_rating) as display,
-               bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls
+               bt.runs, bt.balls, bw.wickets, bw.runs, bw.balls,
+               max(r.scoring_per_ball) filter (where r.discipline = 'batting'),
+               max(r.dismissal_multiplier) filter (where r.discipline = 'batting'),
+               max(r.scoring_per_ball) filter (where r.discipline = 'bowling'),
+               max(r.dismissal_multiplier) filter (where r.discipline = 'bowling')
           from squad_members s
           join people p on p.person_id = s.person_id
           join franchise_seasons f on f.franchise_season_id = s.franchise_season_id
@@ -350,7 +365,8 @@ def load_deck(conn) -> Deck:
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
     for (fs_id, person_id, name, role, band,
          season_year, franchise, overseas, bowling_style, bat, bowl, display,
-         bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls) in rows:
+         bat_runs, bat_balls, bowl_wickets, bowl_runs, bowl_balls,
+         bat_scoring, bat_dismissal, bowl_scoring, bowl_dismissal) in rows:
         batting_band = batting_role(
             season_by_key.get((fs_id, person_id), {}),
             career_by_person.get(person_id, {}),
@@ -362,7 +378,9 @@ def load_deck(conn) -> Deck:
                  season_year, franchise, overseas, bowling_style, display,
                  BATTING_ROLE_SLOTS[batting_band],
                  bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
-                 bowl_runs=bowl_runs, bowl_balls=bowl_balls)
+                 bowl_runs=bowl_runs, bowl_balls=bowl_balls,
+                 bat_scoring=bat_scoring, bat_dismissal=bat_dismissal,
+                 bowl_scoring=bowl_scoring, bowl_dismissal=bowl_dismissal)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]

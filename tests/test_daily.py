@@ -118,9 +118,10 @@ def test_repositions_are_still_allowed():
 #
 # `pick_naive` drafts by rating, so a ratings change can move these: A159 (the softer
 # reputation floor) stopped day 180 stranding and it was replaced by 191, found by the
-# same search. Re-search rather than delete when that happens.
+# same search; A160 (the rescored ratings) did the same to 187, replaced by 177.
+# Re-search rather than delete when that happens.
 STRANDING_CASES = ((51, pick_random), (144, pick_random),
-                   (151, pick_naive), (187, pick_naive), (191, pick_naive))
+                   (151, pick_naive), (177, pick_naive), (191, pick_naive))
 
 
 @pytest.mark.parametrize("offset,policy", STRANDING_CASES)

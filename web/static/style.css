@@ -2543,3 +2543,25 @@ html{scroll-padding-top:80px}
   .auc-closing{opacity:1}
   .auc-burst{display:none}
 }
+
+/* [A158] where a player can bat: a band tag on squad places and twelve rows */
+.auc-band{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;white-space:nowrap;
+  padding:1px 5px;border-radius:4px;border:1px solid var(--line);color:var(--ink-2);align-self:flex-start}
+.auc-band.band-top{color:#7cc4ff;border-color:color-mix(in srgb,#7cc4ff 45%,transparent)}
+.auc-band.band-middle{color:var(--mint);border-color:color-mix(in srgb,var(--mint) 45%,transparent)}
+.auc-band.band-finisher{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.auc-band.band-tail{color:var(--ink-3)}
+.auc-bands{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.auc-bands .auc-band{font-size:11px;padding:3px 8px}
+.auc-bands .auc-band b{font-size:12px}
+.auc-bands .auc-band.none{opacity:.5}
+.auc-slot.filled .auc-band{margin:2px 0}
+.auc-order-row .auc-band{margin-left:2px}
+.auc-order-row.fits{box-shadow:inset 3px 0 0 var(--mint)}
+.auc-order-row.nofit{opacity:.4}
+@media (max-width:520px){
+  .auc-order-row .auc-band .bn{display:none}
+  .auc-order-row{gap:6px;padding:10px 12px}
+  .auc-order-row .auc-o-name{min-width:0;flex:1 1 auto}
+  .auc-order-row b{white-space:nowrap}
+}

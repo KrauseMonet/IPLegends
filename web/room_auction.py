@@ -45,7 +45,7 @@ from etl.feasibility import Card, Deck, order_errors
 from web.rooms import CLOCK_GRACE_S, StaleMove
 
 LOT_SECONDS = 15         # ratified by the user: fifteen seconds a lot...
-BID_EXTEND = 5           # ...and five more for every bid
+BID_WINDOW = 10          # ...and a bid guarantees everyone this long to answer it [A158]
 FILL_SECONDS = 20        # a fill-round choice
 TWELVE_SECONDS = 90      # choosing a twelve from eighteen
 RETAIN_SECONDS = 90      # [A140] choosing retentions, everybody at once
@@ -474,8 +474,11 @@ def _stage_seconds(r: RoomAuctionReplay) -> int:
 
 def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctionReplay:
     """Append one move, then move the clock: a new stage starts a fresh clock, and a bid on
-    the same lot adds BID_EXTEND to it. `room.turn_started_at` holds the current DEADLINE
-    in an auction room (epoch seconds), not a start time."""
+    the same lot tops the clock up to BID_WINDOW seconds if it had less -- never adds to it.
+    [A158] Adding five a bid made a rapid war run the clock out to minutes; a floor gives
+    every bid the same time to be answered however fast the bids before it came.
+    `room.turn_started_at` holds the current DEADLINE in an auction room (epoch seconds),
+    not a start time."""
     now = time.time() if now is None else now
     before = replay(room, deck)
     room.moves = room.moves + [move]
@@ -487,7 +490,7 @@ def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctio
     elif after.stage() != before.stage():
         room.turn_started_at = now + _stage_seconds(after)
     elif move["k"] in ("bid", "limit"):
-        room.turn_started_at = max(room.turn_started_at, now) + BID_EXTEND
+        room.turn_started_at = max(room.turn_started_at, now + BID_WINDOW)
     return after
 
 

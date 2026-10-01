@@ -2442,7 +2442,11 @@ forced by the clock is recorded (`close`), because time is the one input the log
 Without the early close, 260 lots at fifteen seconds each is over an hour. Measured live:
 two humans passing on everything resolved the rest of the auction in one ~3 s request.
 
-**The clock, ratified by the user: 15 seconds a lot, plus 5 for every bid.** In an auction
+**The clock, ratified by the user: 15 seconds a lot, and a bid tops it back up to 10.**
+[Corrected 2026-10-02, A158 -- this said "plus 5 for every bid", which the user found let a
+rapid bidding war push the deadline out to minutes.] A bid sets the deadline to
+`max(deadline, now + BID_WINDOW)`: it never adds, so a lot never shows more than 15 s, and
+every bid still leaves everyone at least 10 s to answer it. In an auction
 room `rooms.turn_started_at` holds the current stage's DEADLINE (epoch seconds), not a start
 time. The fill round gives each human 20 s a choice and the twelve 90 s; running out applies
 the suggestion (the best remaining player, the strongest legal twelve).

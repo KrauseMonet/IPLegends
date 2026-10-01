@@ -144,19 +144,44 @@ def test_a_lot_closes_the_moment_every_human_is_done(deck, clock):
         "an early close is derived from the log, never recorded"
 
 
-def test_a_bid_extends_the_clock_and_a_new_lot_restarts_it(deck, clock):
+def test_a_bid_tops_the_clock_up_and_a_new_lot_restarts_it(deck, clock):
     conn = FakeConn()
     code, host, guest = two_human_room(conn, deck, clock)
     before = load(conn, code).turn_started_at
-    clock.now += 10
+    clock.now += 12                                   # 3 s left, under the bid window
     r = ra.replay(load(conn, code), deck)
     ra.submit(conn, code, deck, ra.bid, host, r.next_price)
     after = ra.replay(load(conn, code), deck)
     room = load(conn, code)
     if after.lot.index == r.lot.index:
-        assert room.turn_started_at == pytest.approx(before + ra.BID_EXTEND)
+        assert room.turn_started_at == pytest.approx(clock.now + ra.BID_WINDOW)
+        assert room.turn_started_at > before
     else:
         assert room.turn_started_at == pytest.approx(clock.now + ra.LOT_SECONDS)
+
+
+def test_rapid_bids_never_run_the_clock_past_its_window(deck, clock):
+    """[A158] Adding time per bid let a fast bidding war push the deadline out without
+    limit. A bid only tops the clock up, so however many land, at most LOT_SECONDS (or
+    BID_WINDOW after the latest bid) is ever left."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    lot = ra.replay(load(conn, code), deck).lot.index
+    bids = 0
+    for _ in range(12):
+        r = ra.replay(load(conn, code), deck)
+        if r.phase != "bid" or r.lot.index != lot:
+            break
+        pid = next((p for p in (host, guest) if r.team_of[p] != r.leader
+                    and r.can_bid(r.auction.teams[r.team_of[p]])), None)
+        if pid is None:
+            break
+        ra.submit(conn, code, deck, ra.bid, pid, r.next_price)
+        bids += 1
+        clock.now += 0.5
+        left = load(conn, code).turn_started_at - clock.now
+        assert left <= ra.LOT_SECONDS
+    assert bids >= 4, "the fixture never got a bidding war going"
 
 
 def test_the_clock_closes_a_lot_nobody_finished(deck, clock):

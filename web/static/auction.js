@@ -704,8 +704,22 @@ function roleLabel(c){
   return [kind, pos].filter(Boolean).join(' · ');
 }
 function bandOf(c){
+  if (!c.positions || !c.positions.length) return null;
   const lo = Math.min(...c.positions);
   return lo === 1 ? 'top' : lo === 3 ? 'middle' : lo === 5 ? 'finisher' : 'tail';
+}
+// [A158] Where a player can bat, as the squad panel and the twelve screen show it. A76 gives
+// every card one band, so his positions are one unbroken run and a range says it exactly.
+const BAND_ORDER = {top: 0, middle: 1, finisher: 2, tail: 3};
+const BAND_SHORT = {top: 'Top', middle: 'Middle', finisher: 'Finisher', tail: 'Lower'};
+function posRange(c){
+  if (!c.positions || !c.positions.length) return '';
+  const lo = Math.min(...c.positions), hi = Math.max(...c.positions);
+  return lo === hi ? `${lo}` : `${lo}–${hi}`;
+}
+function bandTag(c){
+  const b = bandOf(c);
+  return b ? `<em class="auc-band band-${b}" title="${BAND_SHORT[b]} order: can bat at ${posRange(c)}"><span class="bn">${BAND_SHORT[b]} </span>${posRange(c)}</em>` : '';
 }
 
 function renderSide(){
@@ -792,11 +806,17 @@ function renderSquad(d, you){
       ${pill('bowling options', Math.min(bowlers, bowlNeed), bowlNeed, bowlers >= bowlNeed ? 'ok' : 'want')}
       ${pill('overseas', overseas, osCap, overseas >= osCap ? 'full' : '')}
       <span class="auc-need plain"><b>${open}</b>place${open === 1 ? '' : 's'} left</span>
-    </div>`;
+    </div>
+    <div class="auc-bands">${Object.keys(BAND_ORDER).map(b => {
+      const n = cards.filter(c => bandOf(c) === b).length;
+      return `<span class="auc-band band-${b}${n ? '' : ' none'}"><b>${n}</b> ${BAND_SHORT[b]}</span>`;
+    }).join('')}</div>`;
 
   $('#aucSquadCount').textContent = `${d.squad.length}/${d.squad_size}`;
+  // Grouped by where they bat, top order first -- the order a twelve is built in.
   const filled = d.squad.slice().sort((a, b) =>
-    (KIND_ORDER[a.card.kind] ?? 9) - (KIND_ORDER[b.card.kind] ?? 9) || b.price - a.price);
+    (BAND_ORDER[bandOf(a.card)] ?? 9) - (BAND_ORDER[bandOf(b.card)] ?? 9)
+    || (KIND_ORDER[a.card.kind] ?? 9) - (KIND_ORDER[b.card.kind] ?? 9) || b.price - a.price);
   // What the empty places are for, in the order a drafter would chase them.
   const wants = [];
   if (!keepers) wants.push('Keeper');
@@ -809,7 +829,7 @@ function renderSquad(d, you){
         onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
         <div class="auc-slot-top">${ICON[c.kind] || ''}${c.overseas === true ? '<em class="auc-slot-os">OS</em>' : ''}
           ${c.rating != null ? `<i class="auc-slot-rt">${c.rating}</i>` : ''}</div>
-        <span>${c.name}</span><b class="${tierOf(s.price)}">${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
+        <span>${c.name}</span>${bandTag(c)}<b class="${tierOf(s.price)}">${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
       </div>`;
   });
   for (let i = 0; i < open; i++){
@@ -1201,27 +1221,33 @@ function slotName(i){ return i === 11 ? 'Impact' : `No. ${i + 1}`; }
 function drawTwelve(){
   const d = A, squad = d.squad;
   const inTwelve = new Set(TWELVE);
+  // [A158] With a place selected, everyone who could fill it is marked and everyone who
+  // could not is dimmed -- in the twelve (a swap) and on the bench alike.
+  const fits = (c, i) => i === 11 || c.positions.includes(i + 1);
+  const hint = c => TWELVE_SEL == null ? '' : fits(c, TWELVE_SEL) ? ' fits' : ' nofit';
   $('#aucOrder').innerHTML = TWELVE.map((si, i) => {
     const s = squad[si], c = s.card;
-    const ok = i === 11 || c.positions.includes(i + 1);
-    return `<div class="order-row auc-order-row${TWELVE_SEL === i ? ' sel' : ''}${ok ? '' : ' bad'}"
+    const ok = fits(c, i);
+    const swap = TWELVE_SEL != null && TWELVE_SEL !== i
+      ? (fits(c, TWELVE_SEL) && fits(squad[TWELVE[TWELVE_SEL]].card, i) ? ' fits' : ' nofit') : '';
+    return `<div class="order-row auc-order-row${TWELVE_SEL === i ? ' sel' : ''}${ok ? '' : ' bad'}${swap}"
         onclick="twelveTap(${i})">
       <span class="auc-pos">${slotName(i)}</span>${ICON[c.kind] || ''}${keeperBadge(c)}
-      <span class="auc-o-name">${c.name}</span>${ratingBadge(c, true)}<b>${cr(s.price)}</b>
+      <span class="auc-o-name">${c.name}</span>${bandTag(c)}${ratingBadge(c, true)}<b>${cr(s.price)}</b>
     </div>`;
   }).join('');
   $('#aucBench').innerHTML = squad.map((s, si) => inTwelve.has(si) ? '' : `
-    <div class="order-row auc-order-row bench${TWELVE_SEL != null ? ' target' : ''}" onclick="benchTap(${si})">
+    <div class="order-row auc-order-row bench${TWELVE_SEL != null ? ' target' : ''}${hint(s.card)}" onclick="benchTap(${si})">
       ${ICON[s.card.kind] || ''}${keeperBadge(s.card)}
-      <span class="auc-o-name">${s.card.name}</span>${ratingBadge(s.card, true)}<b>${cr(s.price)}</b>
+      <span class="auc-o-name">${s.card.name}</span>${bandTag(s.card)}${ratingBadge(s.card, true)}<b>${cr(s.price)}</b>
     </div>`).join('');
 
   const cards = TWELVE.map(i => squad[i].card);
   const problems = [];
   cards.forEach((c, i) => { if (i < 11 && !c.positions.includes(i + 1)) problems.push(`${c.name} cannot bat at ${i + 1}`); });
   if (!cards.some(c => c.keeper_eligible)) problems.push('no wicketkeeper');
-  // A bowling option is anyone who bowled that season; the server re-checks on submit.
-  const bowlers = cards.filter(c => c.bowl_balls != null).length;
+  // The predicate order_errors itself uses (A155), so this cannot pass what the server refuses.
+  const bowlers = cards.filter(c => c.has_bowl).length;
   if (bowlers < 5) problems.push(`only ${bowlers} of 5 bowling options`);
   const overseas = cards.filter(c => c.overseas === true).length;
   if (overseas > 4) problems.push(`${overseas} overseas players, more than four`);

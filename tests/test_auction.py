@@ -291,10 +291,15 @@ def test_when_the_catalogue_runs_dry_the_register_finishes_every_squad(deck, mon
 
 
 @needs_snapshot
-def test_the_price_cap_binds_the_computer_teams_and_never_the_human(deck):
+def test_the_price_cap_binds_the_computer_teams_and_never_the_human(deck, monkeypatch):
     """Ratified by the user: the ₹30 cr cap is a model of how COMPUTER franchises behave.
     A human may pay whatever they like, so the first time a star reaches the cap the human
-    can still outbid it -- by one increment, since that is all it takes."""
+    can still outbid it -- by one increment, since that is all it takes.
+
+    The cap is lowered to 5% of a purse for the test. At 25% whether any star reaches it
+    depends on the ratings, and A163's re-rating left none reaching it in twenty open
+    auctions -- the rule was unchanged and the test had stopped being able to see it."""
+    monkeypatch.setattr(au, "MAX_SHARE", 0.05)
     cap = int(au.MAX_SHARE * au.PURSE)
 
     class AllIn(au.Human):

@@ -1833,6 +1833,12 @@ scoring 0.70 → 0.99, dismissals 0.53 → 0.98, economy 0.66 → 0.99, wickets 
 §10.2 is kept below as the record of the single-number design and because its tilt is still
 the instrument.
 
+**[A163] The CARD is a blend, the engine is not.** A card's merit is 70% the season's
+headline statistics against that season's peers in the same role (batting: runs per match,
+strike rate, average; bowling: wickets per match, season wickets, economy) and 30% the
+per-match impact described in §7. The engine plays the two halves above and never reads
+the card. Migration 040 holds the weights; CLAUDE.md A163 the reasoning and measurements.
+
 ### 10.1 The outcome space
 
 A ball resolves to one of eight things: a dismissal, or 0-6 off the bat. That is the whole

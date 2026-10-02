@@ -116,12 +116,13 @@ def test_repositions_are_still_allowed():
 # exactly that and failed on a run where nothing happened to strand. A pinned case either
 # reproduces or the behaviour has genuinely changed.
 #
-# `pick_naive` drafts by rating, so a ratings change can move these: A159 (the softer
-# reputation floor) stopped day 180 stranding and it was replaced by 191, found by the
-# same search; A160 (the rescored ratings) did the same to 187, replaced by 177, and
-# A162 to 177, replaced by 156. Re-search rather than delete when that happens.
-STRANDING_CASES = ((51, pick_random), (144, pick_random),
-                   (151, pick_naive), (156, pick_naive), (191, pick_naive))
+# Every case is a RANDOM-drafter case, and that is deliberate. `pick_naive` drafts by
+# rating, so its cases moved with every ratings change -- A159, A160, A162 and A163 each
+# had to re-pin one or more -- while the two `pick_random` cases survived all four,
+# because a random drafter never reads a rating. The policy is not what this test is
+# about; that a restricted deck can strand and the fallback rescues it is.
+STRANDING_CASES = ((51, pick_random), (144, pick_random), (198, pick_random),
+                   (211, pick_random), (264, pick_random))
 
 
 @pytest.mark.parametrize("offset,policy", STRANDING_CASES)

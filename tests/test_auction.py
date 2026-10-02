@@ -425,8 +425,13 @@ def _find_rtm(deck, human_short, role):
     class Probe(au.Human):
         hit = False
 
+        # Half the budget, not all of it: a human who wins with every rupee cannot raise
+        # when the holder plays a card, and the raise is what the test is about. At full
+        # budget that depended on the ratings -- A165's re-rating produced a win at the
+        # very top of the budget and the "raise above the hammer" assertion lost its ground.
         def ceiling(self, auction, team, lot, round_no):
-            return team.max_bid() if role == "winner" and (lot.card.display or 0) >= 88 else 0
+            return (team.max_bid() // 2 if role == "winner" and (lot.card.display or 0) >= 88
+                    else 0)
 
         # Each probe counts only its OWN kind of question: the first version marked a hit
         # on either, so a "winner" search could return a seed where the human only ever
@@ -485,8 +490,8 @@ def test_a_human_winner_s_final_raise_is_what_the_holder_must_match(deck):
     raises = []
 
     class RaiseHard(au.Human):
-        def ceiling(self, auction, team, lot, round_no):
-            return team.max_bid() if (lot.card.display or 0) >= 88 else 0
+        def ceiling(self, auction, team, lot, round_no):    # as `_find_rtm`'s winner probe
+            return team.max_bid() // 2 if (lot.card.display or 0) >= 88 else 0
 
         def rtm_raise(self, auction, team, lot, price, holder):
             raises.append(price)

@@ -78,6 +78,13 @@ def _card_from(d: dict) -> Card:
 
 
 def build_document(conn) -> dict:
+    # [A166] No parallel plans while reading. A parallel aggregate sums floats in whatever
+    # order its workers finish, so `rated_per_ball` came back differing in the LAST BIT
+    # between connections (measured: 1 build in 4) and check 26, which compares exactly,
+    # failed on a snapshot regenerated seconds earlier. With one worker the order is fixed
+    # and four builds hash identically. Session-level: a caller sharing this connection
+    # (validation) only loses parallelism, never correctness.
+    conn.execute("set max_parallel_workers_per_gather = 0")
     deck = load_deck(conn)
     return {
         "format_version": FORMAT_VERSION,

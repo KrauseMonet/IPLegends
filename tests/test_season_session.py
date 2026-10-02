@@ -332,3 +332,38 @@ def test_form_is_oldest_first_and_never_confuses_two_equal_looking_sides():
     assert _side_form(results, twin) == ["L"]
     six = [NS(home=a, away=c, winner=(a if i % 2 else c)) for i in range(7)]
     assert _side_form(six, a) == ["L", "W", "L", "W", "L"]    # the LAST five of seven
+
+
+def test_the_suggested_impact_slot_is_exactly_what_declining_does():
+    """The break screen names the player declining would bring off. Declining is
+    `ImpactPick(None)`, answered by `decide_impact` -- so choosing the named slot by hand
+    must play the very same match, and the suggestion must not be a guess beside it."""
+    played = walk(11)
+    model = _model_with_fixed_state()
+    paused = ss.replay_season(DECK, model, played.state, ss.recorded_moves(()))
+    slot = ss.suggested_impact_slot(paused)
+    assert slot is not None, "seed 11's first break substitutes; pick another seed if not"
+    assert 1 <= slot <= 11
+
+    def first_result(move):
+        r = ss.replay_season(DECK, model, played.state, ss.recorded_moves((move,)))
+        m = r.season.results[0] if r.season.results else r.season.playoffs[0]
+        # Who actually took the field, in order: this test's model plays every ball the
+        # same way, so a score could not tell two lineups apart.
+        return tuple(tuple(c.player.person_id for c in inn.batting) +
+                     tuple(b.player.person_id for b in inn.bowling)
+                     for inn in (m.home_innings, m.away_innings))
+
+    declined = first_result(ImpactPick(None))
+    assert first_result(ImpactPick(slot)) == declined
+    others = [s for s in range(1, 12) if s != slot]
+    assert any(first_result(ImpactPick(s)) != declined for s in others), \
+        "no other slot plays differently, so this test cannot tell a wrong slot apart"
+
+
+def test_no_impact_suggestion_outside_an_impact_pause():
+    played = walk(11)
+    done = ss.replay_season(DECK, _model_with_fixed_state(), played.state,
+                            ss.recorded_moves((ImpactPick(None),)))
+    if done.pending_kind != "impact":
+        assert ss.suggested_impact_slot(done) is None

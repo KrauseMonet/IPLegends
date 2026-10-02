@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from etl.feasibility import XI_SIZE
 from game.season import (
     MATCHES_EACH, TEAMS, TOSS_DEFAULT_ELECTS, ImpactPick, Innings, JourneyAccumulator,
-    JourneyStats, NeedImpact, NeedToss, Season, Side, TossElect, historical_sides,
+    JourneyStats, NeedImpact, NeedToss, Season, Side, TossElect, decide_impact,
+    historical_sides,
     journey_stats, run_league, run_playoffs,
 )
 from web import auction_session
@@ -251,3 +252,18 @@ def _play_season(model, sides: list[Side], yours: Side, rng: random.Random,
 
     return SeasonReplay(yours=yours, season=season, cursor=cursor, complete=True,
                          stats=acc, journey=journey_stats(season, yours, acc))
+
+
+def suggested_impact_slot(replay: SeasonReplay) -> int | None:
+    """The slot (1-11) declining would bring off, or None if declining keeps the Impact
+    Player out this innings. Declining is `ImpactPick(None)`, which the engine answers
+    with `decide_impact` on these same four inputs -- so this is what that button does,
+    shown before it is pressed rather than guessed at. Matched by identity: `Card` has
+    value equality, and two seasons of one person may both be in a twelve."""
+    if replay.pending_kind != "impact":
+        return None
+    target = decide_impact(replay.yours, replay.pending_opponent,
+                           replay.pending_discipline, replay.pending_first_innings)
+    if target is None:
+        return None
+    return next((i for i, c in enumerate(replay.yours.xi, 1) if c is target), None)

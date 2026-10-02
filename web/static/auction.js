@@ -114,7 +114,7 @@ function setFormat(format){
 function startAuction(ctrl){
   if (!CHOSEN_TEAM) return;
   busyClick(ctrl, 'Opening the room…', async () => {
-    const d = await api('/api/auction', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    const d = await api('/api/auction', {method: 'POST', retry: true, headers: {'Content-Type': 'application/json'},
                                          body: JSON.stringify({team: CHOSEN_TEAM, mega: FORMAT === 'mega'})});
     await apply(d, false);
   });
@@ -927,7 +927,7 @@ async function send(path, body, ctrl){
   try {
     const d = AUCTION_ROOM
       ? await window.roomAuctionPost(...roomMove(path, body))
-      : await api(`/api/auction/${A.state}/${path}`, {method: 'POST',
+      : await api(`/api/auction/${A.state}/${path}`, {method: 'POST', retry: true,
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     if (d) await apply(d, true);
   } catch(e){
@@ -1090,7 +1090,7 @@ function confirmRetain(ctrl, nobody){
     try {
       const picks = nobody ? [] : RETAIN;
       const d = AUCTION_ROOM ? await window.roomAuctionPost('retain', {picks})
-        : await api(`/api/auction/${A.state}/retain`, {method: 'POST',
+        : await api(`/api/auction/${A.state}/retain`, {method: 'POST', retry: true,
             headers: {'Content-Type': 'application/json'}, body: JSON.stringify({picks})});
       if (d) await apply(d, false);
     } catch(e){ slip(e.message); }
@@ -1186,7 +1186,7 @@ function takeFill(i, ctrl){
   busyClick(ctrl, null, async () => {
     try {
       const d = AUCTION_ROOM ? await window.roomAuctionPost('fill', {index: i})
-        : await api(`/api/auction/${A.state}/fill`, {method: 'POST',
+        : await api(`/api/auction/${A.state}/fill`, {method: 'POST', retry: true,
             headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: i})});
       if (d) await apply(d, false);
     } catch(e){ slip(e.message); }
@@ -1299,7 +1299,7 @@ function playSeason(ctrl){
   }
   busyClick(ctrl, 'Playing the season…', async () => {
     try {
-      const d = await api(`/api/auction/${A.state}/twelve`, {method: 'POST',
+      const d = await api(`/api/auction/${A.state}/twelve`, {method: 'POST', retry: true,
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({order: TWELVE.slice(0, 11), impact: TWELVE[11]})});
       location.href = `/season?enter=${seasonEnterFor(AUC_SIM_MODE)}#${d.state}`;

@@ -25,14 +25,42 @@ const API_TIMEOUT_MS = 15000;
 // -- including the draft calls draft.js makes, which is why it lives here and not there.
 let API_HEADERS = {};
 
+// A request that never got an answer -- the browser's bare "Failed to fetch", a timeout,
+// or a 502/503/504 from a function that was cold or a database that was waking -- is
+// sent ONCE more before the player hears about it. Most of these are one bad moment on a
+// long India-to-US path, and the second attempt usually lands.
+//
+// Only where a repeat cannot do anything twice: every GET, and a POST whose caller passes
+// `retry: true` because the move is a pure function of the state in its URL (a solo pick,
+// a season toss) or is idempotent by a database key (saving a season, the daily submit).
+// A room's poll passes `retry: false` -- its next poll IS the retry, and a poll that took
+// twice as long would break the one-in-flight rule A146 depends on. Room MOVES never come
+// through this path's retry at all: roomPost has its own, built on moves that name what
+// they were about.
+const API_RETRY_DELAY_MS = 600;
+const API_RETRY_STATUS = new Set([502, 503, 504]);
+
 async function api(path, opts){
+  const method = ((opts && opts.method) || 'GET').toUpperCase();
+  const retry = opts && opts.retry !== undefined ? opts.retry : method === 'GET';
+  try {
+    return await apiOnce(path, opts);
+  } catch(e){
+    if (!retry || !(e.network || e.timeout || API_RETRY_STATUS.has(e.status))) throw e;
+    await new Promise(res => setTimeout(res, API_RETRY_DELAY_MS));
+    return await apiOnce(path, opts);
+  }
+}
+
+async function apiOnce(path, opts){
   const ctrl = new AbortController();
   // `timeoutMs` lets a live move (a bid, a pick) give up sooner than a page load would,
   // so it can be retried while its clock is still running [A146].
   const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || API_TIMEOUT_MS);
+  const {retry, timeoutMs, ...fetchOpts} = opts || {};
   let r;
   try {
-    r = await fetch(path, {...opts, headers: {...API_HEADERS, ...(opts && opts.headers)},
+    r = await fetch(path, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
                            signal: ctrl.signal});
   } catch(e){
     if (e.name === 'AbortError'){
@@ -40,7 +68,13 @@ async function api(path, opts){
       err.timeout = true;
       throw err;
     }
-    throw e;
+    // fetch rejects (rather than resolving with an error status) only when no response
+    // arrived at all -- a dropped connection, a phone between networks. Each browser words
+    // it differently ("Failed to fetch", "Load failed", "NetworkError when..."), and none
+    // of them means anything to a player, so it is said plainly instead.
+    const err = new Error("Couldn't reach the server -- check your connection and try again.");
+    err.network = true;
+    throw err;
   } finally {
     clearTimeout(timer);
   }

@@ -14,7 +14,7 @@ async function newDraft(ctrl){
   if (isAuctionState(SEASON_STATE)){ location.href = '/auction'; return; }
   await busyClick(ctrl, 'Dealing…', async () => {
     try {
-      const s = await api('/api/draft', {method:'POST'});
+      const s = await api('/api/draft', {method:'POST', retry: true});
       location.href = '/draft#' + s.state;
     } catch(e){ slip(e.message); }
   });
@@ -36,7 +36,7 @@ let SEASON_STATE = null;
 
 async function seasonSkip(scope){
   const d = await api(`/api/season/${SEASON_STATE}/skip`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', retry: true, headers:{'Content-Type':'application/json'},
     body: JSON.stringify({scope})});
   SEASON_STATE = d.state;
   return d;
@@ -87,7 +87,7 @@ async function maybeSaveSeason(d){
   if (!ME || !ME.account_id) return;
   if (SAVED_SEASON_STATES.has(d.state)) return;
   SAVED_SEASON_STATES.add(d.state);
-  try { await api(`/api/season/${d.state}/save`, {method: 'POST'}); }
+  try { await api(`/api/season/${d.state}/save`, {method: 'POST', retry: true}); }
   catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
 }
 
@@ -272,7 +272,7 @@ async function submitToss(elects, ctrl){
   await busyClick(ctrl, elects === 'bat' ? 'Batting…' : 'Bowling…', async () => {
     try {
       const d = await api(`/api/season/${SEASON_STATE}/toss`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', retry: true, headers:{'Content-Type':'application/json'},
         body: JSON.stringify({elects})});
       enterRevealStage(d);
     } catch(e){ slip(e.message); }
@@ -281,17 +281,103 @@ async function submitToss(elects, ctrl){
 
 /* --- the innings break: your own Impact Player choice, or decline --------------------- */
 
+// The slot picked on the break screen, sent only when "Send in" is pressed -- a tap selects
+// rather than commits, since this is the one decision in a match that cannot be undone.
+let IMPACT_PICK = null;
+
+// A finished innings' best batter and best bowler -- labelled, since the two belong to
+// different sides and the panel is headed by only one of them.
+function inningsStarsHtml(inn){
+  const bat = inningsTopBatter(inn), bowl = inningsTopBowler(inn);
+  const parts = [];
+  if (bat) parts.push(`<span><i>Top score</i><b>${esc(bat.name)}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
+  if (bowl) parts.push(`<span><i>Best bowling</i><b>${esc(bowl.name)}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
+  return parts.join('');
+}
+
+// One side's best batter (from the innings it batted) and best bowler (from the innings
+// it bowled at).
+function sideStarsHtml(batted, bowledAt){
+  const bat = inningsTopBatter(batted), bowl = inningsTopBowler(bowledAt);
+  const parts = [];
+  if (bat) parts.push(`<span><b>${esc(bat.name)}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
+  if (bowl) parts.push(`<span><b>${esc(bowl.name)}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
+  return parts.join('');
+}
+
+// A tinted panel for one side: its colours (crest or kit) as inline variables or a class.
+function tintAttrs(side, base){
+  const t = sideTint(side);
+  return `class="${base}${t.cls ? ' ' + t.cls : ''}"${t.style ? ` style="${t.style}"` : ''}`;
+}
+
+function impactTile(c, slot, suggested){
+  const kind = ICON[c.kind] || ICON.unrated;
+  return `<button type="button" class="ib-tile${slot === suggested ? ' suggested' : ''}"
+      data-slot="${slot}" onclick="pickImpactSlot(${slot})">
+    <span class="ib-slot">${slot}</span>
+    <span class="ib-who">${kind}<b>${esc(c.name)}</b>${keeperBadge(c)}
+      <em>${c.season_year || ''}${c.has_bowl && c.kind !== 'bowler' && c.kind !== 'allrounder' ? ' · bowls' : ''}</em></span>
+    ${ratingBadge(c, true)}
+    ${slot === suggested ? '<span class="ib-sugg">Algorithm</span>' : ''}
+  </button>`;
+}
+
 function showImpactScreen(pending){
+  IMPACT_PICK = null;
+  const bat = pending.discipline === 'bat';
   $('#impactStage').textContent = matchLabel(pending.stage, REVEAL.your_results.length + 1, REVEAL.matches_each);
-  const battingSide = pending.human_bats_first ? MY_SIDE.name : pending.opponent;
-  $('#impactFirstInnings').textContent =
-    `${battingSide} posted ${pending.first_innings.runs}/${pending.first_innings.wickets} ` +
-    `(${pending.first_innings.overs} ov). You're ${pending.discipline === 'bat' ? 'batting' : 'bowling'} next.`;
-  $('#impactXiList').innerHTML = pending.your_xi.map((c, i) => `
-    <div class="fx" onclick="submitImpact(${i + 1}, this)" style="cursor:pointer">
-      <span>${c.name}</span><span class="sc">slot ${i + 1}</span>
-    </div>`).join('');
+  const them = {short: pending.opponent, name: pending.opponent, crest: pending.opponent_crest, kit: null};
+  const first = pending.first_innings;
+  const setter = pending.human_bats_first ? MY_SIDE : them;
+  const need = bat ? `You need <b>${first.runs + 1}</b> to win`
+                   : `You defend <b>${first.runs}</b>`;
+  const firstEl = $('#impactFirst');
+  firstEl.outerHTML = `<div ${tintAttrs(setter, 'ib-first')} id="impactFirst">
+      <div class="ib-label">First innings</div>
+      <div class="ib-side">${sideBadge(setter, 'ib-badge')}<b>${esc(setter.name)}</b></div>
+      <div class="ib-score">${first.runs}/${first.wickets}<small>${first.overs} ov</small></div>
+      <div class="ib-stars">${inningsStarsHtml(first)}</div>
+      <div class="ib-need">${need}</div>
+    </div>`;
+
+  const imp = pending.your_impact;
+  $('#impactCard').outerHTML = `<div ${tintAttrs(MY_SIDE, 'ib-impact')} id="impactCard">
+      <div class="ib-label">Your Impact Player</div>
+      ${imp ? `${imp.crest ? crestImg(imp.crest, 'ib-crest') : ''}
+        <div class="ib-imp-name">${ICON[imp.kind] || ''}<b>${esc(imp.name)}</b>${ratingBadge(imp, true)}</div>
+        <div class="ib-imp-meta">${esc(imp.franchise || '')} ${imp.season_year || ''}</div>
+        <div class="ib-imp-role">Ready to come in and <b>${bat ? 'bat' : 'bowl'}</b></div>`
+      : '<div class="ib-imp-meta">On the bench</div>'}
+    </div>`;
+
+  const sugg = pending.suggested_slot;
+  $('#impactAsk').textContent = imp ? `Who makes way for ${imp.name}?` : 'Who makes way?';
+  $('#impactHint').innerHTML = bat
+    ? `He bats at his own place in the order, and everyone below moves down one.`
+    : `He takes the place of the player you choose and bowls his four overs.`;
+  $('#impactXiList').innerHTML = pending.your_xi.map((c, i) => impactTile(c, i + 1, sugg)).join('');
+  $('#impactAutoBtn').textContent = sugg
+    ? `Algorithm: ${pending.your_xi[sugg - 1].name} off` : 'Algorithm: keep him out';
+  $('#impactAutoBtn').title = 'Let the algorithm decide';
+  paintImpactPick();
   $('#impactScreen').classList.remove('hide');
+}
+
+function pickImpactSlot(slot){
+  IMPACT_PICK = IMPACT_PICK === slot ? null : slot;
+  paintImpactPick();
+}
+
+function paintImpactPick(){
+  const p = REVEAL && REVEAL.pending;
+  document.querySelectorAll('#impactXiList .ib-tile').forEach(el =>
+    el.classList.toggle('on', Number(el.dataset.slot) === IMPACT_PICK));
+  const btn = $('#impactSendBtn');
+  btn.disabled = IMPACT_PICK === null;
+  const imp = p && p.your_impact;
+  btn.textContent = IMPACT_PICK === null ? 'Pick a player to bring off'
+    : `Send ${imp ? imp.name : 'him'} in for ${p.your_xi[IMPACT_PICK - 1].name}`;
 }
 
 async function submitImpact(slot, ctrl){
@@ -305,7 +391,7 @@ async function submitImpact(slot, ctrl){
   await busyClick(ctrl, slot === null ? 'Declining…' : 'Sending in…', async () => {
     try {
       const d = await api(`/api/season/${SEASON_STATE}/impact`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', retry: true, headers:{'Content-Type':'application/json'},
         body: JSON.stringify({slot})});
       SEASON_STATE = d.state;
       // Impact resolves the whole rest of the match in one step -- no further pause is
@@ -345,6 +431,36 @@ function flickerHeadline(el, finalText, won){
   step();
 }
 
+// The engine's margin names the winner ("YOU by 6 wickets"); the headline already does,
+// so the line under it keeps only what follows.
+function marginText(match, winnerShort){
+  let m = match.margin || '';
+  if (winnerShort && m.startsWith(winnerShort + ' ')) m = m.slice(winnerShort.length + 1);
+  m = m.replace(/\b1 (wickets|runs)\b/, (_, u) => '1 ' + u.slice(0, -1));
+  return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+function resultTeamHtml(side, score, inn, won){
+  const overs = inn ? `<small>${inn.overs} ov</small>` : '';
+  return `<div ${tintAttrs(side, 'mr-team' + (won ? ' won' : ''))}>
+      ${sideBadge(side, 'mr-badge')}
+      <b class="mr-name">${esc(side.name)}</b>
+      <span class="mr-score">${esc(score)}${overs}</span>
+    </div>`;
+}
+
+// One cell per league match: played ones carry their result, the rest wait.
+function formStripHtml(d){
+  const cells = [];
+  d.your_results.forEach((r, i) => {
+    const k = r.winner === 'YOU' ? 'w' : (r.winner === null ? 't' : 'l');
+    const last = i === d.your_results.length - 1 && REVEAL.current && REVEAL.current.stage === 'league';
+    cells.push(`<i class="${k}${last ? ' now' : ''}">${k.toUpperCase()}</i>`);
+  });
+  for (let i = d.your_results.length; i < d.matches_each; i++) cells.push('<i></i>');
+  return cells.join('');
+}
+
 function revealCompletedMatch(match, d){
   REVEAL = d;
   REVEAL.current = match;
@@ -356,31 +472,56 @@ function revealCompletedMatch(match, d){
   $('#revealStage').textContent = isLeague
     ? `League · match ${d.your_results.length} of ${d.matches_each}` : match.stage;
 
-  const them = match.home === 'YOU' ? match.away : match.home;
-  const themCrest = match.home === 'YOU' ? match.away_crest : match.home_crest;
-  const mine = match.home === 'YOU' ? match.home_score : match.away_score;
-  const theirs = match.home === 'YOU' ? match.away_score : match.home_score;
-  const headline = match.winner === 'YOU' ? 'You win'
-    : (match.winner === null ? 'Tied' : (isLeague ? `${them} win` : `${match.winner} win`));
-  flickerHeadline($('#revealHeadline'), headline, match.winner === 'YOU');
-  $('#revealMargin').textContent = match.margin;
-  $('#revealLine').innerHTML = isLeague
-    ? `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
-        >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
-       <span>v ${crestImg(themCrest, 'row-crest')}${them}</span><span class="sc">${mine} · ${theirs}</span>`
-    : `<span class="wl ${match.winner === 'YOU' ? 'w' : (match.winner === null ? '' : 'l')}"
-        >${match.winner === 'YOU' ? 'W' : (match.winner === null ? 'T' : 'L')}</span>
-       <span>${rowSide(match.home, match.home_crest)} v ${rowSide(match.away, match.away_crest)}</span>
-       <span class="sc">${match.home_score} · ${match.away_score}</span>`;
+  // Full names where the result carries them; resolveSide keeps your own side's kit.
+  const named = (short, name, crest) => {
+    const side = resolveSide(short, crest);
+    return (MY_SIDE && short === MY_SIDE.short) || !name ? side : {...side, name};
+  };
+  const home = named(match.home, match.home_name, match.home_crest);
+  const away = named(match.away, match.away_name, match.away_crest);
+  const youWon = match.winner === 'YOU';
+  const tied = match.winner === null;
+  const winner = match.winner === match.home ? home : (match.winner === match.away ? away : null);
+  const headline = youWon ? 'You win' : (tied ? 'Tied' : `${winner.name} win`);
+  const hl = $('#revealHeadline');
+  hl.classList.remove('won', 'lost');
+  flickerHeadline(hl, headline, youWon);
+  if (!youWon && !tied) setTimeout(() => hl.classList.add('lost'), 760);
+  $('#revealMargin').textContent = marginText(match, match.winner);
 
+  const card = $('#matchResultCard');
+  card.className = 'mr' + (youWon ? ' you-won' : (tied ? '' : ' you-lost'));
+  card.removeAttribute('style');
+  const t = sideTint(winner || MY_SIDE);
+  if (t.cls) card.classList.add(t.cls);
+  if (t.style) card.setAttribute('style', t.style);
+
+  $('#revealLine').innerHTML =
+    resultTeamHtml(home, match.home_score, match.home_innings, match.winner === match.home) +
+    '<span class="mr-v">v</span>' +
+    resultTeamHtml(away, match.away_score, match.away_innings, match.winner === match.away);
+
+  // A side's best batter is in the innings it batted and its best bowler in the OTHER
+  // one -- `home_innings.bowling` is the away side's attack (A101's trap).
+  const stars = [];
+  if (match.home_innings && match.away_innings){
+    stars.push(`<div><span class="mr-lbl">${esc(home.name)}</span>${sideStarsHtml(match.home_innings, match.away_innings)}</div>`);
+    stars.push(`<div><span class="mr-lbl">${esc(away.name)}</span>${sideStarsHtml(match.away_innings, match.home_innings)}</div>`);
+  }
+  $('#revealStars').innerHTML = stars.join('');
+
+  const w = d.your_results.filter(r => r.winner === 'YOU').length;
+  const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
+  const tt = d.your_results.length - w - l;
+  $('#revealForm').innerHTML = formStripHtml(d);
   if (isLeague){
-    const w = d.your_results.filter(r => r.winner === 'YOU').length;
-    const l = d.your_results.filter(r => r.winner && r.winner !== 'YOU').length;
-    const t = d.your_results.length - w - l;
-    $('#revealRecord').textContent =
-      `${w}W ${l}L${t ? ' ' + t + 'T' : ''} so far, ${d.your_results.length} of ${d.matches_each} played`;
+    $('#revealRecord').innerHTML =
+      `<b>${w}W ${l}L${tt ? ' ' + tt + 'T' : ''}</b> · ${d.matches_each - d.your_results.length} league matches left`;
   } else {
-    $('#revealRecord').textContent = "You're in this one.";
+    const me = (d.table || []).find(r => r.you);
+    $('#revealRecord').innerHTML = me
+      ? `League: <b>${w}W ${l}L${tt ? ' ' + tt + 'T' : ''}</b> · finished ${ordinal(me.pos)}`
+      : `<b>${w}W ${l}L</b> in the league`;
   }
 
   const isDone = d.complete;
@@ -389,6 +530,7 @@ function revealCompletedMatch(match, d){
   $('#revealSkipGroupBtn').classList.toggle('hide',
     isDone || !d.pending || d.pending.stage !== 'league');
   $('#revealMatchResult').classList.remove('hide');
+  window.scrollTo({top: 0});
 }
 
 function revealNext(){

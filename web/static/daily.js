@@ -96,7 +96,7 @@ async function dailySubmit(ctrl){
   await busyClick(ctrl, 'Playing…', async () => {
     try {
       DAY = await api('/api/daily/submit', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', retry: true, headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({state: S.state})});
       if (DAY.anonymous) keepAnonAttempt(DAY.challenge_date, S.state);
       dailyReveal();
@@ -304,7 +304,7 @@ boot().then(async () => {
   if (kept){
     try {
       DAY = await api('/api/daily/submit', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', retry: true, headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({state: kept})});
       await showDone();
       return;

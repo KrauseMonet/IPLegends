@@ -2664,3 +2664,148 @@ html{scroll-padding-top:80px}
   .auc-order-row .auc-o-name{min-width:0;flex:1 1 auto}
   .auc-order-row b{white-space:nowrap}
 }
+
+/* --- the match result and the innings break, in the scoreboard's own language ---------
+   Both are broadcast cards in the same panel, rule and team tints as .sb, so a match reads
+   as one sequence: board, break, board, result. The result card is tinted in the WINNER's
+   colours; the break shows the total to chase or defend and the Impact Player beside it. */
+.mr,.ib{--team:var(--gold);max-width:820px;margin:28px auto 0;padding:26px 26px 22px;
+  border:1px solid var(--line);border-radius:18px;position:relative;overflow:hidden;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--team-deep,var(--panel)) 70%,var(--panel)),var(--panel) 66%);
+  box-shadow:0 18px 50px rgba(0,0,0,.35)}
+/* clip, not hidden: hidden would make .ib the sticky container and pin nothing (phone confirm bar) */
+.ib{overflow:clip}
+.mr::before,.ib::before{content:"";position:absolute;inset:0 0 auto;height:4px;background:var(--team)}
+.mr-stage{font:600 10.5px var(--mono);letter-spacing:.28em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center}
+.mr-headline,.ib-head{font-family:var(--display);font-size:clamp(44px,8vw,76px);line-height:1;
+  text-transform:uppercase;letter-spacing:.02em;text-align:center;margin:12px 0 6px;color:var(--ink)}
+.mr-headline.won{color:var(--gold-2);text-shadow:0 6px 34px color-mix(in srgb,var(--gold) 45%,transparent)}
+.mr-headline.lost{color:var(--red-2)}
+.ib-head{color:var(--ink);font-size:clamp(36px,6.5vw,58px)}
+.mr-margin{text-align:center;font-size:17px;color:var(--ink-2);font-weight:600}
+.mr.you-won::after{content:"";position:absolute;inset:-40% -20% auto;height:80%;pointer-events:none;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--team) 22%,transparent),transparent);
+  animation:mrGlow 2.4s ease-out both}
+@keyframes mrGlow{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:none}}
+
+.mr-teams{all:unset;box-sizing:border-box;cursor:pointer;display:grid;width:100%;
+  grid-template-columns:1fr auto 1fr;align-items:stretch;gap:12px;margin:22px 0 0;position:relative;z-index:1}
+.mr-teams:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:14px}
+.mr-team{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 12px 14px;
+  border-radius:14px;text-align:center;min-width:0;border:1px solid var(--line);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--team,var(--panel-3)) 20%,transparent),rgba(255,255,255,.02));
+  opacity:.72;transition:opacity .2s,transform .2s}
+.mr-team.won{opacity:1;border-color:color-mix(in srgb,var(--team,var(--gold)) 60%,transparent);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--team,var(--gold)) 30%,transparent),0 12px 30px rgba(0,0,0,.3)}
+.mr-teams:hover .mr-team{opacity:1}
+.mr-team .team-crest.mr-badge{width:64px;height:56px;margin:0;filter:drop-shadow(0 8px 16px rgba(0,0,0,.45))}
+.mr-team .kit-badge.mr-badge{width:52px;height:52px;font-size:17px;margin:0}
+.mr-team .team-badge.mr-badge{width:48px;height:48px;font-size:15px;margin:0}
+.mr-name{font-size:15px;font-weight:800;color:var(--ink);line-height:1.2;overflow-wrap:anywhere}
+.mr-score{font-family:var(--display);font-size:clamp(34px,6vw,50px);line-height:1;color:var(--ink);
+  font-variant-numeric:tabular-nums;display:flex;flex-direction:column;align-items:center;gap:4px}
+.mr-score small{font:600 11px var(--mono);letter-spacing:.14em;color:var(--ink-3)}
+.mr-v{align-self:center;font:700 12px var(--mono);letter-spacing:.2em;color:var(--ink-3);text-transform:uppercase}
+
+.mr-stars{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;position:relative;z-index:1}
+.mr-stars:empty{display:none}
+.mr-stars > div{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;
+  background:rgba(255,255,255,.03);font-size:13.5px;color:var(--ink-2);min-width:0}
+.mr-stars b,.ib-stars b{color:var(--ink);font-weight:700}
+.mr-stars em,.ib-stars em{font-style:normal;color:var(--ink-3);font-size:12px}
+.mr-lbl{font:700 9.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.mr-season{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);text-align:center;
+  position:relative;z-index:1}
+.mr-form{display:flex;justify-content:center;flex-wrap:wrap;gap:6px}
+.mr-form i{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:800 10px var(--mono);
+  font-style:normal;border:1px dashed var(--line-strong);color:var(--ink-3)}
+.mr-form i.w{background:var(--green);border:0;color:#04231a}
+.mr-form i.l{background:var(--red);border:0;color:#2b0705}
+.mr-form i.t{background:var(--ink-3);border:0;color:var(--bg)}
+.mr-form i.now{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--gold);animation:formPop .5s ease-out .4s both}
+@keyframes formPop{from{transform:scale(.3);opacity:0}to{transform:none;opacity:1}}
+.mr-record{margin-top:10px;font-size:14px;color:var(--ink-2)}
+.mr-record b{color:var(--ink)}
+
+.mr-actions{max-width:820px;margin:18px auto 0;display:flex;flex-direction:column;align-items:center;gap:12px}
+.mr-actions .actions{justify-content:center}
+.mr-primary .act.lead{min-width:200px}
+
+/* the innings break */
+.ib-top{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;margin-top:18px}
+.ib-first,.ib-impact{border-radius:14px;padding:16px;border:1px solid var(--line);min-width:0;position:relative;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--team,var(--panel-3)) 20%,transparent),rgba(255,255,255,.02))}
+.ib-label{font:700 9.5px var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--team-ink,var(--ink-3))}
+.ib-side{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:15px;color:var(--ink);font-weight:800}
+.ib-side .team-crest.ib-badge{width:40px;height:36px;margin:0}
+.ib-side .kit-badge.ib-badge{width:36px;height:36px;font-size:12px;margin:0}
+.ib-side .team-badge.ib-badge{width:34px;height:34px;font-size:12px;margin:0}
+.ib-score{font-family:var(--display);font-size:clamp(46px,8vw,68px);line-height:1;color:var(--ink);
+  margin-top:10px;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:10px}
+.ib-score small{font:600 12px var(--mono);letter-spacing:.14em;color:var(--ink-3)}
+.ib-stars{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:13.5px;color:var(--ink-2)}
+.ib-stars i{display:block;font:700 9px var(--mono);font-style:normal;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:1px}
+.ib-need{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:15px;color:var(--gold-2);font-weight:700}
+.ib-need b{font-family:var(--display);font-weight:400;font-size:22px;color:var(--ink);letter-spacing:.02em}
+.ib-impact{display:flex;flex-direction:column;align-items:flex-start;overflow:hidden}
+.ib-crest{position:absolute;right:-14px;bottom:-14px;width:120px;height:110px;object-fit:contain;opacity:.16;pointer-events:none}
+.ib-imp-name{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:20px;color:var(--ink)}
+.ib-imp-name b{font-weight:800;line-height:1.2}
+.ib-imp-name .ic{margin-right:0}
+.ib-imp-meta{font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-top:6px}
+.ib-imp-role{margin-top:auto;padding-top:14px;font-size:14px;color:var(--ink-2)}
+.ib-imp-role b{color:var(--team-ink,var(--gold-2))}
+
+.ib-ask{margin-top:22px;text-align:center}
+.ib-ask h3{margin:0;font-size:18px;font-weight:800;color:var(--ink)}
+.ib-ask p{margin:4px 0 0;font-size:13.5px;color:var(--ink-3)}
+.ib-xi{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.ib-tile{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:26px minmax(0,1fr) auto;
+  align-items:center;gap:10px;padding:10px 12px;border-radius:11px;position:relative;
+  background:rgba(255,255,255,.035);border:1px solid var(--line);transition:border-color .15s,background .15s,transform .15s}
+.ib-tile:hover{border-color:var(--line-strong);background:rgba(255,255,255,.06)}
+.ib-tile:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.ib-tile.on{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 14%,transparent);
+  box-shadow:0 0 0 1px var(--gold)}
+.ib-tile.on .ib-slot{background:var(--gold);color:#1a1204}
+.ib-tile.suggested{border-style:dashed;border-color:color-mix(in srgb,var(--gold) 55%,transparent)}
+.ib-tile.on.suggested{border-style:solid}
+.ib-slot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  font:700 11px var(--mono);background:var(--panel-3);color:var(--ink-2)}
+.ib-who{display:flex;align-items:center;min-width:0;gap:0;font-size:14.5px;color:var(--ink)}
+.ib-who b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib-who em{font:600 10.5px var(--mono);font-style:normal;color:var(--ink-3);margin-left:8px;white-space:nowrap}
+.ib-sugg{position:absolute;top:-8px;right:10px;font:700 8.5px var(--mono);letter-spacing:.16em;
+  text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--panel);color:var(--gold-2);
+  border:1px solid color-mix(in srgb,var(--gold) 55%,transparent)}
+.ib-confirm{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:20px}
+.ib-confirm .act.lead{min-width:260px}
+.ib-confirm .act.lead:disabled{opacity:1;background:var(--panel-3);color:var(--ink-3);border-color:var(--line)}
+
+@media (max-width:640px){
+  .mr,.ib{padding:18px 14px 16px;border-radius:14px;margin-top:16px}
+  .mr-teams{gap:6px}
+  .mr-team{padding:12px 6px}
+  .mr-team .team-crest.mr-badge{width:46px;height:40px}
+  .mr-team .kit-badge.mr-badge{width:40px;height:40px;font-size:13px}
+  .mr-name{font-size:13px}
+  .mr-stars{grid-template-columns:1fr}
+  .mr-form{gap:4px;flex-wrap:nowrap}
+  .mr-form i{width:18px;height:18px;font-size:8px;flex:none}
+  .ib-top{grid-template-columns:1fr}
+  .ib-xi{grid-template-columns:1fr}
+  .mr-actions .act{flex:1 1 100%}
+  /* eleven tiles push the confirm below the fold, so it rides along at the bottom */
+  .ib-confirm{position:sticky;bottom:0;z-index:2;margin:14px -14px -16px;padding:18px 14px 14px;gap:8px;
+    background:linear-gradient(180deg,transparent,var(--panel) 22%)}
+  .ib-confirm .act{flex:1 1 40%;padding-left:10px;padding-right:10px;font-size:12px}
+  .ib-confirm .act.lead{flex-basis:100%;font-size:13px}
+  .ib-confirm .act.lead,.mr-primary .act.lead{min-width:0}
+}
+@media (prefers-reduced-motion:reduce){
+  .mr.you-won::after,.mr-form i.now{animation:none}
+}

@@ -156,7 +156,7 @@ async function roomListOpenRooms(){
   const list = $('#openRoomsList');
   if (!list) return;
   try {
-    const rows = await api('/api/rooms/open');
+    const rows = await api('/api/rooms/open', {retry: false});   // re-polled every few seconds
     const count = $('#openRoomsCount');
     // A live count with a pulsing dot, the same signal a lobby anywhere else gives -- it
     // is the one genuinely changing number on this screen, so it earns the accent.

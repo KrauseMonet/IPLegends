@@ -402,7 +402,7 @@ async function pollRoomNow(){
     // player_id identifies the caller so the server knows whose options (if anyone's)
     // to include -- only the currently active seat's own caller ever sees them.
     const room = await roomApi('/api/rooms/' + ROOM_CODE + '?player_id=' + encodeURIComponent(MY_PID),
-                               {timeoutMs: ROOM_POLL_STUCK_MS});
+                               {timeoutMs: ROOM_POLL_STUCK_MS, retry: false});
     if (myGen !== ROOM_GEN) return;
     const fresh = applyRoom(room);
     // [A149] A poll whose room version is not new used to stop here, and the match data
@@ -425,7 +425,8 @@ async function pollRoomNow(){
       // winner, or the host advancing, needs every other seat's own screen to pick the
       // change up without a manual refresh.
       const at = ROOM_VERSION_SEEN;
-      const m = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${encodeURIComponent(MY_PID)}`);
+      const m = await api(`/api/rooms/${ROOM_CODE}/match?player_id=${encodeURIComponent(MY_PID)}`,
+                        {retry: false});   // part of the poll: the next poll is the retry
       if (myGen !== ROOM_GEN) return;
       // The match payload is a SECOND request and races the same way the room one does,
       // so it needs the same ordering rather than being trusted for having arrived. It

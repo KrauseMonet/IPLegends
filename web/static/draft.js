@@ -50,7 +50,7 @@ async function submitPick(i, slot, ctrl){
   await busyClick(ctrl, 'Taking…', async () => {
     try {
       S = await api(`${DRAFT_API}/${S.state}/pick`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', retry: true, headers:{'Content-Type':'application/json'},
         body: JSON.stringify({index: i, slot})});
       PENDING = null;
       render(S);
@@ -122,7 +122,7 @@ async function submitReposition(fromSlot, toSlot, ctrl){
   await busyClick(ctrl, null, async () => {
     try {
       S = await api(`${DRAFT_API}/${S.state}/reposition`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', retry: true, headers:{'Content-Type':'application/json'},
         body: JSON.stringify({from_slot: from, to_slot: toSlot})});
       render(S);
     } catch(e){ slip(e.message); renderPanels(); }
@@ -132,7 +132,7 @@ async function submitReposition(fromSlot, toSlot, ctrl){
 async function rerollDeal(kind, ctrl){
   await busyClick(ctrl, 'Rerolling…', async () => {
     try {
-      S = await api(`${DRAFT_API}/${S.state}/reroll`, {method:'POST',
+      S = await api(`${DRAFT_API}/${S.state}/reroll`, {method:'POST', retry: true,
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind})});
       PENDING = null;
       render(S);
@@ -327,7 +327,7 @@ if (!window.DAILY_PAGE) boot().then(() => {
   if (!h || !h.includes('-')){
     // No draft to resume, so this is somebody who asked for a draft -- the nav's own
     // Draft link lands here. Deal one rather than bouncing them to the home page.
-    api('/api/draft', {method: 'POST'}).then(s => render(s))
+    api('/api/draft', {method: 'POST', retry: true}).then(s => render(s))
       .catch(e => { slip(e.message); location.href = '/'; });
     return;
   }

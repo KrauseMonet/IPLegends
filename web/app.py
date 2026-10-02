@@ -608,6 +608,9 @@ class ResultOut(BaseModel):
                                     "kit [A151]; null for a franchise, and in solo, where "
                                     "the page supplies the player's own")
     away_kit: KitOut | None = None
+    home_name: str | None = Field(default=None, description="the side's full name, "
+                                  "where `home` is its short form")
+    away_name: str | None = None
     home_score: str
     away_score: str
     winner: str | None
@@ -677,6 +680,10 @@ class PendingImpactOut(BaseModel):
     your_xi: list[CardOut] = Field(
         description="your own drafted eleven, in batting order -- pick a slot (1-11) "
                      "to swap that player out for your Impact Player, or decline")
+    your_impact: CardOut | None = Field(default=None, description="your Impact Player")
+    suggested_slot: int | None = Field(
+        default=None, description="the slot (1-11) declining would bring off -- declining "
+                    "hands the call to decide_impact -- or null if it would keep him out")
 
 
 class SeasonProgressOut(BaseModel):
@@ -1627,6 +1634,7 @@ def _side_crest(side: Side) -> str | None:
 def _result_out(r, you: Side) -> ResultOut:
     return ResultOut(
         stage=r.stage, home=r.home.short, away=r.away.short,
+        home_name=r.home.name, away_name=r.away.name,
         home_crest=_side_crest(r.home), away_crest=_side_crest(r.away),
         home_score=_score(r.home_runs, r.home_wickets),
         away_score=_score(r.away_runs, r.away_wickets),
@@ -1668,6 +1676,8 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
             human_bats_first=replay.pending_human_bats_first,
             first_innings=_innings_out(replay.pending_first_innings),
             your_xi=[_card(c) for c in yours.xi],
+            your_impact=_card(yours.impact) if yours.impact is not None else None,
+            suggested_slot=season_session.suggested_impact_slot(replay),
         )
 
     if not replay.complete:

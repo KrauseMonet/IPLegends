@@ -1,0 +1,35 @@
+# Keeps the Python function warm so a player's first request does not pay a cold start
+# (measured 2026-10-02: ~2.3 s extra on a cold instance against ~0.35 s warm, from India).
+#
+# It pings /api/health ONLY, which touches no database (the deck boots from the committed
+# snapshot, A107). Pinging a database route would also keep Neon's compute awake around
+# the clock, and a free-tier compute running 24/7 uses more compute-hours than the free
+# allowance -- so the database is deliberately left to suspend when nobody is playing.
+#
+# GitHub runs scheduled workflows on a best-effort basis: five minutes is the shortest
+# interval it accepts and runs are often late, so this narrows cold starts rather than
+# eliminating them.
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping the API
+        run: |
+          curl --silent --show-error --fail --max-time 30 \
+            --output /dev/null \
+            --write-out "status %{http_code} in %{time_total}s\n" \
+            https://iplegends.vercel.app/api/health

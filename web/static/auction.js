@@ -616,6 +616,105 @@ function setVoice(on){
 }
 
 // Drawn into the floor's own header, on both the single-player page and a room.
+// --- the sets [A172] -----------------------------------------------------------------------
+// "This set": who is in the set being called now, with ratings. "All sets": every set in the
+// order it is called, each a dropdown of its players. Fetched when opened (a room polls every
+// second, and this is ~260 rows), and refreshed while open so sales appear as they happen.
+
+let SETS_VIEW = null, SETS_TIMER = null, SETS_OPEN = new Set();
+
+function renderSetButtons(){
+  const bar = $('.auc-lotbar');
+  if (!bar || $('#aucSetBtns')) return;
+  bar.insertAdjacentHTML('beforeend', `<span class="auc-sound" id="aucSetBtns">
+    <button class="auc-sound-btn on" onclick="openSets('set')" title="Every player in the set being called, with ratings">This set</button>
+    <button class="auc-sound-btn on" onclick="openSets('all')" title="Every set in calling order">All sets</button></span>`);
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="aucSetsOverlay" class="card-overlay hide" onclick="closeSets(event)">
+      <div class="scorecard-shell auc-sets-shell">
+        <div class="scorecard-frame" id="aucSetsBody"></div>
+        <div class="scorecard-close"><button class="act" onclick="closeSets()">Close</button></div>
+      </div>
+    </div>`);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && SETS_VIEW) closeSets(); });
+}
+
+function setsUrl(){
+  return AUCTION_ROOM ? window.roomAuctionSetsUrl() : `/api/auction/${A.state}/sets`;
+}
+
+async function openSets(view){
+  SETS_VIEW = view;
+  SETS_OPEN = new Set();
+  $('#aucSetsBody').innerHTML = '<p class="auc-sets-empty">Loading the sets…</p>';
+  $('#aucSetsOverlay').classList.remove('hide');
+  await loadSets(true);
+  clearInterval(SETS_TIMER);
+  SETS_TIMER = setInterval(() => loadSets(false), 5000);
+}
+
+function closeSets(e){
+  if (e && e.target !== e.currentTarget) return;
+  SETS_VIEW = null;
+  clearInterval(SETS_TIMER); SETS_TIMER = null;
+  $('#aucSetsOverlay').classList.add('hide');
+}
+
+async function loadSets(first){
+  if (!SETS_VIEW) return;
+  let d;
+  try { d = await api(setsUrl()); }
+  catch(e){ if (first) $('#aucSetsBody').innerHTML = `<p class="auc-sets-empty">${esc(e.message)}</p>`; return; }
+  if (!SETS_VIEW) return;
+  // Keep whichever dropdowns the viewer opened across a refresh.
+  document.querySelectorAll('#aucSetsBody details[data-set]').forEach(el => {
+    if (el.open) SETS_OPEN.add(el.dataset.set); else SETS_OPEN.delete(el.dataset.set);
+  });
+  $('#aucSetsBody').innerHTML = SETS_VIEW === 'set' ? currentSetHtml(d) : allSetsHtml(d, first);
+}
+
+function setLotRow(x){
+  const where = [x.franchise, x.season_year].filter(Boolean).join(' · ');
+  const status = x.status === 'sold' ? `<b>${esc(x.team)}</b> ${cr(x.price)}`
+               : x.status === 'unsold' ? 'Unsold'
+               : x.status === 'current' ? '<b>On the block</b>'
+               : `Base ${cr(x.base)}`;
+  return `<tr class="auc-sets-${x.status}">
+    <td class="auc-sets-rt">${x.rating != null ? `<span class="rating-badge${ratingTier(x.rating)}">${x.rating}</span>` : ''}</td>
+    <td><div class="auc-sets-name">${ICON[x.kind] || ''}${esc(x.name)}${x.overseas === true ? ' <span class="auc-tag os">OS</span>' : ''}</div>
+      <div class="auc-sets-where">${esc(where)}</div></td>
+    <td class="auc-sets-st">${status}</td></tr>`;
+}
+
+function setTable(set){
+  return `<table class="auc-sets-table"><tbody>${set.lots.map(setLotRow).join('')}</tbody></table>`;
+}
+
+function setCounts(set){
+  const sold = set.lots.filter(x => x.status === 'sold').length;
+  const left = set.lots.filter(x => x.status === 'upcoming' || x.status === 'current').length;
+  return `${set.lots.length} players · ${sold} sold${left ? ` · ${left} to come` : ''}`;
+}
+
+function currentSetHtml(d){
+  const set = d.sets.find(s => s.current);
+  if (!set) return `<p class="auc-sets-empty">${d.sets.length
+    ? 'No set is being called right now.' : 'The sets are drawn once retentions are done.'}</p>`;
+  return `<div class="auc-sets-head"><span>This set</span><h3>${esc(set.label)}</h3>
+    <em>${setCounts(set)}</em></div>${setTable(set)}`;
+}
+
+function allSetsHtml(d, first){
+  if (!d.sets.length) return '<p class="auc-sets-empty">The sets are drawn once retentions are done.</p>';
+  if (first && d.current_set) SETS_OPEN.add(d.current_set);
+  return `<div class="auc-sets-head"><span>All sets · in calling order</span>
+    <h3>${d.sets.length} sets</h3><em>Tap a set to see its players</em></div>
+    ${d.sets.map((s, i) => `<details class="auc-sets-set${s.current ? ' now' : ''}" data-set="${esc(s.code)}"${
+      SETS_OPEN.has(s.code) ? ' open' : ''}>
+      <summary><i>${i + 1}</i><span>${esc(s.label)}${s.current ? ' <b>Now</b>' : ''}</span>
+        <em>${setCounts(s)}</em></summary>${setTable(s)}</details>`).join('')}`;
+}
+
 function renderSoundControls(){
   const bar = $('.auc-lotbar');
   if (!bar) return;
@@ -640,6 +739,7 @@ function renderSoundControls(){
 function renderFloor(){
   const d = A, lot = d.lot, c = lot.card;
   renderSoundControls();
+  renderSetButtons();
   $('#aucSetLabel').textContent = lot.round === 'accelerated' ? 'Accelerated round · the unsold, again'
                                                                : lot.set_label;
   $('#aucLotNo').textContent = `Lot ${lot.lot + 1} of ${lot.lots_total}`;
@@ -873,8 +973,18 @@ function renderBidControls(){
   if (AUCTION_ROOM){
     if (d.leader === d.you) note.textContent = 'You lead. Waiting on the room…';
     else if (d.your_limit) note.textContent = `Your limit of ${cr(d.your_limit)} is bidding for you.`;
+    // [A170] A Skip used to leave the floor looking open while the room had already
+    // counted you out, so the other side's next bid hammered the lot on you.
+    else if (d.you_skipping === 'set') note.textContent = 'The host skipped this set.';
+    else if (d.you_skipping === 'all') note.textContent = 'The host skipped to the end.';
     else if (d.you_done) note.textContent = 'You passed on this one.';
     $('#aucPassBtn').disabled = d.you_done || d.leader === d.you;
+    // [A171] Skipping a set or to the end moves the whole room on: the host's call alone.
+    const host = window.roomIsHost && window.roomIsHost();
+    for (const id of ['#aucSkipSetBtn', '#aucSkipAllBtn']){
+      const b = $(id);
+      if (b) b.classList.toggle('hide', !host);
+    }
     // In a room the clock is everyone's, whichever way you bid.
     startCountdown();
     return;
@@ -941,9 +1051,15 @@ async function send(path, body, ctrl){
 
 function liveBid(ctrl){ send('bid', {ceiling: A.next_price, done: false}, ctrl); }
 function limitBid(ctrl){ send('bid', {ceiling: LIMIT, done: true}, ctrl); }
-function passLot(scope, ctrl){ send('pass', {scope}, ctrl); }
+function passLot(scope, ctrl){
+  if (AUCTION_ROOM && scope === 'set'
+      && !confirm('Skip the rest of this set for everyone in the room?')) return;
+  send('pass', {scope}, ctrl);
+}
 function skipRest(ctrl){
-  if (!confirm('Pass on every player left? The fill round will complete your squad at ₹30L each.')) return;
+  if (!confirm(AUCTION_ROOM
+      ? 'Skip to the end for everyone? Every player passes on all the lots left, and the fill round completes each squad at ₹30L a player.'
+      : 'Pass on every player left? The fill round will complete your squad at ₹30L each.')) return;
   send('pass', {scope: 'all'}, ctrl);
 }
 

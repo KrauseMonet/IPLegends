@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=d72fdc35b9">
+<link rel="stylesheet" href="/static/style.css?v=9baac25886">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -71,6 +71,10 @@
         <span id="setupStripLeft">Pick your format</span>
         <span>3 formats · open or private</span>
       </div>
+
+      <!-- [A170] A room you left while it was still going. Your seat never went anywhere;
+           this is the way back to it. Filled by rooms-setup.js. -->
+      <div id="rejoinCard" class="rejoin-card hide"></div>
 
       <div class="room-choices" id="setupTabs" style="margin:26px 0 0">
         <button class="room-choice sel" data-tab="create" onclick="pickSetupTab('create')">Create a room</button>
@@ -242,6 +246,6 @@
 
 <script src="/static/common.js?v=a43774c27f"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/rooms-setup.js?v=cdf76d3d8a"></script>
+<script src="/static/rooms-setup.js?v=164ff44f7a"></script>
 </body>
 </html>

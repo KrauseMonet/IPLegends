@@ -266,12 +266,35 @@ function clearRoomSession(){
 // the browser goes home. Mirrors the single-page app's old go('home') exactly, minus
 // the parts that were about switching to a DIFFERENT section of the same page.
 function leaveRoomAndGoHome(){
+  // [A170] Once a room has started your seat cannot be freed -- it stays, and the room
+  // plays on for you. Forgetting its id used to lock you out for good, because joining
+  // by code is refused after the lobby. So it is kept under its own key: home does not
+  // bounce you back in, and /rooms offers the way back.
+  const inProgress = ROOM_CODE && ROOM && !['lobby', 'complete', 'failed'].includes(ROOM.status);
+  if (inProgress && !confirm('Leave this room? Your seat stays and the room carries on. '
+                              + 'You can come back from Rooms.')) return;
   if (ROOM_CODE && ROOM && ROOM.status === 'lobby' && MY_PID !== ROOM.host_id){
     api(`/api/rooms/${ROOM_CODE}/leave`, {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({player_id: MY_PID})}).catch(() => {});
   }
+  if (inProgress) rememberLeftRoom(ROOM_CODE, MY_PID);
+  else forgetLeftRoom(ROOM_CODE);
   clearRoomSession();
-  location.href = '/';
+  location.href = inProgress ? '/rooms' : '/';
+}
+
+const ROOM_LEFT_KEY = 'iplegends_room_left';
+
+function rememberLeftRoom(code, playerId){
+  try { localStorage.setItem(ROOM_LEFT_KEY, JSON.stringify({code, playerId, at: Date.now()})); }
+  catch(e){}
+}
+
+function forgetLeftRoom(code){
+  try {
+    const left = JSON.parse(localStorage.getItem(ROOM_LEFT_KEY) || 'null');
+    if (left && (!code || left.code === code)) localStorage.removeItem(ROOM_LEFT_KEY);
+  } catch(e){}
 }
 
 // The shared nav's logo goes home; from inside a room "home" has to mean leaving it, or
@@ -283,6 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function enterRoom(code, playerId){
   saveRoomSession(code, playerId);
+  forgetLeftRoom(code);   // [A170] back in, so nothing to come back to
   ROOM_CODE = code; MY_PID = playerId; ROOM_PENDING = null;
   ROOM_REVEAL_ACTIVE = null; ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
   ROOM_SPECTATE_SHOWN = false;
@@ -738,6 +762,8 @@ window.roomAuctionPost = async (path, body) => {
   await queueAuctionView(room.auction);
   return null;
 };
+window.roomAuctionSetsUrl = () => `/api/rooms/${ROOM_CODE}/auction/sets`;   // [A172]
+window.roomIsHost = () => !!(ROOM && MY_PID && ROOM.host_id === MY_PID);   // [A171]
 window.roomAuctionDeadline = () => (ROOM ? ROOM.turn_started_at - serverClock() : 0);
 
 async function kickRoomPlayer(targetId, ctrl){

@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=d72fdc35b9">
+<link rel="stylesheet" href="/static/style.css?v=9baac25886">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -206,8 +206,9 @@
             <div class="auc-note" id="aucNote"></div>
             <div class="actions minor-row">
               <button class="act minor" id="aucPassBtn" onclick="passLot('lot', this)">Not interested</button>
-              <button class="act minor" onclick="passLot('set', this)" title="Pass on every player left in this set">Skip set</button>
-              <button class="act minor" onclick="skipRest(this)" title="Pass on everything left; the fill round completes your squad">Skip to the end</button>
+              <!-- [A171] Host only: these skip for the whole room. -->
+              <button class="act minor hide" id="aucSkipSetBtn" onclick="passLot('set', this)" title="Every player passes on the rest of this set">Skip set for everyone</button>
+              <button class="act minor hide" id="aucSkipAllBtn" onclick="skipRest(this)" title="Every player passes on everything left; the fill round completes each squad">Skip to the end for everyone</button>
             </div>
           </div>
 
@@ -517,7 +518,7 @@
 <script src="/static/reveal.js?v=dbfda54b22"></script>
 <script src="/static/analysis.js?v=4d304e2f1a"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=758a2f95ee"></script>
-<script src="/static/auction.js?v=200b8464ef"></script>
+<script src="/static/room.js?v=3b471cd61b"></script>
+<script src="/static/auction.js?v=5ce1e7f89a"></script>
 </body>
 </html>

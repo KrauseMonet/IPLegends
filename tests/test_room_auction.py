@@ -53,6 +53,22 @@ def load(conn, code):
     return rooms._load_room(conn, code, lock=False)
 
 
+def skip_to_end(conn, code, deck):
+    """[A171] The host skips to the end for the whole room (players no longer can)."""
+    room = load(conn, code)
+    if ra.replay(room, deck).phase == "bid":
+        ra.submit(conn, code, deck, ra.pass_lot, room.host_id, "all")
+
+
+def legacy_skip_set(conn, code, deck, pid):
+    """One player's own Skip set, as logs written before A171 hold it. No route records
+    this any more, so it is appended directly; the replay must still read it."""
+    room = load(conn, code)
+    r = ra.replay(room, deck)
+    ra.record(room, deck, {"k": "pass_set", "seat": pid, "lot": r.lot.index, "r": r.round_no})
+    rooms._save_room(conn, room)
+
+
 # --- the lobby ----------------------------------------------------------------------------
 
 def test_an_auction_room_is_league_only(conn=None):
@@ -144,6 +160,108 @@ def test_a_lot_closes_the_moment_every_human_is_done(deck, clock):
         "an early close is derived from the log, never recorded"
 
 
+def _rejoin_scenario(conn, deck, code, host, guest):
+    """Walk lots with the guest always skipping the set, until one where the guest bids
+    back in and the host then takes the lead. Returns the replay at that moment, with the
+    lot still on screen, or None. Re-skipping before every lot means the guest is always
+    under a Skip when he bids, which is the case room KF3LLG lost."""
+    h, g = None, None
+    for _ in range(60):
+        r = ra.replay(load(conn, code), deck)
+        if r.phase != "bid":
+            return None
+        h, g = r.team_of[host], r.team_of[guest]
+        if r.skipping(g) is None:
+            legacy_skip_set(conn, code, deck, guest)
+            r = ra.replay(load(conn, code), deck)
+            if r.phase != "bid" or r.skipping(g) is None:
+                continue                       # the skip closed that lot; next one
+        lot = r.lot.index
+        assert r.skipping(g) == "set" and r.human_done(g, r.flags)
+        if r.can_bid(r.auction.teams[g]) and r.leader != g:
+            ra.submit(conn, code, deck, ra.bid, guest, r.next_price)
+            r = ra.replay(load(conn, code), deck)
+            if r.phase == "bid" and r.lot.index == lot and r.leader == g \
+                    and r.can_bid(r.auction.teams[h]):
+                ra.submit(conn, code, deck, ra.bid, host, r.next_price)
+                r = ra.replay(load(conn, code), deck)
+                if r.phase == "bid" and r.lot.index == lot and r.leader == h:
+                    return r
+        r = ra.replay(load(conn, code), deck)
+        if r.phase == "bid" and r.lot.index == lot:
+            for pid in (host, guest):
+                if not r.human_done(r.team_of[pid], r.flags):
+                    ra.submit(conn, code, deck, ra.pass_lot, pid, "lot")
+                    r = ra.replay(load(conn, code), deck)
+                    if r.phase != "bid" or r.lot.index != lot:
+                        break
+    return None
+
+
+def test_bidding_after_a_skip_puts_you_back_in(deck, clock):
+    """[A170] A Skip used to stand while the same player kept bidding, so the moment the
+    other side took the lead every human counted as done and the lot was hammered with no
+    chance to answer: room KF3LLG lost lots 8, 14, 16 and 29 that way (on lot 14 the guest
+    bid four times, the host bid once, and it sold on the spot)."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = _rejoin_scenario(conn, deck, code, host, guest)
+    assert r is not None, "never found a lot where the guest bid back in and was outbid"
+    g = r.team_of[guest]
+    assert r.skipping(g) is None
+    assert not r.human_done(g, r.flags), "outbid, so the room must wait on the guest"
+    assert r.leader == r.team_of[host]
+
+
+def test_a_log_written_before_a_bid_could_undo_a_skip_still_replays(deck, clock):
+    """Back then the lot closed the moment the bidder led and nothing was recorded, so the
+    next move is for a later lot. That must read as the lot having closed -- a finished
+    room (KF3LLG is one) is replayed every time its results are shown. A move for an
+    EARLIER lot is still a corrupt log and still refused."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = _rejoin_scenario(conn, deck, code, host, guest)
+    assert r is not None
+    room = load(conn, code)
+    lot, rn, leader, price = r.lot.index, r.round_no, r.leader, r.bids[-1].price
+    old_log = room.moves + [{"k": "pass", "seat": host, "lot": lot + 1, "r": rn}]
+    humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
+    replayed = ra._replay(room.seed, humans, old_log, deck, False)
+    sale = next(x for x in replayed.auction.sales if x.lot.index == lot)
+    assert (sale.winner, sale.price) == (leader, price)
+    assert replayed.lot.index > lot
+    corrupt = room.moves + [{"k": "pass", "seat": host, "lot": lot - 1, "r": rn}]
+    with pytest.raises(ra.AuctionRoomError, match="another lot"):
+        ra._replay(room.seed, humans, corrupt, deck, False)
+
+
+@pytest.mark.parametrize("scope", ["set", "all"])
+def test_only_the_host_can_skip_ahead(deck, clock, scope):
+    """[A171] Skipping a set or to the end moves the whole room on, so a player who is not
+    the host is refused and nothing is recorded."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    before = list(load(conn, code).moves)
+    with pytest.raises(ra.AuctionRoomError, match="only the host"):
+        ra.submit(conn, code, deck, ra.pass_lot, guest, scope)
+    assert load(conn, code).moves == before
+
+
+def test_the_host_skipping_a_set_skips_it_for_everybody(deck, clock):
+    """Every human passes the rest of the set at once, so the whole set resolves in the
+    one request and the room lands on the next set -- nobody is left half-in it."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    skipped = r.lot.set_code
+    ra.submit(conn, code, deck, ra.pass_lot, host, "set")
+    after = ra.replay(load(conn, code), deck)
+    assert after.phase != "bid" or after.lot.set_code != skipped
+    rest = [x for x in r.auction.lots if x.set_code == skipped]
+    assert all(any(s.lot.index == x.index for s in after.auction.sales) for x in rest)
+    assert [m["k"] for m in load(conn, code).moves] == ["skip_set"]
+
+
 def test_a_bid_tops_the_clock_up_and_a_new_lot_restarts_it(deck, clock):
     conn = FakeConn()
     code, host, guest = two_human_room(conn, deck, clock)
@@ -233,11 +351,7 @@ def test_someone_not_seated_cannot_bid(deck, clock):
 
 def run_to_the_end(conn, code, deck, clock):
     """Both humans pass on everything; the clock settles the fill round and the twelves."""
-    room = load(conn, code)
-    for pid in [p for p, x in room.players.items() if not x.is_cpu]:
-        r = ra.replay(load(conn, code), deck)
-        if r.phase == "bid":
-            ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    skip_to_end(conn, code, deck)
     for _ in range(80):
         room = load(conn, code)
         if room.status != "auctioning":
@@ -264,8 +378,7 @@ def test_a_room_whose_humans_skip_everything_still_completes_with_legal_twelves(
 def test_a_human_s_chosen_twelve_is_the_one_that_plays(deck, clock):
     conn = FakeConn()
     code, host, guest = two_human_room(conn, deck, clock)
-    for pid in (host, guest):
-        ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    skip_to_end(conn, code, deck)
     for _ in range(80):
         room = load(conn, code)
         r = ra.replay(room, deck)
@@ -292,7 +405,7 @@ def test_replaying_the_log_from_scratch_gives_the_same_auction(deck, clock):
     code, host, guest = two_human_room(conn, deck, clock)
     r = ra.replay(load(conn, code), deck)
     ra.submit(conn, code, deck, ra.bid, host, r.next_price)
-    ra.submit(conn, code, deck, ra.pass_lot, guest, "set")
+    ra.submit(conn, code, deck, ra.pass_lot, host, "set")
     room = load(conn, code)
     cached = ra.replay(room, deck)
     ra._CACHE.clear()
@@ -448,10 +561,7 @@ def test_a_card_nobody_answers_is_not_played(deck, clock):
 def test_someone_who_skipped_to_the_end_is_never_asked_about_a_card(deck, clock):
     conn = FakeConn()
     code, host, guest = started_mega(conn, deck, clock)
-    for pid in (host, guest):
-        r = ra.replay(load(conn, code), deck)
-        if r.phase == "bid":
-            ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    skip_to_end(conn, code, deck)
     r = ra.replay(load(conn, code), deck)
     assert r.phase in ("fill", "twelve")
     assert not any(m["k"].startswith("rtm") for m in load(conn, code).moves)
@@ -529,8 +639,7 @@ def test_a_move_refused_inside_the_replay_is_never_saved(deck, clock):
     every later replay of the room raised and the room was dead for everybody."""
     conn = FakeConn()
     code, host, guest = two_human_room(conn, deck, clock)
-    for pid in (host, guest):
-        ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
+    skip_to_end(conn, code, deck)
     for _ in range(80):
         room = load(conn, code)
         if ra.replay(room, deck).phase == "fill":
@@ -572,11 +681,7 @@ def _careless_room(conn, deck, clock, seed, game="mega"):
             for pid in r.waiting_on():
                 ra.submit(conn, code, deck, ra.retain, pid, [])
         elif r.phase == "bid":
-            for pid in (host, guest):
-                try:
-                    ra.submit(conn, code, deck, ra.pass_lot, pid, "all")
-                except ra.AuctionRoomError:
-                    pass                               # already done with this lot
+            skip_to_end(conn, code, deck)
         elif r.phase == "fill":
             ra.submit(conn, code, deck, ra.fill, r.pid_of[r.fill_team], 0)
         elif r.phase.startswith("rtm"):
@@ -620,3 +725,52 @@ def test_a_team_that_still_cannot_field_a_twelve_ends_the_room_cleanly(deck, clo
     assert room.status == "failed"
     assert "Chennai Super Kings could not field a legal twelve" in room.failure_reason
     ra._CACHE.clear()
+
+
+def test_the_sets_list_every_lot_in_calling_order_with_how_each_went(deck, clock):
+    """[A172] The "This set" / "All sets" panels. Checked against the auction's own lots
+    and sales, not against the builder's output: every lot appears once, in its set, in
+    the order it is called; a sold lot names its real buyer and price; the lot on the
+    block is the one marked current, and its set is the only current set."""
+    from web.app import _catalogue_out
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    first = ra.replay(load(conn, code), deck).lot.set_code
+    ra.submit(conn, code, deck, ra.pass_lot, host, "set")
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase == "bid"
+    out = _catalogue_out(r.auction, r.lot, r.phase)
+
+    assert [x.lot for s in out.sets for x in s.lots] == [x.index for x in r.auction.lots]
+    by_index = {x.index: x for x in r.auction.lots}
+    for s in out.sets:
+        assert all(by_index[x.lot].set_code == s.code for x in s.lots)
+    assert len({s.code for s in out.sets}) == len(out.sets), "a set appears twice"
+
+    sales = {x.lot.index: x for x in r.auction.sales}
+    rows = {x.lot: x for s in out.sets for x in s.lots}
+    for i, row in rows.items():
+        sale = sales.get(i)
+        if i == r.lot.index:
+            assert row.status == "current"
+        elif sale is None:
+            assert row.status == "upcoming" and row.team is None
+        elif sale.winner is None:
+            assert row.status == "unsold"
+        else:
+            assert (row.status, row.team, row.price) == \
+                ("sold", r.auction.teams[sale.winner].short, sale.price)
+    skipped = next(s for s in out.sets if s.code == first)
+    assert all(x.status in ("sold", "unsold") for x in skipped.lots)
+    assert [s.code for s in out.sets if s.current] == [r.lot.set_code] == [out.current_set]
+    assert any(x.status == "sold" for x in skipped.lots)
+
+
+def test_the_sets_are_empty_until_retentions_are_done(deck, clock):
+    from web.app import _catalogue_out
+    conn = FakeConn()
+    code, host, guest = mega_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase == "retain"
+    out = _catalogue_out(r.auction, r.lot, r.phase)
+    assert out.sets == [] and out.current_set is None

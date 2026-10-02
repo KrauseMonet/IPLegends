@@ -278,6 +278,11 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
 /* The room's reconnecting notice. Deliberately quiet -- it reports a condition that
    usually clears itself within a poll or two, and it appears above a draft in progress,
    so it must not read as an error the player has to act on. */
+.rejoin-card{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  flex-wrap:wrap;margin:22px 0 0;padding:14px 18px;border:1px solid var(--gold);
+  border-radius:10px;background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.rejoin-card p{margin:0;font-size:15px}
+.rejoin-card .act{margin:0}
 .room-offline{margin:0 0 12px;padding:8px 14px;border:1px solid var(--red);
   border-radius:4px;background:rgba(226,71,46,.09);color:var(--red-2);
   font-size:.82rem;letter-spacing:.04em;text-transform:uppercase;text-align:center}
@@ -2808,4 +2813,46 @@ html{scroll-padding-top:80px}
 }
 @media (prefers-reduced-motion:reduce){
   .mr.you-won::after,.mr-form i.now{animation:none}
+}
+
+/* [A172] The sets: "This set" and "All sets" on the auction floor. */
+.auc-sets-shell{width:min(640px,100%)}
+.auc-sets-shell .scorecard-frame{padding:20px 22px;max-height:calc(100vh - 120px);overflow-y:auto}
+.auc-sets-head{margin-bottom:14px}
+.auc-sets-head span{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold)}
+.auc-sets-head h3{margin:4px 0 2px;font-family:var(--display);font-size:24px;text-transform:uppercase}
+.auc-sets-head em{font-style:normal;font-size:12.5px;color:var(--ink-3)}
+.auc-sets-empty{color:var(--ink-3);margin:6px 0}
+.auc-sets-table{width:100%;border-collapse:collapse}
+.auc-sets-table td{padding:8px 6px;border-top:1px solid var(--line);vertical-align:middle}
+.auc-sets-rt{width:40px}
+.auc-sets-name{font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.auc-sets-where{font-size:12px;color:var(--ink-3)}
+.auc-sets-st{text-align:right;white-space:nowrap;font-size:12.5px;color:var(--ink-3)}
+.auc-sets-st b{color:var(--ink)}
+.auc-sets-sold .auc-sets-name,.auc-sets-unsold .auc-sets-name{opacity:.62}
+.auc-sets-current{background:color-mix(in srgb,var(--gold) 12%,transparent)}
+.auc-sets-current .auc-sets-st b{color:var(--gold)}
+.auc-sets-set{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.auc-sets-set.now{border-color:var(--gold)}
+.auc-sets-set summary{display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer;
+  list-style:none}
+.auc-sets-set summary::-webkit-details-marker{display:none}
+.auc-sets-set summary::after{content:'▾';margin-left:8px;color:var(--ink-3);transition:transform .15s}
+.auc-sets-set[open] summary::after{transform:rotate(180deg)}
+.auc-sets-set summary i{font-style:normal;font-family:var(--mono);color:var(--ink-3);width:22px}
+.auc-sets-set summary span{flex:1;font-weight:600}
+.auc-sets-set summary span b{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--bg);background:var(--gold);padding:2px 6px;border-radius:4px;
+  margin-left:6px}
+.auc-sets-set summary em{font-style:normal;font-size:12px;color:var(--ink-3);text-align:right}
+.auc-sets-set .auc-sets-table{margin:0 0 4px}
+.auc-sets-set .auc-sets-table td:first-child{padding-left:14px}
+.auc-sets-set .auc-sets-table td:last-child{padding-right:14px}
+@media (max-width:560px){
+  .auc-sets-shell .scorecard-frame{padding:16px 12px}
+  .auc-sets-set summary{flex-wrap:wrap;gap:4px 10px}
+  .auc-sets-set summary em{width:100%;text-align:left;padding-left:32px;order:3}
+  .auc-sets-set summary::after{order:2}
 }

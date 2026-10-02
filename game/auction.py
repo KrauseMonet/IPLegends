@@ -295,9 +295,13 @@ def arrange(twelve: list[Card]) -> tuple[list[Card], Card] | None:
     while an all-rounder or keeper loses half his value. The keeper stays in the eleven,
     and an eleven that still holds five bowlers is preferred, though a legal twelve may
     lean on the Impact Player for the fifth (A133's `with_bowling_depth`).
+
+    [A170] The WEAKEST specialist who can be spared, not the strongest. This used to sort
+    on `-value`, so it benched the best one it could: room KF3LLG's default twelves sat
+    Suryakumar Yadav (94) and Matthew Hayden (99) out while 79-rated bowlers started.
     """
     ranked = sorted(twelve, key=lambda c: (c.role not in ("batter", "bowler"),
-                                           -_card_value(c)))
+                                           _card_value(c)))
     for need_five in (True, False):
         for impact in ranked:
             xi = [c for c in twelve if c is not impact]

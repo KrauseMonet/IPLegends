@@ -171,6 +171,32 @@ def test_the_impact_player_is_a_specialist_when_one_can_be_spared():
     assert allrounder in order
 
 
+def test_the_impact_player_is_the_weakest_specialist_who_can_be_spared():
+    """[A170] Room KF3LLG's suggested twelves benched Suryakumar Yadav (94) and Matthew
+    Hayden (99) while 79-rated bowlers started, because the ranking ran strongest-first.
+
+    Eight cards for positions 1-7, so exactly one of them must sit out. The 99 middle-order
+    batter CAN be spared, and so can the 85 opener; the 86 finisher cannot (positions 6 and
+    7 then have only one man who can bat there). So the rule must pick the 85, and the old
+    strongest-first rule picks the 99."""
+    def spec(i, band, role, bowls=False, display=80, keeper=False):
+        return Card(fs_id=1, person_id=f"w{i}", name=f"w{i}", bat=0.1,
+                    bowl=0.1 if bowls else None, role=role, keeper_eligible=keeper,
+                    overseas=False, display=display, positions=BATTING_ROLE_SLOTS[band])
+    weakest, best = spec(2, "top", "batter", display=85), spec(4, "middle", "batter", display=99)
+    twelve = ([spec(1, "top", "batter", display=95), weakest,
+               spec(3, "top", "batter", display=90),
+               spec(0, "middle", "keeper", keeper=True, display=80), best,
+               spec(5, "middle", "batter", display=92),
+               spec(6, "finisher", "allrounder", bowls=True, display=88),
+               spec(7, "finisher", "batter", display=86)]
+              + [spec(8 + i, "tail", "bowler", bowls=True, display=79) for i in range(4)])
+    order, impact = au.arrange(twelve)
+    assert impact is weakest
+    assert best in order
+    assert order_errors(order, impact, twelve) == []
+
+
 # --- a lot -------------------------------------------------------------------------------
 
 def _lot(base=100):

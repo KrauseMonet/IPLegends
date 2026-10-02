@@ -13,8 +13,12 @@ first. With several people bidding against each other a lot is a sequence of eve
     {"k": "bid",   "seat": pid, "lot": i, "r": round, "p": price}   raise to the named price
     {"k": "limit", "seat": pid, "lot": i, "r": round, "max": m}     bid for me up to m
     {"k": "pass",  "seat": pid, "lot": i, "r": round}               not interested
-    {"k": "pass_set", "seat": pid, "lot": i, "r": round}            ...nor in the rest of this set
-    {"k": "pass_all", "seat": pid, "lot": i, "r": round}            ...nor in anything left
+    {"k": "skip_set", "seat": host, "lot": i, "r": round}           the HOST skips the rest of
+                                                                    this set for everybody
+    {"k": "skip_all", "seat": host, "lot": i, "r": round}           ...or everything left
+    {"k": "pass_set" | "pass_all", ...}                             one player's own skip: no
+                                                                    longer accepted (A171), still
+                                                                    replayed from older logs
     {"k": "close", "lot": i, "r": round}                            the lot's clock ran out
     {"k": "fill",  "seat": pid, "i": n}                             a fill-round choice
     {"k": "twelve", "seat": pid, "order": [...11], "impact": n}     the chosen twelve
@@ -47,8 +51,8 @@ from web.rooms import CLOCK_GRACE_S, StaleMove
 LOT_SECONDS = 15         # ratified by the user: fifteen seconds a lot...
 BID_WINDOW = 10          # ...and a bid guarantees everyone this long to answer it [A158]
 FILL_SECONDS = 20        # a fill-round choice
-TWELVE_SECONDS = 90      # choosing a twelve from eighteen
-RETAIN_SECONDS = 90      # [A140] choosing retentions, everybody at once
+TWELVE_SECONDS = 150     # choosing a twelve from eighteen (was 90; A171)
+RETAIN_SECONDS = 150     # [A140] choosing retentions, everybody at once (was 90; A171)
 RTM_SECONDS = 15         # [A140] each Right to Match decision: play, raise, match
 
 AUCTION_GAMES = ("auction", "mega")   # 'mega' adds retentions and Right to Match [A140]
@@ -87,6 +91,9 @@ class RoomAuctionReplay:
     rtm_other: int | None = None            # the winner (use, match) or holder (raise)
     rtm_price: int | None = None
     failed_team: int | None = None          # [A150] a team with no legal twelve
+    # [A170] Each human's standing passes ("all", or (set, round)), so the API can say
+    # that a player is skipping -- `passed` alone is only this lot.
+    flags: dict[int, set] = field(default_factory=dict)
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -123,6 +130,16 @@ class RoomAuctionReplay:
                 or self.leader == team_index or not self.can_bid(team)
                 or "all" in flags.get(team_index, set())
                 or (self.lot.set_code, self.round_no) in flags.get(team_index, set()))
+
+    def skipping(self, team_index: int) -> str | None:
+        """[A170] 'all' or 'set' when this human is passing on the current lot because of
+        an earlier Skip, None otherwise. A bid or limit clears it."""
+        f = self.flags.get(team_index, set())
+        if "all" in f:
+            return "all"
+        if self.lot is not None and (self.lot.set_code, self.round_no) in f:
+            return "set"
+        return None
 
     def waiting_on(self) -> list[str]:
         """The humans the room is waiting for right now."""
@@ -310,7 +327,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
         for lot in (auction.lots if round_no == 0 else auction.unsold):
             if all(t.open_places == 0 for t in teams):
                 break
-            state = RoomAuctionReplay(auction, team_of, "bid", lot=lot, round_no=round_no)
+            state = RoomAuctionReplay(auction, team_of, "bid", lot=lot, round_no=round_no,
+                                      flags=flags)
             auto = {t.index: au.cpu_ceiling(t, lot, seed, round_no, mega)
                     for t in teams if not t.human}
 
@@ -325,14 +343,38 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                     return state              # waiting on the people
                 mv = moves[pos]
                 if mv.get("lot") != lot.index or mv.get("r") != round_no:
-                    raise AuctionRoomError(f"move {pos} is for another lot")
+                    if _earlier(mv, lot.index, round_no):
+                        raise AuctionRoomError(f"move {pos} is for another lot")
+                    # [A170] A log written before a bid could undo a pass: back then this
+                    # lot closed the moment the bidder led, with nothing recorded, and the
+                    # next move is for whatever came after it. `submit` only ever records
+                    # a move for the lot on screen, so a log written since never gets here.
+                    break
                 pos += 1
                 kind = mv["k"]
                 if kind == "close":
                     closed = True
                     break
+                if kind in ("skip_set", "skip_all"):
+                    # [A171] The host's skip is the ROOM's: every human passes this lot and
+                    # the rest of the set (or everything), so nobody is left half-in a set
+                    # the others have abandoned -- the shape A170 had to untangle.
+                    mark = (lot.set_code, round_no) if kind == "skip_set" else "all"
+                    for x in human_idx:
+                        state.passed.add(x)
+                        flags[x].add(mark)
+                    reply()
+                    continue
                 h = team_of[mv["seat"]]
                 team = teams[h]
+                if kind in ("bid", "limit"):
+                    # [A170] Bidding puts you back in. A pass, a skipped set or a skip to
+                    # the end used to stand while the same player kept bidding, so the
+                    # moment the other side led the lot was hammered with no chance to
+                    # answer -- room KF3LLG lost lots 8, 14, 16 and 29 that way.
+                    state.passed.discard(h)
+                    flags[h].discard((lot.set_code, round_no))
+                    flags[h].discard("all")
                 if kind == "bid":
                     if not state.can_bid(team) or mv["p"] != state.next_price:
                         raise AuctionRoomError(f"move {pos - 1}: not a valid bid")
@@ -428,6 +470,14 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     if len(result.twelves) == len(team_of):
         result.phase = "complete"
     return result
+
+
+def _earlier(mv: dict, lot_index: int, round_no: int) -> bool:
+    """A bidding move for a lot this replay has already passed: a corrupt log, not an
+    old one. Moves with no lot (Right to Match, fill, twelve) are never earlier."""
+    if "lot" not in mv:
+        return False
+    return (mv.get("r", 0), mv["lot"]) < (round_no, lot_index)
 
 
 def _commit(auction: au.Auction, lot: au.Lot, round_name: str, bids: list[au.Bid]) -> None:
@@ -560,7 +610,11 @@ def pass_lot(room, deck: Deck, player_id: str, scope: str, lot: int | None = Non
     _check_lot(r, lot, round_name)
     if scope == "lot" and team.index in r.passed:
         return r                              # already passed: a retried request
-    kind = {"lot": "pass", "set": "pass_set", "all": "pass_all"}[scope]
+    if scope != "lot" and player_id != room.host_id:
+        # [A171] Skipping a set or skipping to the end moves the whole room on, so it is
+        # the host's call alone, like advancing a round.
+        raise AuctionRoomError("only the host can skip ahead")
+    kind = {"lot": "pass", "set": "skip_set", "all": "skip_all"}[scope]
     return record(room, deck, {"k": kind, "seat": player_id, "lot": r.lot.index,
                                "r": r.round_no})
 

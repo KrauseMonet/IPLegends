@@ -2133,6 +2133,9 @@ class AuctionOut(BaseModel):
     you_done: bool = Field(default=False, description="auction rooms: you have passed or "
                            "set a limit on this lot, so the room is not waiting on you")
     your_limit: int | None = Field(default=None, description="auction rooms: your limit")
+    you_skipping: str | None = Field(default=None, description="auction rooms [A170]: 'set' "
+                                     "or 'all' when an earlier Skip is passing this lot for "
+                                     "you; a bid or limit cancels it")
     waiting_on: list[str] = Field(default=[], description="auction rooms: who is deciding")
     suggestion: list[int] | None = Field(
         default=None, description="squad indexes: eleven in batting order, then Impact")
@@ -2234,6 +2237,66 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
     return out
 
 
+class AuctionCatalogueLotOut(BaseModel):
+    lot: int
+    name: str
+    rating: int | None
+    kind: str
+    overseas: bool | None
+    franchise: str | None
+    season_year: int | None
+    base: int = Field(description="lakh")
+    status: str = Field(description="sold | unsold | current | upcoming")
+    team: str | None = Field(default=None, description="buyer's short code, when sold")
+    price: int | None = Field(default=None, description="lakh, when sold")
+
+
+class AuctionCatalogueSetOut(BaseModel):
+    code: str
+    label: str
+    current: bool
+    lots: list[AuctionCatalogueLotOut]
+
+
+class AuctionCatalogueOut(BaseModel):
+    """[A172] Every set in the order it is called, with its players. Its own route rather
+    than more fields on AuctionOut: a room polls that every second, and this is ~260 rows
+    nobody needs until they press the button."""
+    sets: list[AuctionCatalogueSetOut]
+    current_set: str | None
+
+
+def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
+                   phase: str) -> AuctionCatalogueOut:
+    if a is None:          # a single-player auction still choosing retentions has none yet
+        return AuctionCatalogueOut(sets=[], current_set=None)
+    last = {x.lot.index: x for x in a.sales}      # a lot unsold in round one may sell later
+    live = lot.index if (lot is not None and (phase == "bid" or phase.startswith("rtm"))) \
+        else None
+    sets: list[AuctionCatalogueSetOut] = []
+    for x in a.lots:
+        if not sets or sets[-1].code != x.set_code:
+            sets.append(AuctionCatalogueSetOut(code=x.set_code, label=_set_label(x.set_code),
+                                               current=False, lots=[]))
+        c, sale = x.card, last.get(x.index)
+        if x.index == live:
+            status = "current"
+        elif sale is None:
+            status = "upcoming"
+        else:
+            status = "sold" if sale.winner is not None else "unsold"
+        sold = status == "sold"
+        sets[-1].lots.append(AuctionCatalogueLotOut(
+            lot=x.index, name=c.name, rating=c.display, kind=_kind(c), overseas=c.overseas,
+            franchise=c.franchise, season_year=c.season_year, base=x.base, status=status,
+            team=a.teams[sale.winner].short if sold else None,
+            price=sale.price if sold else None))
+    current = lot.set_code if live is not None else None
+    for st in sets:
+        st.current = st.code == current
+    return AuctionCatalogueOut(sets=sets, current_set=current)
+
+
 def _auction(fn, *args) -> AuctionOut:
     try:
         return _auction_out(fn(STATE["deck"], *args))
@@ -2288,6 +2351,16 @@ def auction_start(body: AuctionStartIn) -> AuctionOut:
 @app.get("/api/auction/{state}", response_model=AuctionOut)
 def auction_get(state: str) -> AuctionOut:
     return _auction(auction_session.replay, state)
+
+
+@app.get("/api/auction/{state}/sets", response_model=AuctionCatalogueOut)
+def auction_sets(state: str) -> AuctionCatalogueOut:
+    """[A172] The sets in calling order, with every player and how each lot went."""
+    try:
+        r = auction_session.replay(STATE["deck"], state)
+    except auction_session.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _catalogue_out(r.auction, r.lot, r.phase)
 
 
 @app.post("/api/auction/{state}/bid", response_model=AuctionOut)
@@ -2668,7 +2741,9 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         if you is not None:
             out.can_bid = r.can_bid(you) and r.leader != you_idx
             out.your_limit = r.proxies.get(you_idx)
-            out.you_done = you_idx in r.passed or you_idx in r.proxies
+            out.you_skipping = r.skipping(you_idx)
+            out.you_done = (you_idx in r.passed or you_idx in r.proxies
+                            or out.you_skipping is not None)
     elif phase == "fill":
         out.fill_options = [_card(c) for c in r.fill_options[:40]]
     elif phase == "twelve":
@@ -3452,6 +3527,25 @@ def _auction_move(code: str, player_id: str, action, *args):
 def room_auction_bid(code: str, body: RoomBidIn):
     return _auction_move(code, body.player_id, room_auction.bid, body.price, body.lot,
                          body.round)
+
+
+@app.get("/api/rooms/{code}/auction/sets", response_model=AuctionCatalogueOut)
+def room_auction_sets(code: str) -> AuctionCatalogueOut:
+    """[A172] An auction room's sets, for anyone in it. Read-only and lock-free."""
+    with _db() as conn:
+        try:
+            room = rooms._load_room(conn, code, lock=False)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not room_auction.is_auction(room):
+        raise HTTPException(status_code=409, detail="this is not an auction room")
+    if room.status == "lobby":
+        return AuctionCatalogueOut(sets=[], current_set=None)
+    try:
+        r = room_auction.replay(room, STATE["deck"])
+    except room_auction.AuctionRoomError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _catalogue_out(r.auction, r.lot, r.phase)
 
 
 @app.post("/api/rooms/{code}/auction/limit", response_model=RoomStateOut)

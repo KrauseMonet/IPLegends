@@ -220,6 +220,10 @@ async function joinRoom(ctrl){
   const code = $('#joinCode').value.trim().toUpperCase();
   const name = currentName();
   if (!code){ slip('Enter a room code.'); return; }
+  // [A170] Your own seat in a room you left: go straight back to it. Joining afresh is
+  // refused once a room has started, and would mint a second seat if it were not.
+  const left = leftRoom();
+  if (left && left.code === code){ enterRoom(code, left.playerId); return; }
   await busyClick(ctrl, 'Joining…', async () => {
     try {
       const r = await api(`/api/rooms/${code}/join`, {method:'POST', headers:{'Content-Type':'application/json'},
@@ -244,6 +248,44 @@ function enterRoom(code, playerId){
   location.href = '/rooms/' + code;
 }
 
+// [A170] A room left while it was still going. room.js writes this; the seat's id is
+// kept on this device only, for the same reason as the session above.
+const ROOM_LEFT_KEY = 'iplegends_room_left';
+
+function leftRoom(){
+  try { return JSON.parse(localStorage.getItem(ROOM_LEFT_KEY) || 'null'); }
+  catch(e){ return null; }
+}
+
+function forgetLeftRoom(){
+  try { localStorage.removeItem(ROOM_LEFT_KEY); } catch(e){}
+}
+
+// Offer the way back only while the server still has the seat and the room is still
+// going: the server is the source of truth, as on room.html's own resume.
+async function offerRejoin(){
+  const left = leftRoom();
+  if (!left || !left.code || !left.playerId) return;
+  let room;
+  try {
+    room = await api(`/api/rooms/${left.code}?player_id=${encodeURIComponent(left.playerId)}`);
+  } catch(e){
+    if (e.status === 404) forgetLeftRoom();   // gone for good; a network blip keeps it
+    return;
+  }
+  const seat = room.players.find(p => p.player_id === left.playerId);
+  if (!seat || room.status === 'complete' || room.status === 'failed'){
+    forgetLeftRoom();
+    return;
+  }
+  const card = $('#rejoinCard');
+  card.innerHTML = `<p>You left room <b>${esc(left.code)}</b> as <b>${esc(seat.name)}</b>.
+      It's still going and your seat is waiting.</p>
+    <button class="act lead" id="rejoinBtn">Rejoin ${esc(left.code)}</button>`;
+  card.classList.remove('hide');
+  $('#rejoinBtn').onclick = () => enterRoom(left.code, left.playerId);
+}
+
 async function boot(){
   // Still fire-and-forget for the auth control itself, but chained here too: a signed-in
   // visitor's own name field starts filled with their username rather than blank, since
@@ -263,6 +305,7 @@ async function boot(){
 
 boot().then(() => {
   drawFormatWheel();
+  offerRejoin();
   // A room.html redirect here (no matching localStorage session, or a verify failure)
   // carries the code it couldn't resolve so the join tab can be pre-filled instead of
   // making the visitor retype it.

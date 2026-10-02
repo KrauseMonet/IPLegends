@@ -1243,6 +1243,28 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
             f"[{float(min(merit, career)):.3f}, {float(max(merit, career)):.3f}] - the "
             f"career term is no longer shrinkage")
 
+    # [A161] The floor is LIFT-ONLY: a season whose merit is above its career must read
+    # exactly its own match-shrunk evidence (A66), because the floor exists to raise a
+    # season toward the career and never past it toward one hot game. The bound above
+    # cannot catch the A159 shape -- a one-match 94 sat INSIDE [merit, career] -- so this
+    # recomputes the evidence blend independently and asserts equality where it must hold.
+    lifted_wrong_way = _rows(conn, """
+        select distinct p.primary_name, r.season_year, r.matches, r.merit,
+               r.career_merit, r.blended_merit
+        from player_season_rating r
+        join people p on p.person_id = r.person_id
+        where r.prior_source is distinct from 'reputation_floor'
+          and r.merit >= r.career_merit
+    """)
+    for name, year, matches, merit, career, blended in lifted_wrong_way:
+        m, c = float(merit), float(career)
+        evidence = (matches / (matches + 6)) * m + (6 / (matches + 6)) * c
+        if abs(float(blended) - evidence) > 1e-9:
+            offenders.append(
+                f"{name} {year}: blended {float(blended):.3f} but a season above its "
+                f"career must read its own shrunk evidence {evidence:.3f} - the floor "
+                f"lifted it toward its merit")
+
     # [A71] The reputation-only branch, checked on its own terms instead of by omission.
     reputation_rows = _rows(conn, """
         select p.primary_name, r.season_year, r.career_merit, r.blended_merit

@@ -1032,7 +1032,9 @@ engine. Weighted by where wickets fall it averages **5.8 runs**; the full engine
 omits. An earlier figure of **7.8** came from a ±15% change, which compounds into extra
 collapses and overstates the marginal -- named here because it was briefly the figure a
 decision was about to rest on. `etl.impact.Costs` implements it; `wicket_cost` below is a
-printed diagnostic only. The paragraph that follows is A31's, kept as the record.
+printed diagnostic only. **[A162]** The chain the CARD prices from runs over each (over, EXACT
+wickets) state's own measured rates, shrunk toward its pair by 200 pseudo-balls, because the
+pair-grained grid made a wicket inside a pair (the 1st, 3rd, 5th, 7th) nearly free. The paragraph that follows is A31's, kept as the record.
 
 **[A31, corrected 2026-07-30] The cost of a wicket is the drop in expected FINAL total, not
 the difference in expected runs remaining.** This paragraph previously read "the difference

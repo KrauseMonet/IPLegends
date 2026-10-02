@@ -178,6 +178,48 @@ class Grid:
 # [A160] The ball count the remaining-runs chain runs over. Twenty overs of six.
 _BALLS = 120
 
+# [A162] How hard an exact-wicket state is pulled toward its pair's rates: the weight, in
+# balls, given to the pair. A judgement rather than a measurement, like k = 100 (A35):
+# the death states the price most depends on hold 500-1,400 balls each and barely move,
+# while the early high-wicket corners (5 down in over 5: 23 balls) are mostly their pair.
+EXACT_SHRINK_BALLS = 200
+
+
+def _rates(grid: Grid, exact: dict | None, over: int, wickets: int) -> tuple[float, float]:
+    """(runs off the bat per ball, any-wicket rate) for one (over, exact wickets) state."""
+    cell = grid.peek(over, wickets)
+    if exact is None:
+        return cell.runs_per_ball, cell.out_rate_any
+    n, runs, outs = exact.get((over, wickets), (0, 0, 0))
+    k = EXACT_SHRINK_BALLS
+    return ((runs + k * cell.runs_per_ball) / (n + k),
+            (outs + k * cell.out_rate_any) / (n + k))
+
+
+def fit_exact(conn) -> dict[tuple[int, int], tuple[int, int, int]]:
+    """[A162] Balls faced, runs off the bat and wickets of any kind per (over, EXACT
+    wickets down, capped at 9), over the SPEC 7.1 fitting set -- the same balls the grid
+    counts, at the grain the grid deliberately does not keep."""
+    rows = conn.execute(
+        f"""
+        with fit as (
+            select match_id, over_no, ball_no, runs_batter, extra_wides,
+                   (wicket_kind is not null and wicket_kind <> all(%s)) as is_wicket
+            from deliveries where {FITTING_SET}
+        ), s as (
+            select *, coalesce(sum(is_wicket::int) over (
+                partition by match_id order by over_no, ball_no
+                rows between unbounded preceding and 1 preceding), 0) as wickets_down
+            from fit
+        )
+        select over_no, least(wickets_down, 9), count(*), sum(runs_batter),
+               sum(is_wicket::int)
+        from s where extra_wides = 0 group by 1, 2
+        """,
+        (list(NOT_A_WICKET),),
+    ).fetchall()
+    return {(o, w): (int(n), int(r), int(x)) for o, w, n, r, x in rows}
+
 
 class Costs:
     """[A160] The cost of a wicket: how much it lowers the ENGINE'S OWN expected remaining
@@ -202,16 +244,25 @@ class Costs:
     Weighted by where wickets actually fall, it averages **5.8 runs** (A160). Extras are
     left out of the chain: the engine adds them at a flat rate per ball, so they move only
     with an all-out, which is too rare to price.
+
+    **[A162] The rates are EXACT-WICKET when `exact` is given, which is how the card's price
+    is built.** The grid groups wickets in pairs (0-1, 2-3, 4-5, 6+), so on the grid a
+    wicket that stays inside its pair changes nothing about the balls that follow and the
+    chain priced the 1st, 3rd, 5th and 7th wicket cheaply -- a zig-zag A31 had already
+    warned of, and A160 rebuilt the price on top of. The archive says the pairs are not
+    equal: at the death a side scores **1.50 runs a ball at 6 down, 1.42 at 7, 1.23 at 8
+    and 1.03 at 9**. So each (over, exact wickets) state uses its own measured rates,
+    shrunk toward its pair's rates by `EXACT_SHRINK_BALLS` pseudo-balls, which only bites
+    where an exact state is thin. Without `exact` (the engine's model, which plays the
+    pair-grained grid and never reads this price) it falls back to the grid as before.
     """
 
-    def __init__(self, grid: Grid) -> None:
+    def __init__(self, grid: Grid, exact: dict | None = None) -> None:
         value = [[0.0] * 11 for _ in range(_BALLS + 1)]
         for t in range(_BALLS - 1, -1, -1):
             for w in range(10):
-                cell = grid.peek(t // 6, w)
-                p = cell.out_rate_any
-                value[t][w] = (cell.runs_per_ball + p * value[t + 1][w + 1]
-                               + (1 - p) * value[t + 1][w])
+                runs, p = _rates(grid, exact, t // 6, w)
+                value[t][w] = runs + p * value[t + 1][w + 1] + (1 - p) * value[t + 1][w]
         self.remaining = value
         self.priced = {
             (over, w): sum(value[6 * over + b + 1][w] - value[6 * over + b + 1][w + 1]
@@ -313,7 +364,7 @@ class Scored(NamedTuple):
 
 
 def score(conn, bat_grid: Grid, bowl_grid: Grid) -> Scored:
-    costs = Costs(bat_grid)
+    costs = Costs(bat_grid, fit_exact(conn))
     bat: dict[tuple[int, int], Tally] = defaultdict(Tally)
     bowl: dict[tuple[int, int], Tally] = defaultdict(Tally)
     bat_careers: dict[int, Tally] = defaultdict(Tally)

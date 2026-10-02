@@ -165,3 +165,33 @@ def test_shrinkage_is_recoverable_from_the_columns_migration_009_stores():
     assert shrink(raw, balls, prior, k) == pytest.approx(
         (impact_total + k * prior) / (balls + k)
     )
+
+
+# --- [A162] the card's wicket price reads EXACT wicket counts, not the grid's pairs ------
+
+from etl.impact import EXACT_SHRINK_BALLS, _rates  # noqa: E402
+
+
+def test_without_exact_rates_the_price_is_the_grids_as_before():
+    """The engine builds `Costs(grid)` and must get the pair-grained chain unchanged."""
+    g = _full_grid(1.3, 0.05)
+    assert Costs(g).priced == Costs(g, None).priced
+
+
+def test_a_wicket_inside_a_pair_is_no_longer_free():
+    """The A160 zig-zag: on the grid, 0 and 1 down are one state, so losing the first
+    wicket changed nothing about the balls that follow. Exact data saying a side scores
+    less at 1 down than at 0 must make that wicket cost something."""
+    g = _full_grid(1.3, 0.05)
+    n = 100_000
+    exact = {(o, 0): (n, int(1.4 * n), int(0.05 * n)) for o in range(20)}
+    exact.update({(o, 1): (n, int(1.0 * n), int(0.05 * n)) for o in range(20)})
+    assert Costs(g, exact).of(5, 0) > Costs(g).of(5, 0) + 1.0
+
+
+def test_a_thin_exact_state_stays_close_to_its_pair():
+    """Five balls are not evidence about a state; the pair's rates carry it."""
+    g = _full_grid(1.3, 0.05)
+    runs, out = _rates(g, {(5, 3): (5, 60, 5)}, 5, 3)
+    assert abs(runs - 1.3) < 0.3 and abs(out - 0.05) < 0.03
+    assert EXACT_SHRINK_BALLS > 0

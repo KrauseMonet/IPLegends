@@ -455,6 +455,49 @@ class BowlerCard:
 
 
 @dataclass(frozen=True)
+class CreaseBatter:
+    """A batter at the crease at the end of an over, as the live scoreboard shows him:
+    figures so far, not final ones. Copied out of the `BatterCard` rather than pointing at
+    it, because the card goes on changing after the snapshot is taken."""
+
+    name: str
+    person_id: str
+    runs: int
+    balls: int
+    fours: int
+    sixes: int
+
+
+# What `Milestone.kind` may be. Fifty and hundred are the batter's; the rest are the
+# bowler's. A hat-trick's third wicket also makes three in an over when all three fell in
+# one over, and only the hat-trick is recorded then -- it is the rarer and the one a
+# viewer would name.
+MILESTONE_KINDS = ("fifty", "hundred", "hattrick", "five_for", "three_in_over")
+
+
+@dataclass(frozen=True)
+class Milestone:
+    """A landmark reached inside an innings, for the reveal to celebrate.
+
+    `balls` is the innings' legal-ball count on the delivery that reached it, which is what
+    lets a reveal that steps over by over fire it in the right over -- including the last,
+    PARTIAL over, which `over_log` never records (`OverSnapshot`'s own rule). A hundred
+    brought up by the winning hit is exactly the one a viewer remembers, and it would be
+    lost if milestones were read off the over log instead.
+
+    Recorded on the ball it happens, from figures the loop already holds: no rng draw, so a
+    seeded match replays to the identical result it did before this existed (A62)."""
+
+    kind: str
+    name: str
+    person_id: str
+    balls: int
+    runs: int          # the batter's score, or the runs the bowler had conceded
+    wickets: int       # the bowler's wickets; 0 for a batting milestone
+    faced: int         # the batter's balls faced; the bowler's legal balls bowled
+
+
+@dataclass(frozen=True)
 class OverSnapshot:
     """One completed over, for an over-by-over reveal. Cumulative totals plus this
     over's own delta, captured at the same natural end-of-over point `commentary`'s
@@ -487,6 +530,21 @@ class OverSnapshot:
     # an over with no boundary genuinely had none, where an unobserved style is unknown.
     over_fours: int = 0
     over_sixes: int = 0
+    # The two batters at the crease once the over is done, `striker` being the one who
+    # faces the NEXT ball -- the end-of-over change of ends already applied, since that is
+    # who a scoreboard marks on strike between overs. None only for a snapshot built by an
+    # older caller or a test.
+    striker: CreaseBatter | None = None
+    non_striker: CreaseBatter | None = None
+    # This over's bowler's figures so far in the innings, cumulative.
+    bowler_balls: int = 0
+    bowler_runs: int = 0
+    bowler_wickets: int = 0
+
+
+def _crease(card: BatterCard) -> CreaseBatter:
+    return CreaseBatter(card.player.name, card.player.person_id,
+                        card.runs, card.balls, card.fours, card.sixes)
 
 
 @dataclass
@@ -501,6 +559,7 @@ class Innings:
     sixes: int = 0
     commentary: list[str] = field(default_factory=list)
     over_log: list[OverSnapshot] = field(default_factory=list)
+    milestones: list[Milestone] = field(default_factory=list)
     chased: bool = False
 
     @property
@@ -549,10 +608,16 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
     striker, non_striker, next_in = cards[0], cards[1], 2
     previous: BowlerCard | None = None
+    # Consecutive wicket-taking deliveries per bowler, across overs: a hat-trick can span
+    # two overs (the last ball of one and the first two of his next), and a wide between
+    # the wickets does not break it, since a wide is not a delivery that counts. Keyed on
+    # the card's identity -- BowlerCard has no eq=False.
+    streak: dict[int, int] = {}
 
     for over in range(overs):
         bowler = choose_bowler(attack, previous)
         previous = bowler
+        over_wickets_by_bowler = 0
         over_start_runs, over_start_wickets = innings.runs, innings.wickets
         over_start_fours, over_start_sixes = innings.fours, innings.sixes
 
@@ -585,6 +650,10 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 striker.out = True
                 innings.wickets += 1
                 bowler.wickets += 1
+                over_wickets_by_bowler += 1
+                streak[id(bowler)] = streak.get(id(bowler), 0) + 1
+                _bowling_milestones(innings, bowler, streak[id(bowler)],
+                                    over_wickets_by_bowler)
                 innings.commentary.append(
                     f"  {innings.overs:>5}  {striker.player.name} out "
                     f"{striker.runs} ({striker.balls})  b {bowler.player.name}  "
@@ -595,8 +664,15 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 striker = cards[next_in]
                 next_in += 1
             else:
+                streak[id(bowler)] = 0
                 runs = OFF_THE_BAT[outcome - 1]
+                before = striker.runs
                 striker.runs += runs
+                for mark, kind in ((50, "fifty"), (100, "hundred")):
+                    if before < mark <= striker.runs:
+                        innings.milestones.append(Milestone(
+                            kind, striker.player.name, striker.player.person_id,
+                            innings.balls, striker.runs, 0, striker.balls))
                 innings.runs += runs
                 bowler.runs += runs
                 # [A115] Tallied from the outcome the draw ALREADY made -- no extra rng
@@ -635,7 +711,28 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
             over_wickets=innings.wickets - over_start_wickets,
             over_fours=innings.fours - over_start_fours,
             over_sixes=innings.sixes - over_start_sixes,
+            # Taken across the change of ends: the man at the other end faces next.
+            striker=_crease(non_striker), non_striker=_crease(striker),
+            bowler_balls=bowler.balls, bowler_runs=bowler.runs,
+            bowler_wickets=bowler.wickets,
         ))
         striker, non_striker = non_striker, striker
 
     return innings
+
+
+def _bowling_milestones(innings: Innings, bowler: BowlerCard, streak: int,
+                        in_over: int) -> None:
+    """Record whatever the wicket just taken by `bowler` completes. Each fires on exactly
+    one ball: a fourth wicket in a row is not a second hat-trick, and a sixth wicket does
+    not make a second five-for."""
+    def mark(kind: str) -> None:
+        innings.milestones.append(Milestone(
+            kind, bowler.player.name, bowler.player.person_id, innings.balls,
+            bowler.runs, bowler.wickets, bowler.balls))
+    if streak == 3:
+        mark("hattrick")
+    elif in_over == 3:
+        mark("three_in_over")
+    if bowler.wickets == 5:
+        mark("five_for")

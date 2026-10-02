@@ -2208,6 +2208,105 @@ html{scroll-padding-top:80px}
   .sb-gauge i{transition:none}
 }
 
+/* --- who is in, and the milestone banner --------------------------------------------- */
+.sb-crease{margin:14px 0 0;display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:center}
+.sb-crease:empty{display:none}
+.sb-bats{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sb-bat-row{display:grid;grid-template-columns:14px minmax(0,1fr) auto auto;align-items:baseline;
+  gap:8px;padding:7px 12px 7px 8px;border-radius:10px;background:rgba(255,255,255,.035);
+  border:1px solid transparent;font-size:14px;color:var(--ink-2)}
+.sb-bat-row b{color:var(--ink);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-bat-row.on{background:color-mix(in srgb,var(--team) 16%,transparent);
+  border-color:color-mix(in srgb,var(--team) 45%,transparent)}
+.sb-bat-row.on b{font-weight:800}
+.sb-strike{color:var(--team);font-weight:900;text-align:center}
+.sb-fig{font-variant-numeric:tabular-nums;white-space:nowrap}
+.sb-fig strong{font:800 17px var(--sans);color:var(--ink)}
+.sb-fig em{font-style:normal;color:var(--ink-3);font-size:13px}
+.sb-extra{font:600 11px var(--mono);color:var(--ink-3);white-space:nowrap}
+.sb-bat-row.landmark .sb-fig strong{color:var(--gold-2)}
+.sb-bat-row.fresh{animation:batIn .5s ease-out}
+.sb-bowl-row{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right;
+  padding-left:16px;border-left:1px solid var(--line);font-size:14px}
+.sb-bowl-row > span:first-child{font:700 9.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.sb-bowl-row b{color:var(--ink);font-weight:700;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@keyframes batIn{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+
+.sb-milestone{position:absolute;left:50%;top:74%;z-index:5;pointer-events:none;opacity:0;
+  transform:translate(-50%,-50%) scale(.6);display:flex;flex-direction:column;gap:8px;
+  min-width:min(420px,86%);padding:18px 26px;border-radius:16px;text-align:center;
+  background:linear-gradient(135deg,var(--gold),#c98a12);color:#1b1200;
+  box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 3px rgba(255,216,115,.35)}
+.sb-milestone.ms-hattrick,.sb-milestone.ms-five_for,.sb-milestone.ms-three_in_over{
+  background:linear-gradient(135deg,#ff6a4d,#b8261a);color:#fff;
+  box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 3px rgba(255,106,77,.35)}
+.sb-milestone.ms-hundred{box-shadow:0 20px 70px rgba(0,0,0,.55),0 0 50px rgba(255,216,115,.7)}
+.sb-ms-item{display:flex;flex-direction:column;gap:2px}
+.sb-ms-item b{font-family:var(--display);font-size:clamp(30px,6vw,46px);line-height:1;
+  letter-spacing:.03em;text-transform:uppercase}
+.sb-ms-item span{font:700 14px var(--sans)}
+.sb-ms-item + .sb-ms-item{border-top:1px solid rgba(0,0,0,.18);padding-top:8px}
+.sb-ms-item + .sb-ms-item b{font-size:clamp(20px,4vw,28px)}
+.sb-milestone.show{animation:msIn 2.4s cubic-bezier(.2,.9,.3,1.2) forwards}
+.sb-milestone.show.ms-hundred,.sb-milestone.show.ms-hattrick{animation:msIn 2.4s cubic-bezier(.2,.9,.3,1.2) forwards,msGlow .5s ease-in-out 3 alternate}
+@keyframes msIn{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}
+  14%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}
+  22%{transform:translate(-50%,-50%) scale(1)}
+  82%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-60%) scale(.96)}}
+@keyframes msGlow{from{filter:brightness(1)}to{filter:brightness(1.18)}}
+@media (max-width:640px){
+  .sb-crease{grid-template-columns:1fr}
+  .sb-bat-row{grid-template-columns:12px minmax(0,1fr) auto;font-size:13px;padding:6px 10px 6px 6px}
+  .sb-extra{display:none}
+  .sb-bowl-row{flex-direction:row;align-items:baseline;justify-content:flex-start;gap:8px;
+    border-left:0;padding-left:6px;text-align:left}
+  .sb-milestone{padding:14px 18px}
+}
+@media (prefers-reduced-motion:reduce){
+  .sb-bat-row.fresh{animation:none}
+  .sb-milestone.show,.sb-milestone.show.ms-hundred,.sb-milestone.show.ms-hattrick{
+    animation:msFade 2.4s linear forwards}
+  @keyframes msFade{0%,85%{opacity:1;transform:translate(-50%,-50%)}100%{opacity:0;transform:translate(-50%,-50%)}}
+}
+
+/* --- the champion's celebration: full screen, over everything -------------------------- */
+.champ-fx{--team:var(--gold);position:fixed;inset:0;z-index:1000;display:grid;place-items:center;
+  padding:16px;cursor:pointer;opacity:0;transition:opacity .4s ease;
+  background:radial-gradient(ellipse at 50% 45%,color-mix(in srgb,var(--team) 30%,rgba(6,9,20,.9)) 0%,rgba(4,6,14,.96) 70%)}
+.champ-fx.on{opacity:1}
+.champ-fx.off{opacity:0;pointer-events:none}
+.champ-fx-sky{position:absolute;inset:0;pointer-events:none}
+.champ-fx-rays{position:absolute;left:50%;top:50%;width:160vmax;height:160vmax;margin:-80vmax 0 0 -80vmax;
+  pointer-events:none;opacity:.22;
+  background:repeating-conic-gradient(from 0deg,color-mix(in srgb,var(--team) 70%,transparent) 0deg 6deg,transparent 6deg 18deg);
+  -webkit-mask:radial-gradient(circle,#000 0%,transparent 55%);mask:radial-gradient(circle,#000 0%,transparent 55%);
+  animation:champSpin 30s linear infinite}
+.champ-fx-card{position:relative;z-index:1;text-align:center;display:flex;flex-direction:column;
+  align-items:center;gap:10px;max-width:560px;width:100%;cursor:default;
+  transform:scale(.7) translateY(30px);opacity:0}
+.champ-fx.on .champ-fx-card{animation:champIn .9s cubic-bezier(.2,1.2,.35,1) .25s forwards}
+.champ-fx-trophy{font-size:clamp(70px,16vw,128px);line-height:1;
+  filter:drop-shadow(0 0 30px rgba(255,216,115,.65));animation:champBob 2.4s ease-in-out 1.2s infinite}
+.champ-fx-kicker{font:700 12px var(--mono);letter-spacing:.38em;text-transform:uppercase;color:var(--gold-2)}
+.champ-fx-badge{margin:6px 0 2px}
+.champ-fx-badge .team-crest{width:120px;height:104px;margin:0;filter:drop-shadow(0 12px 24px rgba(0,0,0,.6))}
+.champ-fx-badge .kit-badge{width:96px;height:96px;font-size:30px;margin:0}
+.champ-fx-badge .team-badge{width:84px;height:84px;font-size:26px;margin:0}
+.champ-fx-name{font-family:var(--display);font-size:clamp(38px,8.5vw,76px);line-height:1;color:#fff;
+  letter-spacing:.02em;text-transform:uppercase;overflow-wrap:anywhere;
+  text-shadow:0 0 34px color-mix(in srgb,var(--team) 80%,transparent),0 6px 24px rgba(0,0,0,.6)}
+.champ-fx-sub{font-size:16px;color:var(--ink-2)}
+.champ-fx-close{margin-top:14px;min-width:180px}
+@keyframes champIn{to{transform:none;opacity:1}}
+@keyframes champBob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-10px) rotate(3deg)}}
+@keyframes champSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .champ-fx-rays,.champ-fx-trophy{animation:none}
+  .champ-fx.on .champ-fx-card{animation:none;transform:none;opacity:1}
+}
+
 /* --- team kits [A151]: a drafted side's badge -- its monogram in `ink` on `deep`, ringed in
    its own colour. `ink` is lifted until it clears 4.5:1 on `deep` (web/colours.py), which is
    why the badge uses that pairing and never the bright base colour behind text. */

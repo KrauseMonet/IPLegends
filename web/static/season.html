@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=3b81d404ed">
+<link rel="stylesheet" href="/static/style.css?v=9d0551635e">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -143,6 +143,9 @@
            so the three reveals are one piece of markup. reveal.js fills every id here;
            the controls under it stay on each page, since each page skips differently. -->
       <div class="sb" id="scoreboard">
+        <!-- a fifty, a hundred, a hat-trick, a five-for: shown over the board for a beat,
+             then gone on its own (a CSS animation, so no timer for a skip to forget). -->
+        <div class="sb-milestone" id="overMilestone" aria-live="polite"></div>
         <div class="sb-stage" id="overStage"></div>
         <div class="sb-main">
           <div class="sb-team sb-bat" id="sbBat"></div>
@@ -154,6 +157,9 @@
         </div>
         <div class="sb-target" id="overTargetLine"></div>
         <div class="sb-gauge"><i id="overOversBar" style="width:0%"></i></div>
+        <!-- who is in: the two batters (the one on strike marked) and the over's bowler,
+             as a broadcast shows them between overs. Empty until the first over is done. -->
+        <div class="sb-crease" id="overCrease"></div>
         <div class="sb-last" id="overLastLine"></div>
         <div class="sb-bars" id="overChips" aria-label="Runs in each over"></div>
         <div class="sb-phases"><span>Powerplay</span><span>Middle overs</span><span>Death</span></div>
@@ -305,8 +311,8 @@
 
 <script src="/static/common.js?v=0d6c2dff60"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/reveal.js?v=bfff1b4f0f"></script>
+<script src="/static/reveal.js?v=dbfda54b22"></script>
 <script src="/static/analysis.js?v=4d304e2f1a"></script>
-<script src="/static/season.js?v=7a57522d3c"></script>
+<script src="/static/season.js?v=f712dfd6ca"></script>
 </body>
 </html>

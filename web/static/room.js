@@ -1393,8 +1393,36 @@ async function maybeSaveRoomResult(){
   } catch(e){ /* best-effort -- a failed save must never interrupt the result screen */ }
 }
 
+// The champion as a side to draw: the table row where there is one (a league), else the
+// final's winning side, which carries its crest or kit; your own kit if it is yours.
+function roomChampionSide(m){
+  if (!m.champion) return null;
+  if (m.you_champion){
+    const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
+    if (me && (me.kit || me.crest)) return {name: me.kit ? me.kit.name : m.champion,
+                                            crest: me.crest || null, kit: me.kit || null};
+  }
+  const row = (m.table || []).find(r => r.name === m.champion);
+  if (row) return {name: row.name, crest: row.crest, kit: row.kit};
+  // The last fixture is the final, and its winner is the champion. A result names sides
+  // by their short form, not the champion's display name, so it is matched by winner.
+  const last = m.results.length ? m.results[m.results.length - 1].result : null;
+  if (last && last.winner && last.winner === last.home)
+    return {name: m.champion, crest: last.home_crest, kit: last.home_kit};
+  if (last && last.winner && last.winner === last.away)
+    return {name: m.champion, crest: last.away_crest, kit: last.away_kit};
+  return {name: m.champion};
+}
+
 function showRoomMatchComplete(m){
   maybeSaveRoomResult();
+  // A room has no seed on the wire, and "Play again" reuses the code, so the run is told
+  // apart by its own final scores as well -- the same room replayed is a new celebration.
+  const last = m.results.length ? m.results[m.results.length - 1].result : null;
+  celebrateChampion({
+    key: `room:${ROOM_CODE}:${m.champion}:${last ? last.home_score + '|' + last.away_score : ''}`,
+    side: roomChampionSide(m), mine: !!m.you_champion,
+  });
   const el = $('#roomMatchBody');
 
   const journeyBtn = m.squad

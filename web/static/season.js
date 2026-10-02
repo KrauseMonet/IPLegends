@@ -162,6 +162,11 @@ function renderVerdictAndBracket(d){
     champion: {name: d.champion, crest: d.champion_crest},
     finishLine: `Finished ${ordinal(me.pos)} in the league, then won the final.`,
   });
+  // Once per season in this browser, so a reload lands on the results without it.
+  celebrateChampion({
+    key: 'solo:' + d.state, mine: won,
+    side: won && MY_SIDE ? MY_SIDE : {name: d.champion, crest: d.champion_crest},
+  });
 
   // Every playoff fixture, yours or not -- a side that missed the top four still sees how
   // the title was decided, instead of an empty heading.

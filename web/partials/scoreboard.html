@@ -2,6 +2,9 @@
            so the three reveals are one piece of markup. reveal.js fills every id here;
            the controls under it stay on each page, since each page skips differently. -->
       <div class="sb" id="scoreboard">
+        <!-- a fifty, a hundred, a hat-trick, a five-for: shown over the board for a beat,
+             then gone on its own (a CSS animation, so no timer for a skip to forget). -->
+        <div class="sb-milestone" id="overMilestone" aria-live="polite"></div>
         <div class="sb-stage" id="overStage"></div>
         <div class="sb-main">
           <div class="sb-team sb-bat" id="sbBat"></div>
@@ -13,6 +16,9 @@
         </div>
         <div class="sb-target" id="overTargetLine"></div>
         <div class="sb-gauge"><i id="overOversBar" style="width:0%"></i></div>
+        <!-- who is in: the two batters (the one on strike marked) and the over's bowler,
+             as a broadcast shows them between overs. Empty until the first over is done. -->
+        <div class="sb-crease" id="overCrease"></div>
         <div class="sb-last" id="overLastLine"></div>
         <div class="sb-bars" id="overChips" aria-label="Runs in each over"></div>
         <div class="sb-phases"><span>Powerplay</span><span>Middle overs</span><span>Death</span></div>

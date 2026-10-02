@@ -447,6 +447,24 @@ class BowlerOut(BaseModel):
     sixes: int = Field(default=0, description="sixes CONCEDED")
 
 
+class CreaseOut(BaseModel):
+    name: str
+    runs: int
+    balls: int
+    fours: int = 0
+    sixes: int = 0
+
+
+class MilestoneOut(BaseModel):
+    kind: str = Field(description="fifty, hundred, hattrick, five_for or three_in_over")
+    name: str
+    balls: int = Field(description="the innings' legal-ball count on the delivery that "
+                                   "reached it, so a reveal can fire it in the right over")
+    runs: int
+    wickets: int
+    faced: int
+
+
 class OverOut(BaseModel):
     over: int
     bowler: str
@@ -457,6 +475,12 @@ class OverOut(BaseModel):
     over_wickets: int = Field(description="wickets that fell THIS over alone")
     over_fours: int = 0
     over_sixes: int = 0
+    striker: CreaseOut | None = Field(
+        default=None, description="on strike for the NEXT ball, after the change of ends")
+    non_striker: CreaseOut | None = None
+    bowler_balls: int = Field(default=0, description="this over's bowler, cumulative")
+    bowler_runs: int = 0
+    bowler_wickets: int = 0
 
 
 class InningsOut(BaseModel):
@@ -475,6 +499,7 @@ class InningsOut(BaseModel):
         description="one entry per FULLY completed over, for an over-by-over reveal -- "
                     "a partial final over (all out, or target chased mid-over) has no "
                     "entry; the final scorecard already covers that moment")
+    milestones: list[MilestoneOut] = Field(default_factory=list)
 
 
 class KitOut(BaseModel):
@@ -1547,10 +1572,19 @@ def _bowler_out(bo) -> BowlerOut:
     )
 
 
+def _crease_out(c) -> CreaseOut | None:
+    if c is None:
+        return None
+    return CreaseOut(name=c.name, runs=c.runs, balls=c.balls, fours=c.fours, sixes=c.sixes)
+
+
 def _over_out(o) -> OverOut:
     return OverOut(over=o.over, bowler=o.bowler, runs=o.runs, wickets=o.wickets,
                    balls=o.balls, over_runs=o.over_runs, over_wickets=o.over_wickets,
-                   over_fours=o.over_fours, over_sixes=o.over_sixes)
+                   over_fours=o.over_fours, over_sixes=o.over_sixes,
+                   striker=_crease_out(o.striker), non_striker=_crease_out(o.non_striker),
+                   bowler_balls=o.bowler_balls, bowler_runs=o.bowler_runs,
+                   bowler_wickets=o.bowler_wickets)
 
 
 def _innings_out(innings) -> InningsOut:
@@ -1564,6 +1598,9 @@ def _innings_out(innings) -> InningsOut:
         bowling=[_bowler_out(bo) for bo in innings.bowling if bo.balls > 0],
         commentary=list(innings.commentary),
         over_log=[_over_out(o) for o in innings.over_log],
+        milestones=[MilestoneOut(kind=m.kind, name=m.name, balls=m.balls, runs=m.runs,
+                                 wickets=m.wickets, faced=m.faced)
+                    for m in innings.milestones],
     )
 
 
@@ -2848,6 +2885,12 @@ def _daily_innings_out(innings, *, bowled_by_a_player: bool) -> dict:
     out = _innings_out(innings).model_dump()
     if not bowled_by_a_player:
         out["bowling"] = []
+        # The same reason reaches the live scoreboard: a five-for by "bowler 3" would be
+        # a celebration of somebody who does not exist, and so would his running figures.
+        out["milestones"] = [m for m in out["milestones"]
+                             if m["kind"] in ("fifty", "hundred")]
+        for o in out["over_log"]:
+            o["bowler_balls"] = o["bowler_runs"] = o["bowler_wickets"] = 0
     return out
 
 

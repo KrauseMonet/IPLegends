@@ -64,8 +64,10 @@ function startOverStepper(innings, stageText, onDone, priorContext, matchup){
     log: innings.over_log, i: 0, timer: null,
     speed: Number($('#overSpeedSelect').value) || 500,
     paused: false, onDone, stageText, innings, priorContext: priorContext || null,
-    lastRuns: null,
+    lastRuns: null, lastCrease: [], milestonesThrough: 0, skipping: false,
   };
+  const ms = document.getElementById('overMilestone');
+  if (ms){ ms.className = 'sb-milestone'; ms.innerHTML = ''; }
   renderOverPrior();
   $('#overStepper').classList.remove('hide');
   // The screen before (an Impact choice, a long result list) may have left the page
@@ -177,6 +179,75 @@ function renderOverChips(entries){
   $('#overChips').innerHTML = bars.join('');
 }
 
+// The batters at the crease, the one on strike marked, and the bowler of the over just
+// done. A batter who was not at the crease last time the board was drawn slides in, so a
+// wicket reads as a new man arriving rather than a name silently changing.
+function renderCrease(batters, bowler){
+  const el = document.getElementById('overCrease');
+  if (!el) return;
+  if (!batters.length){ el.innerHTML = ''; OVER_STEP.lastCrease = []; return; }
+  const before = OVER_STEP.lastCrease;
+  const rows = batters.map(b => {
+    const bits = [];
+    if (b.fours) bits.push(`${b.fours}×4`);
+    if (b.sixes) bits.push(`${b.sixes}×6`);
+    const sr = b.balls ? (100 * b.runs / b.balls).toFixed(0) : '–';
+    const fresh = before.length && !before.includes(b.name);
+    return `<div class="sb-bat-row${b.onStrike ? ' on' : ''}${fresh ? ' fresh' : ''}${b.runs >= 50 ? ' landmark' : ''}">
+      <span class="sb-strike" aria-label="${b.onStrike ? 'on strike' : ''}">${b.onStrike ? '▸' : ''}</span>
+      <b>${esc(b.name)}</b>
+      <span class="sb-fig"><strong>${b.runs}${b.out ? '' : '*'}</strong> <em>(${b.balls})</em></span>
+      <span class="sb-extra">${bits.join(' ')}${bits.length ? ' · ' : ''}SR ${sr}</span>
+    </div>`;
+  });
+  const bowl = bowler
+    ? `<div class="sb-bowl-row"><span>Bowling</span><b>${esc(bowler.name)}</b>
+        <span class="sb-fig"><strong>${bowler.wickets}-${bowler.runs}</strong>
+        <em>(${oversText(bowler.balls)} ov)</em></span></div>`
+    : '';
+  el.innerHTML = `<div class="sb-bats">${rows.join('')}</div>${bowl}`;
+  OVER_STEP.lastCrease = batters.map(b => b.name);
+}
+
+// The two not-out batters once the innings is over. Batters come in in order, so the ones
+// who came in are the first wickets+2 of the order; whoever of those is not out is still
+// there. Nobody is marked on strike -- the innings is over.
+function finalCrease(inn){
+  const came = inn.batting.slice(0, Math.min(inn.wickets + 2, inn.batting.length));
+  return came.filter(b => !b.out).map(b => ({...b, out: false, onStrike: false}));
+}
+
+const MILESTONE_TEXT = {
+  fifty: m => ['Fifty', `${m.name} · ${m.runs} (${m.faced})`],
+  hundred: m => ['Hundred!', `${m.name} · ${m.runs} (${m.faced})`],
+  hattrick: m => ['Hat-trick!', `${m.name} · three in three`],
+  five_for: m => ['Five-for', `${m.name} · ${m.wickets}/${m.runs}`],
+  three_in_over: m => ['Three in the over', `${m.name} · ${m.wickets}/${m.runs}`],
+};
+const MILESTONE_RANK = ['hundred', 'hattrick', 'five_for', 'fifty', 'three_in_over'];
+const MILESTONE_HOLD = 1600;   // ms the reveal waits so a banner can be read
+
+// Fires every milestone reached after the last one shown and on or before `balls`, and
+// returns whether any did. Several in one over (a fifty and a five-for, say) share one
+// banner, the rarest leading.
+function fireMilestones(balls){
+  const all = (OVER_STEP.innings.milestones || []);
+  const due = all.filter(m => m.balls > OVER_STEP.milestonesThrough && m.balls <= balls);
+  OVER_STEP.milestonesThrough = Math.max(OVER_STEP.milestonesThrough, balls);
+  const el = document.getElementById('overMilestone');
+  if (!due.length || !el || OVER_STEP.skipping) return false;
+  due.sort((a, b) => MILESTONE_RANK.indexOf(a.kind) - MILESTONE_RANK.indexOf(b.kind));
+  const lead = due[0].kind;
+  el.innerHTML = due.map(m => {
+    const [title, line] = (MILESTONE_TEXT[m.kind] || (() => [m.kind, m.name]))(m);
+    return `<div class="sb-ms-item"><b>${esc(title)}</b><span>${esc(line)}</span></div>`;
+  }).join('');
+  el.className = 'sb-milestone';
+  void el.offsetWidth;
+  el.className = `sb-milestone show ms-${lead}`;
+  return true;
+}
+
 function oversText(balls){ return `${Math.floor(balls / 6)}.${balls % 6}`; }
 function runRate(runs, balls){ return balls ? (runs * 6 / balls).toFixed(2) : '0.00'; }
 
@@ -192,6 +263,15 @@ function renderOverStep(){
     $('#overOversBar').style.width = (100 * Math.min(1, innings.balls / 120)) + '%';
     renderChaseLine(priorContext, innings.runs, innings.balls, true);
     renderOverChips(log);
+    renderCrease(finalCrease(innings), null);
+    // A milestone in the last, partial over (the winning hit that brings up a hundred)
+    // is only reachable here, so the board holds on the final score long enough to show
+    // it -- unless the viewer skipped, who asked for the end and not a celebration.
+    if (fireMilestones(Infinity)){
+      clearOverTimer();
+      OVER_STEP.timer = setTimeout(finishOverStepper, MILESTONE_HOLD + 600);
+      return;
+    }
     finishOverStepper();
     return;
   }
@@ -207,18 +287,27 @@ function renderOverStep(){
   renderChaseLine(priorContext, o.runs, o.balls, false);
   pulseScoreLine(o.over_wickets > 0, scoreChanged);
   renderOverChips(log.slice(0, i + 1));
+  if (o.striker){
+    renderCrease(
+      [{...o.striker, onStrike: true}, {...o.non_striker, onStrike: false}],
+      o.bowler_balls ? {name: o.bowler, balls: o.bowler_balls, runs: o.bowler_runs,
+                        wickets: o.bowler_wickets} : null);
+  }
+  OVER_STEP.hold = fireMilestones(o.balls) ? MILESTONE_HOLD : 0;
 }
 
 function scheduleNextOver(){
   clearOverTimer();
   if (!OVER_STEP || OVER_STEP.paused) return;
+  const hold = OVER_STEP.hold || 0;
+  OVER_STEP.hold = 0;
   OVER_STEP.timer = setTimeout(() => {
     if (!OVER_STEP) return;
     OVER_STEP.i++;
     const more = OVER_STEP.i < OVER_STEP.log.length;
     renderOverStep();
     if (more) scheduleNextOver();
-  }, OVER_STEP.speed);
+  }, OVER_STEP.speed + hold);
 }
 
 function toggleOverPause(){
@@ -260,6 +349,7 @@ function skipOverStepper(){
   if (!OVER_STEP) return;
   clearOverTimer();
   OVER_STEP.i = OVER_STEP.log.length;
+  OVER_STEP.skipping = true;
   renderOverStep();
 }
 
@@ -803,4 +893,149 @@ async function drawJourneyCard(d, header, side){
   ctx.fillText('THE LEGENDS ALMANACK', cx, listTop + d.squad.length * (rowH + rowGap) - rowGap + 60);
 
   $('#cardDownload').href = canvas.toDataURL('image/png');
+}
+
+/* --- the champion's celebration ----------------------------------------------------------
+   Full screen, fireworks in the champion's own colours, the trophy and the side's badge,
+   shown once when a tournament's result is announced -- to everybody, not only the
+   winner, since the final result is the moment the whole room was waiting for.
+
+   `key` names the tournament (a solo state, a room's run) and is remembered in this
+   browser, so a reload, a re-render or a room's next poll does not replay it. A per-viewer
+   convenience, which is what localStorage is for here; if storage is unavailable the
+   worst case is seeing it again. Tap, Escape or the button dismisses it; it also leaves
+   by itself. With reduced motion asked for there are no fireworks, just the card. */
+
+const CHAMP_SEEN_KEY = 'iplegends_champion_seen';
+let CHAMP_FX = null;
+
+function championSeen(key){
+  try { return (JSON.parse(localStorage.getItem(CHAMP_SEEN_KEY)) || []).includes(key); }
+  catch(e){ return false; }
+}
+function markChampionSeen(key){
+  try {
+    const seen = (JSON.parse(localStorage.getItem(CHAMP_SEEN_KEY)) || []).filter(k => k !== key);
+    seen.push(key);
+    localStorage.setItem(CHAMP_SEEN_KEY, JSON.stringify(seen.slice(-40)));
+  } catch(e){ /* private mode: it may show again, which is harmless */ }
+}
+
+function celebrateChampion({key, side, mine}){
+  if (!side || !side.name || CHAMP_FX) return;
+  if (key && championSeen(key)) return;
+  if (key) markChampionSeen(key);
+
+  const el = document.createElement('div');
+  el.className = 'champ-fx';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', `${side.name} are the champions`);
+  const tint = sideTint(side);
+  if (tint.cls) el.classList.add(tint.cls);
+  if (tint.style) el.setAttribute('style', tint.style);
+  el.innerHTML = `<canvas class="champ-fx-sky"></canvas>
+    <div class="champ-fx-rays"></div>
+    <div class="champ-fx-card">
+      <div class="champ-fx-trophy">🏆</div>
+      <div class="champ-fx-kicker">${mine ? 'You are the' : 'The'} champions</div>
+      <div class="champ-fx-badge">${sideBadge(side, 'champ-fx-mark')}</div>
+      <div class="champ-fx-name">${esc(side.name)}</div>
+      <div class="champ-fx-sub">${mine ? 'Your side lifts the trophy.' : 'Winners of the final.'}</div>
+      <button class="act lead champ-fx-close" type="button">Continue</button>
+    </div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+
+  const css = getComputedStyle(el);
+  const team = (css.getPropertyValue('--team') || '').trim() || '#f5b83d';
+  const colours = [team, team, '#ffd873', '#ffffff', '#f5b83d'];
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const fx = {el, raf: null, timers: [], onKey: null};
+  CHAMP_FX = fx;
+  const close = () => closeChampion();
+  el.querySelector('.champ-fx-close').addEventListener('click', e => { e.stopPropagation(); close(); });
+  el.addEventListener('click', close);
+  fx.onKey = e => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
+  document.addEventListener('keydown', fx.onKey);
+  fx.timers.push(setTimeout(close, 9000));
+  el.querySelector('.champ-fx-close').focus({preventScroll: true});
+  if (!reduce) runFireworks(fx, el.querySelector('canvas'), colours);
+}
+
+function closeChampion(){
+  const fx = CHAMP_FX;
+  if (!fx) return;
+  CHAMP_FX = null;
+  fx.timers.forEach(clearTimeout);
+  if (fx.raf) cancelAnimationFrame(fx.raf);
+  document.removeEventListener('keydown', fx.onKey);
+  fx.el.classList.remove('on');
+  fx.el.classList.add('off');
+  setTimeout(() => fx.el.remove(), 450);
+}
+
+// Rockets rise from the bottom and burst into sparks that fall and fade. Bursts come in
+// a steady rhythm for the first six seconds, with a finale of several at once, then the
+// sky is left to empty. Drawn at device resolution so it stays sharp on a phone.
+function runFireworks(fx, canvas, colours){
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const size = () => {
+    W = innerWidth; H = innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  size();
+  addEventListener('resize', size);
+  const rockets = [], sparks = [];
+  const pick = () => colours[Math.floor(Math.random() * colours.length)];
+  const launch = () => {
+    const x = W * (0.15 + Math.random() * 0.7);
+    rockets.push({x, y: H + 10, vx: (Math.random() - 0.5) * 1.6,
+                  vy: -(H * 0.012 + 7 + Math.random() * 3),
+                  top: H * (0.12 + Math.random() * 0.35), colour: pick()});
+  };
+  const burst = (x, y, colour) => {
+    const n = 70 + Math.floor(Math.random() * 40);
+    const ring = Math.random() < 0.3;
+    for (let i = 0; i < n; i++){
+      const a = (Math.PI * 2 * i) / n + Math.random() * 0.2;
+      const v = ring ? 5.2 : 1.5 + Math.random() * 5;
+      sparks.push({x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1,
+                   decay: 0.009 + Math.random() * 0.012,
+                   colour: Math.random() < 0.8 ? colour : pick()});
+    }
+  };
+  for (let t = 0; t < 6000; t += 420) fx.timers.push(setTimeout(launch, t + Math.random() * 200));
+  [6200, 6300, 6450, 6600, 6700].forEach(t => fx.timers.push(setTimeout(launch, t)));
+  const started = performance.now();
+  const frame = now => {
+    if (CHAMP_FX !== fx){ removeEventListener('resize', size); return; }
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = rockets.length - 1; i >= 0; i--){
+      const r = rockets[i];
+      r.x += r.vx; r.y += r.vy; r.vy += 0.12;
+      ctx.fillStyle = r.colour;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 2.4, 0, Math.PI * 2); ctx.fill();
+      if (r.y <= r.top || r.vy >= 0){ burst(r.x, r.y, r.colour); rockets.splice(i, 1); }
+    }
+    for (let i = sparks.length - 1; i >= 0; i--){
+      const s = sparks[i];
+      s.x += s.vx; s.y += s.vy; s.vx *= 0.985; s.vy = s.vy * 0.985 + 0.05;
+      s.life -= s.decay;
+      if (s.life <= 0){ sparks.splice(i, 1); continue; }
+      ctx.globalAlpha = Math.max(0, s.life);
+      ctx.fillStyle = s.colour;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 2 * s.life + 0.6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (now - started < 12000 || rockets.length || sparks.length) fx.raf = requestAnimationFrame(frame);
+  };
+  fx.raf = requestAnimationFrame(frame);
 }

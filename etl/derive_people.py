@@ -746,7 +746,7 @@ def do_bowling_style(conn) -> None:
             from deliveries d join people p on p.person_id = d.bowler_id
             where d.legal_ball
             group by 1, 2 having count(*) >= %s
-            order by legal desc
+            order by legal desc, d.bowler_id
             """,
             (MIN_LEGAL_BALLS_FOR_STYLE,),
         )

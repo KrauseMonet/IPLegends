@@ -41,7 +41,7 @@ from itertools import zip_longest
 
 from game.season import (
     TOSS_DEFAULT_ELECTS, JourneyAccumulator, Result, Side, Standing,
-    _leader, _OpenMatchNeedsToss, _credit,
+    _OpenMatchNeedsToss, _credit, top_batter, top_bowler,
     fixtures as league_fixtures, play_open,
 )
 from game.simulator import Model
@@ -796,8 +796,8 @@ def room_journey(room: Room, replay: RoomMatchReplay, pid: str) -> RoomJourney |
         runs=acc.total_runs, wickets=acc.total_wickets,
         played=played, won=won, lost=lost, tied=tied,
         champion=replay.champion_pid == pid,
-        top_scorer=_leader(acc.runs, acc.names),
-        top_wicket_taker=_leader(acc.wickets, acc.names),
+        top_scorer=top_batter(acc),
+        top_wicket_taker=top_bowler(acc),
         acc=acc,
     )
 

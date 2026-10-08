@@ -16,6 +16,7 @@ import random
 from dataclasses import dataclass, field
 
 from etl.feasibility import BOWLERS_IN_TWELVE, Card, Deck
+from game.analysis import batting_rank, bowling_rank
 from game.simulator import BALLS_PER_OVER, Innings, OVERS, Model, play_innings
 
 TEAMS = 10                 # you and nine historical sides
@@ -381,7 +382,7 @@ class JourneyAccumulator:
     Keyed by `person_id`, not name (CLAUDE.md's own standing rule) -- two different
     drafted seasons can share a registry name, and this dict is looked up per person for
     the journey card's per-player breakdown, not just for the single tournament-wide
-    leader `_leader` used to pick out. `names` carries the display name alongside, since
+    leader `top_batter`/`top_bowler` pick out. `names` carries the display name alongside, since
     the engine's own `Player` is the only place that name still lives.
     """
 
@@ -438,21 +439,29 @@ class JourneyAccumulator:
         self.total_wickets += innings.wickets
 
 
-def _leader(totals: dict[str, int], names: dict[str, str] | None = None) -> tuple[str, int]:
-    """The name with the highest total, ties broken alphabetically (lowest name) for a
-    deterministic answer -- the same shape of tie-break `positions.py`'s `modal_position`
-    already uses, rather than an arbitrary dict-iteration-order pick.
+# --- ranking the caps ----------------------------------------------------------------------
+# `batting_rank`/`bowling_rank` live in game.analysis (dependency-free) and are the ONE
+# ordering for every "most runs" / "most wickets" leader: the caps, the journey card and
+# Season Analysis's boards. See their docstrings there for why they exist.
 
-    `totals` is keyed by person_id; `names` maps that back to a display name. Left
-    optional, and falling back to the key itself when omitted, so a caller with no name
-    to give (or a test with no collision to worry about) can still key by name directly.
-    """
-    if not totals:
+def top_batter(acc: "JourneyAccumulator") -> tuple[str, int]:
+    """(name, runs) of the accumulator's leading run-scorer by `batting_rank`, or ("", 0).
+    Keyed by person_id throughout; the name is only for display."""
+    if not acc.runs:
         return "", 0
-    names = names or {}
-    best = max(totals.values())
-    key = min((k for k, v in totals.items() if v == best), key=lambda k: names.get(k, k))
-    return names.get(key, key), best
+    pid = min(acc.runs, key=lambda p: batting_rank(
+        acc.runs[p], acc.balls_faced.get(p, 0), acc.names.get(p, p)))
+    return acc.names.get(pid, pid), acc.runs[pid]
+
+
+def top_bowler(acc: "JourneyAccumulator") -> tuple[str, int]:
+    """(name, wickets) of the accumulator's leading wicket-taker by `bowling_rank`."""
+    if not acc.wickets:
+        return "", 0
+    pid = min(acc.wickets, key=lambda p: bowling_rank(
+        acc.wickets[p], acc.runs_conceded.get(p, 0), acc.balls_bowled.get(p, 0),
+        acc.names.get(p, p)))
+    return acc.names.get(pid, pid), acc.wickets[pid]
 
 
 @dataclass
@@ -492,8 +501,8 @@ def journey_stats(season: Season, track: Side, acc: JourneyAccumulator) -> Journ
         runs=acc.total_runs, wickets=acc.total_wickets,
         played=played, won=won, lost=lost, tied=tied,
         champion=season.champion is track,
-        top_scorer=_leader(acc.runs, acc.names),
-        top_wicket_taker=_leader(acc.wickets, acc.names),
+        top_scorer=top_batter(acc),
+        top_wicket_taker=top_bowler(acc),
     )
 
 
@@ -512,30 +521,6 @@ class TournamentLeaders:
     # one. For the cap cards' crest and team line; None only when nobody scored at all.
     top_scorer_side: "Side | None" = None
     top_wicket_taker_side: "Side | None" = None
-
-
-def _best_entry(entries: list[tuple[int, str, object]]) -> tuple[str, int, object]:
-    """`_best_across`, carrying a third element through: the side the winning entry
-    belongs to. The same tie-break, so the name it returns is always `_best_across`'s."""
-    if not entries:
-        return "", 0, None
-    name, value = _best_across([(v, n) for v, n, _ in entries])
-    side = next(sd for v, n, sd in entries if v == value and n == name)
-    return name, value, side
-
-
-def _best_across(entries: list[tuple[int, str]]) -> tuple[str, int]:
-    """Same tie-break as `_leader` -- highest value, alphabetically-lowest name on a tie
-    -- but over a flat list of (value, name) pairs rather than a dict keyed by person.
-    `tournament_leaders` needs one entry PER (person, side): a dict keyed by person_id
-    alone would silently merge two different sides' totals for the same man into one
-    slot before a leader could even be picked, which is exactly the bug this function
-    exists to avoid."""
-    if not entries:
-        return "", 0
-    best_value = max(v for v, _ in entries)
-    name = min(n for v, n in entries if v == best_value)
-    return name, best_value
 
 
 def tournament_leaders(results: list[Result]) -> TournamentLeaders:
@@ -574,12 +559,17 @@ def tournament_leaders(results: list[Result]) -> TournamentLeaders:
             _acc_for(r.away).add_batting(r.away_innings)
             _acc_for(r.home).add_bowling(r.away_innings)
 
-    bat_name, bat_runs, bat_side = _best_entry([
-        (v, acc.names[pid], side_of[sid])
-        for sid, acc in per_side.items() for pid, v in acc.runs.items()])
-    bowl_name, bowl_wkts, bowl_side = _best_entry([
-        (v, acc.names[pid], side_of[sid])
-        for sid, acc in per_side.items() for pid, v in acc.wickets.items()])
+    # One candidate per (person, side), ranked by the same keys the journey card and Season
+    # Analysis use, so all three name the same leader even on a tie.
+    bats = [(batting_rank(v, acc.balls_faced.get(pid, 0), acc.names[pid]),
+             acc.names[pid], v, side_of[sid])
+            for sid, acc in per_side.items() for pid, v in acc.runs.items()]
+    bowls = [(bowling_rank(v, acc.runs_conceded.get(pid, 0), acc.balls_bowled.get(pid, 0),
+                           acc.names[pid]), acc.names[pid], v, side_of[sid])
+             for sid, acc in per_side.items() for pid, v in acc.wickets.items()]
+    _, bat_name, bat_runs, bat_side = min(bats, key=lambda t: t[0], default=(None, "", 0, None))
+    _, bowl_name, bowl_wkts, bowl_side = min(bowls, key=lambda t: t[0],
+                                             default=(None, "", 0, None))
     return TournamentLeaders(
         top_scorer=(bat_name, bat_runs), top_wicket_taker=(bowl_name, bowl_wkts),
         top_scorer_side=bat_side, top_wicket_taker_side=bowl_side,

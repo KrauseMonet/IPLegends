@@ -1504,16 +1504,6 @@ body{
    consistently everywhere (powerplay gold, middle steel, death red) so a viewer learns the
    key once on the Manhattan and reads every other chart for free. */
 .an-wrap{max-width:1120px;margin:0 auto;padding:0 4px 40px}
-.an-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;
-  flex-wrap:wrap;padding:6px 0 22px;border-bottom:1px solid var(--line-strong);margin-bottom:24px}
-.an-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--ink-3);margin-bottom:6px}
-.an-title{font-family:var(--display);font-size:clamp(30px,5vw,52px);line-height:.95;
-  text-transform:uppercase;letter-spacing:.01em;color:var(--ink)}
-.an-stats{display:flex;gap:26px}
-.an-stat b{display:block;font-family:var(--mono);font-size:22px;color:var(--gold);line-height:1}
-.an-stat span{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-3)}
 
 .an-panel{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.018);
   padding:20px 20px 16px;margin-bottom:20px}
@@ -1555,16 +1545,6 @@ body{
 .an-phase-rows div{font-size:12.5px;color:var(--ink-3);line-height:1.75}
 .an-phase-rows em{font-family:var(--mono);font-style:normal;color:var(--ink-2)}
 
-.an-moments{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
-.an-moment{border:1px solid var(--line);border-radius:8px;padding:16px 18px;
-  background:linear-gradient(160deg,rgba(245,184,61,.07),transparent 62%)}
-.an-moment-label{font-family:var(--mono);font-size:10px;letter-spacing:.18em;
-  text-transform:uppercase;color:var(--ink-3)}
-.an-moment-value{font-family:var(--display);font-size:44px;line-height:1.05;color:var(--gold-2)}
-.an-moment-value i{font-family:var(--mono);font-style:normal;font-size:12px;
-  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-left:7px}
-.an-moment-detail{font-size:12.5px;color:var(--ink-2);margin-top:4px}
-
 .an-lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:16px}
 /* Five boards is a prime count, so `auto-fit` orphans one of them onto a row of its own
    at any width that fits four -- stretched to full width and looking like a different
@@ -1604,11 +1584,6 @@ body{
 .an-lead-row.top .an-lead-name{color:var(--ink);font-weight:650}
 .an-lead-row.top .an-lead-value{color:var(--gold-2)}
 
-@media (max-width:640px){
-  .an-head{align-items:flex-start}
-  .an-stats{gap:18px}
-  .an-moment-value{font-size:34px}
-}
 .an-key{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:6px 2px 0}
 .an-key-pip{width:7px;height:7px;border-radius:50%;background:var(--hot);opacity:.9;flex:none}
@@ -1691,6 +1666,175 @@ body{
 .an-team{font-family:var(--mono);font-style:normal;font-size:9.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);
   border-radius:3px;padding:1px 4px;margin-left:5px;white-space:nowrap}
+
+/* --- the analysis page's frame: hero, chapter bar, chapters, honours ---------------------
+   One loud thing per screen: the hero's headline, then each chapter's number and title.
+   Everything inside a chapter stays at panel volume so the chapters, not the panels, are
+   what the eye steps between. */
+.an-hero{position:relative;padding:34px 0 30px;margin-bottom:6px;overflow:hidden}
+.an-hero::after{content:"";position:absolute;right:-60px;top:-40px;width:420px;height:420px;
+  border-radius:50%;pointer-events:none;
+  background:radial-gradient(closest-side,rgba(245,184,61,.16),transparent 70%)}
+.an-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:12px}
+.an-title{font-family:var(--display);font-size:clamp(42px,7.4vw,86px);line-height:.92;
+  text-transform:uppercase;letter-spacing:.005em;color:var(--ink);margin:0 0 30px;font-weight:400}
+.an-hero-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
+  border-top:1px solid var(--line-strong);border-bottom:1px solid var(--line-strong)}
+.an-hero-stat{padding:16px 18px 14px;border-left:1px solid var(--line)}
+.an-hero-stat:first-child{border-left:0;padding-left:0}
+.an-hero-stat b{display:block;font-family:var(--display);font-weight:400;font-size:clamp(28px,3.6vw,42px);
+  line-height:1;color:var(--gold-2);letter-spacing:.01em}
+.an-hero-stat.six b{color:var(--hot)}
+.an-hero-stat span{display:block;margin-top:6px;font-family:var(--mono);font-size:10px;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+
+/* Sits under the site's own sticky bar (64px) rather than over it. */
+.an-nav{position:sticky;top:64px;z-index:20;display:flex;align-items:center;gap:14px;
+  justify-content:space-between;margin:0 -10px 10px;padding:10px;
+  background:rgba(6,13,31,.88);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line)}
+.an-nav-links{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.an-nav-links::-webkit-scrollbar{display:none}
+.an-nav-links button{flex:none;background:none;border:0;cursor:pointer;padding:7px 11px;
+  border-radius:6px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-2);white-space:nowrap}
+.an-nav-links button:hover{background:rgba(255,255,255,.06);color:var(--ink)}
+.an-nav-links button i{font-style:normal;color:var(--gold);margin-right:7px}
+.an-nav-scope{flex:none}
+
+.an-chapter{padding:40px 0 8px;scroll-margin-top:130px}
+.an-chapter-head{display:grid;grid-template-columns:auto minmax(0,1fr);gap:20px;
+  align-items:start;margin-bottom:22px}
+.an-chapter-num{font-family:var(--display);font-size:64px;line-height:.8;color:transparent;
+  -webkit-text-stroke:1px rgba(245,184,61,.55);padding-top:2px}
+.an-chapter-title{font-family:var(--display);font-weight:400;font-size:clamp(26px,3.4vw,36px);
+  text-transform:uppercase;letter-spacing:.01em;line-height:1;margin:0 0 10px;color:var(--ink);
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.an-chapter-line{margin:0;max-width:66ch;font-size:15.5px;line-height:1.6;color:var(--ink-2)}
+.an-chapter-line b{color:var(--ink);font-weight:650}
+.an-scope-tag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;padding:4px 8px;
+  border-radius:4px;border:1px solid var(--line-strong);color:var(--ink-3)}
+.an-scope-tag.yours{border-color:var(--gold);color:var(--gold)}
+.an-sub{font-family:var(--display);font-size:20px;text-transform:uppercase;letter-spacing:.02em;
+  color:var(--ink);margin:26px 0 12px}
+.an-sub span{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  color:var(--ink-3);margin-top:3px}
+.an-chapter .an-lists{margin-bottom:20px}
+.an-lists-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:900px){.an-lists-3{grid-template-columns:minmax(0,1fr)}}
+
+/* The honours: six cards, the four awards carrying their winner's crest large and faint
+   behind the number, the way a broadcast puts a team's badge behind a player's stat. */
+.an-honours{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.an-award{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:14px;
+  padding:18px 20px 16px;min-height:168px;--acc:var(--gold);
+  background:linear-gradient(150deg,color-mix(in srgb,var(--acc) 16%,transparent),rgba(255,255,255,.015) 60%)}
+.an-award::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--acc)}
+.an-award-orange{--acc:var(--cap-orange)}
+.an-award-purple{--acc:var(--cap-purple)}
+.an-award-econ{--acc:var(--mint)}
+.an-award-sr{--acc:var(--gold)}
+.an-award-moment{--acc:var(--hot)}
+.an-award-crest{position:absolute;right:-14px;bottom:-18px;width:132px;height:132px;
+  object-fit:contain;opacity:.16;pointer-events:none}
+.an-award-star{display:flex;align-items:center;justify-content:center;font-size:110px;
+  color:var(--gold);line-height:1}
+.an-award-label{position:relative;font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--acc);font-weight:700}
+.an-award-value{position:relative;font-family:var(--display);font-size:54px;line-height:1.02;
+  color:var(--ink);margin:8px 0 2px}
+.an-award-value i{font-family:var(--mono);font-style:normal;font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin-left:8px}
+.an-award-name{position:relative;font-size:17px;font-weight:650;color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-award-detail{position:relative;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+  margin-top:3px}
+.an-award-detail .an-team{margin:0 6px 0 0}
+.an-award.yours .an-award-name::after{content:" · your side";font-family:var(--mono);
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);font-weight:400}
+@media (max-width:900px){.an-honours{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){
+  .an-honours{gap:10px}
+  .an-award{min-height:0;padding:14px 14px 12px}
+  .an-award-value{font-size:36px}
+  .an-award-value i{display:block;margin:2px 0 0;font-size:9.5px}
+  .an-award-name{font-size:15px}
+  .an-award-crest{width:92px;height:92px}
+  .an-award-star{font-size:78px}
+  .an-award.yours .an-award-name::after{content:none}
+}
+
+/* Phase cards with their three share bars. */
+.an-chapter .an-phases{margin:14px 0 0}
+.an-phase{padding:16px 18px}
+.an-phase-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  margin-bottom:12px}
+.an-phase-top .an-phase-overs{margin-bottom:0}
+.an-phase-top .an-phase-rate{flex-direction:column;align-items:flex-end;gap:2px;margin:0}
+.an-phase-top .an-phase-rate b{font-size:30px;color:var(--tint)}
+.an-phase-rows{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px}
+.an-shares{display:grid;gap:6px}
+.an-share{display:grid;grid-template-columns:58px minmax(0,1fr) 38px;align-items:center;gap:8px}
+.an-share span{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3)}
+.an-share div{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.an-share div i{display:block;height:100%;background:var(--tint);border-radius:3px;opacity:.85}
+.an-share b{font-family:var(--mono);font-size:12px;color:var(--ink-2);text-align:right}
+
+/* Setting against chasing: two cards facing off. */
+.an-chapter .an-vs{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;
+  margin-bottom:20px}
+.an-vs-mid{font-family:var(--display);font-size:26px;color:var(--ink-3);text-transform:uppercase}
+.an-chapter .an-split-big{font-family:var(--display);font-size:56px;line-height:1}
+@media (max-width:560px){
+  .an-chapter .an-vs{grid-template-columns:minmax(0,1fr)}
+  .an-vs-mid{display:none}
+}
+
+.an-bdy-totals{display:flex;gap:34px;flex-wrap:wrap;margin-bottom:16px}
+.an-bdy-totals b{display:block;font-family:var(--display);font-weight:400;font-size:44px;
+  line-height:1;color:var(--ink)}
+.an-bdy-totals div:nth-child(2) b{color:var(--hot)}
+.an-bdy-totals div:nth-child(3) b{color:var(--gold-2)}
+.an-bdy-totals span{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3)}
+
+/* Leaderboard rows gain a bar measured against the leader (--frac), and your own side's
+   rows are lit. The "show all" fold hides rows past the limit until asked. */
+.an-lead-row{position:relative}
+.an-lead-bar{grid-column:2/4;height:3px;border-radius:2px;margin-top:5px;
+  background:linear-gradient(90deg,var(--lead-acc,var(--ink-3)) calc(var(--frac)*100%),rgba(255,255,255,.05) 0)}
+.an-lead-orange{--lead-acc:var(--cap-orange)}
+.an-lead-purple,.an-lead-six{--lead-acc:var(--cap-purple)}
+.an-lead-econ{--lead-acc:var(--mint)}
+.an-lead-sr,.an-lead-power{--lead-acc:var(--gold)}
+.an-lead-avg,.an-lead-four,.an-lead-rating{--lead-acc:#4aa8ff}
+.an-lead-death{--lead-acc:var(--hot)}
+.an-lead-row.yours{background:linear-gradient(90deg,rgba(245,184,61,.08),transparent);
+  margin:0 -8px;padding-left:8px;padding-right:8px}
+.an-lead-limit-5:not(.open) .an-lead-row:nth-child(n+7){display:none}
+.an-lead-more-btn{display:block;width:100%;margin-top:6px;padding:9px 0 4px;background:none;
+  border:0;border-top:1px solid var(--line);cursor:pointer;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.an-lead-more-btn:hover{color:var(--gold)}
+
+@media (max-width:760px){
+  .an-hero{padding-top:20px}
+  .an-hero-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .an-hero-stat{padding:12px 10px 10px}
+  .an-hero-stat:nth-child(4){border-left:0;padding-left:0}
+  .an-hero-stat:nth-child(n+4){border-top:1px solid var(--line)}
+  .an-nav{gap:8px;padding:8px 10px}
+  .an-nav-links{flex:1}
+  .an-nav-links button{padding:7px 8px;font-size:10.5px}
+  .an-nav-scope .an-tab{padding:7px 9px;font-size:10px}
+  .an-nav-scope .an-long{display:none}
+  .an-chapter{padding-top:30px}
+  .an-chapter-head{gap:14px}
+  .an-chapter-num{font-size:44px}
+  .an-chapter-line{font-size:14.5px}
+}
 
 /* --- the slot picker: a draft pick placed from the bottom of a phone screen ----------------
    Only ever opened when the draft's columns are stacked (<=900px); see common.js. Tap

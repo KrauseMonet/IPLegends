@@ -20,11 +20,12 @@ from game.season import (
     TOSS_DEFAULT_ELECTS, ImpactPick, JourneyAccumulator, NeedImpact, NeedToss, Result,
     Season, Side, Standing, TossElect, _MatchNeedsImpact, _MatchNeedsToss, _abbrev,
     _apply_batting_impact, _apply_bowling_impact, _bowling_depth_shortfall, _credit,
-    _insert_batting_impact, _leader, _OpenMatchNeedsToss,
+    _insert_batting_impact, _OpenMatchNeedsToss,
     _play_human_match, _tailender_bowler, _weakest_bowler, _weakest_pure_batter,
     decide_impact, fixtures, journey_stats, play_open, run_league, run_playoffs, toss,
-    tournament_leaders,
+    top_batter, top_bowler, tournament_leaders,
 )
+from game.analysis import season_analysis
 from game.simulator import BALLS_PER_OVER, OVERS, BatterCard, BowlerCard, Innings, Player
 
 FULL = OVERS * BALLS_PER_OVER
@@ -197,7 +198,7 @@ def test_a_bowler_who_never_bowled_a_ball_is_not_counted():
 def test_two_different_people_sharing_a_name_do_not_collapse_into_one_total():
     """The whole reason this accumulator keys by person_id rather than name (CLAUDE.md's
     standing rule): two drafted seasons can share a registry name, and if the dict keyed
-    on that name, their runs would merge into one total and `_leader` could crown a person
+    on that name, their runs would merge into one total and `top_batter` could crown a person
     who never scored most of the runs credited to him."""
     acc = JourneyAccumulator()
     acc.add_batting(Innings(batting=[
@@ -206,17 +207,74 @@ def test_two_different_people_sharing_a_name_do_not_collapse_into_one_total():
     ], bowling=[]))
     assert acc.runs == {"p1": 80, "p2": 5}
     assert acc.names == {"p1": "S Sharma", "p2": "S Sharma"}
-    assert _leader(acc.runs, acc.names) == ("S Sharma", 80)
+    assert top_batter(acc) == ("S Sharma", 80)
 
 
-def test_leader_breaks_ties_alphabetically():
-    """A dict's own iteration order is insertion order, not a real tie-break -- the leader
-    must not depend on which of two equal totals happened to be added first."""
-    assert _leader({"Zed": 50, "Amy": 50, "Mid": 10}) == ("Amy", 50)
+# --- one tie-break everywhere ------------------------------------------------------------
+# The names are chosen so that alphabetical order points the OTHER way: a tie-break that
+# fell back to the name (the old rule) fails every one of these.
+
+def test_a_runs_tie_goes_to_the_better_strike_rate():
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("Amy", 50, 40), _batter("Zed", 50, 30),
+                                     _batter("Mid", 10, 8)], bowling=[]))
+    assert top_batter(acc) == ("Zed", 50)
 
 
-def test_leader_on_no_evidence_at_all():
-    assert _leader({}) == ("", 0)
+def test_a_wickets_tie_goes_to_the_better_economy():
+    acc = JourneyAccumulator()
+    amy, zed = _bowler("Amy", 3), _bowler("Zed", 3)
+    amy.runs, zed.runs = 30, 20
+    acc.add_bowling(Innings(batting=[], bowling=[amy, zed]))
+    assert top_bowler(acc) == ("Zed", 3)
+
+
+def test_the_name_settles_only_a_complete_tie():
+    """Insertion order is not a tie-break: the leader must not depend on which of two
+    identical records happened to be added first."""
+    acc = JourneyAccumulator()
+    acc.add_batting(Innings(batting=[_batter("Zed", 50, 30), _batter("Amy", 50, 30)],
+                            bowling=[]))
+    assert top_batter(acc) == ("Amy", 50)
+
+
+def test_top_performers_on_no_evidence_at_all():
+    acc = JourneyAccumulator()
+    assert top_batter(acc) == ("", 0)
+    assert top_bowler(acc) == ("", 0)
+
+
+def test_the_caps_the_journey_card_and_season_analysis_name_the_same_leaders_on_a_tie():
+    """The reported bug. The caps broke a tie alphabetically and the analysis board by
+    insertion order, so a tied Purple Cap named different bowlers on the season page and
+    on the analysis screen from identical figures (3 of 24 measured seasons). All three
+    must now rank by the same key.
+
+    Both ties sit on side A, so the journey card for A (`top_batter`/`top_bowler` over
+    its own accumulator) is tested on exactly the same tie as the whole-field caps. Each
+    tie is inserted in the order that the old insertion-order rule would get WRONG, and
+    named so that the old alphabetical rule would get wrong too."""
+    a, b = side("A"), side("B")
+    amy, zed = _bowler("Amy", 3), _bowler("Zed", 3)
+    amy.runs, zed.runs = 30, 20       # Zed: same wickets, better economy
+    results = [Result(
+        home=a, away=b,
+        home_innings=Innings(batting=[_batter("Amy", 50, 40), _batter("Zed", 50, 30)],
+                             bowling=[], runs=100),
+        away_innings=Innings(batting=[], bowling=[amy, zed], runs=0),
+    )]
+    leaders = tournament_leaders(results)
+    assert leaders.top_scorer == ("Zed", 50)
+    assert leaders.top_wicket_taker == ("Zed", 3)
+
+    acc = JourneyAccumulator()
+    acc.add_batting(results[0].home_innings)
+    acc.add_bowling(results[0].away_innings)
+    assert (top_batter(acc), top_bowler(acc)) == (("Zed", 50), ("Zed", 3))
+
+    an = season_analysis(results, track=a)
+    assert (an.top_scorers[0].name, an.top_scorers[0].value) == ("Zed", 50)
+    assert (an.top_wickets[0].name, an.top_wickets[0].value) == ("Zed", 3)
 
 
 def test_journey_stats_combines_the_league_record_with_however_far_the_playoffs_went():

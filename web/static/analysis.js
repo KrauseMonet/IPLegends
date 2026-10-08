@@ -6,10 +6,19 @@
 // lives here rather than in either one: both call `renderAnalysis(data, host)` with the
 // identical `AnalysisOut` payload, so the two screens cannot drift.
 //
+// The page reads as a magazine spread rather than a stack of charts: a headline band of the
+// season's numbers, the honours, then four numbered chapters (the innings, the bat, the
+// ball, boundaries), each led by one sentence saying what its charts show. Those sentences
+// are computed from the payload, never written in advance, so each one is true of the
+// season on screen -- and each picks its words (more / less, chasing / setting) from the
+// numbers rather than assuming the usual T20 shape.
+//
 // The two toggles ARE the "search" the feature was asked for. Rather than a query box that
 // can be typed into wrongly, the dimensions the engine can actually answer -- runs against
 // wickets, the whole league against your own side -- are the axes themselves, so every
-// combination a viewer can reach is one the data supports.
+// combination a viewer can reach is one the data supports. The scope toggle lives ONCE, in
+// the sticky chapter bar, and every panel it governs carries a tag saying which view it is
+// showing [A117: a control that governs a number must be findable from the number].
 
 let ANALYSIS = null;
 let AN_METRIC = 'runs';      // 'runs' | 'wickets'
@@ -17,22 +26,22 @@ let AN_SCOPE = 'league';     // 'league' | 'yours'
 
 const PHASE_TINT = {powerplay: 'var(--gold)', middle: 'var(--ink-2)', death: 'var(--hot)'};
 
+// Leaderboards show this many rows and fold the rest behind "show more": ten rows across
+// five boards was the wall of mono text that made the old screen a scroll rather than a read.
+const AN_LEAD_ROWS = 5;
+
+const AN_CHAPTERS = [
+  ['an-honours', 'Honours'],
+  ['an-innings', 'The innings'],
+  ['an-bat', 'With the bat'],
+  ['an-ball', 'With the ball'],
+  ['an-bdy', 'Boundaries'],
+];
+
 function renderAnalysis(d, host){
   ANALYSIS = d;
   if (!anYoursHasData()) AN_SCOPE = 'league';   // a spectator seat has no side of its own
-  host.innerHTML = `
-    <div class="an-head">
-      <div>
-        <div class="an-eyebrow">The Almanack · Season analysis</div>
-        <div class="an-title">Where the season was won</div>
-      </div>
-      <div class="an-stats">
-        ${anStat(d.fixtures, 'matches')}
-        ${anStat(d.innings, 'innings')}
-        ${anStat(d.overs_logged.toLocaleString(), 'overs')}
-      </div>
-    </div>
-    <div id="anBody"></div>`;
+  host.innerHTML = `<div id="anHero"></div><nav id="anNav" class="an-nav"></nav><div id="anBody"></div>`;
   anPaint();
 }
 
@@ -40,29 +49,54 @@ function anYoursHasData(){
   return !!ANALYSIS && ANALYSIS.your_phases.some(p => p.overs > 0);
 }
 
-function anStat(v, label){
-  return `<div class="an-stat"><b>${v}</b><span>${label}</span></div>`;
-}
-
 function anSetMetric(m){ AN_METRIC = m; anPaint(); }
 function anSetScope(s){ AN_SCOPE = s; anPaint(); }
 
+function anJump(id){
+  const el = document.getElementById(id);
+  if (!el) return;
+  // Clear the sticky site nav plus the chapter bar beneath it.
+  const bar = document.querySelector('.an-nav');
+  const off = (bar ? bar.getBoundingClientRect().bottom : 128) + 12;
+  const y = el.getBoundingClientRect().top + window.scrollY - off;
+  window.scrollTo({top: y, behavior: 'smooth'});
+}
+
+function anToggleMore(btn){
+  const panel = btn.closest('.an-lead');
+  const open = panel.classList.toggle('open');
+  btn.textContent = open ? 'Show fewer' : btn.dataset.more;
+}
+
+// --- small helpers for the sentences ---------------------------------------------------------
+
+const anSum = (rows, k) => rows.reduce((n, r) => n + (r[k] || 0), 0);
+const anPct = (a, b) => b ? Math.round(100 * a / b) : 0;
+const anFix = (v, n = 1) => Number(v).toFixed(n);
+
+function anOrdinal(n){
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function anPhase(phases, key){ return phases.find(p => p.phase === key) || null; }
+
+// --- the page -------------------------------------------------------------------------------
+
 function anPaint(){
   const d = ANALYSIS;
-  const phases = AN_SCOPE === 'yours' ? d.your_phases : d.phases;
-  const bars = AN_SCOPE === 'yours' ? d.your_manhattan : d.manhattan;
-  const scopeToggle = anYoursHasData() ? `
-    <div class="an-toggle">
-      <button class="an-tab ${AN_SCOPE === 'league' ? 'sel' : ''}" onclick="anSetScope('league')">Whole league</button>
-      <button class="an-tab ${AN_SCOPE === 'yours' ? 'sel' : ''}" onclick="anSetScope('yours')">Your side</button>
-    </div>` : '';
-
-  // [A117] Every boundary figure the panel below shows, resolved once for the current
-  // scope. The panel carries its own copy of the toggle rather than relying on the one in
-  // the Manhattan head three screens up -- that is where this was reported from, and a
-  // control that governs a number should be next to the number. Both write the same
-  // global and `anPaint` redraws everything, so the two can never disagree.
   const yours = AN_SCOPE === 'yours';
+  const phases = yours ? d.your_phases : d.phases;
+  const bars = yours ? d.your_manhattan : d.manhattan;
+
+  $('#anHero').innerHTML = anHero(d);
+  $('#anNav').innerHTML = anNavBar();
+  // The site's own sticky bar is 64px on a desktop and wraps taller on a phone, so the
+  // chapter bar is pinned beneath whatever height it actually has.
+  const top = document.querySelector('.topnav');
+  if (top) $('#anNav').style.top = top.offsetHeight + 'px';
+
+  // [A117] Every boundary figure the panel below shows, resolved once for the current scope.
   const bdy = {
     fours: yours ? d.your_total_fours : d.total_fours,
     sixes: yours ? d.your_total_sixes : d.total_sixes,
@@ -70,112 +104,244 @@ function anPaint(){
     sixBoard: yours ? d.your_most_sixes : d.most_sixes,
     fourBoard: yours ? d.your_most_fours : d.most_fours,
   };
+  const scopeTag = anYoursHasData()
+    ? `<span class="an-scope-tag${yours ? ' yours' : ''}">${yours ? 'Your side' : 'Whole league'}</span>`
+    : '';
 
   $('#anBody').innerHTML = `
-    <div class="an-panel">
-      <div class="an-panel-head">
-        <div>
-          <h3>Manhattan</h3>
-          <p>${AN_METRIC === 'runs'
-                ? 'Runs per over, averaged over the innings that reached it.'
-                : 'Wickets per over.'}</p>
-        </div>
-        <div class="an-controls">
+    ${anChapter('an-honours', '01', 'The honours', anHonoursLine(d), '', `
+      <div class="an-honours">
+        ${anAward('Orange Cap', 'orange', d.top_scorers[0], v => Math.round(v), 'runs')}
+        ${anAward('Purple Cap', 'purple', d.top_wickets[0], v => Math.round(v), 'wickets')}
+        ${anAward('Best economy', 'econ', d.best_economy[0], v => anFix(v, 2), 'an over')}
+        ${anAward('Best strike rate', 'sr', d.best_strike[0], v => anFix(v), 'per 100 balls')}
+        ${anMoment('Biggest over', d.best_over && {
+            value: d.best_over.runs, unit: 'runs',
+            name: `Over ${d.best_over.over}`,
+            detail: `${esc(d.best_over.side)} · off ${esc(d.best_over.bowler)}`})}
+        ${anMoment('Highest innings', d.highest_innings && {
+            value: `${d.highest_innings.runs}/${d.highest_innings.wickets}`, unit: '',
+            name: esc(d.highest_innings.side),
+            detail: `${d.highest_innings.overs} overs`})}
+      </div>`)}
+
+    ${anChapter('an-innings', '02', 'How an innings unfolded', anInningsLine(phases, bars), scopeTag, `
+      <div class="an-panel">
+        <div class="an-panel-head">
+          <div>
+            <h3>Manhattan</h3>
+            <p>${AN_METRIC === 'runs'
+                  ? 'Runs per over, averaged over the innings that reached it.'
+                  : 'Wickets that fell in each over, all season.'}</p>
+          </div>
           <div class="an-toggle">
             <button class="an-tab ${AN_METRIC === 'runs' ? 'sel' : ''}" onclick="anSetMetric('runs')">Runs</button>
             <button class="an-tab ${AN_METRIC === 'wickets' ? 'sel' : ''}" onclick="anSetMetric('wickets')">Wickets</button>
           </div>
-          ${scopeToggle}
         </div>
+        <div class="an-scroll">${manhattanSvg(bars, AN_METRIC)}</div>
+        ${AN_METRIC === 'runs'
+          ? '<div class="an-key"><i class="an-key-pip"></i>a pip marks the overs wickets fell in</div>'
+          : ''}
       </div>
-      <div class="an-scroll">${manhattanSvg(bars, AN_METRIC)}</div>
-      ${AN_METRIC === 'runs'
-        ? '<div class="an-key"><i class="an-key-pip"></i>a pip marks the overs wickets fell in</div>'
-        : ''}
-    </div>
+      <div class="an-phases">${phases.map(p => phaseCard(p, phases)).join('')}</div>`)}
 
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>The three phases</h3>
-        <p>Overs 1-6, 7-15, 16-20.</p>
-      </div></div>
-      <div class="an-phases">${phases.map(phaseCard).join('')}</div>
-      <div class="an-scroll">${phaseBarSvg(phases)}</div>
-    </div>
-
-    <div class="an-panel">
-      <div class="an-panel-head"><div><h3>The season's biggest moments</h3></div></div>
-      <div class="an-moments">
-        ${momentCard('Biggest over', d.best_over && `${d.best_over.runs}`,
-                     d.best_over && `Over ${d.best_over.over} · ${esc(d.best_over.side)} · off ${d.best_over.bowler}`,
-                     'runs')}
-        ${momentCard('Highest innings', d.highest_innings && `${d.highest_innings.runs}/${d.highest_innings.wickets}`,
-                     d.highest_innings && `${esc(d.highest_innings.side)} · ${d.highest_innings.overs} overs`,
-                     '')}
+    ${anChapter('an-bat', '03', 'With the bat', anBatLine(d), '', `
+      <div class="an-vs">
+        ${splitCard('Batting first', d.bat_first, 'first')}
+        <div class="an-vs-mid">v</div>
+        ${splitCard('Chasing', d.chasing, 'chase')}
       </div>
-    </div>
+      <div class="an-panel">
+        <div class="an-panel-head"><div>
+          <h3>The batting order</h3>
+          <p>Runs and average by the number a batter went in at.</p>
+        </div></div>
+        <div class="an-scroll">${positionSvg(d.positions)}</div>
+      </div>
+      <div class="an-lists an-lists-3">
+        ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v, 'runs', AN_LEAD_ROWS)}
+        ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1), 'runs per dismissal', AN_LEAD_ROWS)}
+        ${leaderPanel('Best strike rate', 'Runs per hundred balls', d.best_strike, 'sr', v => v.toFixed(1), 'runs per 100 balls', AN_LEAD_ROWS)}
+      </div>`)}
 
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>Who bowls the hard overs</h3>
-        <p>Economy in each phase, attributed over by over.</p>
-      </div></div>
+    ${anChapter('an-ball', '04', 'With the ball', anBallLine(d), '', `
+      <div class="an-lists an-lists-2">
+        ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v, 'wickets', AN_LEAD_ROWS)}
+        ${leaderPanel('Best economy', 'Runs per over conceded', d.best_economy, 'econ', v => v.toFixed(2), 'runs per over', AN_LEAD_ROWS)}
+      </div>
+      <div class="an-sub">Who bowls the hard overs <span>Economy in each phase, attributed over by over</span></div>
       <div class="an-lists an-lists-2">
         ${phasePanel('At the death', 'Overs 16-20 · lowest economy', d.death_bowlers, 'death')}
         ${phasePanel('In the powerplay', 'Overs 1-6 · lowest economy', d.powerplay_bowlers, 'power')}
       </div>
-    </div>
+      <div class="an-panel">
+        <div class="an-panel-head"><div>
+          <h3>Spin against pace</h3>
+          <p>Economy, wickets and overs for each style, by phase.</p>
+        </div></div>
+        ${styleTable(d.style_phases, d.unknown_style_overs)}
+      </div>`)}
 
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>Spin against pace</h3>
-        <p>Economy, wickets and overs for each style, by phase.</p>
-      </div></div>
-      ${styleTable(d.style_phases, d.unknown_style_overs)}
-    </div>
-
-    <div class="an-panel">
-      <div class="an-panel-head">
-        <div>
-          <h3>Boundaries</h3>
-          <p>${bdy.fours.toLocaleString()} fours and ${bdy.sixes.toLocaleString()}
-             sixes — ${bdy.share}% of ${yours ? "your side's runs" : 'every run scored'}.</p>
-        </div>
-        ${scopeToggle}
+    ${anChapter('an-bdy', '05', 'Boundaries', anBoundaryLine(bdy, phases, yours), scopeTag, `
+      <div class="an-bdy-totals">
+        <div><b>${bdy.fours.toLocaleString()}</b><span>fours</span></div>
+        <div><b>${bdy.sixes.toLocaleString()}</b><span>sixes</span></div>
+        <div><b>${bdy.share}%</b><span>of ${yours ? "your side's runs" : 'all runs'}</span></div>
       </div>
       ${boundaryPhases(phases)}
       <div class="an-lists an-lists-2">
-        ${leaderPanel('Most sixes', 'Cleared the rope', bdy.sixBoard, 'six', v => v, 'sixes')}
-        ${leaderPanel('Most fours', 'Found the fence', bdy.fourBoard, 'four', v => v, 'fours')}
+        ${leaderPanel('Most sixes', 'Cleared the rope', bdy.sixBoard, 'six', v => v, 'sixes', AN_LEAD_ROWS)}
+        ${leaderPanel('Most fours', 'Found the fence', bdy.fourBoard, 'four', v => v, 'fours', AN_LEAD_ROWS)}
+      </div>`)}`;
+}
+
+function anHero(d){
+  const wickets = anSum(d.phases, 'wickets');
+  const balls = anSum(d.phases, 'balls');
+  const rr = balls ? d.total_runs / (balls / 6) : 0;
+  const stat = (v, label, cls = '') =>
+    `<div class="an-hero-stat ${cls}"><b>${v}</b><span>${label}</span></div>`;
+  return `<header class="an-hero">
+    <div class="an-eyebrow">Season analysis · ${d.fixtures} matches · ${d.innings} innings ·
+      ${d.overs_logged.toLocaleString()} overs</div>
+    <h2 class="an-title">Where the season<br>was won</h2>
+    <div class="an-hero-stats">
+      ${stat(d.total_runs.toLocaleString(), 'runs')}
+      ${stat(wickets.toLocaleString(), 'wickets')}
+      ${stat(d.total_sixes.toLocaleString(), 'sixes', 'six')}
+      ${stat(d.total_fours.toLocaleString(), 'fours')}
+      ${stat(anFix(rr, 2), 'runs an over')}
+    </div>
+  </header>`;
+}
+
+function anNavBar(){
+  const yours = AN_SCOPE === 'yours';
+  const scope = anYoursHasData() ? `
+    <div class="an-toggle an-nav-scope" title="Applies to the innings and boundaries chapters">
+      <button class="an-tab ${!yours ? 'sel' : ''}" onclick="anSetScope('league')"><span class="an-long">Whole </span>league</button>
+      <button class="an-tab ${yours ? 'sel' : ''}" onclick="anSetScope('yours')"><span class="an-long">Your </span>side</button>
+    </div>` : '';
+  return `
+    <div class="an-nav-links">${AN_CHAPTERS.map(([id, label], i) =>
+      `<button onclick="anJump('${id}')"><i>0${i + 1}</i>${label}</button>`).join('')}</div>
+    ${scope}`;
+}
+
+function anChapter(id, num, title, line, tag, body){
+  return `<section class="an-chapter" id="${id}">
+    <div class="an-chapter-head">
+      <div class="an-chapter-num">${num}</div>
+      <div>
+        <h3 class="an-chapter-title">${title} ${tag}</h3>
+        ${line ? `<p class="an-chapter-line">${line}</p>` : ''}
       </div>
     </div>
+    ${body}
+  </section>`;
+}
 
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>Setting or chasing</h3>
-        <p>Average score and win rate. A chase ends when it is won.</p>
-      </div></div>
-      <div class="an-vs">
-        ${splitCard('Batting first', d.bat_first, 'first')}
-        ${splitCard('Chasing', d.chasing, 'chase')}
-      </div>
-    </div>
+// --- the honours --------------------------------------------------------------------------
 
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>The batting order</h3>
-        <p>Runs and average by the number a batter went in at.</p>
-      </div></div>
-      <div class="an-scroll">${positionSvg(d.positions)}</div>
-    </div>
+function anCrestMark(row){
+  // A drafted side has no crest; it reads YOU on the leaderboards, so it gets the star the
+  // rest of the site uses for your own side.
+  return row.crest
+    ? `<img class="an-award-crest" src="${row.crest}" alt="" loading="lazy">`
+    : `<div class="an-award-crest an-award-star">★</div>`;
+}
 
-    <div class="an-lists an-lists-5">
-      ${leaderPanel('Orange Cap', 'Most runs', d.top_scorers, 'orange', v => v, 'runs')}
-      ${leaderPanel('Purple Cap', 'Most wickets', d.top_wickets, 'purple', v => v, 'wickets')}
-      ${leaderPanel('Best average', 'Runs per dismissal', d.best_averages, 'avg', v => v.toFixed(1), 'runs per dismissal')}
-      ${leaderPanel('Best economy', 'Runs per over conceded', d.best_economy, 'econ', v => v.toFixed(2), 'runs per over')}
-      ${leaderPanel('Best strike rate', 'Runs per hundred balls', d.best_strike, 'sr', v => v.toFixed(1), 'runs per 100 balls')}
-    </div>`;
+function anAward(label, kind, row, fmt, unit){
+  if (!row) return '';
+  return `<div class="an-award an-award-${kind}${row.team === 'YOU' ? ' yours' : ''}">
+    ${anCrestMark(row)}
+    <div class="an-award-label">${label}</div>
+    <div class="an-award-value">${fmt(row.value)}<i>${unit}</i></div>
+    <div class="an-award-name">${esc(row.name)}</div>
+    <div class="an-award-detail">${teamTag(row.team)}${esc(row.detail || '')}</div>
+  </div>`;
+}
+
+function anMoment(label, m){
+  if (!m) return '';
+  return `<div class="an-award an-award-moment">
+    <div class="an-award-label">${label}</div>
+    <div class="an-award-value">${m.value}<i>${m.unit}</i></div>
+    <div class="an-award-name">${m.name}</div>
+    <div class="an-award-detail">${m.detail}</div>
+  </div>`;
+}
+
+// --- the chapter sentences ------------------------------------------------------------------
+// Each returns '' when the data cannot support it, rather than a sentence about nothing.
+
+function anHonoursLine(d){
+  const o = d.top_scorers[0], p = d.top_wickets[0];
+  if (!o || !p) return '';
+  return `<b>${esc(o.name)}</b> made ${Math.round(o.value)} runs and <b>${esc(p.name)}</b>
+    took ${Math.round(p.value)} wickets — the season's two caps.`;
+}
+
+function anInningsLine(phases, bars){
+  const pp = anPhase(phases, 'powerplay'), death = anPhase(phases, 'death');
+  if (!pp || !death || !pp.overs || !death.overs) return '';
+  const diff = death.run_rate - pp.run_rate;
+  const runs = anSum(phases, 'runs'), wk = anSum(phases, 'wickets'), ov = anSum(phases, 'overs');
+  let s = `The death went at <b>${anFix(death.run_rate, 2)}</b> an over, ${anFix(Math.abs(diff))}
+    ${diff >= 0 ? 'more' : 'less'} than the powerplay: its ${anPct(death.overs, ov)}% of the overs
+    brought ${anPct(death.runs, runs)}% of the runs and ${anPct(death.wickets, wk)}% of the wickets.`;
+  const reached = bars.filter(b => b.innings);
+  if (reached.length){
+    const peak = reached.reduce((a, b) => b.average_runs > a.average_runs ? b : a);
+    s += ` The dearest over was the <b>${anOrdinal(peak.over)}</b>, at ${anFix(peak.average_runs)}
+      runs an innings.`;
+  }
+  return s;
+}
+
+function anBatLine(d){
+  const f = d.bat_first, c = d.chasing;
+  if (!f.innings || !c.innings) return '';
+  const chaseWon = c.win_rate > f.win_rate;
+  let s = `${chaseWon ? 'Chasing' : 'Setting a total'} won <b>${anFix(
+      chaseWon ? c.win_rate : f.win_rate, 0)}%</b> of matches; a first innings averaged
+    ${anFix(f.average)}.`;
+  // An average off a handful of dismissals is one score, not a reading of the position.
+  const steady = d.positions.filter(p => p.outs >= 10);
+  if (steady.length){
+    const best = steady.reduce((a, b) => b.average > a.average ? b : a);
+    s += ` Number <b>${best.position}</b> was the steadiest place to bat, at ${anFix(best.average)}
+      runs a dismissal.`;
+  }
+  return s;
+}
+
+function anBallLine(d){
+  const tally = style => {
+    const rows = d.style_phases.filter(r => r.style === style);
+    return {overs: anSum(rows, 'overs'), runs: anSum(rows, 'runs'), wickets: anSum(rows, 'wickets')};
+  };
+  const pace = tally('pace'), spin = tally('spin');
+  if (!pace.overs || !spin.overs) return '';
+  const econ = t => anFix(t.runs / t.overs, 2);
+  const strike = t => t.wickets ? anFix(6 * t.overs / t.wickets) : '–';
+  return `Spin went at <b>${econ(spin)}</b> an over to pace's <b>${econ(pace)}</b>, and took a
+    wicket every ${strike(spin)} balls to pace's ${strike(pace)}.`;
+}
+
+function anBoundaryLine(b, phases, yours){
+  let s = `<b>${b.share}%</b> of ${yours ? "your side's" : 'every'} run${yours ? 's' : ''} came
+    in fours and sixes.`;
+  const withSixes = phases.filter(p => p.sixes && p.balls);
+  if (withSixes.length > 1){
+    const every = p => p.balls / p.sixes;
+    const most = withSixes.reduce((a, p) => every(p) < every(a) ? p : a);
+    const least = withSixes.reduce((a, p) => every(p) > every(a) ? p : a);
+    s += ` The ${most.label.toLowerCase()} cleared the rope every ${anFix(every(most))} balls,
+      the ${least.label.toLowerCase()} every ${anFix(every(least))}.`;
+  }
+  return s;
 }
 
 // --- the Manhattan -------------------------------------------------------------------------
@@ -187,8 +353,10 @@ function manhattanSvg(bars, metric){
   const W = 760, H = 300, L = 44, R = 12, T = 34, B = 42;
   const plotW = W - L - R, plotH = H - T - B;
   const vals = bars.map(b => metric === 'runs' ? b.average_runs : b.wickets);
+  // The axis is drawn in quarters, so the top is rounded up to a multiple of four and every
+  // gridline lands on a whole number (it used to read 0, 3, 6, 8, 11).
   const peak = Math.max(1, ...vals);
-  const top = metric === 'runs' ? Math.ceil(peak) : Math.max(1, Math.ceil(peak));
+  const top = Math.ceil(peak / 4) * 4;
   const bw = plotW / 20;
   const y = v => T + plotH - (v / top) * plotH;
 
@@ -208,7 +376,7 @@ function manhattanSvg(bars, metric){
     grid.push(`<line x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"
       stroke="var(--line)" stroke-width="1" opacity="${i ? '.5' : '1'}"/>
       <text x="${L - 8}" y="${(yy + 4).toFixed(1)}" class="an-axis" text-anchor="end">${
-        metric === 'runs' ? v.toFixed(0) : v.toFixed(0)}</text>`);
+        v.toFixed(0)}</text>`);
   }
 
   const cols = bars.map((b, i) => {
@@ -244,22 +412,36 @@ function manhattanSvg(bars, metric){
 
 // --- phases ---------------------------------------------------------------------------------
 
-function phaseCard(p){
+// --- phases ---------------------------------------------------------------------------------
+// One card per phase: its rate up top, then three share bars saying what fraction of the
+// innings' overs, runs and wickets it held. That replaces a separate stacked-bar chart
+// below the cards: "the death is a quarter of the overs and a third of the wickets" is the
+// sentence, and it reads best sitting on the phase it describes.
+
+function phaseCard(p, phases){
+  const share = k => anPct(p[k], anSum(phases, k));
+  const bar = (label, k) => `<div class="an-share">
+      <span>${label}</span><div><i style="width:${share(k)}%"></i></div><b>${share(k)}%</b>
+    </div>`;
   return `<div class="an-phase" style="--tint:${PHASE_TINT[p.phase]}">
-    <div class="an-phase-name">${p.label}</div>
-    <div class="an-phase-overs">Overs ${p.overs_range}</div>
-    <div class="an-phase-rate"><b>${p.run_rate.toFixed(2)}</b><span>runs / over</span></div>
+    <div class="an-phase-top">
+      <div>
+        <div class="an-phase-name">${p.label}</div>
+        <div class="an-phase-overs">Overs ${p.overs_range}</div>
+      </div>
+      <div class="an-phase-rate"><b>${p.run_rate.toFixed(2)}</b><span>runs / over</span></div>
+    </div>
     <div class="an-phase-rows">
       <div><em>${p.runs.toLocaleString()}</em> runs</div>
       <div><em>${p.wickets.toLocaleString()}</em> wickets</div>
-      <div><em>${p.balls_per_wicket ? p.balls_per_wicket.toFixed(1) : '--'}</em> balls / wicket</div>
+      <div><em>${p.balls_per_wicket ? p.balls_per_wicket.toFixed(1) : '–'}</em> balls / wkt</div>
+    </div>
+    <div class="an-shares">
+      ${bar('Overs', 'overs')}${bar('Runs', 'runs')}${bar('Wickets', 'wickets')}
     </div>
   </div>`;
 }
 
-// A single stacked bar of where the season's runs and wickets actually came from. Shares are
-// what a viewer wants here -- "the death is a fifth of the overs and a third of the wickets"
-// is the sentence, and two 100%-wide bars say it without any axis at all.
 // [A113] Spin against pace, per phase. A table rather than a chart: the interesting read
 // is "compare economy down a column", and three phases x two styles is small enough that
 // numbers beat bars -- the SVGs on this screen exist where a shape carries the meaning
@@ -344,69 +526,52 @@ function boundaryPhases(phases){
     </div>`).join('')}</div>`;
 }
 
-function phaseBarSvg(phases){
-  const W = 760, rowH = 34, pad = 8;
-  const rows = [['Runs', phases.map(p => p.runs)],
-                ['Wickets', phases.map(p => p.wickets)],
-                ['Overs', phases.map(p => p.overs)]];
-  const H = rows.length * (rowH + pad) + 24;
-  const L = 74;
-  const out = rows.map(([label, vals], r) => {
-    const total = vals.reduce((a, b) => a + b, 0) || 1;
-    let x = L;
-    const y = r * (rowH + pad) + 10;
-    const segs = vals.map((v, i) => {
-      const w = (v / total) * (W - L);
-      const key = ['powerplay', 'middle', 'death'][i];
-      const pct = Math.round(100 * v / total);
-      const seg = `<g><title>${label}, ${key}: ${v.toLocaleString()} (${pct}%)</title>
-        <rect x="${x.toFixed(1)}" y="${y}" width="${Math.max(0, w - 2).toFixed(1)}"
-          height="${rowH}" rx="3" fill="${PHASE_TINT[key]}" opacity=".8"/>
-        ${w > 44 ? `<text x="${(x + w / 2 - 1).toFixed(1)}" y="${y + rowH / 2 + 5}"
-          class="an-seg" text-anchor="middle">${pct}%</text>` : ''}</g>`;
-      x += w;
-      return seg;
-    }).join('');
-    return `<text x="${L - 12}" y="${y + rowH / 2 + 5}" class="an-axis"
-      text-anchor="end">${label}</text>${segs}`;
-  }).join('');
-  return `<svg class="an-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"
-    role="img" aria-label="Share of runs, wickets and overs by phase">${out}</svg>`;
+// --- leaders ----------------------------------------------------------------------------------
+// Each row carries a thin bar measured against the board's leader, so the gap between first
+// and fifth is visible without reading two numbers. On a lower-is-better board (an economy)
+// the bar is leader / value, so the best still reads longest.
+
+const AN_LOWER_BETTER = new Set(['econ', 'death', 'power']);
+
+function anLeadRow(r, i, kind, value, numeric, best, tip, sub){
+  const frac = AN_LOWER_BETTER.has(kind)
+    ? (numeric ? best / numeric : 0)
+    : (best ? numeric / best : 0);
+  return `
+    <div class="an-lead-row${i === 0 ? ' top' : ''}${r.team === 'YOU' ? ' yours' : ''}"
+         title="${attr(tip)}" style="--frac:${Math.max(0, Math.min(1, frac)).toFixed(3)}">
+      <span class="an-lead-pos">${i + 1}</span>
+      <span class="an-lead-name">${crestImg(r.crest, 'lead-crest')}${esc(r.name)}</span>
+      <span class="an-lead-value">${value}</span>
+      <span class="an-lead-sub">${teamTag(r.team)}${sub}</span>
+      <span class="an-lead-bar"></span>
+    </div>`;
 }
 
-// --- moments and leaders ---------------------------------------------------------------------
-
-function momentCard(label, value, detail, unit){
-  if (!value) return '';
-  return `<div class="an-moment">
-    <div class="an-moment-label">${label}</div>
-    <div class="an-moment-value">${value}<i>${unit}</i></div>
-    <div class="an-moment-detail">${detail}</div>
+function anLeadShell(title, sub, kind, rows, limit){
+  const more = limit && rows.length > limit
+    ? `<button class="an-lead-more-btn" data-more="Show all ${rows.length}"
+         onclick="anToggleMore(this)">Show all ${rows.length}</button>` : '';
+  return `<div class="an-lead an-lead-${kind}${limit ? ` an-lead-limit-${limit}` : ''}">
+    <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
+    ${rows.join('')}${more}
   </div>`;
 }
 
-function leaderPanel(title, sub, rows, kind, fmt, unit){
+// `limit` is optional: the records page shows every row, this screen folds past five.
+function leaderPanel(title, sub, rows, kind, fmt, unit, limit){
   if (!rows.length) return '';
+  const best = rows[0].value;
   // `unit` is the board's own reading of its number, so the tooltip says "675 runs" on
   // the Orange Cap and "6.26 runs per over" on the economy board rather than one generic
   // word that is wrong on four of the five.
   const body = rows.map((r, i) => {
     const tip = `${r.name}${r.team ? ' — ' + r.team : ''} · ${fmt(r.value)} ${unit}`
       + (r.detail ? ` · ${r.detail}` : '');
-    return `
-    <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
-      <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${crestImg(r.crest, 'lead-crest')}${r.name}</span>
-      <span class="an-lead-value">${fmt(r.value)}</span>
-      <span class="an-lead-sub">${teamTag(r.team)}${r.detail}</span>
-    </div>`;
-  }).join('');
-  return `<div class="an-lead an-lead-${kind}">
-    <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
-    ${body}
-  </div>`;
+    return anLeadRow(r, i, kind, fmt(r.value), r.value, best, tip, esc(r.detail || ''));
+  });
+  return anLeadShell(title, sub, kind, body, limit);
 }
-
 
 // --- [A110] phase specialists, the setting/chasing split, and the batting order ---------
 
@@ -416,32 +581,29 @@ function phasePanel(title, sub, rows, kind){
       <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>
       <div class="cap-empty">Nobody bowled enough overs in this phase to rank.</div></div>`;
   }
-  const body = rows.slice(0, 6).map((r, i) => {
+  const shown = rows.slice(0, AN_LEAD_ROWS);
+  const best = shown[0].economy;
+  const body = shown.map((r, i) => {
     const tip = `${r.name}${r.team ? ' — ' + r.team : ''}`
       + ` · economy ${r.economy.toFixed(2)} · ${r.overs} overs · ${r.wickets} wickets`;
-    return `
-    <div class="an-lead-row${i === 0 ? ' top' : ''}" title="${attr(tip)}">
-      <span class="an-lead-pos">${i + 1}</span>
-      <span class="an-lead-name">${crestImg(r.crest, 'lead-crest')}${r.name}</span>
-      <span class="an-lead-value">${r.economy.toFixed(2)}</span>
-      <span class="an-lead-sub">${teamTag(r.team)}${r.overs} ov · ${r.wickets}w</span>
-    </div>`;
-  }).join('');
-  return `<div class="an-lead an-lead-${kind}">
-    <div class="an-lead-head"><b>${title}</b><span>${sub}</span></div>${body}</div>`;
+    return anLeadRow(r, i, kind, r.economy.toFixed(2), r.economy, best, tip,
+                     `${r.overs} ov · ${r.wickets}w`);
+  });
+  return anLeadShell(title, sub, kind, body, 0);
 }
 
 function splitCard(title, s, kind){
   // A dash, not a 0%, when nothing has been played -- the same "no evidence is a dash"
-  // convention the ratings and the profile page already use.
-  const pct = s.innings ? s.win_rate.toFixed(0) + '%' : '–';
+  // convention the ratings and the profile page already use. Win rate leads because it is
+  // the question ("bat or bowl?"); the average score is the context under it.
+  const pct = s.innings ? s.win_rate.toFixed(0) : '–';
   return `<div class="an-split an-split-${kind}">
     <div class="an-split-title">${title}</div>
-    <div class="an-split-big">${s.innings ? s.average.toFixed(1) : '–'}<i>avg score</i></div>
+    <div class="an-split-big">${pct}<i>${s.innings ? '% won' : ''}</i></div>
     <div class="an-split-gauge"><span style="width:${s.innings ? s.win_rate : 0}%"></span></div>
     <div class="an-split-rows">
-      <div><em>${pct}</em> of these were won</div>
-      <div><em>${s.wins}</em> wins from <em>${s.innings}</em> innings</div>
+      <div><em>${s.wins}</em> wins from <em>${s.innings}</em></div>
+      <div><em>${s.innings ? s.average.toFixed(1) : '–'}</em> average score</div>
     </div>
   </div>`;
 }
@@ -508,7 +670,7 @@ function teamTag(team){
 
 // The `title` remains, because a name can still outrun its line on a narrow viewport --
 // but it is now the fallback rather than the only way to read a row. It is the same
-// tooltip mechanism the SVGs in this file already use (manhattanSvg, phaseBarSvg,
+// tooltip mechanism the SVGs in this file already use (manhattanSvg,
 // positionSvg all carry <title> children): one convention, no positioning logic to get
 // wrong, and it cannot overflow the viewport.
 //

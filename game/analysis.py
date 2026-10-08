@@ -45,10 +45,38 @@ different split here would put the analysis screen quietly at odds with the rati
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 BALLS_PER_OVER = 6
 FULL_INNINGS_BALLS = 120
 POWERPLAY_OVERS = 6
+
+
+# --- ranking the leaders -------------------------------------------------------------------
+# ONE ordering for every place a "most runs" or "most wickets" leader is chosen: the Orange
+# and Purple Caps and the journey card's top performers (game.season, which imports these),
+# and the leaderboards below.
+#
+# They used to disagree on ties, and nothing else. The caps broke a tie alphabetically and
+# the analysis board by whichever man happened to be counted first, so on a tied Purple Cap
+# the season page and the analysis screen named different winners from identical numbers --
+# measured on 3 of 24 drafted seasons (27, 29 and 31 wickets each), every one a wicket tie,
+# because a wicket count ties far more often than a run total.
+#
+# The tie-break is the IPL's own rather than an arbitrary one: level on runs, the better
+# strike rate wins (fewer balls for the same runs); level on wickets, the better economy.
+# The name is only the last resort, so the answer is still deterministic.
+
+def batting_rank(runs: int, balls: int, name: str) -> tuple:
+    """Sort key, lowest first: most runs, then fewest balls, then name."""
+    return (-runs, balls, name)
+
+
+def bowling_rank(wickets: int, runs: int, balls: int, name: str) -> tuple:
+    """Sort key, lowest first: most wickets, then best economy, then name. Economy is kept
+    as an exact fraction so two bowlers on the same figures cannot differ in the last bit."""
+    economy = Fraction(runs, balls) if balls else Fraction(10 ** 9)
+    return (-wickets, economy, name)
 
 
 def phase_of(over_no: int, scheduled_balls: int = FULL_INNINGS_BALLS) -> str:
@@ -559,10 +587,15 @@ def season_analysis(results, track=None) -> SeasonAnalysis:
 
     a.best_over, a.highest_innings = best_over, highest
 
+    # Ranked by the same keys as the caps and the journey card, so a tie cannot put a
+    # different man on top here than on the season page.
     a.top_scorers = [Leader(v[3], v[0], f"{v[1]} balls", v[4])
-                     for _, v in sorted(bat.items(), key=lambda kv: -kv[1][0])[:10]]
+                     for _, v in sorted(bat.items(),
+                                        key=lambda kv: batting_rank(kv[1][0], kv[1][1], kv[1][3]))[:10]]
     a.top_wickets = [Leader(v[3], v[0], f"{v[1] // BALLS_PER_OVER} overs", v[4])
-                     for _, v in sorted(bowl.items(), key=lambda kv: -kv[1][0])[:10]]
+                     for _, v in sorted(bowl.items(),
+                                        key=lambda kv: bowling_rank(kv[1][0], kv[1][2], kv[1][1],
+                                                                    kv[1][3]))[:10]]
 
     # Rate leaders need a volume floor or they are won by whoever bowled two overs -- A33's
     # reasoning at one-tournament scale. The numbers are not picked round: they are half a

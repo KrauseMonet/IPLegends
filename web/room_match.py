@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import zip_longest
 
 from game.season import (
@@ -582,6 +582,7 @@ def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
     cached = _ROUND_ROBIN_CACHE.get(key)
     if cached is not None:
         entries, rng_state = cached
+        entries = _rebound(entries, dict(pairs))
         d.entries.extend(entries)
         d.rng.setstate(rng_state)
         return entries
@@ -597,6 +598,37 @@ def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
     entries = list(d.entries)
     _ROUND_ROBIN_CACHE[key] = (entries, d.rng.getstate())
     return entries
+
+
+def _rebound(entries: list[RoomResultEntry], side_of: dict[str, Side]) -> list[RoomResultEntry]:
+    """Cached round-robin entries re-pointed at THIS replay's own `Side` objects. [A177]
+
+    A cache hit used to hand back the Side objects of whichever replay first filled the
+    cache, while the playoffs are always played between this replay's fresh ones -- so a
+    team existed as TWO objects in one result list. Everything keyed on `id(side)` then
+    split it in two: `tournament_leaders` credited a player's league runs and his playoff
+    runs to different buckets, and room SD9Z8Y gave the Orange Cap to Tendulkar (612)
+    over Watson (561 + 183 = 744) on every warm request while a cold one got it right.
+    Patching each consumer to key on pid instead would leave the trap set for the next
+    one; rebinding here makes the list identity-consistent for all of them. Copies, never
+    mutates, because the cached entries are shared by every later replay."""
+    def swap(side: Side | None, home: Side, away: Side, new_home: Side, new_away: Side):
+        if side is None:
+            return None
+        return new_home if side is home else new_away if side is away else side
+
+    out = []
+    for e in entries:
+        r = e.result
+        h, a = side_of[e.home_pid], side_of[e.away_pid]
+        sos = [replace(so, first=swap(so.first, r.home, r.away, h, a),
+                       second=swap(so.second, r.home, r.away, h, a),
+                       winner=swap(so.winner, r.home, r.away, h, a))
+               for so in r.super_overs]
+        result = replace(r, home=h, away=a, winner=swap(r.winner, r.home, r.away, h, a),
+                         super_overs=sos)
+        out.append(replace(e, result=result))
+    return out
 
 
 def _balanced_order(entries: list[RoomResultEntry]) -> list[RoomResultEntry]:

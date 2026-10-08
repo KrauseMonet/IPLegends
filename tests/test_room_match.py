@@ -567,6 +567,33 @@ def test_round_robin_cache_does_not_change_playoff_outcomes(conn):
     assert _fingerprint(replay_cached.table) == _fingerprint(replay.table)
 
 
+def test_a_warm_replay_names_each_team_by_one_side_object(conn):
+    """[A177] Room SD9Z8Y: a cache hit used to return league results holding the Side
+    objects of the FIRST replay while the playoffs used this replay's own, so one team
+    was two objects and `tournament_leaders` (keyed on `id(side)`) split a player's
+    season in two -- Watson's 744 became 561 + 183 and lost the Orange Cap to a 612.
+    Checked on the identity property itself, plus the caps agreeing cold and warm."""
+    from game.season import tournament_leaders
+    room, host_id = _make_and_complete_league(conn)
+    _drive_room_to_completion(conn, room, host_id)
+
+    room_match._ROUND_ROBIN_CACHE.clear()
+    _, cold = room_match.room_match_state(conn, room.code, DECK, MODEL)
+    _, warm = room_match.room_match_state(conn, room.code, DECK, MODEL)
+
+    for replay in (cold, warm):
+        objects: dict[str, set[int]] = {}
+        for e in replay.results:
+            objects.setdefault(e.home_pid, set()).add(id(e.result.home))
+            objects.setdefault(e.away_pid, set()).add(id(e.result.away))
+        assert all(len(ids) == 1 for ids in objects.values()), objects
+
+    def caps(replay):
+        led = tournament_leaders([e.result for e in replay.results])
+        return led.top_scorer, led.top_wicket_taker
+    assert caps(warm) == caps(cold)
+
+
 # --- the reveal order: spread across teams, never touching the simulation ---------------
 
 def test_reveal_order_is_a_pure_permutation():

@@ -8,6 +8,12 @@
 let CHOSEN_FORMAT = null, CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
 let CHOSEN_MEGA = true;          // auction rooms: retentions and Right to Match [A140]
+let CHOSEN_TRADES = false;       // auction rooms: a trade window after the fill round [A174]
+function pickTrades(on){
+  CHOSEN_TRADES = on;
+  document.querySelectorAll('#tradesChoices .room-choice')
+    .forEach(b => b.classList.toggle('sel', (b.dataset.trades === 'on') === on));
+}
 
 function pickMega(on){
   CHOSEN_MEGA = on;
@@ -173,8 +179,10 @@ async function roomListOpenRooms(){
         <span style="display:flex;align-items:center;gap:14px">
           ${fieldWheel(r.seats_total, r.seats_filled, {mini: true})}
           <span>
-            <span class="rr-name">${ROOM_FORMAT_LABEL[r.format] || r.format}</span>
-            <span class="rr-meta">${r.seats_filled} of ${r.seats_total} seats · ${r.timer_seconds}s
+            <span class="rr-name">${r.game === 'mega' ? 'Mega auction' : r.game === 'auction' ? 'Auction'
+              : (ROOM_FORMAT_LABEL[r.format] || r.format)}</span>
+            <span class="rr-meta">${r.seats_filled} of ${r.seats_total} seats${r.game && r.game !== 'draft'
+              ? (r.trades ? ' · trades on' : ' · trades off') : ` · ${r.timer_seconds}s`}
               · ${esc(r.host_name)}'s room</span>
           </span>
         </span>
@@ -209,6 +217,7 @@ async function createRoom(ctrl){
           game: CHOSEN_FORMAT !== 'auction' ? 'draft' : (CHOSEN_MEGA ? 'mega' : 'auction'),
           timer_seconds: CHOSEN_TIMER, host_name: name,
           draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY,
+          trades: CHOSEN_FORMAT === 'auction' && CHOSEN_TRADES,
           // [A151] Your saved kit, if you have one; an auction room ignores it.
           kit: savedKit()})});
       enterRoom(r.room.code, r.player_id);

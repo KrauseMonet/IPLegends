@@ -774,3 +774,247 @@ def test_the_sets_are_empty_until_retentions_are_done(deck, clock):
     assert r.phase == "retain"
     out = _catalogue_out(r.auction, r.lot, r.phase)
     assert out.sets == [] and out.current_set is None
+
+
+# --- the trade window [A174] ----------------------------------------------------------------
+
+def trade_room(conn, deck, clock, trades=True, a="MI", b="CSK"):
+    """Two people, everything skipped, the clock run through the fill round: the room is
+    wherever the fill round leads -- the trade window if it is on, the twelves if not."""
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="auction", trades=trades)
+    room, guest = rooms.join_room(conn, room.code, "Ben", deck)
+    rooms.choose_franchise(conn, room.code, host, a)
+    rooms.choose_franchise(conn, room.code, guest, b)
+    rooms.start_room(conn, room.code, host, deck)
+    code = room.code
+    skip_to_end(conn, code, deck)
+    for _ in range(80):
+        room = load(conn, code)
+        if ra.replay(room, deck).phase in ("trade", "twelve"):
+            break
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
+        rooms.room_state(conn, code, deck)
+    return code, host, guest
+
+
+def legal_swaps(r, a, b):
+    """Every (give, get) the window would accept from team `a` to team `b`, by person id."""
+    teams = r.auction.teams
+    return [(g.person_id, t.person_id) for g in teams[a].squad for t in teams[b].squad
+            if not r.offer_errors(a, b, g, t)]
+
+
+def sides(conn, code, deck):
+    r = ra.replay(load(conn, code), deck)
+    return r, r.team_of
+
+
+def test_the_window_opens_after_the_fill_round_only_when_the_room_has_it(deck, clock):
+    off_conn = FakeConn()
+    off = trade_room(off_conn, deck, clock, trades=False)
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock, trades=True)
+    assert ra.replay(load(conn, code), deck).phase == "trade"
+    assert ra.replay(load(off_conn, off[0]), deck).phase == "twelve"
+
+
+def test_an_accepted_offer_swaps_the_two_players_with_their_prices(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    a, b = team_of[host], team_of[guest]
+    give, get = legal_swaps(r, a, b)[0]
+    before_a = {c.person_id: p for c, p in zip(r.auction.teams[a].squad, r.auction.teams[a].paid)}
+    before_b = {c.person_id: p for c, p in zip(r.auction.teams[b].squad, r.auction.teams[b].paid)}
+    ra.submit(conn, code, deck, ra.offer, host, guest, give, get)
+    ra.submit(conn, code, deck, ra.answer, guest, 0, True)
+    r, _ = sides(conn, code, deck)
+    ta, tb = r.auction.teams[a], r.auction.teams[b]
+    ids_a, ids_b = [c.person_id for c in ta.squad], [c.person_id for c in tb.squad]
+    assert get in ids_a and give not in ids_a
+    assert give in ids_b and get not in ids_b
+    assert len(ta.squad) == len(tb.squad) == au.SQUAD_SIZE
+    assert dict(zip(ids_a, ta.paid))[get] == before_b[get]
+    assert dict(zip(ids_b, tb.paid))[give] == before_a[give]
+    assert au.twelve_feasible(ta.squad, 0) and au.twelve_feasible(tb.squad, 0)
+    assert [(t.a, t.b, t.a_gave.person_id, t.b_gave.person_id) for t in r.trades] == \
+        [(a, b, give, get)]
+
+
+def test_nobody_can_trade_with_a_computer_franchise(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    a = team_of[host]
+    cpu = next(t for t in r.auction.teams if not t.human)
+    errors = r.offer_errors(a, cpu.index, r.auction.teams[a].squad[0], cpu.squad[0])
+    assert errors and "computer" in errors[0]
+    with pytest.raises(ra.AuctionRoomError, match="computer"):
+        ra.submit(conn, code, deck, ra.offer, host, "not-a-seat",
+                  r.auction.teams[a].squad[0].person_id, cpu.squad[0].person_id)
+
+
+def test_an_illegal_swap_is_refused_with_its_reason(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    a, b = team_of[host], team_of[guest]
+    teams = r.auction.teams
+    bad = next((g, t) for g in teams[a].squad for t in teams[b].squad
+               if au.trade_errors(teams[a], teams[b], g, t))
+    reason = au.trade_errors(teams[a], teams[b], *bad)[0]
+    with pytest.raises(ra.AuctionRoomError) as exc:
+        ra.submit(conn, code, deck, ra.offer, host, guest, bad[0].person_id, bad[1].person_id)
+    assert reason in str(exc.value)
+
+
+def test_each_team_trades_at_most_twice_and_never_trades_on_an_arrival(deck, clock):
+    conn = FakeConn()
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="auction", trades=True)
+    room, g1 = rooms.join_room(conn, room.code, "Ben", deck)
+    room, g2 = rooms.join_room(conn, room.code, "Cai", deck)
+    for pid, short in ((host, "MI"), (g1, "CSK"), (g2, "RCB")):
+        rooms.choose_franchise(conn, room.code, pid, short)
+    rooms.start_room(conn, room.code, host, deck)
+    code = room.code
+    skip_to_end(conn, code, deck)
+    for _ in range(80):
+        rr = load(conn, code)
+        if ra.replay(rr, deck).phase == "trade":
+            break
+        clock.now = rr.turn_started_at + rooms.CLOCK_GRACE_S + 1
+        rooms.room_state(conn, code, deck)
+    for partner in (g1, g2):
+        r, team_of = sides(conn, code, deck)
+        give, get = legal_swaps(r, team_of[host], team_of[partner])[0]
+        ra.submit(conn, code, deck, ra.offer, host, partner, give, get)
+        n = len(ra.replay(load(conn, code), deck).offers) - 1
+        ra.submit(conn, code, deck, ra.answer, partner, n, True)
+    r, team_of = sides(conn, code, deck)
+    assert r.trades_used(team_of[host]) == ra.TRADES_PER_TEAM
+    teams, a, b = r.auction.teams, team_of[host], team_of[g1]
+    assert any("used your" in e for e in r.offer_errors(a, b, teams[a].squad[0], teams[b].squad[0]))
+    # The two others can still trade with each other, but not with what they just got.
+    arrived = r.trades[0].a_gave                 # host -> g1
+    b, c = team_of[g1], team_of[g2]
+    assert any("arrived in a trade" in e
+               for e in r.offer_errors(b, c, arrived, teams[c].squad[0]))
+
+
+def test_a_trade_voids_every_other_open_offer_either_side_made(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    swaps = legal_swaps(r, team_of[host], team_of[guest])
+    ra.submit(conn, code, deck, ra.offer, host, guest, *swaps[0])
+    other = next(s for s in swaps if s[0] != swaps[0][0] and s[1] != swaps[0][1])
+    ra.submit(conn, code, deck, ra.offer, host, guest, *other)
+    ra.submit(conn, code, deck, ra.answer, guest, 1, True)
+    r, _ = sides(conn, code, deck)
+    assert [o.state for o in r.offers] == ["void", "accepted"]
+    with pytest.raises(ra.AuctionRoomError, match="no longer on the table"):
+        ra.submit(conn, code, deck, ra.answer, guest, 0, True)
+    assert len(ra.replay(load(conn, code), deck).trades) == 1
+
+
+def test_only_the_receiver_answers_and_only_the_maker_withdraws(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    swaps = legal_swaps(r, team_of[host], team_of[guest])
+    ra.submit(conn, code, deck, ra.offer, host, guest, *swaps[0])
+    with pytest.raises(ra.AuctionRoomError, match="not made to you"):
+        ra.submit(conn, code, deck, ra.answer, host, 0, True)
+    with pytest.raises(ra.AuctionRoomError, match="not your offer"):
+        ra.submit(conn, code, deck, ra.withdraw, guest, 0)
+    ra.submit(conn, code, deck, ra.withdraw, host, 0)
+    ra.submit(conn, code, deck, ra.offer, host, guest, *swaps[1])
+    ra.submit(conn, code, deck, ra.answer, guest, 1, False)
+    r, _ = sides(conn, code, deck)
+    assert [o.state for o in r.offers] == ["withdrawn", "declined"]
+    assert r.trades == []
+
+
+@pytest.mark.parametrize("how", ["ready", "host", "clock"])
+def test_the_window_closes_by_everyone_ready_the_host_or_the_clock(deck, clock, how):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    if how == "ready":
+        ra.submit(conn, code, deck, ra.trade_ready, host, True)
+        assert ra.replay(load(conn, code), deck).phase == "trade"   # one is not everyone
+        ra.submit(conn, code, deck, ra.trade_ready, guest, True)
+    elif how == "host":
+        with pytest.raises(ra.AuctionRoomError, match="only the host"):
+            ra.submit(conn, code, deck, ra.end_trades, guest)
+        ra.submit(conn, code, deck, ra.end_trades, host)
+    else:
+        room = load(conn, code)
+        assert room.turn_started_at == pytest.approx(clock.now + ra.TRADE_SECONDS, abs=60)
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
+        rooms.room_state(conn, code, deck)
+    assert ra.replay(load(conn, code), deck).phase == "twelve"
+
+
+def test_a_room_with_trades_replays_identically_from_scratch(deck, clock):
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    ra.submit(conn, code, deck, ra.offer, host, guest,
+              *legal_swaps(r, team_of[host], team_of[guest])[0])
+    ra.submit(conn, code, deck, ra.answer, guest, 0, True)
+    room = load(conn, code)
+    cached = ra.replay(room, deck)
+    ra._CACHE.clear()
+    fresh = ra.replay(room, deck)
+    for t in range(au.TEAMS):
+        assert [c.person_id for c in cached.auction.teams[t].squad] == \
+            [c.person_id for c in fresh.auction.teams[t].squad]
+
+
+def test_only_the_host_sets_the_window_and_only_in_the_lobby(deck, clock):
+    conn = FakeConn()
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="auction")
+    room, guest = rooms.join_room(conn, room.code, "Ben", deck)
+    assert load(conn, room.code).trades is False
+    with pytest.raises(rooms.RoomError, match="only the host"):
+        rooms.set_trades(conn, room.code, guest, True)
+    rooms.set_trades(conn, room.code, host, True)
+    assert load(conn, room.code).trades is True
+    rooms.choose_franchise(conn, room.code, host, "MI")
+    rooms.choose_franchise(conn, room.code, guest, "CSK")
+    rooms.start_room(conn, room.code, host, deck)
+    with pytest.raises(rooms.RoomError, match="before the auction"):
+        rooms.set_trades(conn, room.code, host, False)
+    draft, dhost = rooms.create_room(conn, "final", 30, "Dee")
+    with pytest.raises(rooms.RoomError, match="only an auction room"):
+        rooms.set_trades(conn, draft.code, dhost, True)
+
+
+def test_a_retained_player_who_is_traded_stops_being_retained():
+    teams = au.make_teams(1, humans=frozenset({"MI", "CSK"}))
+    a, b = teams[0], teams[1]
+    from etl.feasibility import Card
+    mk = lambda n: Card(fs_id=n, person_id=f"p{n}", name=f"P{n}", positions=frozenset({1}))
+    a.squad, a.paid, a.retained = [mk(1), mk(2), mk(3)], [1800, 1400, 50], 2
+    b.squad, b.paid = [mk(4), mk(5)], [70, 90]
+    au.apply_trade(a, b, a.squad[0], b.squad[1])
+    assert [c.person_id for c in a.squad] == ["p2", "p3", "p5"]
+    assert a.paid == [1400, 50, 90] and a.retained == 1
+    assert [c.person_id for c in b.squad] == ["p4", "p1"] and b.paid == [70, 1800]
+    assert b.retained == 0
+
+
+def test_a_swap_that_leaves_either_squad_without_a_legal_twelve_is_refused(deck, clock):
+    """The overseas cap is the commonest refusal, so a test taking the first refused pair
+    never reached this rule -- found by breaking it and watching nothing fail."""
+    conn = FakeConn()
+    code, host, guest = trade_room(conn, deck, clock)
+    r, team_of = sides(conn, code, deck)
+    a, b = team_of[host], team_of[guest]
+    teams = r.auction.teams
+    bad = next(((g, t) for g in teams[a].squad for t in teams[b].squad
+                if au.trade_errors(teams[a], teams[b], g, t)
+                == ["your squad could no longer field a legal twelve"]), None)
+    assert bad is not None, "no swap in this room breaks only the twelve; pick another seed"
+    with pytest.raises(ra.AuctionRoomError, match="legal twelve"):
+        ra.submit(conn, code, deck, ra.offer, host, guest, bad[0].person_id, bad[1].person_id)

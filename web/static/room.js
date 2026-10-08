@@ -614,6 +614,8 @@ function renderRoomLobby(r){
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyFranchises(r);
+  $('#lobbyTradesWrap').classList.toggle('hide', !auction);
+  if (auction) renderLobbyTrades(r);
   const mine = r.players.find(p => p.player_id === MY_PID);
   $('#lobbyKitWrap').classList.toggle('hide', auction || !mine || !mine.kit);
   if (!auction && mine && mine.kit) $('#lobbyKit').innerHTML = roomKitStrip(mine);
@@ -690,6 +692,36 @@ function renderLobbyFranchises(r){
   }).join('');
 }
 
+// [A174] The host switches the trade window on or off until the auction starts; everyone
+// else sees what was chosen, because it changes how the auction should be played.
+function renderLobbyTrades(r){
+  const host = MY_PID === r.host_id;
+  const note = r.trades
+    ? 'On: after the fill round, the people here can swap players one for one, two trades each.'
+    : 'Off: squads go straight from the fill round to picking twelves.';
+  $('#lobbyTrades').innerHTML = host
+    ? `<div class="room-choices">
+         <button class="room-choice${r.trades ? ' sel' : ''}" onclick="setRoomTrades(true, this)">Trades on</button>
+         <button class="room-choice${r.trades ? '' : ' sel'}" onclick="setRoomTrades(false, this)">Trades off</button>
+       </div><div class="note" style="margin-top:6px">${note}</div>`
+    : `<div class="note"><b>${r.trades ? 'On' : 'Off'}</b> — ${note.split(': ')[1]}</div>`;
+}
+
+async function setRoomTrades(on, ctrl){
+  if (!ROOM || ROOM.trades === on) return;
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/trades`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, on})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
 async function chooseRoomFranchise(short, ctrl){
   await busyClick(ctrl, null, async () => {
     const myGen = ++ROOM_GEN;
@@ -735,7 +767,8 @@ function renderRoomAuction(r){
 }
 
 // Only these are retried: each names its lot, so a repeat can never land on another one.
-const AUCTION_RETRYABLE = new Set(['bid', 'limit', 'pass']);
+// [A174] The trade moves are safe to repeat too: the server treats a repeat as already done.
+const AUCTION_RETRYABLE = new Set(['bid', 'limit', 'pass', 'offer', 'answer', 'withdraw', 'ready']);
 
 // The two hooks auction.js calls in room mode.
 window.roomAuctionPost = async (path, body) => {
@@ -763,6 +796,8 @@ window.roomAuctionPost = async (path, body) => {
   return null;
 };
 window.roomAuctionSetsUrl = () => `/api/rooms/${ROOM_CODE}/auction/sets`;   // [A172]
+window.roomTradeCheckUrl = (to, give, get) => `/api/rooms/${ROOM_CODE}/auction/trade-check?`
+  + new URLSearchParams({player_id: MY_PID, to, give, get});                  // [A174]
 window.roomIsHost = () => !!(ROOM && MY_PID && ROOM.host_id === MY_PID);   // [A171]
 window.roomAuctionDeadline = () => (ROOM ? ROOM.turn_started_at - serverClock() : 0);
 

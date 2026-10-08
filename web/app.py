@@ -760,6 +760,9 @@ class CreateRoomIn(BaseModel):
                                      "retentions and Right to Match [A140]; league only")
     kit: KitIn | None = Field(default=None, description="the host's kit [A151]; draft "
                               "rooms only, dropped if invalid")
+    trades: bool = Field(default=False, description="[A174] auction rooms: open a trade "
+                         "window between the people after the fill round. The host may "
+                         "change it in the lobby (POST /api/rooms/{code}/trades)")
 
 
 class JoinRoomIn(BaseModel):
@@ -818,6 +821,8 @@ class RoomStateOut(BaseModel):
     host_id: str
     status: str = Field(description="lobby | drafting | auctioning | complete | failed")
     game: str = Field(default="draft", description="'draft' or 'auction' [A139]")
+    trades: bool = Field(default=False, description="[A174] an auction room's trade window "
+                         "is on; locked once the auction starts")
     auction: "AuctionOut | None" = Field(
         default=None, description="auction rooms only: the floor as the CALLER sees it")
     round: int = Field(description="len(moves) // seats -- which snake wave we're in")
@@ -865,6 +870,8 @@ class OpenRoomOut(BaseModel):
     timer_seconds: int
     draft_mode: str
     host_name: str
+    game: str = "draft"
+    trades: bool = False
 
 
 class CreatedRoomOut(BaseModel):
@@ -2102,10 +2109,68 @@ class AuctionRtmOut(BaseModel):
     deciding: str | None = Field(default=None, description="rooms: whose decision it is")
 
 
+class TradePlayerOut(BaseModel):
+    """[A174] One player on a trade-window squad."""
+    person_id: str
+    card: CardOut
+    price: int = Field(description="what his current team paid, in lakh")
+    tradeable: bool = Field(description="false for a player who arrived in a trade")
+
+
+class TradeSideOut(BaseModel):
+    """A team in the trade window: yours, or a partner you may trade with."""
+    short: str
+    franchise: str
+    crest: str | None = None
+    owner: str | None = None
+    player_id: str | None = Field(default=None, description="the partner's seat, to offer to")
+    trades_left: int
+    ready: bool
+    overseas: int
+    squad: list[TradePlayerOut]
+
+
+class TradeOfferOut(BaseModel):
+    n: int
+    from_short: str
+    to_short: str
+    give: CardOut = Field(description="what the offering side gives")
+    get: CardOut = Field(description="what the offering side asks for")
+    status: Literal["open", "accepted", "declined", "withdrawn", "void"]
+    yours: bool = Field(description="you made it (else it was made to you)")
+    delta_you: float | None = Field(default=None, description="your best twelve's change, "
+                                    "rating points per player, if it goes through")
+    delta_them: float | None = None
+
+
+class TradeWindowOut(BaseModel):
+    you: TradeSideOut
+    partners: list[TradeSideOut]
+    offers: list[TradeOfferOut] = Field(description="offers you made or received")
+    per_team: int = room_auction.TRADES_PER_TEAM
+    max_open: int = room_auction.MAX_OPEN_OFFERS
+    seconds: int = room_auction.TRADE_SECONDS
+
+
+class TradeOut(BaseModel):
+    """[A174] A completed trade, announced to the whole room."""
+    n: int
+    a_short: str
+    a_franchise: str
+    a_crest: str | None = None
+    a_owner: str | None = None
+    a_gave: CardOut
+    b_short: str
+    b_franchise: str
+    b_crest: str | None = None
+    b_owner: str | None = None
+    b_gave: CardOut
+
+
 class AuctionOut(BaseModel):
     state: str
     phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "rtm_watch", "fill",
-                   "twelve", "ready", "wait", "complete"]
+                   "trade", "twelve", "ready", "wait", "complete"]
     mega: bool = False
     you: str
     franchise: str
@@ -2143,6 +2208,10 @@ class AuctionOut(BaseModel):
     squad_size: int = auction.SQUAD_SIZE
     squad_overseas_cap: int = auction.SQUAD_OVERSEAS_CAP
     purse_total: int = auction.PURSE
+    trade: TradeWindowOut | None = Field(default=None, description="[A174] auction rooms: "
+                                         "the trade window, while it is open")
+    trades: list[TradeOut] = Field(default=[], description="[A174] every trade completed "
+                                   "in this room, in order -- for the announcements")
 
 
 # `RoomStateOut` refers to `AuctionOut` before it is defined; resolve that now it exists.
@@ -2164,6 +2233,12 @@ def _sale_out(r, sale: auction.Sale) -> AuctionSaleOut:
         rtm_raised=sale.rtm.raised_to if sale.rtm else None,
         rtm_matched=sale.rtm.matched if sale.rtm else None)
 
+
+# The fill round sends this many options, best first. It was 40, which was fine for a list
+# read top-down and wrong once the screen could filter by role: forty best-rated options
+# can hold no keeper at all, so "show me keepers" came back empty while the register held
+# dozens. Each option is one small card.
+FILL_OPTIONS_SHOWN = 250
 
 # The retention screen shows at most this many of a franchise's seasons -- the strongest,
 # which is where every sensible retention is, rather than all ~400 of Mumbai's.
@@ -2227,7 +2302,7 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
         out.your_bid = r.open_ceiling
         out.can_bid = you.max_bid() >= out.next_price
     elif r.phase == "fill":
-        out.fill_options = [_card(c) for c in r.fill_options[:40]]
+        out.fill_options = [_card(c) for c in r.fill_options[:FILL_OPTIONS_SHOWN]]
     if r.suggestion is not None:
         order, impact = auction_session.twelve_indexes(r, r.suggestion)
         out.suggestion = order + [impact]
@@ -2688,6 +2763,8 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         phase = "wait"
     if phase.startswith("rtm") and r.rtm_team != you_idx:
         phase = "rtm_watch"
+    if phase == "trade" and you_idx is None:
+        phase = "wait"
     names = {pid: room.players[pid].name for pid in room.players}
     out = AuctionOut(
         state=room.code, phase=phase, you=you.short if you else "",
@@ -2745,11 +2822,59 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
             out.you_done = (you_idx in r.passed or you_idx in r.proxies
                             or out.you_skipping is not None)
     elif phase == "fill":
-        out.fill_options = [_card(c) for c in r.fill_options[:40]]
+        out.fill_options = [_card(c) for c in r.fill_options[:FILL_OPTIONS_SHOWN]]
     elif phase == "twelve":
         sug = room_auction.suggestion(a, you_idx)
         out.suggestion = (sug[0] + [sug[1]]) if sug else None
+    elif phase == "trade":
+        out.trade = _trade_window_out(room, r, you_idx)
+    out.trades = [_trade_out(r, t, owners) for t in r.trades]
     return out
+
+
+def _trade_side_out(room, r, idx: int, owners: dict) -> TradeSideOut:
+    t = r.auction.teams[idx]
+    arrived = r.arrived(idx)
+    return TradeSideOut(
+        short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
+        owner=owners.get(t.short), player_id=r.pid_of.get(idx),
+        trades_left=room_auction.TRADES_PER_TEAM - r.trades_used(idx),
+        ready=idx in r.trade_ready, overseas=t.overseas,
+        squad=[TradePlayerOut(person_id=c.person_id, card=_card(c), price=p,
+                              tradeable=c.person_id not in arrived)
+               for c, p in zip(t.squad, t.paid)])
+
+
+def _trade_window_out(room, r, you_idx: int) -> TradeWindowOut:
+    owners = {p.franchise: p.name for p in room.players.values() if not p.is_cpu}
+    teams = r.auction.teams
+    offers = []
+    for o in r.offers:
+        if you_idx not in (o.a, o.b):
+            continue
+        d = None
+        if o.state == "open":
+            d = room_auction.swap_deltas(teams[o.a], teams[o.b], o.give, o.get)
+        mine = o.a == you_idx
+        offers.append(TradeOfferOut(
+            n=o.n, from_short=teams[o.a].short, to_short=teams[o.b].short,
+            give=_card(o.give), get=_card(o.get), status=o.state, yours=mine,
+            delta_you=(d["you"] if mine else d["them"]) if d else None,
+            delta_them=(d["them"] if mine else d["you"]) if d else None))
+    return TradeWindowOut(
+        you=_trade_side_out(room, r, you_idx, owners),
+        partners=[_trade_side_out(room, r, i, owners)
+                  for i in sorted(set(r.team_of.values())) if i != you_idx],
+        offers=offers)
+
+
+def _trade_out(r, t, owners: dict) -> TradeOut:
+    a, b = r.auction.teams[t.a], r.auction.teams[t.b]
+    return TradeOut(
+        n=t.n, a_short=a.short, a_franchise=a.franchise, a_crest=crest_url(a.franchise),
+        a_owner=owners.get(a.short), a_gave=_card(t.a_gave),
+        b_short=b.short, b_franchise=b.franchise, b_crest=crest_url(b.franchise),
+        b_owner=owners.get(b.short), b_gave=_card(t.b_gave))
 
 
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
@@ -2814,7 +2939,7 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
         active_player_id=None, players=players, failure_reason=room.failure_reason,
         draft_mode=room.draft_mode, is_open=room.is_open, version=room.version,
         server_now=time.time(), turn_started_at=room.turn_started_at,
-        game=room.game, auction=auction_view)
+        game=room.game, trades=room.trades, auction=auction_view)
 
 
 # --- the daily challenge ------------------------------------------------------------------
@@ -3294,7 +3419,8 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
         try:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
-                body.is_open, body.game, body.kit.model_dump() if body.kit else None)
+                body.is_open, body.game, body.kit.model_dump() if body.kit else None,
+                body.trades)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -3381,7 +3507,8 @@ def list_open_rooms() -> list[OpenRoomOut]:
             OpenRoomOut(
                 code=r.code, format=r.format, seats_filled=r.seats_filled,
                 seats_total=rooms.ROOM_FORMATS[r.format], timer_seconds=r.timer_seconds,
-                draft_mode=r.draft_mode, host_name=r.host_name)
+                draft_mode=r.draft_mode, host_name=r.host_name, game=r.game,
+                trades=r.trades)
             for r in rooms.list_open_rooms(conn)
         ]
 
@@ -3573,6 +3700,96 @@ def room_auction_retain(code: str, body: RoomRetainIn):
 @app.post("/api/rooms/{code}/auction/rtm", response_model=RoomStateOut)
 def room_auction_rtm(code: str, body: RoomRtmIn):
     return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price)
+
+
+class RoomTradesIn(BaseModel):
+    player_id: str
+    on: bool
+
+
+@app.post("/api/rooms/{code}/trades", response_model=RoomStateOut)
+def room_trades(code: str, body: RoomTradesIn) -> RoomStateOut:
+    """[A174] The host turns the trade window on or off, in the lobby."""
+    with _db() as conn:
+        try:
+            room = rooms.set_trades(conn, code, body.player_id, body.on)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+class RoomOfferIn(BaseModel):
+    player_id: str
+    to: str = Field(description="the partner's player_id")
+    give: str = Field(description="person_id of your player")
+    get: str = Field(description="person_id of theirs")
+
+
+class RoomAnswerIn(BaseModel):
+    player_id: str
+    offer: int = Field(ge=0)
+    yes: bool
+
+
+class RoomWithdrawIn(BaseModel):
+    player_id: str
+    offer: int = Field(ge=0)
+
+
+class RoomReadyIn(BaseModel):
+    player_id: str
+    on: bool = True
+
+
+@app.post("/api/rooms/{code}/auction/offer", response_model=RoomStateOut)
+def room_auction_offer(code: str, body: RoomOfferIn):
+    return _auction_move(code, body.player_id, room_auction.offer, body.to, body.give,
+                         body.get)
+
+
+@app.post("/api/rooms/{code}/auction/answer", response_model=RoomStateOut)
+def room_auction_answer(code: str, body: RoomAnswerIn):
+    return _auction_move(code, body.player_id, room_auction.answer, body.offer, body.yes)
+
+
+@app.post("/api/rooms/{code}/auction/withdraw", response_model=RoomStateOut)
+def room_auction_withdraw(code: str, body: RoomWithdrawIn):
+    return _auction_move(code, body.player_id, room_auction.withdraw, body.offer)
+
+
+@app.post("/api/rooms/{code}/auction/ready", response_model=RoomStateOut)
+def room_auction_ready(code: str, body: RoomReadyIn):
+    return _auction_move(code, body.player_id, room_auction.trade_ready, body.on)
+
+
+@app.post("/api/rooms/{code}/auction/trade-end", response_model=RoomStateOut)
+def room_auction_trade_end(code: str, body: HostActionIn):
+    return _auction_move(code, body.player_id, room_auction.end_trades)
+
+
+class TradeCheckOut(BaseModel):
+    errors: list[str]
+    you: float | None = Field(default=None, description="your best twelve's change, per player")
+    them: float | None = None
+
+
+@app.get("/api/rooms/{code}/auction/trade-check", response_model=TradeCheckOut)
+def room_auction_trade_check(code: str, player_id: str, to: str, give: str,
+                             get: str) -> TradeCheckOut:
+    """[A174] What an offer would do before it is made. Read-only and lock-free, so a
+    player can try pairings freely without anything being recorded."""
+    with _db() as conn:
+        try:
+            room = rooms._load_room(conn, code, lock=False)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not room_auction.is_auction(room):
+        raise HTTPException(status_code=409, detail="this is not an auction room")
+    try:
+        r = room_auction.replay(room, STATE["deck"])
+    except room_auction.AuctionRoomError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TradeCheckOut(**room_auction.trade_check(r, player_id, to, give, get))
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)

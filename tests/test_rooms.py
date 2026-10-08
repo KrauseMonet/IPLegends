@@ -104,15 +104,17 @@ class FakeConn:
             # `r.game` and `p.franchise` (migration 033) come last in the real SELECT,
             # after the player columns; game is stored at row index 13.
             game = row[13]
+            trades = row[14] if len(row) > 14 else False   # migration 044, last column
             base = row[:13] + (idle,)
             if not seats:
                 # A room with no seats still returns exactly one row, with every column
                 # of the right-hand side NULL -- that is what an outer join does, and
                 # `_load_room` has an explicit branch for it.
-                return FakeCursor([base + (None, None, None, game, None, None, None, None)])
+                return FakeCursor([base + (None, None, None, game, None, None, None, None,
+                                           trades)])
             # The kit columns (migration 036) follow the franchise, as in the real SELECT.
             return FakeCursor([
-                base + (pid, name, is_cpu, game, franchise, kn, km, kc)
+                base + (pid, name, is_cpu, game, franchise, kn, km, kc, trades)
                 for (_seat, pid, name, is_cpu, franchise, kn, km, kc) in seats
             ])
 
@@ -146,7 +148,8 @@ class FakeConn:
                 seats = self.players.get(code, {})
                 host_row = seats.get(host_id)
                 host_name = host_row[2] if host_row else None
-                out.append((code, fmt, timer_seconds, draft_mode, host_name, len(seats)))
+                out.append((code, fmt, timer_seconds, draft_mode, host_name, len(seats),
+                            row[13], row[14]))
             return FakeCursor(out[:limit])
 
         if sql_norm.startswith("insert into room_players"):
@@ -177,7 +180,7 @@ class FakeConn:
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
              turn_started_at, failure_reason, moves, match_moves, draft_mode,
-             is_open, game) = params
+             is_open, game, trades) = params
             # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
             # code; unwrap to the plain list each wraps, exactly what a real jsonb
             # column reads back.
@@ -189,7 +192,8 @@ class FakeConn:
                 # that has been written once is at version 1, not 0.
                 self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, draft_mode, is_open, 1, game)
+                                     match_moves_value, draft_mode, is_open, 1, game,
+                                     trades)
             else:
                 # Mirrors the real `on conflict (code) do update set` clause exactly --
                 # only status/turn_started_at/failure_reason/moves/match_moves are ever
@@ -201,13 +205,15 @@ class FakeConn:
                 # `_save_room` call NOT actually changing the seed in real Postgres,
                 # silently papered over by a fake that changes it anyway.
                 (ecode, efmt, etimer, eseed, ehost, _estatus,
-                 _eturn, _efail, _emoves, _ematch, edraft, eopen, eversion, egame) = existing
+                 _eturn, _efail, _emoves, _ematch, edraft, eopen, eversion, egame,
+                 _etrades) = existing
                 # `version = rooms.version + 1` in the real ON CONFLICT clause: it
                 # increments on EVERY write, whatever changed, and is never reset --
                 # including by play_again, which resets everything else about the room.
                 self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
                                      turn_started_at, failure_reason, moves_value,
-                                     match_moves_value, edraft, eopen, eversion + 1, egame)
+                                     match_moves_value, edraft, eopen, eversion + 1, egame,
+                                     trades)   # [A174] updated on conflict, as the real SQL
             # RETURNING version -- `_save_room` reads this back onto the Room object so
             # the response it serves carries the version its own write produced.
             self.updated_at[code] = time.time()

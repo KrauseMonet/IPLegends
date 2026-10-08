@@ -966,3 +966,78 @@ def _fill(auction: Auction, human: Human | None) -> None:
         auction.fills += 1
         auction.sales.append(Sale(lot, "fill", team.index, MIN_PRICE,
                                   [Bid(team.index, MIN_PRICE)]))
+
+
+# --- trades [A174] -----------------------------------------------------------------------
+#
+# After the fill round an auction ROOM may open a trade window between its people: one
+# player for one player, no money, never with a computer franchise (ratified by the user).
+# These two functions are the squad-level half -- what a swap does to two squads and
+# whether both can still play. The window itself (who may offer what, how many, for how
+# long) is `web/room_auction.py`'s.
+
+def trade_errors(a: Team, b: Team, give: Card, get: Card) -> list[str]:
+    """Why `a` giving `give` to `b` for `get` is not allowed, as seen from `a`; empty when
+    it is. Both squads must stay legal afterwards: no one person twice, no more than
+    SQUAD_OVERSEAS_CAP overseas players, and a legal twelve still there to be picked --
+    `twelve_feasible(squad, 0)`, the exact test with nothing left to buy [A150]."""
+    errors = []
+    if not any(c is give for c in a.squad):
+        errors.append(f"{give.name} is not in your squad")
+    if not any(c is get for c in b.squad):
+        errors.append(f"{get.name} is not in {b.short}'s squad")
+    if errors:
+        return errors
+    after_a = [c for c in a.squad if c is not give] + [get]
+    after_b = [c for c in b.squad if c is not get] + [give]
+    for who, whose, squad in (("you", "your", after_a), (b.short, f"{b.short}'s", after_b)):
+        ids = [c.person_id for c in squad]
+        if len(set(ids)) != len(ids):
+            errors.append(f"{who} would hold the same player twice")
+        overseas = sum(c.overseas is True for c in squad)
+        if overseas > SQUAD_OVERSEAS_CAP:
+            errors.append(f"{who} would have {overseas} overseas players "
+                          f"(at most {SQUAD_OVERSEAS_CAP})")
+        elif not twelve_feasible(squad, 0):
+            errors.append(f"{whose} squad could no longer field a legal twelve")
+    return errors
+
+
+def apply_trade(a: Team, b: Team, give: Card, get: Card) -> tuple[int, int]:
+    """Swap the two players, each keeping the price his old team paid for him. Returns
+    (what `a` had paid for `give`, what `b` had paid for `get`).
+
+    A retained player who leaves stops being retained: the squad's first `retained` places
+    are the retentions (`AuctionSquadOut.retained` reads them that way), so he is removed
+    from his place and the count drops, and whoever arrives joins at the end."""
+    def out(team: Team, card: Card) -> int:
+        i = next(i for i, c in enumerate(team.squad) if c is card)
+        team.squad.pop(i)
+        paid = team.paid.pop(i)
+        if i < team.retained:
+            team.retained -= 1
+        return paid
+
+    paid_give, paid_get = out(a, give), out(b, get)
+    a.squad.append(get)
+    a.paid.append(paid_get)
+    b.squad.append(give)
+    b.paid.append(paid_give)
+    return paid_give, paid_get
+
+
+_TWELVE_VALUE: dict[tuple, float | None] = {}
+
+
+def twelve_value(squad: list[Card]) -> float | None:
+    """The face value of a squad's best twelve, averaged per player: what a trade does to
+    a side, as one number. Cached on the squad's membership, since the trade window asks
+    the same question of the same squads on every poll."""
+    key = tuple(sorted((c.person_id, c.fs_id) for c in squad))
+    if key not in _TWELVE_VALUE:
+        if len(_TWELVE_VALUE) > 4096:
+            _TWELVE_VALUE.clear()
+        chosen = best_twelve(squad)
+        _TWELVE_VALUE[key] = (None if chosen is None
+                              else sum(_card_value(c) for c in chosen) / TWELVE_SIZE)
+    return _TWELVE_VALUE[key]

@@ -142,6 +142,9 @@ class Room:
     version: int = 0
     # migration 033 -- 'draft' or 'auction' (web/room_auction.py). Set once at creation.
     game: str = "draft"
+    # migration 044 -- an auction room's trade window between its people [A174]. The host
+    # may change it in the lobby (`set_trades`); it locks when the auction starts.
+    trades: bool = False
 
     @property
     def seats(self) -> int:
@@ -256,7 +259,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                r.draft_mode, r.is_open, r.version,
                extract(epoch from (now() - r.updated_at)) as idle_seconds,
                p.player_id, p.name, p.is_cpu, r.game, p.franchise,
-               p.kit_name, p.kit_monogram, p.kit_colour
+               p.kit_name, p.kit_monogram, p.kit_colour, r.trades
           from rooms r
           left join room_players p on p.room_code = r.code
          where r.code = %s
@@ -275,7 +278,8 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                 turn_started_at=turn_started_at or 0.0, failure_reason=failure_reason,
                 moves=list(moves or []), match_moves=list(match_moves or []),
                 draft_mode=draft_mode, is_open=is_open, version=version,
-                idle_seconds=float(idle_seconds or 0.0), game=rows[0][17])
+                idle_seconds=float(idle_seconds or 0.0), game=rows[0][17],
+                trades=bool(rows[0][22]))
     for row in rows:
         player_id, name, is_cpu, franchise = row[14], row[15], row[16], row[18]
         kit_name, kit_monogram, kit_colour = row[19], row[20], row[21]
@@ -304,10 +308,12 @@ def _save_room(conn, room: Room) -> None:
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode, is_open, version, game)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s)
+                            draft_mode, is_open, version, game, trades)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
+            -- [A174] the one setting the host may change after creation, in the lobby
+            trades = excluded.trades,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
             match_moves = excluded.match_moves,
             version = rooms.version + 1,
@@ -319,7 +325,7 @@ def _save_room(conn, room: Room) -> None:
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
-         Json(room.match_moves), room.draft_mode, room.is_open, room.game),
+         Json(room.match_moves), room.draft_mode, room.is_open, room.game, room.trades),
     ).fetchone()[0]
     # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
     # separate `conn.execute` per player, but every existing player's row is a guaranteed
@@ -377,7 +383,8 @@ def clean_player_name(raw: str) -> str:
 
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
-                 game: str = "draft", kit: dict | None = None) -> tuple[Room, str]:
+                 game: str = "draft", kit: dict | None = None,
+                 trades: bool = False) -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
     if game != "draft" and fmt != "league":
@@ -395,7 +402,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
                 seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
-                game=game)
+                game=game, trades=bool(trades) and game != "draft")
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     room.players[host_id].kit = _arriving_kit(room, host_id, kit)
     _save_room(conn, room)
@@ -510,6 +517,22 @@ def choose_franchise(conn, code: str, player_id: str, short: str) -> Room:
     return room
 
 
+def set_trades(conn, code: str, player_id: str, on: bool) -> Room:
+    """[A174] The host turns an auction room's trade window on or off -- in the lobby
+    only, because a window decided after bidding began would change the rules of an
+    auction people are already playing."""
+    room = _load_room(conn, code)
+    if room.game == "draft":
+        raise RoomError("only an auction room has a trade window")
+    if player_id != room.host_id:
+        raise RoomError("only the host can change the trade window")
+    if room.status != "lobby":
+        raise RoomError("the trade window is decided before the auction starts")
+    room.trades = bool(on)
+    _save_room(conn, room)
+    return room
+
+
 @dataclass
 class OpenRoom:
     """One row of the public browse list -- just enough to show and join it, never the
@@ -522,6 +545,8 @@ class OpenRoom:
     draft_mode: str
     host_name: str
     seats_filled: int
+    game: str = "draft"
+    trades: bool = False
 
 
 def list_open_rooms(conn) -> list[OpenRoom]:
@@ -545,7 +570,8 @@ def list_open_rooms(conn) -> list[OpenRoom]:
         select r.code, r.format, r.timer_seconds, r.draft_mode,
                (select name from room_players
                  where room_code = r.code and player_id = r.host_id) as host_name,
-               (select count(*) from room_players where room_code = r.code) as seats_filled
+               (select count(*) from room_players where room_code = r.code) as seats_filled,
+               r.game, r.trades
           from rooms r
          where r.is_open and r.status = 'lobby'
            and r.updated_at > now() - make_interval(mins => %s)
@@ -556,8 +582,9 @@ def list_open_rooms(conn) -> list[OpenRoom]:
     ).fetchall()
     return [
         OpenRoom(code=code, format=fmt, timer_seconds=timer_seconds, draft_mode=draft_mode,
-                 host_name=host_name or "Host", seats_filled=seats_filled)
-        for code, fmt, timer_seconds, draft_mode, host_name, seats_filled in rows
+                 host_name=host_name or "Host", seats_filled=seats_filled, game=game,
+                 trades=bool(trades))
+        for code, fmt, timer_seconds, draft_mode, host_name, seats_filled, game, trades in rows
         if seats_filled < ROOM_FORMATS[fmt]
     ]
 

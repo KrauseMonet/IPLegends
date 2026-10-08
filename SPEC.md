@@ -2569,6 +2569,57 @@ Chennai Super Kings, for 29 crore") through the browser's own speech synthesis, 
 an Indian English voice. Sound and voice are separate switches on the floor, remembered per
 browser; browsers allow no sound before the first click, so nothing plays until then.
 
+### 15.12 The trade window [A174]
+
+An auction room may open a **trade window** between the fill round and the twelves. Ratified
+by the user:
+
+- **On or off, decided before the auction starts.** The host chooses it when creating the
+  room and may change it in the lobby; it locks when the auction starts (`rooms.trades`,
+  migration 044). Off by default.
+- **People only.** Trades are between the humans in the room, never with a computer
+  franchise. A single-player auction therefore has no trade window: there is nobody to
+  trade with. A room with fewer than two people skips the window.
+- **One player for one player, no money.** Each player keeps the price his old team paid.
+  A retained player who is traded stops counting as retained.
+- **Two trades per team** (`TRADES_PER_TEAM`), and a player who arrived in a trade cannot
+  be traded on.
+- **Both squads must still be legal afterwards**: no more than six overseas players, and a
+  legal twelve still available (`twelve_feasible(squad, 0)`, the exact test).
+- **An offer goes void when either side completes another trade**, because the squads it
+  was made against no longer exist. A seat may have at most three offers open at once.
+- **The window lasts 120 seconds** (`TRADE_SECONDS`) and closes early when the host closes
+  it, when everyone has said they are done, or when no two people can still trade.
+
+Moves, in the room's one shared log: `offer` (names both players by person id, never by a
+place in a squad, since squads change), `answer`, `withdraw`, `ready`, `trade_end` (host)
+and `trade_close` (the clock). Before sending an offer the page asks the server what the
+swap would do (`GET .../auction/trade-check`), which returns the reasons it would be
+refused, or the change to both sides' best twelve in rating points per player.
+
+Every completed trade is announced to everyone in the room, with both crests, both players,
+a sound and the auctioneer's voice. Trades already completed when a page loads are not
+replayed.
+
+**Measured before it was built** (a pilot of 2 auctions per configuration, so indicative):
+the best one-for-one trade that leaves the other side's twelve no worse improves a twelve by
+about **+0.5 rating points per player**, against a 2.5 (open) to 3.5 (mega) spread between
+the strongest and weakest auction twelves; a trade strictly better for both sides averages
+about **+0.2**. Many acceptable trades free a star benched by the overseas cap. The fuller
+20-auction run was stopped once the user ruled out computer trades, since its remaining
+question (how generous a computer team should be) no longer existed.
+
+### 15.13 The fill round's screen [A174]
+
+The fill round shows every option the rules allow (up to 250, was 40), as cards that can be
+filtered by role (batters, keepers, all-rounders, bowlers), by where the player bats (A76's
+four bands), by overseas, and by "fills a gap" (a keeper or a bowling option the squad still
+lacks), and sorted by rating, batting position, role, name or season, grouped under headings
+for the last two. The cap was raised because forty best-rated options can hold almost
+nothing a squad needs: in one measured room the first forty held **1 keeper and 1 domestic
+player**, against **8 and 86** in the full list. The index sent to the server is always the
+option's place in the full list, never its place on screen.
+
 ## 16. Team kits [A151]
 
 A drafted twelve is a mix of franchises, so it has no crest. It wears a **kit** instead: a

@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=9baac25886">
+<link rel="stylesheet" href="/static/style.css?v=a91bd3c429">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -84,6 +84,11 @@
           <div id="lobbyKitWrap" class="hide">
             <div class="col-head" style="margin-bottom:0"><span>Your team kit</span><em>everyone in the room sees it</em></div>
             <div id="lobbyKit"></div>
+          </div>
+          <!-- [A174] An auction room's trade window: the host decides before the start. -->
+          <div id="lobbyTradesWrap" class="hide">
+            <div class="col-head" style="margin-bottom:0"><span>Trade window</span><em>after the fill round · between people only</em></div>
+            <div id="lobbyTrades" class="lobby-trades"></div>
           </div>
           <!-- [A139] An auction room's lobby: every seat claims a franchise. -->
           <div id="lobbyFranchiseWrap" class="hide">
@@ -244,6 +249,9 @@
       </div>
       <div id="aucFillList" class="auc-fill-list"></div>
     </section>
+
+    <!-- ============ TRADE WINDOW [A174] ============ drawn whole by auction.js -->
+    <section id="aucTrade" class="hide"></section>
 
     <!-- ============ PICK YOUR TWELVE ============ -->
     <section id="aucTwelve" class="hide">
@@ -518,7 +526,7 @@
 <script src="/static/reveal.js?v=dbfda54b22"></script>
 <script src="/static/analysis.js?v=4d304e2f1a"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=3b471cd61b"></script>
-<script src="/static/auction.js?v=5ce1e7f89a"></script>
+<script src="/static/room.js?v=92a849d7f3"></script>
+<script src="/static/auction.js?v=47fc21064b"></script>
 </body>
 </html>

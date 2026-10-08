@@ -23,6 +23,16 @@ first. With several people bidding against each other a lot is a sequence of eve
     {"k": "fill",  "seat": pid, "i": n}                             a fill-round choice
     {"k": "twelve", "seat": pid, "order": [...11], "impact": n}     the chosen twelve
 
+[A174] With the room's trade window on (`rooms.trades`) and two or more people bidding,
+the fill round is followed by a trade window before the twelves:
+
+    {"k": "offer",  "seat": pid, "to": pid, "give": person, "get": person}  one for one
+    {"k": "answer", "seat": pid, "offer": n, "yes": bool}           accept or decline offer n
+    {"k": "withdraw", "seat": pid, "offer": n}                      take your own offer back
+    {"k": "ready",  "seat": pid, "on": bool}                        done trading (or not)
+    {"k": "trade_end", "seat": host}                                the host closes the window
+    {"k": "trade_close"}                                            the window's clock ran out
+
 After every human event the AUTOMATIC bidders reply at once: every computer team, from a
 limit fixed when the lot opened, and every human who set a limit. So all the people in the
 room see the same exchange, and a human can only ever answer it.
@@ -54,6 +64,9 @@ FILL_SECONDS = 20        # a fill-round choice
 TWELVE_SECONDS = 150     # choosing a twelve from eighteen (was 90; A171)
 RETAIN_SECONDS = 150     # [A140] choosing retentions, everybody at once (was 90; A171)
 RTM_SECONDS = 15         # [A140] each Right to Match decision: play, raise, match
+TRADE_SECONDS = 120      # [A174] the trade window, closed early by the host or by everyone ready
+TRADES_PER_TEAM = 2      # [A174] ratified by the user
+MAX_OPEN_OFFERS = 3      # [A174] one seat's open offers at once, so nobody floods the others
 
 AUCTION_GAMES = ("auction", "mega")   # 'mega' adds retentions and Right to Match [A140]
 
@@ -75,7 +88,7 @@ class StaleAuctionMove(StaleMove, AuctionRoomError):
 class RoomAuctionReplay:
     auction: au.Auction
     team_of: dict[str, int]                 # human player_id -> team index
-    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | twelve | complete | failed
+    phase: str      # retain | bid | rtm_use | rtm_raise | rtm_match | fill | trade | twelve | complete | failed
     lot: au.Lot | None = None
     round_no: int = 0
     bids: list[au.Bid] = field(default_factory=list)
@@ -94,6 +107,12 @@ class RoomAuctionReplay:
     # [A170] Each human's standing passes ("all", or (set, round)), so the API can say
     # that a player is skipping -- `passed` alone is only this lot.
     flags: dict[int, set] = field(default_factory=dict)
+    # [A174] the trade window: every offer made (by number), every trade completed, who
+    # has said they are done, and how many trades each team has used. `trades` stays on
+    # every later phase too, so the room can announce a trade that closed the window.
+    offers: list["Offer"] = field(default_factory=list)
+    trades: list["Trade"] = field(default_factory=list)
+    trade_ready: set[int] = field(default_factory=set)
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -149,9 +168,43 @@ class RoomAuctionReplay:
             return [pid for pid in self.team_of if pid not in self.twelves]
         if self.phase == "retain":
             return [pid for pid, i in self.team_of.items() if i not in self.retained]
+        if self.phase == "trade":
+            return [pid for pid, i in self.team_of.items() if i not in self.trade_ready]
         if self.phase.startswith("rtm"):
             return [self.pid_of[self.rtm_team]]
         return []
+
+    def trades_used(self, team_index: int) -> int:
+        return sum(team_index in (t.a, t.b) for t in self.trades)
+
+    def arrived(self, team_index: int) -> set[str]:
+        """People who came to this team in a trade: they may not be traded on."""
+        out = set()
+        for t in self.trades:
+            if t.a == team_index:
+                out.add(t.b_gave.person_id)
+            elif t.b == team_index:
+                out.add(t.a_gave.person_id)
+        return out
+
+    def offer_errors(self, a: int, b: int, give: Card, get: Card) -> list[str]:
+        """[A174] Every rule of the window, from `a`'s side. `game.auction.trade_errors` is
+        the squad half; the rest is the window's own."""
+        teams = self.auction.teams
+        errors = []
+        if a == b:
+            return ["you cannot trade with yourself"]
+        if b not in self.team_of.values():
+            return ["trades are between the people in the room, not the computer franchises"]
+        if self.trades_used(a) >= TRADES_PER_TEAM:
+            errors.append(f"you have used your {TRADES_PER_TEAM} trades")
+        if self.trades_used(b) >= TRADES_PER_TEAM:
+            errors.append(f"{teams[b].short} has used its {TRADES_PER_TEAM} trades")
+        if give.person_id in self.arrived(a):
+            errors.append(f"{give.name} arrived in a trade and cannot be traded on")
+        if get.person_id in self.arrived(b):
+            errors.append(f"{get.name} arrived in a trade and cannot be traded on")
+        return errors + au.trade_errors(teams[a], teams[b], give, get)
 
     @property
     def retention_lost(self) -> dict[int, list[tuple[Card, int]]]:
@@ -171,12 +224,13 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     the room once a second would otherwise rebuild the same auction over and over."""
     humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
     mega = room.game == "mega"
-    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega)
+    trades = bool(getattr(room, "trades", False))
+    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, trades)
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
         return hit
-    result = _replay(room.seed, humans, room.moves, deck, mega)
+    result = _replay(room.seed, humans, room.moves, deck, mega, trades)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
@@ -218,6 +272,51 @@ def settle_shared(retained: dict[int, list[Card]], pools: dict[int, list[Card]],
     settled = {t: [c for c in cards if not any(c is lc for lc, _ in lost.get(t, []))]
                for t, cards in retained.items()}
     return settled, lost
+
+
+@dataclass
+class Offer:
+    """[A174] One offer: team `a` gives `give` to team `b` for `get`. Open until answered,
+    withdrawn, or VOID -- an offer goes void the moment either side completes some other
+    trade, because the squads it was made against no longer exist, and accepting it would
+    apply a swap neither person saw."""
+    n: int
+    a: int
+    b: int
+    give: Card
+    get: Card
+    # `state`, not `status`: tests/test_room_schema.py reads every status assignment in
+    # this file as a ROOM status, which is the guard it exists to be.
+    state: str = "open"             # open | accepted | declined | withdrawn | void
+
+
+@dataclass
+class Trade:
+    """[A174] A completed trade, in the order trades completed."""
+    n: int
+    offer: int
+    a: int
+    b: int
+    a_gave: Card
+    b_gave: Card
+    a_paid: int                     # what `a` had paid for the player it gave
+    b_paid: int
+
+
+def _person(squad: list[Card], person_id) -> Card:
+    card = next((c for c in squad if c.person_id == person_id), None)
+    if card is None:
+        raise AuctionRoomError("that player is not in the squad")
+    return card
+
+
+def _window_over(state: RoomAuctionReplay, humans: set[int]) -> bool:
+    """[A174] The window closes itself once everyone has said they are done, or once no two
+    people can still trade with each other -- decided from the log alone, like a lot that
+    every human is done with, so neither needs a recorded move."""
+    if humans <= state.trade_ready:
+        return True
+    return sum(state.trades_used(h) < TRADES_PER_TEAM for h in humans) < 2
 
 
 class _Pause(Exception):
@@ -271,7 +370,7 @@ def _reserve(deck: Deck) -> list[Card]:
 
 
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
-            mega: bool = False) -> RoomAuctionReplay:
+            mega: bool = False, trades: bool = False) -> RoomAuctionReplay:
     teams = au.make_teams(seed, humans=frozenset(humans.values()))
     by_short = {t.short: t.index for t in teams}
     team_of = {pid: by_short[short] for pid, short in humans.items()}
@@ -458,8 +557,16 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     if unfieldable:
         return RoomAuctionReplay(auction, team_of, "failed", failed_team=unfieldable[0].index)
 
+    # [A174] The trade window, between the people only, if the room has one.
+    window = RoomAuctionReplay(auction, team_of, "trade")
+    if trades and len(human_idx) >= 2:
+        pos = _trade_window(window, moves, pos, human_idx, team_of)
+        if pos is None:
+            return window
+
     # Every human picks a twelve, in any order.
-    result = RoomAuctionReplay(auction, team_of, "twelve")
+    result = RoomAuctionReplay(auction, team_of, "twelve", offers=window.offers,
+                               trades=window.trades, trade_ready=window.trade_ready)
     while pos < len(moves):
         mv = moves[pos]
         pos += 1
@@ -470,6 +577,70 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     if len(result.twelves) == len(team_of):
         result.phase = "complete"
     return result
+
+
+def _trade_window(state: RoomAuctionReplay, moves: list[dict], pos: int,
+                  humans: set[int], team_of: dict[str, int]) -> int | None:
+    """Replay the trade window into `state`. Returns where the twelves' moves begin, or
+    None while the window is still open."""
+    teams = state.auction.teams
+    while not _window_over(state, humans):
+        if pos >= len(moves):
+            return None
+        mv = moves[pos]
+        kind = mv.get("k")
+        if kind not in ("offer", "answer", "withdraw", "ready", "trade_end", "trade_close"):
+            raise AuctionRoomError(f"move {pos}: expected a trade-window move")
+        pos += 1
+        if kind in ("trade_end", "trade_close"):
+            break
+        h = team_of.get(mv.get("seat"))
+        if h is None:
+            raise AuctionRoomError(f"move {pos - 1}: not a seat in this room")
+        if kind == "ready":
+            if mv.get("on", True):
+                state.trade_ready.add(h)
+            else:
+                state.trade_ready.discard(h)
+            continue
+        if kind == "offer":
+            b = team_of.get(mv.get("to"))
+            if b is None:
+                raise AuctionRoomError("trades are between the people in the room")
+            give = _person(teams[h].squad, mv["give"])
+            get = _person(teams[b].squad, mv["get"])
+            errors = state.offer_errors(h, b, give, get)
+            if errors:
+                raise AuctionRoomError("; ".join(errors))
+            state.offers.append(Offer(len(state.offers), h, b, give, get))
+            continue
+        n = mv.get("offer")
+        if not isinstance(n, int) or not 0 <= n < len(state.offers):
+            raise AuctionRoomError("no such offer")
+        offer = state.offers[n]
+        if offer.state != "open":
+            raise AuctionRoomError("that offer is no longer on the table")
+        if kind == "withdraw":
+            if offer.a != h:
+                raise AuctionRoomError("only the side that made an offer can withdraw it")
+            offer.state = "withdrawn"
+            continue
+        if offer.b != h:                               # an answer
+            raise AuctionRoomError("that offer was not made to you")
+        if not mv.get("yes"):
+            offer.state = "declined"
+            continue
+        a, b = teams[offer.a], teams[offer.b]
+        a_paid, b_paid = au.apply_trade(a, b, offer.give, offer.get)
+        offer.state = "accepted"
+        state.trades.append(Trade(len(state.trades), offer.n, offer.a, offer.b,
+                                  offer.give, offer.get, a_paid, b_paid))
+        # Every other open offer either side was party to was made against squads that no
+        # longer exist.
+        for o in state.offers:
+            if o.state == "open" and {o.a, o.b} & {offer.a, offer.b}:
+                o.state = "void"
+    return pos
 
 
 def _earlier(mv: dict, lot_index: int, round_no: int) -> bool:
@@ -519,7 +690,7 @@ def _stage_seconds(r: RoomAuctionReplay) -> int:
     if r.phase.startswith("rtm"):
         return RTM_SECONDS
     return {"bid": LOT_SECONDS, "fill": FILL_SECONDS, "twelve": TWELVE_SECONDS,
-            "retain": RETAIN_SECONDS}.get(r.phase, 0)
+            "retain": RETAIN_SECONDS, "trade": TRADE_SECONDS}.get(r.phase, 0)
 
 
 def record(room, deck: Deck, move: dict, now: float | None = None) -> RoomAuctionReplay:
@@ -676,6 +847,103 @@ def rtm(room, deck: Deck, player_id: str, yes: bool, price: int | None = None
     return record(room, deck, move)
 
 
+def _trade_seat(room, deck: Deck, player_id: str) -> tuple[RoomAuctionReplay, int]:
+    r = replay(room, deck)
+    team = _seat(r, player_id)
+    if r.phase != "trade":
+        raise AuctionRoomError("the trade window is closed")
+    return r, team.index
+
+
+def offer(room, deck: Deck, player_id: str, to: str, give: str, get: str) -> RoomAuctionReplay:
+    """[A174] Offer `give` (one of yours, by person id) for `get` (one of theirs)."""
+    r, h = _trade_seat(room, deck, player_id)
+    b = r.team_of.get(to)
+    if b is None:
+        raise AuctionRoomError("trades are between the people in the room, "
+                               "not the computer franchises")
+    for o in r.offers:
+        if (o.state == "open" and o.a == h and o.b == b and o.give.person_id == give
+                and o.get.person_id == get):
+            return r                          # already on the table: a retried request
+    if sum(o.state == "open" and o.a == h for o in r.offers) >= MAX_OPEN_OFFERS:
+        raise AuctionRoomError(f"you have {MAX_OPEN_OFFERS} offers open already; "
+                               f"withdraw one first")
+    teams = r.auction.teams
+    errors = r.offer_errors(h, b, _person(teams[h].squad, give), _person(teams[b].squad, get))
+    if errors:
+        raise AuctionRoomError("; ".join(errors))
+    return record(room, deck, {"k": "offer", "seat": player_id, "to": to, "give": give,
+                               "get": get})
+
+
+def answer(room, deck: Deck, player_id: str, n: int, yes: bool) -> RoomAuctionReplay:
+    r, h = _trade_seat(room, deck, player_id)
+    if not 0 <= n < len(r.offers):
+        raise AuctionRoomError("no such offer")
+    o = r.offers[n]
+    if o.b != h:
+        raise AuctionRoomError("that offer was not made to you")
+    if o.state == ("accepted" if yes else "declined"):
+        return r                              # a retried request
+    if o.state != "open":
+        raise AuctionRoomError("that offer is no longer on the table")
+    return record(room, deck, {"k": "answer", "seat": player_id, "offer": n, "yes": bool(yes)})
+
+
+def withdraw(room, deck: Deck, player_id: str, n: int) -> RoomAuctionReplay:
+    r, h = _trade_seat(room, deck, player_id)
+    if not 0 <= n < len(r.offers) or r.offers[n].a != h:
+        raise AuctionRoomError("that is not your offer")
+    if r.offers[n].state == "withdrawn":
+        return r
+    if r.offers[n].state != "open":
+        raise AuctionRoomError("that offer is no longer on the table")
+    return record(room, deck, {"k": "withdraw", "seat": player_id, "offer": n})
+
+
+def trade_ready(room, deck: Deck, player_id: str, on: bool) -> RoomAuctionReplay:
+    r, h = _trade_seat(room, deck, player_id)
+    if (h in r.trade_ready) == bool(on):
+        return r
+    return record(room, deck, {"k": "ready", "seat": player_id, "on": bool(on)})
+
+
+def end_trades(room, deck: Deck, player_id: str) -> RoomAuctionReplay:
+    """The host closes the window for everyone, like a skip [A171]."""
+    r, _h = _trade_seat(room, deck, player_id)
+    if player_id != room.host_id:
+        raise AuctionRoomError("only the host can close the trade window")
+    return record(room, deck, {"k": "trade_end", "seat": player_id})
+
+
+def trade_check(r: RoomAuctionReplay, player_id: str, to: str, give: str, get: str) -> dict:
+    """[A174] What an offer would do, before it is made: the reasons it would be refused,
+    and the change to both sides' best twelve, per player. Read-only."""
+    if r.phase != "trade":
+        return {"errors": ["the trade window is closed"]}
+    h, b = r.team_of.get(player_id), r.team_of.get(to)
+    if h is None or b is None:
+        return {"errors": ["trades are between the people in the room"]}
+    teams = r.auction.teams
+    try:
+        g, t = _person(teams[h].squad, give), _person(teams[b].squad, get)
+    except AuctionRoomError as exc:
+        return {"errors": [str(exc)]}
+    errors = r.offer_errors(h, b, g, t)
+    if errors:
+        return {"errors": errors}
+    return {"errors": [], **swap_deltas(teams[h], teams[b], g, t)}
+
+
+def swap_deltas(a: au.Team, b: au.Team, give: Card, get: Card) -> dict:
+    """Both sides' best-twelve change, in rating points per player, if `a` gives `give`."""
+    before_a, before_b = au.twelve_value(a.squad), au.twelve_value(b.squad)
+    after_a = au.twelve_value([c for c in a.squad if c is not give] + [get])
+    after_b = au.twelve_value([c for c in b.squad if c is not get] + [give])
+    return {"you": round(after_a - before_a, 2), "them": round(after_b - before_b, 2)}
+
+
 def retention_suggestion(r: RoomAuctionReplay, team_index: int) -> list[int]:
     """What a computer team would keep for this franchise: the timeout's answer."""
     team = r.auction.teams[team_index]
@@ -716,6 +984,8 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
         elif r.phase == "rtm_match":
             record(room, deck, {"k": "rtm_match", "seat": r.pid_of[r.rtm_team], "yes": False},
                    now)
+        elif r.phase == "trade":
+            record(room, deck, {"k": "trade_close"}, now)
         elif r.phase == "twelve":
             for pid in r.waiting_on():
                 order, impact = suggestion(r.auction, r.team_of[pid])

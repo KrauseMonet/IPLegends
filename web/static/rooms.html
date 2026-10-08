@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=9baac25886">
+<link rel="stylesheet" href="/static/style.css?v=a91bd3c429">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -156,6 +156,14 @@
                   title="Every franchise starts from nothing with ₹120 crore.">Open auction</button>
               </div>
 
+              <div class="room-label auction-only hide">Trade window</div>
+              <div class="room-choices auction-only hide" id="tradesChoices">
+                <button class="room-choice" data-trades="on" onclick="pickTrades(true)"
+                  title="After the fill round, the people in the room can swap players one for one -- two trades each, never with a computer franchise.">Trades on</button>
+                <button class="room-choice sel" data-trades="off" onclick="pickTrades(false)"
+                  title="Squads go straight from the fill round to picking twelves.">Trades off</button>
+              </div>
+
               <div class="room-label">Visibility</div>
               <div class="room-choices" id="visibilityChoices">
                 <button class="room-choice sel" data-visibility="closed" onclick="pickVisibility(false)">Closed</button>
@@ -246,6 +254,6 @@
 
 <script src="/static/common.js?v=a43774c27f"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/rooms-setup.js?v=164ff44f7a"></script>
+<script src="/static/rooms-setup.js?v=9310211158"></script>
 </body>
 </html>

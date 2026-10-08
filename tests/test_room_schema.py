@@ -60,3 +60,39 @@ def test_every_game_a_room_can_be_created_with_is_one_the_database_allows():
     the step 033 skipped for `status`."""
     from web.rooms import GAMES
     assert set(GAMES) <= allowed_games()
+
+
+def rooms_columns() -> set[str]:
+    """Every column the migrations give `rooms`: the CREATE TABLE's, then each
+    `alter table rooms add column`."""
+    cols: set[str] = set()
+    for path in sorted((ROOT / "migrations").glob("*.sql")):
+        text = path.read_text()
+        m = re.search(r"create table rooms\s*\((.*?)\n\);", text, re.I | re.S)
+        if m:
+            for line in m.group(1).splitlines():
+                w = re.match(r"\s*([a-z_]+)\s+[a-z]", line)
+                if w and w.group(1) not in ("primary", "check", "constraint", "unique"):
+                    cols.add(w.group(1))
+        cols |= set(re.findall(r"alter table rooms\s+add column\s+([a-z_]+)", text, re.I))
+        for old, new in re.findall(r"alter table rooms\s+rename column\s+([a-z_]+)\s+to\s+([a-z_]+)",
+                                   text, re.I):
+            cols.discard(old)
+            cols.add(new)
+        cols -= set(re.findall(r"alter table rooms\s+drop column\s+(?:if exists\s+)?([a-z_]+)",
+                               text, re.I))
+    return cols
+
+
+def test_every_rooms_column_the_room_code_reads_or_writes_exists():
+    """[A174] The fake connection accepts any column, so a column the code writes that no
+    migration creates passes every room test and fails on the first real save -- A139's
+    shape for a column rather than a value. Checked before migration 044 was applied."""
+    src = (ROOT / "web" / "rooms.py").read_text()
+    insert = re.search(r"insert into rooms \((.*?)\)", src, re.S).group(1)
+    written = {c.strip() for c in insert.split(",")}
+    read = set(re.findall(r"\br\.([a-z_]+)", src))
+    known = rooms_columns()
+    assert {"code", "status", "moves", "game"} <= known, "the column scan has drifted"
+    assert written <= known, f"written but never created: {written - known}"
+    assert read <= known, f"read but never created: {read - known}"

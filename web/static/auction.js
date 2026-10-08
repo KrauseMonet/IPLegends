@@ -124,7 +124,7 @@ function startAuction(ctrl){
 
 function show(id){
   // A room page carries only the floor, the fill round, the twelve and the wait panel.
-  ['aucSetup', 'aucRetain', 'aucFloor', 'aucFill', 'aucTwelve', 'aucWait'].forEach(s => {
+  ['aucSetup', 'aucRetain', 'aucFloor', 'aucFill', 'aucTrade', 'aucTwelve', 'aucWait'].forEach(s => {
     const el = $('#' + s);
     if (el) el.classList.toggle('hide', s !== id);
   });
@@ -133,6 +133,7 @@ function show(id){
 async function apply(d, animate){
   const prev = A;
   stopCountdown();
+  stopPhaseClock();
   // The address bar carries the single-player auction's state. A room's URL is the room.
   if (!AUCTION_ROOM) history.replaceState(null, '', '#' + d.state);
   closeRtm();
@@ -153,8 +154,10 @@ async function apply(d, animate){
     if (isRtm(d.phase)) openRtm();
   }
   else if (d.phase === 'fill'){ show('aucFill'); renderFill(); }
+  else if (d.phase === 'trade'){ show('aucTrade'); renderTrade(); }
   else if (d.phase === 'wait' || d.phase === 'complete'){ renderWait(); show('aucWait'); }
   else { renderTwelve(); show('aucTwelve'); }
+  announceTrades(d);
 }
 
 // --- the animation between two server responses ----------------------------------------------
@@ -1279,23 +1282,191 @@ function answerRtm(yes, ctrl){
   send('rtm', body, ctrl);
 }
 
-// --- the fill round ------------------------------------------------------------------------
+// --- the fill round [A174: rebuilt] -----------------------------------------------------------
+//
+// The squad's gaps first, then every option the rules allow, as cards a drafter can cut down
+// by role, by where the player bats and by overseas, sorted and grouped the way they are
+// looking. The index sent to the server is always the option's ORIGINAL place in
+// `fill_options`, never its place on screen, so a filter can never take the wrong man.
+
+const FILL_KEY = 'iplegends_fill_view';
+let FILL_VIEW = {role: 'all', band: 'any', origin: 'any', sort: 'rating', need: false};
+try { Object.assign(FILL_VIEW, JSON.parse(localStorage.getItem(FILL_KEY) || '{}')); } catch(e) {}
+const ROLE_CHIPS = [['all', 'All'], ['batter', 'Batters'], ['keeper', 'Keepers'],
+                    ['allrounder', 'All-rounders'], ['bowler', 'Bowlers']];
+const BAND_CHIPS = [['any', 'Any'], ['top', 'Top 1–3'], ['middle', 'Middle 3–5'],
+                    ['finisher', 'Finisher 5–7'], ['tail', 'Lower 8–11']];
+const ORIGIN_CHIPS = [['any', 'Any'], ['domestic', 'Domestic'], ['overseas', 'Overseas']];
+const FILL_SORTS = [['rating', 'Best rating'], ['position', 'By batting position'],
+                    ['role', 'By role'], ['name', 'Name A–Z'], ['season', 'Newest season']];
+const ROLE_NAME = {batter: 'Batters', keeper: 'Wicketkeepers', allrounder: 'All-rounders',
+                   bowler: 'Bowlers', unrated: 'Others'};
+const BAND_NAME = {top: 'Top order · bats 1–3', middle: 'Middle order · bats 3–5',
+                   finisher: 'Finishers · bat 5–7', tail: 'Lower order · bats 8–11'};
+
+function roleMatch(c, role){
+  if (role === 'all') return true;
+  if (role === 'keeper') return !!c.keeper_eligible;
+  return c.kind === role;
+}
+function originMatch(c, origin){
+  return origin === 'any' || (origin === 'overseas') === (c.overseas === true);
+}
+// What the squad still lacks for a legal twelve, from the predicates the twelve check uses.
+function squadGaps(d){
+  const cards = d.squad.map(s => s.card);
+  const bowlNeed = (META && META.bowlers_needed) || 5;
+  return {keeper: !cards.some(c => c.keeper_eligible), bowlNeed,
+          bowlers: Math.max(0, bowlNeed - cards.filter(c => c.has_bowl).length)};
+}
+function fillsGap(c, gaps){
+  const out = [];
+  if (gaps.keeper && c.keeper_eligible) out.push('keeper');
+  if (gaps.bowlers && c.has_bowl) out.push('bowling option');
+  return out;
+}
+function setFillView(key, value){
+  FILL_VIEW[key] = FILL_VIEW[key] === value && key === 'need' ? !value : value;
+  try { localStorage.setItem(FILL_KEY, JSON.stringify(FILL_VIEW)); } catch(e) {}
+  renderFill();
+}
+function chipRow(label, key, chips, counts){
+  return `<div class="row"><span class="lbl">${label}</span>${chips.map(([v, t]) =>
+    `<button class="fchip${FILL_VIEW[key] === v ? ' sel' : ''}" onclick="setFillView('${key}', '${v}')"
+       ${counts && !counts[v] && v !== FILL_VIEW[key] ? 'disabled' : ''}>${t}${counts ? `<span class="n">${counts[v] || 0}</span>` : ''}</button>`).join('')}</div>`;
+}
+
+function fillToolsEl(){
+  let el = $('#aucFillTools');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'aucFillTools';
+    el.className = 'auc-fill-tools';
+    $('#aucFillList').before(el);
+    const head = document.createElement('div');
+    head.id = 'aucFillHead';
+    head.className = 'auc-fill-head';
+    el.before(head);
+  }
+  return el;
+}
 
 function renderFill(){
   const d = A;
   const you = yourTeam(d);
   const need = d.squad_size - you.players;
+  const gaps = squadGaps(d);
   $('#aucFillLede').textContent = `The hammer has fallen with ${need} place${need === 1 ? '' : 's'} `
-    + `still open in your squad. Take the players you want at ₹30L each, best first.`;
-  $('#aucFillList').innerHTML = d.fill_options.map((c, i) => `
-    <div class="auc-fill-row">
-      ${ICON[c.kind] || ''}${keeperBadge(c)}
-      <span class="auc-fill-name" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
-        <em>${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</em></span>
-      ${ratingBadge(c, true)}
-      ${c.overseas ? '<span class="auc-tag os">Overseas</span>' : ''}
-      <button class="act minor" onclick="takeFill(${i}, this)">Take</button>
-    </div>`).join('');
+    + `still open in your squad. Every player here costs ₹30L, and every one keeps a legal `
+    + `twelve within reach.`;
+  const tools = fillToolsEl();
+
+  // The squad's gaps and its batting spread, as the floor's squad panel shows them.
+  const cards = d.squad.map(s => s.card);
+  const overseas = cards.filter(c => c.overseas === true).length;
+  const pill = (txt, cls) => `<span class="auc-need ${cls}">${txt}</span>`;
+  $('#aucFillHead').innerHTML = `
+    <div class="auc-needs">
+      ${pill(gaps.keeper ? '<b>0/1</b>keeper' : '<b>1/1</b>keeper', gaps.keeper ? 'want' : 'ok')}
+      ${pill(`<b>${gaps.bowlNeed - gaps.bowlers}/${gaps.bowlNeed}</b>bowling options`, gaps.bowlers ? 'want' : 'ok')}
+      ${pill(`<b>${overseas}/${d.squad_overseas_cap || 6}</b>overseas`, '')}
+      ${pill(`<b>${need}</b>place${need === 1 ? '' : 's'} to fill`, 'plain')}
+    </div>
+    <div class="auc-bands">${Object.keys(BAND_ORDER).map(b => {
+      const n = cards.filter(c => bandOf(c) === b).length;
+      return `<span class="auc-band band-${b}${n ? '' : ' none'}"><b>${n}</b> ${BAND_SHORT[b]}</span>`;
+    }).join('')}</div>
+    ${AUCTION_ROOM ? '<span class="auc-fill-clock" id="aucFillClock"></span>' : ''}`;
+
+  const opts = d.fill_options.map((c, i) => ({c, i}));
+  const by = (key, pick) => {
+    const counts = {};
+    opts.forEach(o => { const k = pick(o.c); counts[k] = (counts[k] || 0) + 1; });
+    return counts;
+  };
+  const roleCounts = {all: opts.length};
+  ROLE_CHIPS.slice(1).forEach(([v]) => { roleCounts[v] = opts.filter(o => roleMatch(o.c, v)).length; });
+  const bandCounts = {any: opts.length, ...by('band', bandOf)};
+  const originCounts = {any: opts.length, overseas: opts.filter(o => o.c.overseas === true).length,
+                        domestic: opts.filter(o => o.c.overseas !== true).length};
+  const hasGap = gaps.keeper || gaps.bowlers;
+  tools.innerHTML = `
+    ${chipRow('Role', 'role', ROLE_CHIPS, roleCounts)}
+    ${chipRow('Bats at', 'band', BAND_CHIPS, bandCounts)}
+    <div class="row"><span class="lbl">Origin</span>${ORIGIN_CHIPS.map(([v, t]) =>
+      `<button class="fchip${FILL_VIEW.origin === v ? ' sel' : ''}" onclick="setFillView('origin', '${v}')">${t}<span class="n">${originCounts[v]}</span></button>`).join('')}
+      ${hasGap ? `<button class="fchip need${FILL_VIEW.need ? ' sel' : ''}" onclick="setFillView('need', true)"
+          title="Only players who fill a gap a legal twelve needs">Fills a gap</button>` : ''}</div>
+    <div class="row"><span class="lbl">Sort</span>
+      <select class="fsort" onchange="setFillView('sort', this.value)" aria-label="Sort">
+        ${FILL_SORTS.map(([v, t]) => `<option value="${v}"${FILL_VIEW.sort === v ? ' selected' : ''}>${t}</option>`).join('')}
+      </select></div>`;
+
+  let shown = opts.filter(o => roleMatch(o.c, FILL_VIEW.role)
+    && (FILL_VIEW.band === 'any' || bandOf(o.c) === FILL_VIEW.band)
+    && originMatch(o.c, FILL_VIEW.origin)
+    && (!FILL_VIEW.need || !hasGap || fillsGap(o.c, gaps).length));
+  const rating = c => (c.rating == null ? -1 : c.rating);
+  const sorts = {
+    rating: (a, b) => rating(b.c) - rating(a.c) || a.i - b.i,
+    position: (a, b) => (Math.min(...(a.c.positions || [12])) - Math.min(...(b.c.positions || [12])))
+                        || rating(b.c) - rating(a.c),
+    role: (a, b) => (KIND_ORDER[a.c.kind] ?? 9) - (KIND_ORDER[b.c.kind] ?? 9) || rating(b.c) - rating(a.c),
+    name: (a, b) => a.c.name.localeCompare(b.c.name),
+    season: (a, b) => (b.c.season_year || 0) - (a.c.season_year || 0) || rating(b.c) - rating(a.c),
+  };
+  shown.sort(sorts[FILL_VIEW.sort] || sorts.rating);
+
+  // Grouped under headings when the sort is a grouping one; one block otherwise.
+  const groups = [];
+  const groupKey = FILL_VIEW.sort === 'position' ? o => bandOf(o.c) || 'none'
+                 : FILL_VIEW.sort === 'role' ? o => o.c.kind : () => 'all';
+  shown.forEach(o => {
+    const k = groupKey(o);
+    let g = groups.find(x => x.k === k);
+    if (!g) groups.push(g = {k, items: []});
+    g.items.push(o);
+  });
+  const title = k => k === 'all' ? `${shown.length} player${shown.length === 1 ? '' : 's'}`
+    : FILL_VIEW.sort === 'position' ? (BAND_NAME[k] || 'Anywhere') : (ROLE_NAME[k] || k);
+
+  const list = $('#aucFillList');
+  list.className = 'auc-fill-groups';
+  list.innerHTML = shown.length ? groups.map(g => `
+    <div class="auc-fill-group">
+      <h4>${title(g.k)}${g.k !== 'all' ? `<em>${g.items.length}</em>` : ''}</h4>
+      <div class="auc-fill-grid">${g.items.map(({c, i}) => {
+        const fills = fillsGap(c, gaps);
+        return `
+        <div class="fcard ${crestClass(c.crest)}${fills.length ? ' wanted' : ''}">
+          <div class="top">${ICON[c.kind] || ''}${keeperBadge(c)}${bandTag(c)}
+            ${c.overseas ? '<span class="auc-tag os">OS</span>' : ''}
+            <span class="rt">${ratingBadge(c, true)}</span></div>
+          <div class="nm" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
+            <em>${[roleLabel(c), [c.franchise, c.season_year].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</em></div>
+          ${fills.length ? `<div class="fills">Fills: ${fills.join(' + ')}</div>` : ''}
+          <button class="act minor" onclick="takeFill(${i}, this)">Take · ₹30L</button>
+        </div>`; }).join('')}</div>
+    </div>`).join('')
+    : `<div class="auc-fill-empty">Nobody matches those filters.
+         <button class="act minor" onclick="FILL_VIEW = {role:'all', band:'any', origin:'any', sort:FILL_VIEW.sort, need:false}; renderFill()">Show everyone</button></div>`;
+  if (AUCTION_ROOM) startPhaseClock('#aucFillClock', 8, s => `${s}s to choose`);
+}
+
+// A room's fill choice and trade window run on the stage clock; this shows it ticking.
+let PHASE_TICK = null;
+function stopPhaseClock(){ if (PHASE_TICK){ clearInterval(PHASE_TICK); PHASE_TICK = null; } }
+function startPhaseClock(sel, urgentAt, fmt){
+  stopPhaseClock();
+  const draw = () => {
+    const el = $(sel);
+    if (!el || !window.roomAuctionDeadline) return;
+    const left = Math.max(0, Math.ceil(window.roomAuctionDeadline()));
+    el.textContent = fmt(left);
+    el.classList.toggle('urgent', left <= urgentAt);
+  };
+  draw();
+  PHASE_TICK = setInterval(draw, 500);
 }
 
 function takeFill(i, ctrl){
@@ -1307,6 +1478,271 @@ function takeFill(i, ctrl){
       if (d) await apply(d, false);
     } catch(e){ slip(e.message); }
   });
+}
+
+// --- the trade window [A174] -------------------------------------------------------------------
+//
+// Rooms only, between the people (never the computer franchises). Pick one of yours on the
+// left and one of a partner's on the right; the table in the middle shows the swap, what it
+// does to both best twelves (asked of the server, which owns the legality rules), and sends
+// it. Offers made to you glow until answered. Completed trades are announced to everyone.
+
+let TRD = {give: null, get: null, partner: null, fYou: 'all', fThem: 'all', check: null, checkKey: null};
+const TRD_FILTERS = [['all', 'All'], ['batter', 'Bat'], ['keeper', 'WK'], ['allrounder', 'AR'], ['bowler', 'Bowl']];
+
+function trdFilter(side, v){ TRD[side] = v; renderTrade(); }
+function trdPick(side, pid){
+  TRD[side] = TRD[side] === pid ? null : pid;
+  TRD.check = null; TRD.checkKey = null;
+  renderTrade();
+  // On a phone the deal table sits above both squads: bring it back once the pair is set.
+  if (TRD.give && TRD.get && STACKED_DRAFT.matches)
+    $('.trd-table').scrollIntoView({block: 'start'});   // not smooth: the preview's redraw cuts it off
+}
+function trdPartner(pid){ if (TRD.partner !== pid){ TRD.partner = pid; TRD.get = null; TRD.check = null; renderTrade(); } }
+
+function trdRows(side, team, filter, selected, sideKey){
+  const sorted = team.squad.slice().sort((a, b) =>
+    (BAND_ORDER[bandOf(a.card)] ?? 9) - (BAND_ORDER[bandOf(b.card)] ?? 9)
+    || (b.card.rating || 0) - (a.card.rating || 0));
+  return sorted.filter(s => roleMatch(s.card, filter)).map(s => {
+    const c = s.card;
+    const cls = (selected === s.person_id ? ' sel' : '') + (s.tradeable ? '' : ' locked');
+    const click = s.tradeable ? `onclick="trdPick('${sideKey}', '${s.person_id}')"` : '';
+    return `<div class="trd-row${cls}" ${click}>
+      ${ICON[c.kind] || ''}${keeperBadge(c)}
+      <span class="nm">${c.name}<em>${[c.franchise, c.season_year].filter(Boolean).join(' ')}${c.overseas ? ' · overseas' : ''}</em></span>
+      ${bandTag(c)}${ratingBadge(c, true)}<span class="pr">${cr(s.price)}</span>
+    </div>`;
+  }).join('') || '<div class="trd-hint" style="padding:14px">Nobody here.</div>';
+}
+
+function trdFilterRow(key){
+  return `<div class="trd-filter">${TRD_FILTERS.map(([v, t]) =>
+    `<button class="fchip${TRD[key] === v ? ' sel' : ''}" onclick="trdFilter('${key}', '${v}')">${t}</button>`).join('')}</div>`;
+}
+
+function trdSlot(cap, s){
+  if (!s) return `<div class="trd-slot"><span class="cap">${cap}</span><span class="trd-hint" style="margin:0">Tap a player</span></div>`;
+  const c = s.card;
+  return `<div class="trd-slot filled ${crestClass(c.crest)}"><span class="cap">${cap}</span>
+    ${ICON[c.kind] || ''}<span class="who">${c.name}<em>${roleLabel(c)}</em></span>
+    <span style="display:flex;gap:5px;align-items:center">${bandTag(c)}${ratingBadge(c, true)}</span></div>`;
+}
+
+function deltaHtml(label, v){
+  if (v == null) return `<div class="trd-delta"><span>${label}</span><b class="flat">…</b></div>`;
+  const cls = v > 0.004 ? 'up' : v < -0.004 ? 'down' : 'flat';
+  return `<div class="trd-delta"><span>${label}</span><b class="${cls}">${v > 0 ? '+' : ''}${v.toFixed(2)}</b></div>`;
+}
+
+function offerHtml(o, t){
+  const incoming = !o.yours, open = o.status === 'open';
+  const giveLine = incoming
+    ? `<b>${o.from_short}</b> offers <b>${o.give.name}</b> <span class="arrow">⇄</span> for your <b>${o.get.name}</b>`
+    : `You offer <b>${o.give.name}</b> <span class="arrow">⇄</span> <b>${o.to_short}'s ${o.get.name}</b>`;
+  const statusWord = {open: incoming ? 'for you' : 'waiting', accepted: 'done', declined: 'declined',
+                      withdrawn: 'withdrawn', void: 'off the table'}[o.status];
+  const deltas = open && o.delta_you != null ? `<div class="trd-verdict" style="margin:0">
+      ${deltaHtml('Your twelve', o.delta_you)}${deltaHtml('Theirs', o.delta_them)}</div>` : '';
+  const acts = !open ? '' : incoming
+    ? `<div class="acts"><button class="act lead" onclick="trdAnswer(${o.n}, true, this)">Accept</button>
+         <button class="act minor" onclick="trdAnswer(${o.n}, false, this)">Decline</button></div>`
+    : `<div class="acts"><button class="act minor" onclick="trdWithdraw(${o.n}, this)">Withdraw</button></div>`;
+  return `<div class="trd-offer${incoming ? ' incoming' : ''}${open ? ' open' : ' closed'}">
+    <div class="line">${giveLine}<span class="st ${o.status}">${statusWord}</span></div>${deltas}${acts}</div>`;
+}
+
+function renderTrade(){
+  const d = A, t = d.trade;
+  if (!t) return;
+  if (!TRD.partner || !t.partners.some(p => p.player_id === TRD.partner))
+    TRD.partner = (t.partners[0] || {}).player_id || null;
+  const partner = t.partners.find(p => p.player_id === TRD.partner);
+  const mine = t.you.squad.find(s => s.person_id === TRD.give && s.tradeable);
+  const theirs = partner && partner.squad.find(s => s.person_id === TRD.get && s.tradeable);
+  if (!mine) TRD.give = null;
+  if (!theirs) TRD.get = null;
+
+  const left = t.you.trades_left;
+  const pips = Array.from({length: t.per_team}, (_, i) => `<i class="${i < t.per_team - left ? 'used' : ''}"></i>`).join('');
+  const host = window.roomIsHost && window.roomIsHost();
+  const openMine = t.offers.filter(o => o.yours && o.status === 'open').length;
+  const incoming = t.offers.filter(o => !o.yours);
+  const outgoing = t.offers.filter(o => o.yours);
+  const ready = t.you.ready;
+
+  let table;
+  if (!left) {
+    table = `<div class="trd-hint">You have used both trades. Your squad is set.</div>`;
+  } else if (!partner) {
+    table = `<div class="trd-hint">Nobody left to trade with.</div>`;
+  } else {
+    const check = TRD.check;
+    const errors = check && check.errors && check.errors.length ? check.errors : [];
+    const canSend = !!(mine && theirs && check && !errors.length && openMine < t.max_open
+                        && partner.trades_left > 0);
+    table = `
+      <div class="trd-faceoff">
+        ${trdSlot('You give', mine || null)}
+        <div class="trd-swap${mine && theirs ? ' live' : ''}">⇄</div>
+        ${trdSlot(`${partner.short} give`, theirs || null)}
+      </div>
+      ${mine && theirs ? `<div class="trd-verdict">
+          ${deltaHtml('Your twelve', check && !errors.length ? check.you : null)}
+          ${deltaHtml(`${partner.short}'s twelve`, check && !errors.length ? check.them : null)}</div>` : ''}
+      ${errors.length ? `<div class="trd-errors">${errors.map(e => `<div>✕ ${esc(e)}</div>`).join('')}</div>` : ''}
+      ${mine && theirs ? '' : `<div class="trd-hint">Pick one of yours and one of ${esc(partner.owner || partner.short)}'s. Change in best twelve is shown per player.</div>`}
+      ${partner.trades_left ? '' : `<div class="trd-errors"><div>✕ ${partner.short} has used its trades</div></div>`}
+      ${openMine >= t.max_open ? `<div class="trd-errors"><div>✕ ${t.max_open} offers open already — withdraw one first</div></div>` : ''}
+      <button class="act lead trd-send" ${canSend ? '' : 'disabled'} onclick="trdOffer(this)">Send offer to ${esc(partner.owner || partner.short)}</button>`;
+  }
+
+  $('#aucTrade').innerHTML = `
+    <div class="trd-hero">
+      <div>
+        <div class="auc-kicker">Trade window · one for one · no money</div>
+        <h2 class="auc-title">Make a <span>deal</span></h2>
+        <p class="auc-lede">Swap players with the other people in the room — up to ${t.per_team} trades each.
+          A player who arrives in a trade stays. Both squads must still be able to field a legal twelve.</p>
+      </div>
+      <div class="trd-status">
+        <div class="trd-pips">${pips}<span>${left} trade${left === 1 ? '' : 's'} left</span></div>
+        <div class="trd-clock" id="trdClock">—</div>
+        <button class="act ${ready ? 'lead' : 'minor'}" onclick="trdReady(${!ready}, this)">${ready ? '✓ Done trading' : "I'm done trading"}</button>
+        ${host ? '<button class="act minor" onclick="trdEnd(this)">Close the window</button>' : ''}
+      </div>
+    </div>
+    <div class="trd-desk">
+      <div class="trd-col ${crestClass(t.you.crest) || 'crest-' + t.you.short}">
+        <div class="trd-col-head">${chip(t.you.short)}<b>Your squad</b><em>${t.you.overseas} OS</em></div>
+        ${trdFilterRow('fYou')}
+        <div class="trd-list">${trdRows('you', t.you, TRD.fYou, TRD.give, 'give')}</div>
+      </div>
+      <div class="trd-table">
+        <h3>The deal</h3>
+        ${table}
+        <div class="trd-offers">
+          ${incoming.length ? `<h4>Offers to you</h4>${incoming.slice().reverse().map(o => offerHtml(o, t)).join('')}` : ''}
+          ${outgoing.length ? `<h4>Your offers</h4>${outgoing.slice().reverse().map(o => offerHtml(o, t)).join('')}` : ''}
+        </div>
+      </div>
+      <div class="trd-col ${partner ? 'crest-' + partner.short : ''}">
+        <div class="trd-partners">${t.partners.map(p => `
+          <button class="trd-partner crest-${p.short}${p.player_id === TRD.partner ? ' sel' : ''}" onclick="trdPartner('${p.player_id}')">
+            ${chip(p.short)}${esc(p.owner || p.short)}
+            ${p.ready ? '<span class="rdy">DONE</span>' : ''}${p.trades_left ? '' : '<span class="out">NO TRADES</span>'}
+          </button>`).join('')}</div>
+        ${partner ? `${trdFilterRow('fThem')}
+          <div class="trd-list">${trdRows('them', partner, TRD.fThem, TRD.get, 'get')}</div>` : ''}
+      </div>
+    </div>
+    ${d.trades.length ? `<div class="trd-wire"><h4>Trade wire</h4>${d.trades.slice().reverse().map(x => `
+      <div class="trd-wire-row">${chip(x.a_short)}<b>${x.a_gave.name}</b><span class="arrow">⇄</span>
+        <b>${x.b_gave.name}</b>${chip(x.b_short)}</div>`).join('')}</div>` : ''}`;
+
+  startPhaseClock('#trdClock', 15, s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+  if (mine && theirs && partner) trdCheck(partner, mine, theirs);
+}
+
+async function trdCheck(partner, mine, theirs){
+  const key = [partner.player_id, mine.person_id, theirs.person_id].join('|');
+  if (TRD.checkKey === key) return;
+  TRD.checkKey = key;
+  try {
+    const res = await api(window.roomTradeCheckUrl(partner.player_id, mine.person_id, theirs.person_id));
+    if (TRD.checkKey !== key) return;
+    TRD.check = res;
+  } catch(e){
+    if (TRD.checkKey !== key) return;
+    TRD.check = {errors: [e.message]};
+  }
+  if (A && A.phase === 'trade') renderTrade();
+}
+
+async function trdMove(path, body, ctrl){
+  return busyClick(ctrl, null, async () => {
+    try {
+      const d = await window.roomAuctionPost(path, body);
+      if (d) await apply(d, false);
+    } catch(e){ slip(e.message); }
+  });
+}
+function trdOffer(ctrl){
+  if (!TRD.give || !TRD.get || !TRD.partner) return;
+  const body = {to: TRD.partner, give: TRD.give, get: TRD.get};
+  TRD.give = TRD.get = null; TRD.check = null; TRD.checkKey = null;
+  trdMove('offer', body, ctrl);
+}
+function trdAnswer(n, yes, ctrl){ trdMove('answer', {offer: n, yes}, ctrl); }
+function trdWithdraw(n, ctrl){ trdMove('withdraw', {offer: n}, ctrl); }
+function trdReady(on, ctrl){ trdMove('ready', {on}, ctrl); }
+function trdEnd(ctrl){
+  if (!confirm('Close the trade window for everyone? Nobody can trade after this.')) return;
+  trdMove('trade-end', {}, ctrl);
+}
+
+// --- a completed trade, announced to the whole room ----------------------------------------
+//
+// Everyone sees every trade the moment it completes, wherever they are in the room: the
+// two crests slide in, the players change hands, and the auctioneer says so. Trades already
+// done when the page loads are not replayed (a reload is not news).
+
+let TRADES_SEEN = null;
+const TRADE_FLASHES = [];
+let TRADE_FLASHING = false;
+
+function announceTrades(d){
+  const list = d.trades || [];
+  if (TRADES_SEEN === null){ TRADES_SEEN = list.length; return; }
+  for (const t of list.slice(TRADES_SEEN)) TRADE_FLASHES.push(t);
+  TRADES_SEEN = Math.max(TRADES_SEEN, list.length);
+  if (!TRADE_FLASHING) nextTradeFlash();
+}
+
+SOUNDS.trade = () => {
+  // A rising sweep, then two bright notes: a deal struck.
+  tone(240, 0.45, {type: 'sawtooth', gain: 0.05, slide: 960});
+  tone(784, 0.25, {gain: 0.14, at: 0.42});
+  tone(1175, 0.5, {gain: 0.12, at: 0.56});
+};
+
+function nextTradeFlash(){
+  const t = TRADE_FLASHES.shift();
+  if (!t){ TRADE_FLASHING = false; return; }
+  TRADE_FLASHING = true;
+  const side = (cls, short, fr, crest, owner, gets) => `
+    <div class="trd-flash-side ${cls} crest-${short}">
+      ${crestImg(crest, 'crest-img')}
+      <div class="fr">${fr}</div>${owner ? `<div class="ow">${esc(owner)}</div>` : ''}
+      <div class="gets">gets</div>
+      <div class="pl">${gets.name}<em>${roleLabel(gets)}${gets.rating != null ? ' · ' + gets.rating : ''}</em></div>
+    </div>`;
+  const el = document.createElement('div');
+  el.className = 'trd-flash';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<div class="trd-flash-inner">
+      <div class="trd-flash-kicker">Breaking · trade completed</div>
+      <div class="trd-flash-title">TRADE!</div>
+      <div class="trd-flash-deal">
+        ${side('left', t.a_short, t.a_franchise, t.a_crest, t.a_owner, t.b_gave)}
+        <div class="trd-flash-swap">⇄</div>
+        ${side('right', t.b_short, t.b_franchise, t.b_crest, t.b_owner, t.a_gave)}
+      </div>
+      <div class="trd-flash-tap">Tap to continue</div>
+    </div>`;
+  let done = false;
+  const close = () => {
+    if (done) return;
+    done = true;
+    el.classList.add('out');
+    setTimeout(() => { el.remove(); nextTradeFlash(); }, 350);
+  };
+  el.addEventListener('click', close);
+  document.body.appendChild(el);
+  play('trade');
+  speak(`Trade! ${franchiseName(t.a_short)} send ${t.a_gave.name} to ${franchiseName(t.b_short)}, for ${t.b_gave.name}.`);
+  setTimeout(close, 5200);
 }
 
 // --- a room waiting on other people [A139] ---------------------------------------------------

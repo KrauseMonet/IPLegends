@@ -2856,3 +2856,190 @@ html{scroll-padding-top:80px}
   .auc-sets-set summary em{width:100%;text-align:left;padding-left:32px;order:3}
   .auc-sets-set summary::after{order:2}
 }
+
+/* ============ FILL ROUND, rebuilt [A174] ============
+   Was one long list read top-down, best first. Now a toolbar that filters by role, by
+   batting band and by overseas, sorts several ways, and groups the cards under headings,
+   above a grid of cards -- with what the squad still lacks shown first, since that is
+   what decides most fill picks. */
+.auc-fill-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin-top:18px}
+.auc-fill-clock{font-family:var(--mono);font-size:13px;color:var(--ink-2);padding:5px 10px;
+  border:1px solid var(--line);border-radius:999px}
+.auc-fill-clock.urgent{color:var(--hot);border-color:var(--hot);animation:aucPulse .9s ease-in-out infinite}
+.auc-fill-tools{position:sticky;top:0;z-index:5;margin-top:16px;padding:12px 14px;
+  border:1px solid var(--line);border-radius:14px;background:rgba(10,23,48,.94);
+  backdrop-filter:blur(6px);display:grid;gap:10px}
+.auc-fill-tools .row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.auc-fill-tools .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ink-3);min-width:62px}
+.fchip{appearance:none;border:1px solid var(--line);background:transparent;color:var(--ink-2);
+  font:600 12.5px/1 var(--sans);padding:7px 11px;border-radius:999px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;transition:background .15s,border-color .15s,color .15s}
+.fchip:hover{border-color:var(--line-strong);color:var(--ink)}
+.fchip.sel{background:var(--gold);border-color:var(--gold);color:#1b1300}
+.fchip .n{font-family:var(--mono);font-size:11px;opacity:.7}
+.fchip.need{border-color:var(--hot);color:var(--hot)}
+.fchip.need.sel{background:var(--hot);color:#fff}
+.fchip:disabled{opacity:.35;cursor:default}
+.fsort{appearance:none;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;font:600 12.5px var(--sans);padding:7px 28px 7px 10px;cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-2) 50%),linear-gradient(135deg,var(--ink-2) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+.auc-fill-groups{margin-top:18px;display:grid;gap:22px}
+.auc-fill-group h4{margin:0 0 10px;display:flex;align-items:baseline;gap:10px;
+  font-family:var(--display);font-weight:400;font-size:22px;letter-spacing:.02em}
+.auc-fill-group h4 em{font:500 12px var(--mono);color:var(--ink-3);font-style:normal}
+.auc-fill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.fcard{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px;
+  background:linear-gradient(160deg,var(--team-deep,var(--panel-2)) 0%,var(--panel) 70%);
+  padding:12px 12px 10px;display:grid;gap:6px;transition:transform .15s,border-color .15s}
+.fcard:hover{transform:translateY(-2px);border-color:var(--team,var(--line-strong))}
+.fcard::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--team,var(--line))}
+.fcard .top{display:flex;align-items:center;gap:7px}
+.fcard .rt{margin-left:auto}
+.fcard .nm{font-weight:800;font-size:15px;line-height:1.2;cursor:pointer}
+.fcard .nm em{display:block;font:400 11.5px var(--sans);color:var(--ink-3);font-style:normal;margin-top:2px}
+.fcard .meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.fcard .fills{font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mint)}
+.fcard button{margin-top:4px;width:100%}
+.fcard.wanted{border-color:rgba(255,74,53,.55);box-shadow:0 0 0 1px rgba(255,74,53,.25) inset}
+.auc-fill-empty{padding:28px;text-align:center;color:var(--ink-3);border:1px dashed var(--line);border-radius:14px}
+
+/* ============ THE TRADE WINDOW [A174] ============
+   Its own room: a dark trading desk, your squad on the left, a partner's on the right and
+   the deal itself on the table between them, with the two players squaring up. */
+#aucTrade{--trd-glow:rgba(61,220,151,.18)}
+.trd-hero{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;
+  padding:30px 0 10px;border-bottom:1px solid var(--line)}
+.trd-hero .auc-title{font-size:clamp(40px,7vw,68px)}
+.trd-hero .auc-title span{color:var(--mint)}
+.trd-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.trd-clock{font:700 26px var(--mono);color:var(--mint);min-width:76px;text-align:center;
+  padding:6px 12px;border:1px solid rgba(61,220,151,.4);border-radius:10px;background:rgba(61,220,151,.06)}
+.trd-clock.urgent{color:var(--hot);border-color:var(--hot);background:rgba(255,74,53,.08);animation:aucPulse .9s ease-in-out infinite}
+.trd-pips{display:flex;align-items:center;gap:5px;font:600 11px var(--mono);letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3)}
+.trd-pips i{width:11px;height:11px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px var(--mint)}
+.trd-pips i.used{background:transparent;border:1px solid var(--ink-3);box-shadow:none}
+.trd-desk{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,1.05fr) minmax(0,1fr);gap:16px;margin-top:18px;align-items:start}
+.trd-col{min-width:0;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.trd-col-head{display:flex;align-items:center;gap:10px;padding:12px 14px;
+  background:linear-gradient(90deg,var(--team-deep,var(--panel-2)),transparent);border-bottom:1px solid var(--line)}
+.trd-col-head b{font-family:var(--display);font-weight:400;font-size:20px;letter-spacing:.02em}
+.trd-col-head em{margin-left:auto;font:500 11.5px var(--mono);color:var(--ink-3);font-style:normal}
+.trd-filter{display:flex;flex-wrap:wrap;gap:5px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.trd-filter .fchip{padding:5px 9px;font-size:11.5px}
+.trd-list{max-height:520px;overflow-y:auto}
+.trd-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);
+  cursor:pointer;transition:background .12s}
+.trd-row:hover{background:rgba(255,255,255,.04)}
+.trd-row .nm{flex:1;min-width:0;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trd-row .nm em{display:block;font:400 11px var(--sans);color:var(--ink-3);font-style:normal}
+.trd-row .pr{font:600 12px var(--mono);color:var(--ink-2)}
+.trd-row.sel{background:linear-gradient(90deg,rgba(61,220,151,.22),rgba(61,220,151,.04));
+  box-shadow:inset 3px 0 0 var(--mint)}
+.trd-row.locked{opacity:.45;cursor:not-allowed}
+.trd-row.locked .nm::after{content:" · arrived in a trade";font-weight:400;font-size:11px;color:var(--ink-3)}
+.trd-partners{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);overflow-x:auto}
+.trd-partner{appearance:none;display:flex;align-items:center;gap:7px;padding:6px 10px 6px 6px;border-radius:999px;
+  border:1px solid var(--line);background:transparent;color:var(--ink-2);font:600 12.5px var(--sans);cursor:pointer;white-space:nowrap}
+.trd-partner.sel{border-color:var(--team,var(--gold));background:var(--team-deep,var(--panel-2));color:var(--ink)}
+.trd-partner .rdy{font:700 9.5px var(--mono);letter-spacing:.1em;color:var(--mint)}
+.trd-partner .out{font:700 9.5px var(--mono);letter-spacing:.1em;color:var(--ink-3)}
+.trd-table{border:1px solid rgba(61,220,151,.35);border-radius:16px;padding:16px;
+  background:radial-gradient(120% 90% at 50% 0%,var(--trd-glow),transparent 60%),var(--panel);
+  box-shadow:0 18px 50px rgba(0,0,0,.35);position:sticky;top:12px}
+.trd-table h3{margin:0 0 12px;font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.03em;text-align:center}
+.trd-faceoff{display:grid;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);align-items:center;gap:6px}
+.trd-slot{min-width:0;min-height:132px;border:1px dashed var(--line-strong);border-radius:12px;padding:10px;
+  display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:5px;
+  background:linear-gradient(170deg,var(--team-deep,transparent),transparent 75%)}
+.trd-slot.filled{border-style:solid;border-color:var(--team,var(--line-strong))}
+.trd-slot .cap{font:700 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.trd-slot .who{font-weight:800;font-size:15px;line-height:1.2}
+.trd-slot .who em{display:block;font:400 11px var(--sans);color:var(--ink-3);font-style:normal}
+.trd-slot.filled{animation:trdLand .35s cubic-bezier(.2,1.4,.4,1)}
+@keyframes trdLand{from{transform:scale(.88);opacity:.3}to{transform:none;opacity:1}}
+.trd-swap{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:20px;
+  color:var(--mint);border:1px solid rgba(61,220,151,.45);background:rgba(61,220,151,.08)}
+.trd-swap.live{animation:trdSpin 2.4s ease-in-out infinite}
+@keyframes trdSpin{0%,60%{transform:rotate(0)}80%,100%{transform:rotate(180deg)}}
+.trd-verdict{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.trd-delta{border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-align:center}
+.trd-delta span{display:block;font:600 10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.trd-delta b{font:700 20px var(--mono)}
+.trd-delta b.up{color:var(--mint)} .trd-delta b.down{color:var(--red-2)} .trd-delta b.flat{color:var(--ink-2)}
+.trd-errors{margin-top:10px;font-size:13px;color:var(--red-2);display:grid;gap:3px}
+.trd-hint{margin-top:10px;font-size:13px;color:var(--ink-3);text-align:center}
+.trd-send{margin-top:12px;width:100%}
+.trd-offers{margin-top:16px;display:grid;gap:8px}
+.trd-offers h4{margin:6px 0 0;font:700 10.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.trd-offer{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:7px;background:var(--panel-2)}
+.trd-offer.incoming.open{border-color:var(--gold);box-shadow:0 0 0 1px rgba(245,184,61,.3),0 0 22px rgba(245,184,61,.12);animation:trdNudge 2.2s ease-in-out infinite}
+@keyframes trdNudge{0%,100%{box-shadow:0 0 0 1px rgba(245,184,61,.3),0 0 10px rgba(245,184,61,.08)}50%{box-shadow:0 0 0 1px rgba(245,184,61,.55),0 0 26px rgba(245,184,61,.22)}}
+.trd-offer .line{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+.trd-offer .line b{font-weight:800}
+.trd-offer .arrow{color:var(--mint);font-weight:800}
+.trd-offer .st{margin-left:auto;font:700 10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.trd-offer .st.accepted{color:var(--mint)} .trd-offer .st.declined,.trd-offer .st.void{color:var(--red-2)}
+.trd-offer .acts{display:flex;gap:6px}
+.trd-offer .acts .act{flex:1;padding:8px 10px}
+.trd-offer.closed{opacity:.55}
+.trd-wire{margin-top:22px;border-top:1px solid var(--line);padding-top:14px}
+.trd-wire h4{margin:0 0 10px;font:700 10.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.trd-wire-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.trd-wire-row .arrow{color:var(--mint)}
+.trd-foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:16px}
+@media (max-width:980px){
+  .trd-desk{grid-template-columns:minmax(0,1fr)}
+  .trd-table{position:static;order:-1}
+  .trd-list{max-height:340px}
+}
+
+/* A completed trade, announced to the whole room. */
+.trd-flash{position:fixed;inset:0;z-index:950;display:grid;place-items:center;padding:16px;
+  background:radial-gradient(80% 60% at 50% 50%,rgba(6,13,31,.82),rgba(6,13,31,.96));
+  animation:trdFade .3s ease-out;cursor:pointer}
+.trd-flash.out{animation:trdFadeOut .35s ease-in forwards}
+@keyframes trdFade{from{opacity:0}}
+@keyframes trdFadeOut{to{opacity:0}}
+.trd-flash-inner{width:min(760px,100%);text-align:center}
+.trd-flash-kicker{font:700 12px var(--mono);letter-spacing:.42em;text-transform:uppercase;color:var(--mint)}
+.trd-flash-title{font-family:var(--display);font-weight:400;font-size:clamp(64px,15vw,150px);line-height:.9;
+  letter-spacing:.03em;margin:4px 0 18px;color:var(--ink);
+  text-shadow:0 0 30px rgba(61,220,151,.45);animation:trdStamp .55s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes trdStamp{from{transform:scale(2.4) rotate(-6deg);opacity:0}to{transform:none;opacity:1}}
+.trd-flash-deal{display:grid;grid-template-columns:minmax(0,1fr) 60px minmax(0,1fr);align-items:center;gap:8px}
+.trd-flash-side{border-radius:16px;padding:16px 12px;display:grid;justify-items:center;gap:6px;
+  background:linear-gradient(170deg,var(--team-deep,var(--panel-2)),var(--panel));border:1px solid var(--team,var(--line))}
+.trd-flash-side .crest-img{width:64px;height:64px}
+.trd-flash-side .fr{font-family:var(--display);font-size:22px;letter-spacing:.03em}
+.trd-flash-side .ow{font-size:12px;color:var(--ink-3)}
+.trd-flash-side .gets{margin-top:6px;font:700 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.trd-flash-side .pl{font-weight:800;font-size:18px;line-height:1.2}
+.trd-flash-side .pl em{display:block;font:400 12px var(--sans);color:var(--ink-3);font-style:normal}
+.trd-flash-side.left{animation:trdInL .6s .25s cubic-bezier(.2,1.2,.4,1) both}
+.trd-flash-side.right{animation:trdInR .6s .25s cubic-bezier(.2,1.2,.4,1) both}
+@keyframes trdInL{from{transform:translateX(-60%);opacity:0}}
+@keyframes trdInR{from{transform:translateX(60%);opacity:0}}
+.trd-flash-side .pl{animation:trdPlate .8s .9s ease-out both}
+@keyframes trdPlate{from{opacity:0;transform:translateY(10px)}}
+.trd-flash-swap{font-size:34px;color:var(--mint);animation:trdSpinOnce 1s .6s ease-in-out both}
+@keyframes trdSpinOnce{from{transform:rotate(-180deg) scale(.4);opacity:0}}
+.trd-flash-tap{margin-top:16px;font-size:12px;color:var(--ink-3)}
+@media (max-width:560px){
+  .trd-flash-deal{grid-template-columns:minmax(0,1fr);gap:6px}
+  .trd-flash-swap{transform:rotate(90deg)}
+}
+@media (prefers-reduced-motion:reduce){
+  .trd-flash,.trd-flash *,.trd-swap.live,.trd-offer.incoming.open,.trd-slot.filled{animation:none!important}
+}
+@keyframes aucPulse{0%,100%{opacity:1}50%{opacity:.55}}
+@media (max-width:600px){
+  .auc-fill-tools{position:static}
+  /* One swipeable line per filter on a phone, rather than three wrapped rows each. */
+  .auc-fill-tools .row{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:0 14px}
+  .auc-fill-tools .row::-webkit-scrollbar{display:none}
+  .auc-fill-tools .fchip{flex:none}
+  .auc-fill-tools .lbl{min-width:54px;flex:none}
+}

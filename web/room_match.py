@@ -321,6 +321,65 @@ def _start_recorded(room: Room) -> bool:
     return any(isinstance(mv, dict) and mv.get("kind") == "start" for mv in room.match_moves)
 
 
+# [A176] Which league schedule a room plays, fixed by the "start" move that opens its
+# matches. A start move recorded before A176 carries no "schedule" and keeps the old one
+# (seats in join order on the circle, doubles at 1/2/5, A97's bucketed reveal), so a
+# tournament already under way never has its fixtures or results changed under it. Every
+# start recorded since carries SCHEDULE_GROUPS. "Play again" clears the move log, so a
+# replayed room starts on the new schedule.
+SCHEDULE_CIRCLE = 1
+SCHEDULE_GROUPS = 2
+
+# The IPL's own two-group format (2022 on), on ten teams: seats 0,2,4,6,8 are one group
+# and 1,3,5,7,9 the other. Circular distances 2 and 4 join every pair inside a group and
+# 5 pairs each side with exactly one team of the other group, so a side plays its four
+# group-mates twice, one rival from the other group twice, and the other four once -- 14
+# matches, five doubles, the same as DOUBLE_AT gives. Chosen over DOUBLE_AT for rooms
+# because DOUBLE_AT's graph has no four teams all meeting each other twice, so it cannot
+# honour HUMANS_TOGETHER_BELOW for a four-person room; this one can for up to five.
+GROUP_DOUBLE_AT = (2, 4, 5)
+
+# Below this many people, every human side is placed in the same group, so each pair of
+# people meets twice. At or above it the seating is a plain shuffle.
+HUMANS_TOGETHER_BELOW = 5
+
+
+def _start_move() -> dict:
+    return _stamped({"kind": "start", "schedule": SCHEDULE_GROUPS})
+
+
+def _schedule(room: Room) -> int:
+    for mv in room.match_moves:
+        if isinstance(mv, dict) and mv.get("kind") == "start":
+            return mv.get("schedule", SCHEDULE_CIRCLE)
+    return SCHEDULE_CIRCLE
+
+
+def _league_seating(room: Room, pairs: list[tuple[str, Side]]) -> list[int]:
+    """`seating[position] = index into pairs` for the group schedule. Seeded from the
+    room's own seed under its own label, so it draws nothing from the match stream and
+    every replay seats the room identically."""
+    rng = random.Random(f"{room.seed}:seating")
+    n = len(pairs)
+    humans = [k for k, (pid, _) in enumerate(pairs) if not room.players[pid].is_cpu]
+    others = [k for k in range(n) if k not in humans]
+    if len(humans) >= HUMANS_TOGETHER_BELOW:
+        order = list(range(n))
+        rng.shuffle(order)
+        return order
+    group_a, group_b = list(range(0, n, 2)), list(range(1, n, 2))
+    if rng.random() < 0.5:
+        group_a, group_b = group_b, group_a
+    rng.shuffle(humans)
+    rng.shuffle(others)
+    rng.shuffle(group_a)
+    rng.shuffle(group_b)
+    seating = [0] * n
+    for position, k in zip(group_a + group_b, humans + others):
+        seating[position] = k
+    return seating
+
+
 def _league_revealed_count(room: Room) -> int:
     """How many of the round-robin's fixtures the host has revealed so far -- the
     highest `through` value recorded, or 0. Monotonic by construction: a write only ever
@@ -397,7 +456,7 @@ def _resolve_one_step(room: Room, replay: RoomMatchReplay, *, league_to: int | N
     the total. The failsafe leaves it None and advances the cursor by one, because it is
     rescuing a stalled room rather than fast-forwarding it."""
     if replay.awaiting_start:
-        room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
+        room.match_moves = room.match_moves + [_start_move()]
         return True
 
     if replay.league_progress is not None:
@@ -513,12 +572,13 @@ def _standings_table(pairs: list[tuple[str, Side]],
 # branch), which is unrelated to whether the underlying simulation is cached. Computing
 # a table fresh from whatever slice is relevant is cheap (70 rows at most) and needs no
 # caching of its own.
-_ROUND_ROBIN_CACHE: dict[tuple[str, int], tuple[list[RoomResultEntry], tuple]] = {}
+_ROUND_ROBIN_CACHE: dict[tuple[str, int, int], tuple[list[RoomResultEntry], tuple]] = {}
 
 
 def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
                           ) -> list[RoomResultEntry]:
-    key = (room.code, room.seed)
+    schedule = _schedule(room)
+    key = (room.code, room.seed, schedule)
     cached = _ROUND_ROBIN_CACHE.get(key)
     if cached is not None:
         entries, rng_state = cached
@@ -526,16 +586,50 @@ def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
         d.rng.setstate(rng_state)
         return entries
 
-    side_by_index = [side for _, side in pairs]
-    for i, j in league_fixtures(len(pairs)):
+    if schedule == SCHEDULE_GROUPS:
+        side_by_index = [pairs[k][1] for k in _league_seating(room, pairs)]
+        fixture_list = league_fixtures(len(pairs), GROUP_DOUBLE_AT)
+    else:
+        side_by_index = [side for _, side in pairs]
+        fixture_list = league_fixtures(len(pairs))
+    for i, j in fixture_list:
         d.resolve_auto(side_by_index[i], side_by_index[j], "league")
     entries = list(d.entries)
     _ROUND_ROBIN_CACHE[key] = (entries, d.rng.getstate())
     return entries
 
 
+def _balanced_order(entries: list[RoomResultEntry]) -> list[RoomResultEntry]:
+    """[A176] The reveal order for the group schedule: matchday by matchday, so no side
+    runs ahead of the others or is left holding the last games of the group stage.
+
+    A97's bucketing (below) fixed the host's fourteen games coming FIRST and made them
+    come LAST instead: bucket sizes run 14, 12, 10 ... 0, so once the small buckets empty
+    only the host's is left, and six of the last thirteen reveals were the host's. Here
+    each next fixture is the one whose two sides have been shown the FEWEST games (the
+    larger of the two counts, then the sum, then simulation order), so every side's
+    count stays within one of every other's all the way through. Display only, like
+    `_reveal_order`: a permutation of finished results, never a re-simulation."""
+    remaining = list(enumerate(entries))
+    shown: dict[str, int] = {}
+    out = []
+    while remaining:
+        def cost(item):
+            k, e = item
+            a, b = shown.get(e.home_pid, 0), shown.get(e.away_pid, 0)
+            return (max(a, b), a + b, k)
+        pick = min(remaining, key=cost)
+        remaining.remove(pick)
+        e = pick[1]
+        shown[e.home_pid] = shown.get(e.home_pid, 0) + 1
+        shown[e.away_pid] = shown.get(e.away_pid, 0) + 1
+        out.append(e)
+    return out
+
+
 def _reveal_order(entries: list[RoomResultEntry], n_teams: int) -> list[RoomResultEntry]:
-    """Reorders ALREADY-SIMULATED round-robin entries for REVEAL ONLY -- diagnosed
+    """[A176: kept for rooms started before the group schedule -- see `_balanced_order`.]
+    Reorders ALREADY-SIMULATED round-robin entries for REVEAL ONLY -- diagnosed
     from a real report ("only the host's own matches are shown") that turned out to be
     literally true for the first fourteen of seventy reveals, every time.
 
@@ -638,7 +732,9 @@ def replay_room_matches(room: Room, deck, model: Model) -> RoomMatchReplay:
     # round instead of called once each. The round-robin itself is cached (see
     # `_round_robin_results`'s own docstring) -- it is the dominant cost of replaying a
     # league room and depends on nothing this room's own moves could change.
-    all_entries = _reveal_order(_round_robin_results(d, room, pairs), len(pairs))
+    simulated = _round_robin_results(d, room, pairs)
+    all_entries = (_balanced_order(simulated) if _schedule(room) == SCHEDULE_GROUPS
+                   else _reveal_order(simulated, len(pairs)))
     total = len(all_entries)
     revealed = min(_league_revealed_count(room), total)
 
@@ -875,7 +971,7 @@ def start_matches(conn, code: str, player_id: str, deck, model) -> Room:
     replay = replay_room_matches(room, deck, model)
     if not replay.awaiting_start:
         raise RoomError("this room is not waiting to start right now")
-    room.match_moves = room.match_moves + [_stamped({"kind": "start"})]
+    room.match_moves = room.match_moves + [_start_move()]
     rooms._save_room(conn, room)
     return room
 

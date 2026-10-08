@@ -585,14 +585,15 @@ class Season:
     champion: Side | None = None
 
 
-def fixtures(n: int = TEAMS) -> list[tuple[int, int]]:
-    """Index pairs for the league, each side appearing MATCHES_EACH times."""
+def fixtures(n: int = TEAMS, double_at: tuple[int, ...] = DOUBLE_AT) -> list[tuple[int, int]]:
+    """Index pairs for the league, each side appearing MATCHES_EACH times. `double_at`
+    names the circular distances that meet twice; a room's league passes its own (A176)."""
     out: list[tuple[int, int]] = []
     for i in range(n):
         for j in range(i + 1, n):
             gap = min((j - i) % n, (i - j) % n)
             out.append((i, j))
-            if gap in DOUBLE_AT:
+            if gap in double_at:
                 out.append((j, i))          # the reverse fixture, home side swapped
     return out
 

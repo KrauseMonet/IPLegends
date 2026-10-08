@@ -2106,6 +2106,17 @@ directly opposite. Distance 5 is the antipode and so names one opponent rather t
 It is also what a real fixture list does: near rivals twice, the rest once. Symmetric, so
 no side gets an easier draw.
 
+**Rooms play a different 5-regular graph (A176): the IPL's own two-group format.** Seats
+0, 2, 4, 6, 8 form one group and the odd seats the other; distances 2 and 4 join every pair
+inside a group and 5 joins each side to one team of the other group, so a side plays its
+four group-mates twice, one cross-group rival twice and the other four once. Seats are
+shuffled from the room's seed rather than taken in join order, and **with fewer than five
+people every human side is placed in the same group, so every pair of people meets twice**
+— which the circle above cannot do for four (no four seats are all 1, 2 or 5 apart). The
+group stage is revealed matchday by matchday, the next fixture always the one whose sides
+have been shown the fewest games. A room started before A176 keeps the circle and its old
+reveal order, so a tournament in progress never changes; solo seasons are unchanged.
+
 ### 12.3 The table
 
 Two points a win, one a tie. **Net run rate charges a side bowled out the FULL twenty

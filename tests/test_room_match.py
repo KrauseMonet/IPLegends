@@ -1200,3 +1200,113 @@ def test_a_room_table_carries_for_against_and_form_that_agree_with_itself(conn):
         expect.append("T" if e.result.winner is None
                       else ("W" if e.result.winner.short == me.short else "L"))
     assert next(r for r in out.table if r.you).form == expect
+
+
+# --- [A176] the group schedule: humans together, a balanced reveal, old rooms untouched ---
+
+from collections import Counter
+from types import SimpleNamespace
+
+
+def _fake_seating_room(seed: int, n_humans: int):
+    pids = [f"p{k}" for k in range(10)]
+    players = {pid: SimpleNamespace(is_cpu=k >= n_humans) for k, pid in enumerate(pids)}
+    room = SimpleNamespace(seed=seed, players=players)
+    pairs = [(pid, None) for pid in pids]
+    return room, pairs
+
+
+def _meetings(room, pairs) -> Counter:
+    from game.season import fixtures as league_fixtures
+    seating = room_match._league_seating(room, pairs)
+    met = Counter()
+    for i, j in league_fixtures(10, room_match.GROUP_DOUBLE_AT):
+        a, b = pairs[seating[i]][0], pairs[seating[j]][0]
+        met[frozenset((a, b))] += 1
+    return met
+
+
+@pytest.mark.parametrize("n_humans", [2, 3, 4])
+def test_below_five_people_every_pair_of_humans_meets_twice(n_humans):
+    """The rule asked for, over many seeds: with fewer than five people every human pair
+    is a double fixture. DOUBLE_AT's own graph cannot do this for four (no four seats are
+    all 1, 2 or 5 apart), which is why rooms use GROUP_DOUBLE_AT."""
+    for seed in range(200):
+        room, pairs = _fake_seating_room(seed, n_humans)
+        met = _meetings(room, pairs)
+        humans = [pid for pid, _ in pairs[:n_humans]]
+        for a in humans:
+            for b in humans:
+                if a < b:
+                    assert met[frozenset((a, b))] == 2, (seed, a, b)
+
+
+def test_the_group_schedule_is_a_fair_season_and_a_permutation_of_seats():
+    """Every side plays 14 matches with exactly five doubles, whatever the seating, and
+    the seating places every seat exactly once -- for a crowd of people (plain shuffle)
+    and for a small room (humans grouped)."""
+    for n_humans in (1, 2, 4, 5, 10):
+        for seed in range(50):
+            room, pairs = _fake_seating_room(seed, n_humans)
+            assert sorted(room_match._league_seating(room, pairs)) == list(range(10))
+            met = _meetings(room, pairs)
+            for pid, _ in pairs:
+                mine = [c for pair, c in met.items() if pid in pair]
+                assert sum(mine) == 14 and mine.count(2) == 5, (n_humans, seed, pid)
+
+
+def test_the_seating_actually_varies_between_rooms():
+    """Shuffled from the seed, not fixed by join order: across seeds the host does not
+    always have the same double-fixture opponents."""
+    seen = set()
+    for seed in range(30):
+        room, pairs = _fake_seating_room(seed, 1)
+        met = _meetings(room, pairs)
+        seen.add(frozenset(p for p, c in met.items() if "p0" in p and c == 2))
+    assert len(seen) > 5
+
+
+def test_the_balanced_reveal_never_lets_a_side_run_ahead_or_hold_the_end():
+    """The reported shape was the host's games bunched at the END of the reveal. Here
+    every side's shown count stays within one of every other's at every step, so nobody
+    is left with a run of games at either end."""
+    from game.season import fixtures as league_fixtures
+    entries = [SimpleNamespace(home_pid=f"t{i}", away_pid=f"t{j}")
+               for i, j in league_fixtures(10, room_match.GROUP_DOUBLE_AT)]
+    ordered = room_match._balanced_order(entries)
+    assert sorted(map(id, ordered)) == sorted(map(id, entries))
+    shown = Counter()
+    for e in ordered:
+        shown[e.home_pid] += 1
+        shown[e.away_pid] += 1
+        counts = [shown[f"t{k}"] for k in range(10)]
+        assert max(counts) - min(counts) <= 2
+    last_ten = ordered[-10:]
+    assert max(Counter(p for e in last_ten for p in (e.home_pid, e.away_pid)).values()) <= 3
+
+
+def test_a_room_started_before_a176_keeps_its_old_schedule(conn):
+    """A start move with no "schedule" is a tournament already under way: it must keep
+    join-order seating and DOUBLE_AT, or its results would change mid-tournament. A new
+    start move plays the group schedule. Checked on the real fixtures each one plays."""
+    from game.season import DOUBLE_AT, fixtures as league_fixtures
+    room, host_id = _make_and_complete_league(conn)
+    assert room_match._schedule(rooms._load_room(conn, room.code)) == room_match.SCHEDULE_GROUPS
+
+    def doubles(r):
+        replay = room_match.replay_room_matches(r, DECK, MODEL)
+        while replay.league_progress and replay.league_progress[0] < replay.league_progress[1]:
+            r.match_moves = r.match_moves + [{"kind": "league-reveal", "through": 70}]
+            replay = room_match.replay_room_matches(r, DECK, MODEL)
+        c = Counter(frozenset((e.home_pid, e.away_pid)) for e in replay.results if e.stage == "league")
+        return {p for p, n in c.items() if n == 2}
+
+    new_room = rooms._load_room(conn, room.code)
+    old_room = rooms._load_room(conn, room.code)
+    old_room.match_moves = [{k: v for k, v in mv.items() if k != "schedule"}
+                            for mv in old_room.match_moves]
+    pids = [pid for pid, _ in room_match._sides_with_pid(old_room, DECK)]
+    expected_old = {frozenset((pids[i], pids[j]))
+                    for i, j in league_fixtures(10) if min((j - i) % 10, (i - j) % 10) in DOUBLE_AT}
+    assert doubles(old_room) == expected_old
+    assert doubles(new_room) != expected_old

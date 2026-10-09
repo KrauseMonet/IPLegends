@@ -2702,3 +2702,20 @@ guess list, each move sends it, and the server replays it. State lives in `local
 rule). **No account, no table, no migration.** The share line is built on the server and
 names nobody (A129): `🟩` a cell filled, `🟪` a rare one (5 or fewer answers), `⬛` empty.
 Names are the archive's initials form ("V Kohli"), so a search is by surname.
+
+**Guess the Player** (`game/guess.py`, `web/guess_routes.py`, `/guess`, A183). Find the mystery
+player in eight guesses. Any player who has appeared may be guessed; each guess returns eight
+tiles against the mystery man: **teams** (the clubs shared, shown as crests), **role**,
+**country**, **bowling** (pace, spin or doesn't bowl), **debut season**, **last season**
+("Active" for 2026), **career runs** and **career wickets**. A tile is `match`, `close` or
+`miss`; a number tile also carries an arrow toward the mystery player's value. Close means a
+season within 2, runs or wickets within a quarter of the answer but never tighter than 100
+runs or 10 wickets. A value the archive does not hold is `unknown` and is never a clue (A23);
+batting hand is not a tile because `people.batting_hand` is empty for every player.
+
+The mystery is drawn only from players with `runs + 20*wickets >= 1000` and three or more
+seasons (197 today). A daily seed walks a fixed shuffle of that pool, so no player returns
+before all have had a day; practice seeds draw at random. Same stateless shape as Bingo: the
+guess list is the whole state, each move replays it, the mystery is named only when the
+puzzle is over, and the share line is one row of squares per guess with no names.
+Browser-side helpers shared by both games live in `web/static/puzzle.js`.

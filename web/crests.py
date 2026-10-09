@@ -113,3 +113,15 @@ def crest_url(name: str | None, year: int | None = None) -> str | None:
     key = crest_key(name, year)
     file = _files().get(key) if key else None
     return f"/static/crests/{file}" if file else None
+
+
+def franchise_crest(name: str) -> str | None:
+    """A franchise's LATEST crest, by its canonical name -- for a header or a tile, where
+    there is no single season to ask about. For a defunct club that is the last crest it
+    wore; `crest_url` with no year only knows the clubs still playing. [A182]"""
+    best = None
+    for c in CRESTS:
+        if name in c.names and (best is None or (c.last or 9999) > (best.last or 9999)):
+            best = c
+    file = _files().get(best.key) if best else None
+    return f"/static/crests/{file}" if file else None

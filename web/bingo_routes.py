@@ -43,18 +43,6 @@ def facts() -> bingo.Facts:
     return f
 
 
-@cache
-def _franchise_crest(name: str) -> str | None:
-    """A franchise's crest for a column header: its latest, which for a defunct club is
-    the last one it wore. (`crest_url` with no year only knows the clubs still playing.)"""
-    best = None
-    for c in crests.CRESTS:
-        if name in c.names and (best is None or (c.last or 9999) > (best.last or 9999)):
-            best = c
-    file = crests._files().get(best.key) if best else None
-    return f"/static/crests/{file}" if file else None
-
-
 class AxisOut(BaseModel):
     key: str
     label: str
@@ -118,7 +106,7 @@ class RevealCellOut(BaseModel):
 
 def _axis(c: bingo.Criterion) -> AxisOut:
     return AxisOut(key=c.key, label=c.label, kind=c.kind,
-                   crest=_franchise_crest(c.label) if c.kind == "franchise" else None)
+                   crest=crests.franchise_crest(c.label) if c.kind == "franchise" else None)
 
 
 def _label(seed: int, daily: bool, date: datetime.date | None) -> str:
@@ -182,10 +170,11 @@ def bingo_grid(response: Response, seed: int | None = None) -> GridOut:
     return _grid_out(_grid(seed), date=day)
 
 
-@router.get("/api/bingo/players", response_model=list[PlayerOut])
+@router.get("/api/puzzles/players", response_model=list[PlayerOut])
 def bingo_players(response: Response) -> list[PlayerOut]:
-    """Everybody who can be guessed, for the search box. Names only: a hint such as the
-    clubs a man played for would answer the question being asked."""
+    """Everybody who can be guessed, for a puzzle's search box -- shared by every puzzle
+    game, which is why it is not under /api/bingo. Names only: a hint such as the clubs a
+    man played for would answer the question being asked."""
     response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     return [PlayerOut(id=p.person_id, name=p.name)
             for p in sorted(facts().players.values(), key=lambda p: (p.name, p.person_id))]

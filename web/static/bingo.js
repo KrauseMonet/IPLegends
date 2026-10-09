@@ -10,23 +10,14 @@
 // convenience, like Flashback's best score) and a result travels as a spoiler-free share.
 
 const BG_KEY = 'iplegends_bingo_v1';
-// A shared link has to work for whoever reads it, so it names the real site (A129).
-const BG_ORIGIN = 'https://iplegends.vercel.app';
-const BG_JSON = {'Content-Type': 'application/json'};
 
 let BG = {mode: 'daily', grid: null, guesses: [], state: null, sel: null,
           players: null, answers: null, busy: false, matches: [], active: 0};
 
 // --- storage: the guess list per grid, and the days a daily was finished ------------------
 
-function bgStore(){
-  try { return JSON.parse(localStorage.getItem(BG_KEY) || '{}') || {}; }
-  catch(e){ return {}; }
-}
-function bgSave(patch){
-  try { localStorage.setItem(BG_KEY, JSON.stringify(Object.assign(bgStore(), patch))); }
-  catch(e){ /* private window, quota: the game still plays, it just will not resume */ }
-}
+const bgStore = () => pzStore(BG_KEY);
+const bgSave = patch => pzSave(BG_KEY, patch);
 
 function bgPersist(){
   const g = BG.grid;
@@ -34,35 +25,10 @@ function bgPersist(){
   else bgSave({practice: {seed: g.seed, guesses: BG.guesses}});
 }
 
-// --- streak -------------------------------------------------------------------------------
-// A streak is not broken until a day has actually been MISSED (A130): playing yesterday and
-// not yet today leaves it alive, because nothing has been lost, only not yet extended.
-
-function bgDayNum(iso){ return Math.round(Date.parse(iso + 'T00:00:00Z') / 86400000); }
-
-function bgStreaks(days, todayIso){
-  const set = new Set(days.map(bgDayNum));
-  const today = bgDayNum(todayIso);
-  let cur = 0, d = set.has(today) ? today : today - 1;
-  while (set.has(d)){ cur++; d--; }
-  let best = 0, run = 0, prev = null;
-  for (const n of [...set].sort((a, b) => a - b)){
-    run = prev !== null && n === prev + 1 ? run + 1 : 1;
-    best = Math.max(best, run); prev = n;
-  }
-  return {cur, best};
-}
-
 function bgPaintStreak(){
   const el = $('#bgStreak');
-  if (BG.mode !== 'daily' || !BG.grid){ el.textContent = ''; return; }
-  const days = bgStore().days || [];
-  const {cur, best} = bgStreaks(days, BG.grid.date);
-  const doneToday = days.includes(BG.grid.date);
-  if (!cur){ el.textContent = best ? `Best streak: ${best} days.` : ''; return; }
-  el.innerHTML = doneToday
-    ? `Streak: <b>${cur}</b> day${cur === 1 ? '' : 's'}.`
-    : `Streak: <b>${cur}</b> day${cur === 1 ? '' : 's'}. Finish today's grid to keep it.`;
+  el.innerHTML = BG.mode === 'daily' && BG.grid
+    ? pzStreakHtml(bgStore().days || [], BG.grid.date, 'grid') : '';
 }
 
 // --- loading ------------------------------------------------------------------------------
@@ -101,7 +67,7 @@ async function bgStart(grid, fresh){
   BG.state = bgEmptyState();
   if (BG.guesses.length){
     try {
-      const r = await api('/api/bingo/play', {method: 'POST', retry: true, headers: BG_JSON,
+      const r = await api('/api/bingo/play', {method: 'POST', retry: true, headers: PZ_JSON,
         body: JSON.stringify({seed: grid.seed, guesses: BG.guesses})});
       BG.state = r.state;
     } catch(e){
@@ -176,18 +142,7 @@ function bgRender(){
 
 // --- picking ------------------------------------------------------------------------------
 
-async function bgPlayers(){
-  if (!BG.players){
-    const list = await api('/api/bingo/players');
-    BG.players = list.map(p => ({id: p.id, name: p.name,
-      words: bgNorm(p.name).split(/\s+/)}));
-  }
-  return BG.players;
-}
-
-function bgNorm(s){
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim();
-}
+const bgPlayers = pzPlayers;
 
 async function bgSelect(i){
   if (BG.state.finished) return;
@@ -205,31 +160,13 @@ async function bgSelect(i){
 }
 
 function bgFilter(){
-  const q = bgNorm($('#bgInput').value);
-  const out = $('#bgResults');
-  if (!q || !BG.players){ BG.matches = []; out.innerHTML = ''; return; }
-  const toks = q.split(/\s+/);
   const placed = new Set(BG.state.placed.map(p => p.person_id));
   const triedHere = new Set(BG.state.wrong.filter(w => w.cell === BG.sel).map(w => w.person_id));
-  const scored = [];
-  for (const p of BG.players){
-    let score = 0;
-    for (const t of toks){
-      const k = p.words.findIndex(w => w.startsWith(t));
-      if (k < 0){ score = -1; break; }
-      score += k === p.words.length - 1 ? 0 : 1;      // a surname match ranks first
-    }
-    if (score >= 0) scored.push({p, score});
-  }
-  scored.sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name));
-  BG.matches = scored.slice(0, 8).map(x => x.p);
-  BG.active = BG.matches.findIndex(p => !placed.has(p.id) && !triedHere.has(p.id));
-  if (BG.active < 0) BG.active = 0;
-  out.innerHTML = BG.matches.map((p, k) => {
-    const why = placed.has(p.id) ? 'on the grid' : triedHere.has(p.id) ? 'tried here' : '';
-    return `<li><button class="${k === BG.active ? 'act-row' : ''}" ${why ? 'disabled' : ''}
-      onclick="bgGuess('${esc(p.id)}')">${esc(p.name)}${why ? `<em>${why}</em>` : ''}</button></li>`;
-  }).join('') || '<li class="bg-none">Nobody by that name. Names are as the scorecard prints them: V Kohli.</li>';
+  const m = pzMatches($('#bgInput').value,
+    p => placed.has(p.id) ? 'on the grid' : triedHere.has(p.id) ? 'tried here' : '');
+  BG.matches = m.list.map(x => x.p); BG.active = m.active;
+  $('#bgResults').innerHTML = pzResultsHtml(m, 'bgGuess',
+    'Nobody by that name. Names are as the scorecard prints them: V Kohli.');
 }
 
 function bgKey(e){
@@ -251,7 +188,7 @@ async function bgGuess(pid){
   const cell = BG.sel;
   BG.busy = true;
   try {
-    const r = await api('/api/bingo/play', {method: 'POST', retry: true, headers: BG_JSON,
+    const r = await api('/api/bingo/play', {method: 'POST', retry: true, headers: PZ_JSON,
       body: JSON.stringify({seed: BG.grid.seed, guesses: BG.guesses, guess: [cell, pid]})});
     BG.guesses.push([cell, pid]);
     BG.state = r.state;
@@ -296,25 +233,8 @@ async function bgFinish(fresh){
   if (fresh) $('#bgDone').scrollIntoView({block: 'start', behavior: 'smooth'});
 }
 
-// The text is the server's (`share_text`), never assembled here, so its wording cannot drift
-// from the scoring (A129). The ladder: the phone's share sheet, then the clipboard, then
-// showing the text so it can still be copied by hand.
-async function bgShare(){
-  const text = BG.state && BG.state.share;
-  if (!text){ slip('Finish the grid first.'); return; }
-  if (navigator.share){
-    try { await navigator.share({text}); return; }
-    catch(e){ if (e && e.name === 'AbortError') return; }    // closing the sheet is not an error
-  }
-  try { await navigator.clipboard.writeText(text); slip('Result copied. It has no names in it, so post it anywhere.'); }
-  catch(e){ slip(text); }
-}
-
-async function bgLink(){
-  const url = `${BG_ORIGIN}/bingo?seed=${BG.grid.seed}`;
-  try { await navigator.clipboard.writeText(url); slip('Link copied.'); }
-  catch(e){ slip(url); }
-}
+const bgShare = () => pzShare(BG.state && BG.state.share);
+const bgLink = () => pzCopyLink(`${PZ_ORIGIN}/bingo?seed=${BG.grid.seed}`);
 
 // --- boot ---------------------------------------------------------------------------------
 

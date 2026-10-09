@@ -3,27 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft · The Legends Almanack</title>
-<meta name="description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<title>Guess the Player · The Legends Almanack</title>
+<meta name="description" content="Find the mystery IPL player in eight guesses. Every guess shows which clubs, role, country and career numbers you share with him.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#050b1a">
-<!-- iOS has no manifest support for standalone display and no install prompt of its own:
-     it reads these two, and the user adds the app through Share > Add to Home Screen. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="Draft an all-time IPL XI from nineteen seasons of the real archive, then play out a season.">
+<meta property="og:description" content="Find the mystery IPL player in eight guesses. A new one every day.">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="/static/og-image.png">
-<!-- Same-origin, so no preconnect and no second host to resolve. Preloaded because both
-     are needed by the first paint (masthead + headline) and would otherwise not be
-     discovered until the stylesheet had parsed. -->
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
@@ -57,72 +52,59 @@
 <div class="sheet">
 
 
-  <!-- ============ DRAFT ============ -->
-  <section id="draft">
-    <div class="folio">
-      <div class="col">
-        <div class="col-head"><span>Dealt to you</span></div>
-        <div class="fixture">
-          <div class="yr" id="dealYear"></div>
-          <div class="club" id="dealTeam">—</div>
-          <div class="reroll-row hide" id="rerollRow">
-            <button class="act reroll" id="rerollTeamBtn" onclick="rerollDeal('team', this)">Another team</button>
-            <button class="act reroll" id="rerollSeasonBtn" onclick="rerollDeal('season', this)">Another season</button>
-            <span id="rerollCount"></span>
-          </div>
-        </div>
-        <div class="col-head" style="margin-bottom:0">
-          <span>Available</span><em id="optCount"></em></div>
-        <div id="options" class="col-scroll"></div>
-      </div>
+  <!-- ============ GUESS THE PLAYER ============ -->
+  <section id="guess" class="prose-page bg gp">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">Guess the Player</div>
+    </div>
+    <p class="qz-lede">One IPL player is hiding. Guess anyone who has played in the league and
+      each guess shows how he compares: the clubs you share, his role, country, bowling, when he
+      debuted and last played, and his career runs and wickets. Eight guesses.</p>
 
-      <div class="col">
-        <div class="col-head"><span>Batting order</span><em id="pickCount">0/12</em></div>
-        <div class="tally">
-          <div class="n" id="pickBig">0</div>
-          <div class="of">chosen<br><span id="oversLine">0 of 4 overseas</span></div>
-        </div>
-        <div class="gauge"><i id="progBar" style="width:0%"></i></div>
-        <div id="teamRatings" class="ledger hide" style="grid-template-columns:repeat(3,1fr);margin:0 0 12px"></div>
-        <div id="orderSheet" class="col-scroll"></div>
-      </div>
+    <div class="qz-challenge hide" id="gpChallenge"></div>
 
-      <div class="col">
-        <div class="col-head"><span>Legality</span></div>
-        <div id="legality" class="legality note col-scroll">Take players straight into a batting
-          position (or Impact) until all twelve are filled: a wicketkeeper, five bowling
-          options, and eleven batting positions.</div>
-        <div class="room-label hide" id="simModeLabel" style="margin-top:14px">Simulate</div>
-        <div class="room-choices hide" id="simModeChoices">
-          <button class="room-choice sel" data-simmode="whole" onclick="setSimMode('whole')"
-            title="Everything at once -- league, table and playoffs together.">Whole tournament</button>
-          <button class="room-choice" data-simmode="matchbymatch" onclick="setSimMode('matchbymatch')"
-            title="One result at a time, all the way through -- league then playoffs.">Match by match</button>
-          <button class="room-choice" data-simmode="groupstage" onclick="setSimMode('groupstage')"
-            title="See the whole league stage and table first, then choose how to play the knockouts.">Group stage first</button>
-        </div>
-        <div class="foot-actions">
-          <button class="act lead hide" id="simBtn" onclick="simulate(this)">Play the season</button>
-          <button class="act" onclick="abandonDraft()">Abandon</button>
-        </div>
+    <div class="bg-tabs" id="gpTabs">
+      <button class="room-choice sel" data-mode="daily" onclick="gpMode('daily')">Today's player</button>
+      <button class="room-choice" data-mode="practice" onclick="gpMode('practice')">Practice</button>
+    </div>
+
+    <div class="qz-best" id="gpStreak"></div>
+
+    <div class="bg-hud">
+      <div class="bg-pips" id="gpPips" aria-label="Guesses"></div>
+      <div class="gp-left" id="gpLeft"></div>
+    </div>
+
+    <div class="gp-legend">
+      <span><i class="match"></i> same</span><span><i class="close"></i> close</span>
+      <span><i class="miss"></i> different</span><span>▲▼ the mystery player's is higher or lower</span>
+    </div>
+
+    <div class="bg-picker" id="gpPicker">
+      <input id="gpInput" class="room-input" type="search" autocomplete="off" autocapitalize="off"
+        spellcheck="false" placeholder="Type a surname…" oninput="gpFilter()" onkeydown="gpKey(event)">
+      <ul class="bg-results" id="gpResults"></ul>
+    </div>
+
+    <div class="gp-rows" id="gpRows"></div>
+    <p class="bg-hint" id="gpHint">Guess any player who has appeared in the IPL.</p>
+
+    <div class="bg-done hide" id="gpDone">
+      <div class="over-line qz-over" id="gpDoneLabel"></div>
+      <div class="qz-title" id="gpDoneTitle"></div>
+      <div class="gp-answer" id="gpAnswer"></div>
+      <pre class="bg-share-preview" id="gpSharePreview"></pre>
+      <div class="foot-actions" style="justify-content:flex-start">
+        <button class="act lead" onclick="gpShare()">Share result</button>
+        <button class="act" onclick="gpMode('practice', true)">Play a practice puzzle</button>
+        <button class="act" onclick="gpLink()">Copy link to this puzzle</button>
       </div>
+    </div>
+    <div class="foot-actions hide" id="gpGiveUpRow" style="justify-content:center">
+      <button class="bg-cancel" onclick="gpGiveUp()">Give up and reveal</button>
     </div>
   </section>
-
-  <div id="statOverlay" class="card-overlay hide" onclick="hideStat(event)">
-    <div class="scorecard-shell stat-frame">
-      <div class="scorecard-frame">
-        <div class="report">
-          <div class="over-line" id="statSub"></div>
-          <div class="call" id="statName"></div>
-        </div>
-        <div class="colophon stat-tiles" id="statBody"></div>
-      </div>
-      <div class="scorecard-close">
-        <button class="act" onclick="hideStat()">Close</button>
-      </div>
-    </div>
-  </div>
 
   <!-- shell:auth -->
   <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
@@ -161,7 +143,6 @@
     </div>
   </div>
 <!-- /shell:auth -->
-
   <!-- shell:footer -->
 <footer class="imprint">
   <div class="imprint-links">
@@ -179,6 +160,7 @@
 
 <script src="/static/common.js?v=29328806f4"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/draft.js?v=935a541076"></script>
+<script src="/static/puzzle.js?v=1cdd4eaa1c"></script>
+<script src="/static/guess.js?v=eafd24a14d"></script>
 </body>
 </html>

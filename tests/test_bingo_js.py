@@ -1,4 +1,5 @@
-"""Bingo's streak arithmetic, which lives in the page (A182). The repo has no JavaScript
+"""The puzzle games' streak arithmetic, which lives in the page (A182, moved to the shared
+`puzzle.js` by A183 so Bingo and Guess the Player cannot disagree). The repo has no JavaScript
 harness, so this runs the one pure function under node, skipped where node is absent.
 
 A streak is not broken until a day has been MISSED (A130), and consecutive means the next
@@ -13,15 +14,15 @@ import subprocess
 
 import pytest
 
-JS = pathlib.Path(__file__).resolve().parent.parent / "web" / "static" / "bingo.js"
+JS = pathlib.Path(__file__).resolve().parent.parent / "web" / "static" / "puzzle.js"
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
 def streaks(days, today):
     src = JS.read_text()
-    body = re.search(r"function bgDayNum[\s\S]*?(?=\nfunction bgPaintStreak)", src).group(0)
+    body = re.search(r"function pzDayNum[\s\S]*?(?=\n// --- end streak)", src).group(0)
     out = subprocess.run(
-        ["node", "-e", f"{body}; console.log(JSON.stringify(bgStreaks({json.dumps(days)}, "
+        ["node", "-e", f"{body}; console.log(JSON.stringify(pzStreaks({json.dumps(days)}, "
                        f"{json.dumps(today)})))"],
         capture_output=True, text=True, check=True).stdout
     return json.loads(out)

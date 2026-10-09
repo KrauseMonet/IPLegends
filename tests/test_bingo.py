@@ -406,7 +406,7 @@ def test_the_finished_state_carries_the_share_text(client, facts):
 
 
 def test_players_list_names_everybody_and_hints_at_nothing(client, facts):
-    d = client.get("/api/bingo/players").json()
+    d = client.get("/api/puzzles/players").json()
     assert len(d) == len(facts.players)
     assert set(d[0]) == {"id", "name"}
 

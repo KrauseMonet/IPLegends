@@ -36,7 +36,7 @@ from etl.franchise_map import canonical
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "puzzle_facts.json.gz"
 
 # Bumped only when the FILE FORMAT changes, not when the data does (A107's rule).
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2   # [A183] role, country and bowling style were added for Guess the Player
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,13 @@ class PlayerFacts:
     fifties: int                     # innings of 50+ (includes the hundreds)
     four_wicket_hauls: int           # matches with 4+ wickets
     sixes: int
+    # What the person IS, as the archive and the hand-filled CSVs record it. NULL stays NULL
+    # (A23): a player nobody has classified is unknown, never a default, and the games that
+    # show these fields say "unknown" rather than guess.
+    role: str | None = None          # the role of most of his seasons (A26): batter, bowler,
+                                     # allrounder or keeper
+    country: str | None = None       # the nation he played for DURING his IPL career (A51)
+    bowling_style: str | None = None # "pace" or "spin"; NULL for a man who never bowled
 
     @property
     def prominence(self) -> int:
@@ -69,6 +76,7 @@ def _doc_row(p: PlayerFacts) -> dict:
         "over": p.overseas, "keeper": p.keeper, "runs": p.runs, "wk": p.wickets,
         "mr": p.best_season_runs, "mw": p.best_season_wickets, "h": p.hundreds,
         "f": p.fifties, "w4": p.four_wicket_hauls, "s6": p.sixes,
+        "role": p.role, "ctry": p.country, "bs": p.bowling_style,
     }
 
 
@@ -77,7 +85,27 @@ def _from_row(d: dict) -> PlayerFacts:
         person_id=d["id"], name=d["name"], franchises=tuple(d["fr"]), seasons=tuple(d["yrs"]),
         overseas=d["over"], keeper=d["keeper"], runs=d["runs"], wickets=d["wk"],
         best_season_runs=d["mr"], best_season_wickets=d["mw"], hundreds=d["h"],
-        fifties=d["f"], four_wicket_hauls=d["w4"], sixes=d["s6"])
+        fifties=d["f"], four_wicket_hauls=d["w4"], sixes=d["s6"],
+        role=d["role"], country=d["ctry"], bowling_style=d["bs"])
+
+
+# When two roles tie across a career, the more specific wins: a man who is half all-rounder
+# and half batter is an all-rounder, and one half keeper is a keeper. Fixed so the answer
+# never depends on the order the database returns rows in.
+_ROLE_PRIORITY = ("allrounder", "keeper", "batter", "bowler")
+
+
+def _career_roles(conn) -> dict[str, str]:
+    """The role of most of a person's seasons (`squad_members.role`, A26/A52). Per-season
+    roles are the archive's own calibrated answer; a career has no role of its own, so this
+    is the most common one."""
+    counts: dict[str, dict[str, int]] = defaultdict(dict)
+    for pid, role, n in conn.execute(
+            "select person_id, role, count(*) from squad_members group by 1, 2"):
+        counts[pid][role] = n
+    return {pid: max(by_role, key=lambda r: (by_role[r], -_ROLE_PRIORITY.index(r)
+                                              if r in _ROLE_PRIORITY else -99))
+            for pid, by_role in counts.items()}
 
 
 def build_players(conn, deck) -> list[PlayerFacts]:
@@ -88,11 +116,13 @@ def build_players(conn, deck) -> list[PlayerFacts]:
     name: dict[str, str] = {}
     overseas: dict[str, bool | None] = {}
     keeper: dict[str, bool] = defaultdict(bool)
+    style: dict[str, str | None] = {}
     for cards in deck.cards_by_fs.values():
         for c in cards:
             pid = c.person_id
             name[pid] = c.name
             overseas.setdefault(pid, c.overseas)
+            style.setdefault(pid, c.bowling_style)
             keeper[pid] = keeper[pid] or c.keeper_eligible
             franchises[pid].add(canonical(c.franchise))
             # Summed by CALENDAR YEAR across franchises: a man traded mid-season has two
@@ -119,6 +149,10 @@ def build_players(conn, deck) -> list[PlayerFacts]:
         select batter_id, count(*) from deliveries
          where runs_batter = 6 and not is_super_over group by 1""")
 
+    role_of = _career_roles(conn)
+    country = {pid: ctry for pid, ctry in conn.execute(
+        "select person_id, nationality from people where nationality is not null")}
+
     out = []
     for pid in sorted(name):
         years = runs_by_year[pid].keys()
@@ -130,7 +164,8 @@ def build_players(conn, deck) -> list[PlayerFacts]:
             best_season_runs=max(runs_by_year[pid].values()),
             best_season_wickets=max(wkts_by_year[pid].values()),
             hundreds=hundreds.get(pid, 0), fifties=fifties.get(pid, 0),
-            four_wicket_hauls=hauls.get(pid, 0), sixes=sixes.get(pid, 0)))
+            four_wicket_hauls=hauls.get(pid, 0), sixes=sixes.get(pid, 0),
+            role=role_of.get(pid), country=country.get(pid), bowling_style=style.get(pid)))
     return out
 
 

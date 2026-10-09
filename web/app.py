@@ -39,6 +39,7 @@ from web.crests import all_crests, crest_url, unambiguous_crest
 from web import auction_session
 from web import room_auction
 from web import auth
+from web import client_failures
 from web import daily as daily_lib
 from web import db
 from web import kit as kit_lib
@@ -207,6 +208,25 @@ def _db_unavailable(_request, _exc) -> JSONResponse:
         content={"detail": "Couldn't reach the database right now -- try again in a moment."},
         headers={"Retry-After": "3"},
     )
+
+
+# [A180] A slow request or a server error, logged with its path and duration. Vercel
+# keeps function logs for about an hour, so this is for watching a live session (`vercel
+# logs`); the durable record of what PLAYERS saw is client_failure_reports. Two seconds
+# is several times a normal request from India, so only the requests that matter print.
+SLOW_REQUEST_MS = 2000
+
+
+@app.middleware("http")
+async def _log_slow_requests(request: Request, call_next):
+    started = time.monotonic()
+    response = await call_next(request)
+    ms = (time.monotonic() - started) * 1000
+    if request.url.path.startswith("/api/") and (ms > SLOW_REQUEST_MS
+                                                 or response.status_code >= 500):
+        print(f"[slow] {request.method} {request.url.path} {response.status_code} "
+              f"{ms:.0f} ms", flush=True)
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -1384,6 +1404,41 @@ def health() -> dict:
         # with every request means reuse is not happening at all.
         "db": db.stats(),
     }
+
+
+class ClientFailureIn(BaseModel):
+    t: float = Field(description="when, epoch ms, by the browser's clock")
+    kind: Literal["timeout", "network", "server"]
+    method: str = Field(max_length=8)
+    path: str = Field(max_length=200)
+    status: int | None = None
+    ms: int = Field(ge=0, le=600_000, description="how long the request waited")
+    online: bool | None = Field(default=None, description="navigator.onLine at the time")
+    net: str | None = Field(default=None, max_length=20,
+                            description="navigator.connection.effectiveType, where offered")
+    visible: bool | None = Field(default=None, description="was the tab visible")
+
+
+class ClientFailureReportIn(BaseModel):
+    page: str = Field(max_length=100)
+    ok: int = Field(ge=0, le=1_000_000, description="requests that succeeded since the "
+                                                    "last report")
+    failures: list[ClientFailureIn] = Field(max_length=client_failures.MAX_PER_REPORT)
+
+
+@app.post("/api/client-failures", status_code=204)
+def client_failure_report(body: ClientFailureReportIn) -> Response:
+    """[A180] A batch of failed requests from one page. Always 204: there is nothing a
+    page could do with an error here, and a report must never itself become a failure a
+    player sees."""
+    if body.failures:
+        try:
+            with _db() as conn:
+                client_failures.record(conn, body.page, body.ok,
+                                       [f.model_dump() for f in body.failures])
+        except psycopg.Error as exc:
+            print(f"[client-failures] not stored: {exc}", flush=True)
+    return Response(status_code=204)
 
 
 @app.get("/api/meta")

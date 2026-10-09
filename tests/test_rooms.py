@@ -118,11 +118,6 @@ class FakeConn:
                 for (_seat, pid, name, is_cpu, franchise, kn, km, kc) in seats
             ])
 
-        if sql_norm.startswith("set local lock_timeout"):
-            # Real Postgres bounds how long the locking read waits; there is no lock to
-            # wait on here, so this only has to be accepted rather than simulated.
-            return FakeCursor([])
-
         if sql_norm.startswith("select r.code, r.format"):
             idle_mins, limit = params
             out = []
@@ -875,6 +870,8 @@ def test_save_room_writes_every_players_row_in_one_round_trip(conn):
         rooms.join_room(conn, room.code, name, DECK)
     room = rooms._load_room(conn, room.code)
     assert len(room.players) == 9
+    # A seat must CHANGE for the seats to be written at all [A180]; see the test below.
+    room.players[host_id].franchise = "MI"
 
     seen: list[str] = []
     real_execute = conn.execute
@@ -891,6 +888,69 @@ def test_save_room_writes_every_players_row_in_one_round_trip(conn):
         f"expected exactly one round trip for all nine players' rows, got "
         f"{len(room_player_inserts)}"
     )
+
+
+def _seat_writes(conn) -> list[str]:
+    seen: list[str] = []
+    real_execute = conn.execute
+
+    def spy(sql, params=()):
+        seen.append(sql)
+        return real_execute(sql, params)
+
+    conn.execute = spy
+    return seen
+
+
+def test_saving_a_room_whose_seats_did_not_change_writes_no_seats(conn):
+    """[A180] A bid, a pick or a clock catch-up changes the room and never a seat, so the
+    seat upsert is a wasted round trip on nearly every write. Counted, because writing
+    the same seats again produces identical end state and only a count can see it."""
+    room, _host_id = _make_room(conn, "cup")
+    rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms._load_room(conn, room.code)
+    room.moves.append(3)          # a real change to the ROOM, none to any seat
+    seen = _seat_writes(conn)
+    rooms._save_room(conn, room)
+    assert not [s for s in seen if "room_players" in s.lower()]
+    assert [s for s in seen if "insert into rooms" in s.lower()], "the room itself is saved"
+
+
+def test_a_changed_seat_still_reaches_the_database(conn):
+    """The other half: skipping must never skip a real change. Every column the seat
+    upsert writes has to be compared, or a change to the one left out is silently lost --
+    checked on a reload, not on the object that was saved."""
+    room, host_id = _make_room(conn, "cup")
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms._load_room(conn, room.code)
+    room.players[bob_id].kit = rooms.Kit("Bobs Lot", "BL", "gold")
+    rooms._save_room(conn, room)
+    assert rooms._load_room(conn, room.code).players[bob_id].kit.monogram == "BL"
+
+    room = rooms._load_room(conn, room.code)
+    room.players[host_id].franchise = "CSK"
+    rooms._save_room(conn, room)
+    assert rooms._load_room(conn, room.code).players[host_id].franchise == "CSK"
+
+
+def test_a_second_save_in_one_request_does_not_rewrite_seats_the_first_wrote(conn):
+    """A request that saves twice (a move, then the catch-up it caused) writes a changed
+    seat once: after the first save the database already holds it."""
+    room, host_id = _make_room(conn, "cup")
+    room = rooms._load_room(conn, room.code)
+    room.players[host_id].franchise = "RR"
+    rooms._save_room(conn, room)
+    seen = _seat_writes(conn)
+    room.moves.append(1)
+    rooms._save_room(conn, room)
+    assert not [s for s in seen if "room_players" in s.lower()]
+
+
+def test_a_room_never_read_always_writes_its_seats(conn):
+    """A room built in memory (create_room) has no 'as read' seats to compare against,
+    so its seats are written -- otherwise a new room would exist with nobody in it."""
+    room, host_id = _make_room(conn, "final")
+    assert host_id in rooms._load_room(conn, room.code).players
 
 
 def test_the_turn_does_not_advance_before_the_timer_expires(conn, monkeypatch):

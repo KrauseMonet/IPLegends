@@ -90,7 +90,7 @@ STATE_TABLES = {
 # at all, so "were super overs excluded" has no answer here rather than a passing one.
 OPERATIONAL_TABLES = {"rooms", "room_players",
                       "accounts", "game_results", "game_result_players",
-                      "daily_challenges", "daily_results"}
+                      "daily_challenges", "daily_results", "client_failure_reports"}
 
 # Who the bowler gets a wicket for. Check 8 asserts these two sets between them account
 # for every kind in the archive, so a kind added later cannot fall silently between them.

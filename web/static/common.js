@@ -52,7 +52,64 @@ async function api(path, opts){
   }
 }
 
+// [A180] Why requests fail, as this browser saw it. "Couldn't reach the server" covers a
+// dropped connection, a timeout and a server error alike, and only the browser can tell
+// them apart -- a request that never arrived leaves no trace on the server. Each failure
+// is kept on the device and sent the next time a request SUCCEEDS (sending it while the
+// connection is down would fail the same way), or when the page is closed, together with
+// how many requests succeeded meanwhile so it reads as a rate. Refusals (4xx: outbid, a
+// closed lot) are the game working and are not recorded. Stored in client_failure_reports;
+// `uv run python -m tools.failures` prints the summary.
+const FAIL_KEY = 'iplegends_failures', FAIL_MAX = 50;
+let FAIL_OK = 0, FAIL_SENDING = false;
+function failQueue(){
+  try { return JSON.parse(localStorage.getItem(FAIL_KEY) || '[]'); } catch(e){ return []; }
+}
+function failSave(q){
+  try { localStorage.setItem(FAIL_KEY, JSON.stringify(q.slice(-FAIL_MAX))); } catch(e){}
+}
+// No query string, and a long segment (a draft or season state) collapsed to ':state', so
+// paths group together and nothing a player typed is sent.
+function failPath(path){
+  return String(path).split('?')[0].replace(/\/[^/]{25,}/g, '/:state').slice(0, 200);
+}
+function noteFailure(kind, method, path, status, started){
+  const q = failQueue();
+  q.push({t: Date.now(), kind, method, path: failPath(path), status: status || null,
+          ms: Math.round(Date.now() - started), online: navigator.onLine,
+          net: (navigator.connection && navigator.connection.effectiveType) || null,
+          visible: document.visibilityState === 'visible'});
+  failSave(q);
+}
+function noteSuccess(){
+  FAIL_OK++;
+  if (!FAIL_SENDING && failQueue().length) sendFailures(false);
+}
+function sendFailures(closing){
+  const q = failQueue().slice(-FAIL_MAX);
+  if (!q.length) return;
+  const body = JSON.stringify({page: location.pathname.slice(0, 100), ok: FAIL_OK, failures: q});
+  if (closing){
+    // A closing page cannot wait for an answer; sendBeacon outlives it.
+    if (navigator.sendBeacon &&
+        navigator.sendBeacon('/api/client-failures', new Blob([body], {type: 'application/json'}))){
+      failSave([]); FAIL_OK = 0;
+    }
+    return;
+  }
+  FAIL_SENDING = true;
+  // A plain fetch, not api(): a report must never be retried or recorded as a failure itself.
+  fetch('/api/client-failures', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                 body, keepalive: true})
+    .then(r => { if (r.ok){ failSave(failQueue().slice(q.length)); FAIL_OK = 0; } })
+    .catch(() => {})
+    .finally(() => { FAIL_SENDING = false; });
+}
+addEventListener('pagehide', () => sendFailures(true));
+
 async function apiOnce(path, opts){
+  const started = Date.now();
+  const method = ((opts && opts.method) || 'GET').toUpperCase();
   const ctrl = new AbortController();
   // `timeoutMs` lets a live move (a bid, a pick) give up sooner than a page load would,
   // so it can be retried while its clock is still running [A146].
@@ -64,6 +121,7 @@ async function apiOnce(path, opts){
                            signal: ctrl.signal});
   } catch(e){
     if (e.name === 'AbortError'){
+      noteFailure('timeout', method, path, null, started);
       const err = new Error('That took too long to respond -- the server may be busy. Try again.');
       err.timeout = true;
       throw err;
@@ -72,6 +130,7 @@ async function apiOnce(path, opts){
     // arrived at all -- a dropped connection, a phone between networks. Each browser words
     // it differently ("Failed to fetch", "Load failed", "NetworkError when..."), and none
     // of them means anything to a player, so it is said plainly instead.
+    noteFailure('network', method, path, null, started);
     const err = new Error("Couldn't reach the server -- check your connection and try again.");
     err.network = true;
     throw err;
@@ -79,6 +138,7 @@ async function apiOnce(path, opts){
     clearTimeout(timer);
   }
   const body = await r.json().catch(() => ({}));
+  if (r.status >= 500) noteFailure('server', method, path, r.status, started);
   if (!r.ok) {
     // `.status` carried on the thrown Error, not just the message text -- lets a
     // caller (room-session resume, elsewhere) tell "this is genuinely gone" (404) apart
@@ -89,6 +149,7 @@ async function apiOnce(path, opts){
     err.body = body;
     throw err;
   }
+  noteSuccess();
   return body;
 }
 

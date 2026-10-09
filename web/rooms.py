@@ -73,6 +73,7 @@ from etl.feasibility import (
     DraftState, eligible, pick_afk,
 )
 from game.season import historical_sides
+from web.db import outside_transaction
 from web import session as sess
 from web.kit import Kit, KitError, default_kit, parse_kit
 
@@ -145,6 +146,10 @@ class Room:
     # migration 044 -- an auction room's trade window between its people [A174]. The host
     # may change it in the lobby (`set_trades`); it locks when the auction starts.
     trades: bool = False
+    # [A180] What `room_players` held when this room was READ, in `_seat_rows` form, so
+    # `_save_room` can skip rewriting seats nothing changed -- one round trip on every
+    # bid and pick. None for a room never read (just created), which always writes them.
+    loaded_seats: tuple | None = field(default=None, compare=False, repr=False)
 
     @property
     def seats(self) -> int:
@@ -244,16 +249,19 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
     # take is on the ROOM row, and Postgres refuses `for update` on the nullable side of
     # an outer join anyway -- which is the right restriction here, since a room with no
     # seats yet must still load rather than erroring.
-    if lock:
-        # SET LOCAL, not SET: under transaction-mode pooling (Neon's pooled endpoint is
-        # PgBouncer) a session-level setting can outlive this transaction and reach the
-        # next client handed the same server connection. LOCAL is scoped to the
-        # transaction the statement below runs in, which is exactly the scope the lock
-        # itself has. Issued only when actually locking -- a read-only poll waits on no
-        # lock, so bounding one for it was a round trip per request buying nothing.
-        conn.execute("set local lock_timeout = '5s'")
-    rows = conn.execute(
-        f"""
+    # The lock wait is bounded INSIDE this statement [A180], by `set_config(..., true)` in
+    # a materialized CTE, rather than by a separate `set local lock_timeout` beforehand --
+    # one round trip fewer on every move. It still applies to this statement's own lock:
+    # the CTE is joined below the row-locking step, so it runs before any lock is
+    # requested (verified under real contention: the wait ends at the timeout). `true` is
+    # LOCAL -- scoped to this transaction, which matters under transaction-mode pooling
+    # (Neon's pooled endpoint is PgBouncer), where a session-level setting could reach
+    # the next client handed the same server connection. Only when locking: a read-only
+    # poll waits on no lock.
+    bound = ("with _lock_bound as materialized "
+             "(select set_config('lock_timeout', '5s', true))" if lock else "")
+    sql = f"""
+        {bound}
         select r.code, r.format, r.timer_seconds, r.seed, r.host_id, r.status,
                r.turn_started_at, r.failure_reason, r.moves, r.match_moves,
                r.draft_mode, r.is_open, r.version,
@@ -262,12 +270,18 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                p.kit_name, p.kit_monogram, p.kit_colour, r.trades
           from rooms r
           left join room_players p on p.room_code = r.code
+          {"cross join _lock_bound" if lock else ""}
          where r.code = %s
          order by p.seat_order
         {"for update of r" if lock else ""}
-        """,
-        (code,),
-    ).fetchall()
+        """
+    if lock:
+        rows = conn.execute(sql, (code,)).fetchall()
+    else:
+        # A lock-free read needs no transaction, so it is one round trip, not three
+        # [A180]. Inside a transaction the caller already opened this changes nothing.
+        with outside_transaction(conn):
+            rows = conn.execute(sql, (code,)).fetchall()
     if not rows:
         raise RoomError(f"no room {code!r}")
     (code, fmt, timer_seconds, seed, host_id, status,
@@ -291,7 +305,20 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
         # Migration 036 makes the three kit columns null together.
         kit = Kit(kit_name, kit_monogram, kit_colour) if kit_name is not None else None
         room.players[player_id] = RoomPlayer(player_id, name, is_cpu, franchise, kit)
+    room.loaded_seats = _seat_rows(room)
     return room
+
+
+def _seat_rows(room: Room) -> tuple:
+    """Every value `_save_room` writes to `room_players`, one tuple per seat in seat
+    order. Comparing two of these is how a save knows whether a seat changed, so it must
+    carry EVERY written column -- a column left out here would be a change that never
+    reaches the database."""
+    return tuple(
+        (player_id, seat_order, p.name, p.is_cpu, p.franchise,
+         p.kit.name if p.kit else None, p.kit.monogram if p.kit else None,
+         p.kit.colour if p.kit else None)
+        for seat_order, (player_id, p) in enumerate(room.players.items()))
 
 
 def _save_room(conn, room: Room) -> None:
@@ -337,7 +364,11 @@ def _save_room(conn, room: Room) -> None:
     # is most of why a pick in a full room felt slow rather than any lock contention (that
     # was the earlier, separate fix -- A92). Values are still individually conflict-
     # checked/skipped exactly as before; only the round-trip count changes.
-    if room.players:
+    # [A180] And none at all when no seat changed since the read -- every bid, pick and
+    # clock catch-up, which is nearly every write. Seats only change on a join, a
+    # franchise or kit choice, or a start that fills CPU seats.
+    seat_rows = _seat_rows(room)
+    if room.players and seat_rows != room.loaded_seats:
         values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s, %s, %s, %s)"] * len(room.players))
         params = []
         for seat_order, (player_id, p) in enumerate(room.players.items()):
@@ -360,6 +391,7 @@ def _save_room(conn, room: Room) -> None:
             """,
             params,
         )
+    room.loaded_seats = seat_rows   # what the database now holds
 
 
 def clean_player_name(raw: str) -> str:
@@ -1061,7 +1093,9 @@ def room_state(conn, code: str, deck: Deck) -> Room:
     # player is exactly the case that generates no writes of its own, and is exactly the
     # case the idle sweep would otherwise delete out from under the people sitting in it.
     if room.idle_seconds > PRESENCE_HEARTBEAT_MINUTES * 60:
-        _touch_room(conn, room)
+        # One self-contained UPDATE, so it needs no transaction either [A180].
+        with outside_transaction(conn):
+            _touch_room(conn, room)
     if room.status == "auctioning":
         # `turn_started_at` is a DEADLINE in an auction room, not a start time.
         if time.time() <= room.turn_started_at + CLOCK_GRACE_S:

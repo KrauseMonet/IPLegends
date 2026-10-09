@@ -190,6 +190,37 @@ def connection():
         _LOCAL.last_used = time.monotonic()
 
 
+@contextmanager
+def outside_transaction(conn):
+    """[A180] Run a read (or one self-contained write) without opening a transaction, so
+    it costs ONE round trip instead of three.
+
+    psycopg opens a transaction before the first statement on a non-autocommit
+    connection, and it sends that BEGIN as a round trip of its own; `connection()` then
+    pays a third for COMMIT. For a single statement that needs no lock and no atomicity
+    with anything else -- a room poll's lock-free read, the presence heartbeat -- both are
+    pure cost. Measured against the Singapore database (A179): a poll took 214 ms of
+    database time this way and 69 ms without, three trips against one.
+
+    Only takes effect when nothing is open yet. Called inside a transaction it does
+    nothing, because switching to autocommit there would silently commit the caller's
+    earlier work early and drop its row locks -- so a caller that already holds a lock
+    keeps it. A test fake without psycopg's `info` passes straight through. Autocommit is
+    switched back off afterwards, so whatever the request does next (a locked read and a
+    save) runs in a real transaction exactly as before."""
+    info = getattr(conn, "info", None)
+    if (info is None or conn.autocommit
+            or info.transaction_status != psycopg.pq.TransactionStatus.IDLE):
+        yield conn
+        return
+    conn.autocommit = True
+    try:
+        yield conn
+    finally:
+        if not conn.closed:
+            conn.autocommit = False
+
+
 def close_all() -> None:
     """This thread's connection, for tests and for an orderly local shutdown. There is no
     cross-thread registry to close from: a thread-local is by construction only reachable

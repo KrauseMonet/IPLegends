@@ -56,6 +56,7 @@
     { "src": "/flashback", "dest": "/web/static/flashback.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/bingo", "dest": "/web/static/bingo.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/chain", "dest": "/web/static/chain.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/xi", "dest": "/web/static/xi.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/guess", "dest": "/web/static/guess.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/about", "dest": "/web/static/about.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/faq", "dest": "/web/static/faq.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },

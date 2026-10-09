@@ -2733,3 +2733,15 @@ average player has 54 teammates, 74% of well-known pairs share exactly one bridg
 0.9% are three steps apart, and neither banning franchises nor forcing each link onto a new
 club changes that. The start walks a fixed shuffle of the same 197-player pool as Guess the
 Player, with its own key. Same stateless shape as the other two: the guess list is the state.
+
+**Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
+the names blanked. Each blank keeps the man's batting position and his figures that day; name the
+side. Five mistakes end it; a player who played for the other side is a mistake that says so.
+The matches are the 18 finals (a final is the last match of its season by date), every match with
+a century, and every super-over match: 149 matches, of which 254 sides have an unambiguous XI.
+Before 2023 the archive names exactly the 11 who played; from 2023 it names a twelfth who may not
+have taken the field, so only a side where every man named took part is used (and is then the "12
+who played"). `participated` is not the XI -- it misses a fielder who neither batted nor bowled.
+Facts format 4 holds the sides (`PlayerFacts` unchanged); `clean_side` and `scan_deliveries` are
+pure so the rules and the clues are tested without a database. Same stateless shape as the other
+puzzle games; the daily walks a fixed shuffle of the 254 sides.

@@ -42,6 +42,7 @@ from web import auth
 from web import bingo_routes
 from web import chain_routes
 from web import guess_routes
+from web import xi_routes
 from web import client_failures
 from web import daily as daily_lib
 from web import db
@@ -155,6 +156,7 @@ app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
 app.include_router(bingo_routes.router)
 app.include_router(chain_routes.router)
 app.include_router(guess_routes.router)
+app.include_router(xi_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -353,6 +355,11 @@ def bingo_page() -> FileResponse:
 @app.get("/chain", include_in_schema=False)
 def chain_page() -> FileResponse:
     return FileResponse(STATIC / "chain.html")
+
+
+@app.get("/xi", include_in_schema=False)
+def xi_page() -> FileResponse:
+    return FileResponse(STATIC / "xi.html")
 
 
 @app.get("/guess", include_in_schema=False)

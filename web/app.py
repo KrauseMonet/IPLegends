@@ -40,6 +40,7 @@ from web import auction_session
 from web import room_auction
 from web import auth
 from web import bingo_routes
+from web import chain_routes
 from web import guess_routes
 from web import client_failures
 from web import daily as daily_lib
@@ -152,6 +153,7 @@ def _load_unrated(conn) -> dict[int, list]:
 
 app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
 app.include_router(bingo_routes.router)
+app.include_router(chain_routes.router)
 app.include_router(guess_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
@@ -346,6 +348,11 @@ def flashback_page() -> FileResponse:
 @app.get("/bingo", include_in_schema=False)
 def bingo_page() -> FileResponse:
     return FileResponse(STATIC / "bingo.html")
+
+
+@app.get("/chain", include_in_schema=False)
+def chain_page() -> FileResponse:
+    return FileResponse(STATIC / "chain.html")
 
 
 @app.get("/guess", include_in_schema=False)

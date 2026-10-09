@@ -2719,3 +2719,17 @@ before all have had a day; practice seeds draw at random. Same stateless shape a
 guess list is the whole state, each move replays it, the mystery is named only when the
 puzzle is over, and the share line is one row of squares per guess with no names.
 Browser-side helpers shared by both games live in `web/static/puzzle.js`.
+
+**Teammate Chain** (`game/chain.py`, `web/chain_routes.py`, `/chain`, A184). A daily starting
+player and a chain from him: name a teammate, then a teammate of that player, and so on, nobody
+twice. Teammates are players who batted or bowled for the **same franchise in the same season**
+(`PlayerFacts.squads`, facts format 3). A name that never shared a squad with the chain's last
+player is a strike; three strikes end the chain, and its length in links is the score. A run may
+be stopped and banked early. Each link shows the shared squad; a finished run names the five
+best-known teammates of the last player not already used.
+
+It is deliberately NOT "link A to B in the fewest steps". Measured on the real graph the
+average player has 54 teammates, 74% of well-known pairs share exactly one bridge player and
+0.9% are three steps apart, and neither banning franchises nor forcing each link onto a new
+club changes that. The start walks a fixed shuffle of the same 197-player pool as Guess the
+Player, with its own key. Same stateless shape as the other two: the guess list is the state.

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Records · The Legends Almanack</title>
-<meta name="description" content="The archive's own record book -- highest-rated seasons, most runs, most wickets, best strike rate and economy, across nineteen seasons of the real IPL.">
+<title>Teammate Chain · The Legends Almanack</title>
+<meta name="description" content="Start from one IPL player and name a teammate, then a teammate of his, and so on. Same club, same season, nobody twice. Three wrong answers end it. How long can you go?">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="The archive's own record book, across nineteen seasons of the real IPL.">
+<meta property="og:description" content="How long a chain of IPL teammates can you build? Three wrong answers end it.">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -52,45 +52,56 @@
 <div class="sheet">
 
 
-  <!-- ============ RECORDS ============ -->
-  <section id="records" class="prose-page">
+  <!-- ============ TEAMMATE CHAIN ============ -->
+  <section id="chain" class="prose-page bg ch">
     <div class="report">
       <div class="over-line">THE LEGENDS ALMANACK</div>
-      <div class="call">Record book</div>
+      <div class="call">Teammate Chain</div>
     </div>
-    <p class="prose" style="padding-top:0;margin-bottom:26px;max-width:64ch">Every rated
-      player-season in the archive, ranked -- not one draft, not one squad. A count (runs,
-      wickets) carries no volume floor; a rate (strike rate, economy) is floored at the
-      same ball counts the draft's own rating gate uses, so a two-over spell can't win an
-      economy title.</p>
+    <p class="qz-lede">Start from one player. Name a teammate of his, then a teammate of that
+      player, and so on. Teammates means the same club in the same season. Nobody can appear
+      twice, and three wrong answers end the chain. How long can you go?</p>
 
-    <div class="an-panel">
-      <div class="an-panel-head">
-        <div>
-          <h3>Highest-rated seasons</h3>
-          <p>By the card's own 70-99 rating -- batting and bowling already blended into
-            one number where a player did both.</p>
-        </div>
-        <div class="an-toggle" id="recRoleTabs">
-          <button class="an-tab sel" data-role="overall" onclick="recSetRole('overall')">Overall</button>
-          <button class="an-tab" data-role="batting" onclick="recSetRole('batting')">Batting</button>
-          <button class="an-tab" data-role="bowling" onclick="recSetRole('bowling')">Bowling</button>
-          <button class="an-tab" data-role="allrounder" onclick="recSetRole('allrounder')">All-rounders</button>
-        </div>
+    <div class="qz-challenge hide" id="chChallenge"></div>
+
+    <div class="bg-tabs" id="chTabs">
+      <button class="room-choice sel" data-mode="daily" onclick="chMode('daily')">Today's chain</button>
+      <button class="room-choice" data-mode="practice" onclick="chMode('practice')">Practice</button>
+    </div>
+
+    <div class="qz-best" id="chStreak"></div>
+
+    <div class="bg-hud">
+      <div class="ch-lives" id="chLives" aria-label="Strikes left"></div>
+      <div class="bg-score"><b id="chLinks">0</b><i>links</i></div>
+    </div>
+
+    <div class="bg-picker" id="chPicker">
+      <div class="bg-picker-q" id="chQ"></div>
+      <input id="chInput" class="room-input" type="search" autocomplete="off" autocapitalize="off"
+        spellcheck="false" placeholder="Type a surname…" oninput="chFilter()" onkeydown="chKey(event)">
+      <ul class="bg-results" id="chResults"></ul>
+    </div>
+
+    <div class="ch-steps" id="chSteps"></div>
+    <p class="bg-hint" id="chHint"></p>
+
+    <div class="foot-actions hide" id="chStopRow" style="justify-content:center">
+      <button class="bg-cancel" onclick="chStop()">Stop and bank this chain</button>
+    </div>
+
+    <div class="bg-done hide" id="chDone">
+      <div class="over-line qz-over" id="chDoneLabel"></div>
+      <div class="qz-title" id="chDoneTitle"></div>
+      <div class="qz-final"><b id="chFinal">0</b><span>links</span></div>
+      <div class="qz-stats" id="chStats"></div>
+      <div class="ch-missed" id="chMissed"></div>
+      <pre class="bg-share-preview" id="chSharePreview"></pre>
+      <div class="foot-actions" style="justify-content:flex-start">
+        <button class="act lead" onclick="chShare()">Share result</button>
+        <button class="act" onclick="chMode('practice', true)">Play a practice chain</button>
+        <button class="act" onclick="chLink()">Copy link to this chain</button>
       </div>
-      <div class="an-lists" id="recTopBoard"></div>
-    </div>
-
-    <div class="an-panel">
-      <div class="an-panel-head"><div>
-        <h3>Season records</h3>
-        <p>The archive's own extremes -- one board per measure, twenty seasons deep.</p>
-      </div></div>
-      <div class="an-lists" id="recBoards"></div>
-    </div>
-
-    <div class="foot-actions" style="justify-content:center;padding:10px 0 30px">
-      <a class="act lead" href="/">Begin a draft</a>
     </div>
   </section>
 
@@ -148,43 +159,7 @@
 
 <script src="/static/common.js?v=29328806f4"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/analysis.js?v=660256fadc"></script>
-<script>
-let RECORDS = null;
-let REC_ROLE = 'overall';
-
-function recSetRole(role){
-  REC_ROLE = role;
-  document.querySelectorAll('#recRoleTabs .an-tab').forEach(b =>
-    b.classList.toggle('sel', b.dataset.role === role));
-  recPaintTop();
-}
-
-function recPaintTop(){
-  const byRole = {overall: RECORDS.top_rated, batting: RECORDS.top_batting,
-    bowling: RECORDS.top_bowling, allrounder: RECORDS.top_allrounder};
-  $('#recTopBoard').innerHTML = leaderPanel('Highest-rated seasons', 'card rating, 70-99',
-    byRole[REC_ROLE], 'rating', v => Math.round(v), 'rating');
-}
-
-function recPaintBoards(){
-  $('#recBoards').innerHTML = [
-    leaderPanel('Most runs in a season', 'Archive-wide', RECORDS.most_runs, 'orange', v => Math.round(v), 'runs'),
-    leaderPanel('Most wickets in a season', 'Archive-wide', RECORDS.most_wickets, 'purple', v => Math.round(v), 'wickets'),
-    leaderPanel('Best strike rate in a season', 'Runs per hundred balls', RECORDS.best_strike_rate, 'sr', v => v.toFixed(1), 'SR'),
-    leaderPanel('Best economy in a season', 'Runs per over conceded', RECORDS.best_economy, 'econ', v => v.toFixed(2), 'runs per over'),
-  ].join('');
-}
-
-async function boot(){
-  loadMe();
-  const m = await loadMeta();
-  renderDeckStats(m);
-  RECORDS = await api('/api/records');
-  recPaintTop();
-  recPaintBoards();
-}
-boot().catch(e => slip(e.message));
-</script>
+<script src="/static/puzzle.js?v=1cdd4eaa1c"></script>
+<script src="/static/chain.js?v=72eae92029"></script>
 </body>
 </html>

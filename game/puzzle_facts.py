@@ -36,7 +36,7 @@ from etl.franchise_map import canonical
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "puzzle_facts.json.gz"
 
 # Bumped only when the FILE FORMAT changes, not when the data does (A107's rule).
-FORMAT_VERSION = 2   # [A183] role, country and bowling style were added for Guess the Player
+FORMAT_VERSION = 3   # [A184] squads were added for Teammate Chain (v2: role, country, style)
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,10 @@ class PlayerFacts:
                                      # allrounder or keeper
     country: str | None = None       # the nation he played for DURING his IPL career (A51)
     bowling_style: str | None = None # "pace" or "spin"; NULL for a man who never bowled
+    # Every franchise-season he batted or bowled in, as "Franchise|year" (canonical
+    # franchise). Two players are TEAMMATES if they share one -- the same club in the same
+    # season, which is how a fan remembers a dressing room. Not "played in the same match".
+    squads: tuple[str, ...] = ()
 
     @property
     def prominence(self) -> int:
@@ -76,7 +80,7 @@ def _doc_row(p: PlayerFacts) -> dict:
         "over": p.overseas, "keeper": p.keeper, "runs": p.runs, "wk": p.wickets,
         "mr": p.best_season_runs, "mw": p.best_season_wickets, "h": p.hundreds,
         "f": p.fifties, "w4": p.four_wicket_hauls, "s6": p.sixes,
-        "role": p.role, "ctry": p.country, "bs": p.bowling_style,
+        "role": p.role, "ctry": p.country, "bs": p.bowling_style, "sq": list(p.squads),
     }
 
 
@@ -86,7 +90,7 @@ def _from_row(d: dict) -> PlayerFacts:
         overseas=d["over"], keeper=d["keeper"], runs=d["runs"], wickets=d["wk"],
         best_season_runs=d["mr"], best_season_wickets=d["mw"], hundreds=d["h"],
         fifties=d["f"], four_wicket_hauls=d["w4"], sixes=d["s6"],
-        role=d["role"], country=d["ctry"], bowling_style=d["bs"])
+        role=d["role"], country=d["ctry"], bowling_style=d["bs"], squads=tuple(d["sq"]))
 
 
 # When two roles tie across a career, the more specific wins: a man who is half all-rounder
@@ -117,12 +121,14 @@ def build_players(conn, deck) -> list[PlayerFacts]:
     overseas: dict[str, bool | None] = {}
     keeper: dict[str, bool] = defaultdict(bool)
     style: dict[str, str | None] = {}
+    squad_of: dict[str, set[str]] = defaultdict(set)
     for cards in deck.cards_by_fs.values():
         for c in cards:
             pid = c.person_id
             name[pid] = c.name
             overseas.setdefault(pid, c.overseas)
             style.setdefault(pid, c.bowling_style)
+            squad_of[pid].add(f"{canonical(c.franchise)}|{c.season_year}")
             keeper[pid] = keeper[pid] or c.keeper_eligible
             franchises[pid].add(canonical(c.franchise))
             # Summed by CALENDAR YEAR across franchises: a man traded mid-season has two
@@ -165,7 +171,8 @@ def build_players(conn, deck) -> list[PlayerFacts]:
             best_season_wickets=max(wkts_by_year[pid].values()),
             hundreds=hundreds.get(pid, 0), fifties=fifties.get(pid, 0),
             four_wicket_hauls=hauls.get(pid, 0), sixes=sixes.get(pid, 0),
-            role=role_of.get(pid), country=country.get(pid), bowling_style=style.get(pid)))
+            role=role_of.get(pid), country=country.get(pid), bowling_style=style.get(pid),
+            squads=tuple(sorted(squad_of[pid]))))
     return out
 
 

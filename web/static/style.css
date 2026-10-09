@@ -3489,3 +3489,28 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
   .gp-club{height:20px}span.gp-club{min-width:20px}
 }
 @media (prefers-reduced-motion:reduce){.gp-tile.fresh{animation:none}}
+
+/* --- Teammate Chain [A184] -------------------------------------------------------------- */
+.ch-lives{display:flex;gap:8px}
+.ch-lives i{width:26px;height:10px;border-radius:5px;background:var(--hot);transition:background .2s,opacity .2s}
+.ch-lives i.lost{background:var(--panel-3);opacity:.7}
+.ch .bg-picker{margin:0 0 18px}
+.ch .bg-picker-q{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.ch .bg-picker-q .gp-clubs{justify-content:flex-start}
+.ch .bg-picker.shake{animation:bgShake .35s ease}
+.ch-steps{display:flex;flex-direction:column}
+.ch-link{align-self:center;font:600 11px/1.3 var(--mono);letter-spacing:.04em;color:var(--mint);
+  padding:6px 12px;border-left:2px solid var(--mint);margin:0 0 0 22px;max-width:calc(100% - 22px)}
+.ch-step{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;
+  border:1px solid var(--line);background:var(--panel)}
+.ch-step b{font:800 16px var(--sans);flex:1;min-width:0;overflow-wrap:anywhere}
+.ch-step .gp-clubs{flex:none;max-width:45%;justify-content:flex-end}
+.ch .gp-club{opacity:1;filter:none;height:22px}
+.ch-n{font:700 10px var(--mono);letter-spacing:.14em;color:var(--ink-3);min-width:34px}
+.ch-step.end{border-color:var(--gold);background:var(--panel-2);box-shadow:0 0 0 1px rgba(245,184,61,.25)}
+.ch-step.end .ch-n{color:var(--gold-2)}
+.ch-step.fresh{animation:bgPop .4s ease}
+.ch-missed{margin:14px 0}
+.ch-names{display:flex;flex-wrap:wrap;gap:8px}
+.ch-names span{padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);font:600 13px var(--sans)}
+@media (prefers-reduced-motion:reduce){.ch-step.fresh,.ch .bg-picker.shake{animation:none}}

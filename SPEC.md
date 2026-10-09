@@ -2745,3 +2745,15 @@ who played"). `participated` is not the XI -- it misses a fielder who neither ba
 Facts format 4 holds the sides (`PlayerFacts` unchanged); `clean_side` and `scan_deliveries` are
 pure so the rules and the clues are tested without a database. Same stateless shape as the other
 puzzle games; the daily walks a fixed shuffle of the 254 sides.
+
+
+## 18. Navigation [A186]
+
+Draft and Auction lead. The top bar is `Draft, Auction, Rooms, Daily, Puzzles, Records` and does not
+grow: a new game is a card on the Puzzles hub, never a new top-level item. On the home page Draft &
+season and Auction are the only large tiles; Rooms and the daily challenge are a smaller row; the
+puzzles are one strip. The puzzle games (Bingo, Guess the Player, Teammate Chain, Name the XI, the
+Flashback quiz) share a second bar that appears on their pages only, and `/puzzles` is a hub that
+shows which of the four daily puzzles are finished today and one streak across them. A day counts
+toward that streak if any daily puzzle was finished on it. Progress is kept in the visitor's own
+browser (each game under its own key), so the hub needs no account and no request beyond today's date.

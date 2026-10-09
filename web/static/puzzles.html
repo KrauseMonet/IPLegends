@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teammate Chain · The Legends Almanack</title>
-<meta name="description" content="Start from one IPL player and name a teammate, then a teammate of his, and so on. Same club, same season, nobody twice. Three wrong answers end it. How long can you go?">
+<title>Puzzles · The Legends Almanack</title>
+<meta name="description" content="Five-minute IPL puzzles built from nineteen seasons of ball-by-ball records: Bingo, Guess the Player, Teammate Chain, Name the XI and the Flashback quiz.">
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png">
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Almanack">
 <meta property="og:title" content="The Legends Almanack">
-<meta property="og:description" content="How long a chain of IPL teammates can you build? Three wrong answers end it.">
+<meta property="og:description" content="Five-minute IPL puzzles. A new set every day.">
 <meta property="og:image" content="/static/og-image.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -64,56 +64,59 @@
 <div class="sheet">
 
 
-  <!-- ============ TEAMMATE CHAIN ============ -->
-  <section id="chain" class="prose-page bg ch">
+  <!-- ============ PUZZLES ============ -->
+  <section id="puzzles" class="prose-page pz">
     <div class="report">
       <div class="over-line">THE LEGENDS ALMANACK</div>
-      <div class="call">Teammate Chain</div>
+      <div class="call">Puzzles</div>
     </div>
-    <p class="qz-lede">Start from one player. Name a teammate of his, then a teammate of that
-      player, and so on. Teammates means the same club in the same season. Nobody can appear
-      twice, and three wrong answers end the chain. How long can you go?</p>
+    <p class="qz-lede">Five-minute games built from nineteen seasons of ball-by-ball records. Four
+      of them have a new puzzle every day, the same for everybody, and every one has a share
+      line with no spoilers in it.</p>
 
-    <div class="qz-challenge hide" id="chChallenge"></div>
+    <div class="qz-best" id="pzStreak"></div>
 
-    <div class="bg-tabs" id="chTabs">
-      <button class="room-choice sel" data-mode="daily" onclick="chMode('daily')">Today's chain</button>
-      <button class="room-choice" data-mode="practice" onclick="chMode('practice')">Practice</button>
+    <h2 class="pz-h2">Today <span id="pzCount"></span></h2>
+    <div class="pz-grid">
+      <a class="pz-card" href="/bingo" data-key="iplegends_bingo_v1">
+        <span class="pz-tag">Daily · about 5 minutes</span>
+        <h3>Bingo</h3>
+        <p>Fill a 3×3 grid with players who fit both the row and the column. Nine guesses,
+          and the rarer the square, the more it scores.</p>
+        <span class="pz-go">Play →</span>
+      </a>
+      <a class="pz-card" href="/guess" data-key="iplegends_guess_v1">
+        <span class="pz-tag">Daily · about 3 minutes</span>
+        <h3>Guess the Player</h3>
+        <p>Find the mystery player in eight guesses. Each guess shows the clubs, role, country
+          and career numbers you share with him.</p>
+        <span class="pz-go">Play →</span>
+      </a>
+      <a class="pz-card" href="/chain" data-key="iplegends_chain_v1">
+        <span class="pz-tag">Daily · as long as you last</span>
+        <h3>Teammate Chain</h3>
+        <p>Name a teammate of the starting player, then a teammate of his, and so on.
+          Three wrong answers end it.</p>
+        <span class="pz-go">Play →</span>
+      </a>
+      <a class="pz-card" href="/xi" data-key="iplegends_xi_v1">
+        <span class="pz-tag">Daily · about 5 minutes</span>
+        <h3>Name the XI</h3>
+        <p>A famous scorecard with the names taken off. Each blank keeps what the man did
+          that day. Fill in the side.</p>
+        <span class="pz-go">Play →</span>
+      </a>
     </div>
 
-    <div class="qz-best" id="chStreak"></div>
-
-    <div class="bg-hud">
-      <div class="ch-lives" id="chLives" aria-label="Strikes left"></div>
-      <div class="bg-score"><b id="chLinks">0</b><i>links</i></div>
-    </div>
-
-    <div class="bg-picker" id="chPicker">
-      <div class="bg-picker-q" id="chQ"></div>
-      <input id="chInput" class="room-input" type="search" autocomplete="off" autocapitalize="off"
-        spellcheck="false" placeholder="Type a surname…" oninput="chFilter()" onkeydown="chKey(event)">
-      <ul class="bg-results" id="chResults"></ul>
-    </div>
-
-    <div class="ch-steps" id="chSteps"></div>
-    <p class="bg-hint" id="chHint"></p>
-
-    <div class="foot-actions hide" id="chStopRow" style="justify-content:center">
-      <button class="bg-cancel" onclick="chStop()">Stop and bank this chain</button>
-    </div>
-
-    <div class="bg-done hide" id="chDone">
-      <div class="over-line qz-over" id="chDoneLabel"></div>
-      <div class="qz-title" id="chDoneTitle"></div>
-      <div class="qz-final"><b id="chFinal">0</b><span>links</span></div>
-      <div class="qz-stats" id="chStats"></div>
-      <div class="ch-missed" id="chMissed"></div>
-      <pre class="bg-share-preview" id="chSharePreview"></pre>
-      <div class="foot-actions" style="justify-content:flex-start">
-        <button class="act lead" onclick="chShare()">Share result</button>
-        <button class="act" onclick="chMode('practice', true)">Play a practice chain</button>
-        <button class="act" onclick="chLink()">Copy link to this chain</button>
-      </div>
+    <h2 class="pz-h2">Whenever you like</h2>
+    <div class="pz-grid one">
+      <a class="pz-card" href="/flashback">
+        <span class="pz-tag">Quiz · ten questions</span>
+        <h3>Flashback</h3>
+        <p>Ten questions on nineteen real seasons, twenty seconds each. Then challenge a friend
+          to beat your score.</p>
+        <span class="pz-go">Take the quiz →</span>
+      </a>
     </div>
   </section>
 
@@ -172,6 +175,6 @@
 <script src="/static/common.js?v=2875dd81ec"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
 <script src="/static/puzzle.js?v=1cdd4eaa1c"></script>
-<script src="/static/chain.js?v=72eae92029"></script>
+<script src="/static/puzzles.js?v=ee7e66c3cf"></script>
 </body>
 </html>

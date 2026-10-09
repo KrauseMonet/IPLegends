@@ -347,6 +347,11 @@ def flashback_page() -> FileResponse:
     return FileResponse(STATIC / "flashback.html")
 
 
+@app.get("/puzzles", include_in_schema=False)
+def puzzles_page() -> FileResponse:
+    return FileResponse(STATIC / "puzzles.html")
+
+
 @app.get("/bingo", include_in_schema=False)
 def bingo_page() -> FileResponse:
     return FileResponse(STATIC / "bingo.html")

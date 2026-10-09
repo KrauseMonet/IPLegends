@@ -818,11 +818,23 @@ function sideBadge(side, cls = ''){
 
 // `path` defaults to the page's own; the season page passes '/auction' for an auction's
 // season, which lives at /season but belongs to the auction [A148].
+// Whether a nav link's `data-match` ("/draft /season") covers this path: an exact match or
+// anything beneath it. One predicate for both bars, and pure so it can be tested [A186].
+function navMatches(spec, path){
+  return spec.split(' ').some(m => path === m || path.startsWith(m + '/'));
+}
+
 function markCurrentNav(path = location.pathname){
-  document.querySelectorAll('.topnav-links a[data-match]').forEach(a => {
-    const on = a.dataset.match.split(' ').some(m => path === m || path.startsWith(m + '/'));
+  document.querySelectorAll('.topnav-links a[data-match], .pznav a[data-match]').forEach(a => {
+    const on = navMatches(a.dataset.match, path);
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    // A bar that scrolls sideways on a phone must show where you are, not leave the current
+    // page half off the edge. Set on the bar itself: scrollIntoView would also scroll the page.
+    if (on && a.closest('.pznav-in')){
+      const bar = a.closest('.pznav-in');
+      bar.scrollLeft = a.offsetLeft - (bar.clientWidth - a.offsetWidth) / 2;
+    }
   });
 }
 markCurrentNav();

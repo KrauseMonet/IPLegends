@@ -88,6 +88,42 @@ function sideTint(side){
   return {cls: '', style: ''};
 }
 
+/* --- a match result card's pieces, shared by the season, rooms and the daily ---------- */
+
+// The best batter of the innings a side batted and the best bowler of the innings it
+// bowled at -- `home_innings.bowling` is the away side's attack (A101's trap).
+function sideStarsHtml(batted, bowledAt){
+  const bat = inningsTopBatter(batted), bowl = inningsTopBowler(bowledAt);
+  const parts = [];
+  if (bat) parts.push(`<span><b>${esc(bat.name)}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
+  if (bowl) parts.push(`<span><b>${esc(bowl.name)}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
+  return parts.join('');
+}
+
+// A tinted panel for one side: its colours (crest or kit) as inline variables or a class.
+// The engine's margin names the winner ("YOU by 6 wickets"); the headline already does,
+// so the line under it keeps only what follows.
+function marginText(match, winnerShort){
+  let m = match.margin || '';
+  if (winnerShort && m.startsWith(winnerShort + ' ')) m = m.slice(winnerShort.length + 1);
+  m = m.replace(/\b1 (wickets|runs)\b/, (_, u) => '1 ' + u.slice(0, -1));
+  return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+function tintAttrs(side, base){
+  const t = sideTint(side);
+  return `class="${base}${t.cls ? ' ' + t.cls : ''}"${t.style ? ` style="${t.style}"` : ''}`;
+}
+
+function resultTeamHtml(side, score, inn, won){
+  const overs = inn ? `<small>${inn.overs} ov</small>` : '';
+  return `<div ${tintAttrs(side, 'mr-team' + (won ? ' won' : ''))}>
+      ${sideBadge(side, 'mr-badge')}
+      <b class="mr-name">${esc(side.name)}</b>
+      <span class="mr-score">${esc(score)}${overs}</span>
+    </div>`;
+}
+
 function renderOverMatchup(m){
   const board = document.getElementById('scoreboard');
   if (!board) return;

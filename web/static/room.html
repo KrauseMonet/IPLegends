@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=34a7d65509">
+<link rel="stylesheet" href="/static/style.css?v=8c8b946676">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -60,46 +60,45 @@
   <!-- ============ ROOM: lobby / live draft / result ============ -->
   <section id="room">
     <div id="roomLobby" class="hide">
-      <div class="folio" style="grid-template-columns:1fr">
-        <div class="col" style="max-width:560px;margin:40px auto;width:100%">
-          <div class="col-head"><span>Lobby</span><em id="lobbySeats"></em></div>
-          <div class="fixture">
-            <div class="yr">ROOM CODE</div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <div class="club" id="lobbyCode" style="letter-spacing:2px"></div>
-              <button class="act" style="padding:6px 12px;font-size:11px" onclick="copyRoomCode()">Copy code</button>
-              <button class="act" style="padding:6px 12px;font-size:11px" onclick="copyRoomLink()">Copy link</button>
-            </div>
-            <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px;line-height:1.5">
-              Send the code to type in, or the link to open straight here. Either way,
-              joining works while this room is in the lobby with a seat free.
-            </div>
-            <div style="margin-top:10px;color:var(--ink-3);font-family:var(--mono);font-size:12px">
-              <span id="lobbyFormat"></span> · <span id="lobbyTimer"></span> · <span id="lobbyMode"></span>
-            </div>
+      <div class="lb">
+        <!-- The code is the one thing people have to read out to each other, so it is the
+             biggest thing on the screen. -->
+        <div class="mr lb-card">
+          <div class="mr-stage">Room lobby · <span id="lobbySeats"></span></div>
+          <div class="lb-code" id="lobbyCode"></div>
+          <div class="lb-copy">
+            <button class="act" onclick="copyRoomCode()">Copy code</button>
+            <button class="act" onclick="copyRoomLink()">Copy link</button>
           </div>
-          <div class="col-head" style="margin-bottom:0"><span>Players</span></div>
-          <div id="lobbyPlayers" class="col-scroll"></div>
-          <!-- [A151] A draft room's lobby: the kit your drafted side will wear. -->
-          <div id="lobbyKitWrap" class="hide">
-            <div class="col-head" style="margin-bottom:0"><span>Your team kit</span><em>everyone in the room sees it</em></div>
-            <div id="lobbyKit"></div>
-          </div>
-          <!-- [A174] An auction room's trade window: the host decides before the start. -->
-          <div id="lobbyTradesWrap" class="hide">
-            <div class="col-head" style="margin-bottom:0"><span>Trade window</span><em>after the fill round · between people only</em></div>
-            <div id="lobbyTrades" class="lobby-trades"></div>
-          </div>
-          <!-- [A139] An auction room's lobby: every seat claims a franchise. -->
-          <div id="lobbyFranchiseWrap" class="hide">
-            <div class="col-head" style="margin-bottom:0"><span>Your franchise</span><em>unchosen ones bid as computer teams</em></div>
-            <div id="lobbyFranchises" class="auc-franchises auc-lobby-franchises"></div>
-          </div>
-          <div class="foot-actions">
-            <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
-            <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
-          </div>
+          <p class="lb-note">Send the code to type in, or the link to open straight here.
+            Anyone can join while the room is in the lobby with a seat free.</p>
+          <div class="dr-chips" id="lobbyChips"></div>
         </div>
+
+        <div class="lb-block">
+          <div class="pf-head">Players <em id="lobbyFill"></em></div>
+          <div id="lobbyPlayers" class="lb-seats"></div>
+        </div>
+        <!-- [A151] A draft room's lobby: the kit your drafted side will wear. -->
+        <div id="lobbyKitWrap" class="lb-block hide">
+          <div class="pf-head">Your team kit <em>everyone in the room sees it</em></div>
+          <div id="lobbyKit"></div>
+        </div>
+        <!-- [A174] An auction room's trade window: the host decides before the start. -->
+        <div id="lobbyTradesWrap" class="lb-block hide">
+          <div class="pf-head">Trade window <em>after the fill round · between people only</em></div>
+          <div id="lobbyTrades" class="lobby-trades"></div>
+        </div>
+        <!-- [A139] An auction room's lobby: every seat claims a franchise. -->
+        <div id="lobbyFranchiseWrap" class="lb-block hide">
+          <div class="pf-head">Your franchise <em>unchosen ones bid as computer teams</em></div>
+          <div id="lobbyFranchises" class="auc-franchises auc-lobby-franchises"></div>
+        </div>
+        <div class="actions lb-actions">
+          <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
+          <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
+        </div>
+        <p class="lb-wait hide" id="lobbyWaitNote">Waiting for the host to start.</p>
       </div>
     </div>
 
@@ -146,12 +145,10 @@
     </div>
 
     <div id="roomResult" class="hide">
-      <div class="report">
-        <div class="over-line">ROOM <span id="roomResultCode"></span></div>
-      </div>
+      <div class="rs-bar">Room <b id="roomResultCode"></b></div>
       <div id="roomMatchBody"></div>
-      <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
-        <button class="act lead hide" id="roomDoneBtn" onclick="leaveRoomAndGoHome()">Done</button>
+      <div class="actions rs-actions" style="padding-bottom:30px">
+        <button class="act hide" id="roomDoneBtn" onclick="leaveRoomAndGoHome()">Done</button>
       </div>
     </div>
 
@@ -321,16 +318,13 @@
     </div>
 
     <div id="roomFailed" class="hide">
-      <div class="report">
-        <div class="over-line">ROOM <span id="roomFailedCode"></span></div>
-        <div class="call">Draft stranded</div>
-        <p style="max-width:520px;margin:14px auto 0;color:var(--ink-3);font-size:14px;line-height:1.5">
-          One seat's earlier picks left no legal candidate for a slot that still needed filling.
-          This is a rare, genuine dead end in the archive rather than a bug in your play. The
-          room cannot recover from here.
-        </p>
-        <p style="max-width:520px;margin:10px auto 0;font-family:var(--mono);font-size:12px;color:var(--ink-4)"
-           id="roomFailedReason"></p>
+      <div class="mr rs out">
+        <div class="mr-stage">Room <span id="roomFailedCode"></span></div>
+        <div class="rs-title">Draft stranded</div>
+        <p class="rs-note">One seat's earlier picks left no legal candidate for a slot that still
+          needed filling. This is a rare, genuine dead end in the archive rather than a bug in
+          your play. The room cannot recover from here.</p>
+        <p class="rs-note rs-reason" id="roomFailedReason"></p>
       </div>
       <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
         <button class="act lead" onclick="leaveRoomAndGoHome()">Done</button>
@@ -523,10 +517,10 @@
 
 <script src="/static/common.js?v=a43774c27f"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/reveal.js?v=acc6b4fc74"></script>
+<script src="/static/reveal.js?v=fad22f4bbc"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=92a849d7f3"></script>
+<script src="/static/room.js?v=bd65c1068c"></script>
 <script src="/static/auction.js?v=47fc21064b"></script>
 </body>
 </html>

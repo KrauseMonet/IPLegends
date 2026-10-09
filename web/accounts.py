@@ -299,3 +299,48 @@ def save_game_result(conn, account_id: int, source: str, natural_key: str,
             params,
         )
     return True
+
+
+@dataclass(frozen=True)
+class ProfileHistory:
+    solo_games: int
+    room_games: int
+    recent_games: list[dict]    # newest first: source, champion, matches_played/won, completed_at
+    daily_dates: list           # every day this account played, oldest first -- for streaks
+    recent_dailies: list[dict]  # newest first: challenge_date, objective_met
+
+
+RECENT_GAMES = 8
+RECENT_DAILIES = 14
+
+
+def profile_history(conn, account_id: int) -> ProfileHistory:
+    """What the profile shows beyond the career totals: games by kind, the last few saved
+    games and the daily record. ONE round trip, for A108's reason -- this page's cost was
+    almost entirely latency, so a second query costs what a second statement would.
+
+    A saved game records only its kind, whether it was won and its match record, so that is
+    all a recent game can say; finishing position and team name were never stored, and
+    nothing here invents them."""
+    row = conn.execute(
+        """
+        select
+            (select count(*) from game_results
+              where account_id = %(id)s and source = 'solo'),
+            (select count(*) from game_results
+              where account_id = %(id)s and source = 'room'),
+            (select coalesce(json_agg(g order by g.completed_at desc), '[]'::json) from (
+                select source, champion, matches_played, matches_won, completed_at
+                  from game_results where account_id = %(id)s
+                 order by completed_at desc limit %(games)s) g),
+            (select coalesce(array_agg(challenge_date order by challenge_date), '{}')
+               from daily_results where account_id = %(id)s),
+            (select coalesce(json_agg(d order by d.challenge_date desc), '[]'::json) from (
+                select challenge_date, objective_met
+                  from daily_results where account_id = %(id)s
+                 order by challenge_date desc limit %(dailies)s) d)
+        """,
+        {"id": account_id, "games": RECENT_GAMES, "dailies": RECENT_DAILIES},
+    ).fetchone()
+    return ProfileHistory(solo_games=row[0], room_games=row[1], recent_games=list(row[2]),
+                          daily_dates=list(row[3]), recent_dailies=list(row[4]))

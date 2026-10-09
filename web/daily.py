@@ -29,7 +29,8 @@ from dataclasses import dataclass, field, replace
 
 from etl.feasibility import Deck
 from game.scenarios import (
-    DAILY_DECK_SIZE, RULES_FULL_MATCH, RULES_LEGACY, Outcome, Scenario, bonuses_on_offer,
+    BALLS_PER_INNINGS, DAILY_DECK_SIZE, RULES_FULL_MATCH, RULES_LEGACY, Outcome, Scenario,
+    bonuses_on_offer,
     choose_deck, daily_seed, evaluate, generate, overs_words, rank_key,
 )
 from game.season import Side
@@ -473,7 +474,7 @@ def share_text(day: "Day", result: dict, rank: int | None = None,
     lines.append(f"{sc.short()} · {sc.opposition_name} · {stage}")
 
     lines.append(("✅ " if result["objective_met"] else "❌ ")
-                 + _share_outcome(sc, result))
+                 + outcome_words(sc, result["objective_met"], result["margin"]))
     for b in result.get("bonuses") or []:
         lines.append(f"⭐ {BONUS_LABELS.get(b, b)}")
     if rank is not None and players:
@@ -486,23 +487,39 @@ def share_text(day: "Day", result: dict, rank: int | None = None,
     return "\n".join(lines)
 
 
-def _share_outcome(scenario: Scenario, result: dict) -> str:
-    """The same two-branch rule `evaluate` uses, in the words a reader wants: a failed
-    chase reports how close it came, because its margin is negative for exactly that
+def outcome_words(scenario: Scenario, met: bool, margin: int) -> str:
+    """How an attempt went, in words, measured against what the day ASKED. One copy, used
+    by the share line, the result screen and every leaderboard row, because this is
+    wording that has to agree with the scoring.
+
+    The requirement matters as much as the margin. On two of the three units a missed
+    objective can carry a perfectly good margin -- a chase completed with too few wickets
+    in hand, or too slowly -- and the margin alone then reads as success: this used to say
+    "chased with 1.0 overs to spare" for a chase that took 19 overs on a day that allowed
+    17. So a miss of that kind names the requirement it missed.
+
+    A failed chase reports how close it came: its margin is negative for exactly that
     reason (game/scenarios.py has the why)."""
-    margin = result["margin"]
-    if scenario.margin_unit == "runs":
-        if margin > 0:
+    unit = scenario.margin_unit
+    if unit == "runs":
+        if margin == 0:
+            return "tied"
+        if margin < 0:
+            return f"lost by {-margin} runs"
+        if met or scenario.runs_required is None:
             return f"won by {margin} runs"
-        return "tied" if margin == 0 else f"lost by {-margin} runs"
-    # Both remaining units share one failure convention -- a negative margin is runs short,
-    # never the unit named above (game/scenarios.py explains why ranking a failure on
-    # wickets in hand would reward blocking out).
+        return f"won by {margin} runs, not the {scenario.runs_required + 1}+ needed"
     if margin < 0:
         return f"fell {-margin} short"
-    if scenario.margin_unit == "balls":
-        return f"chased with {overs_words(margin)} overs to spare"
-    return f"chased, {margin} wicket{'' if margin == 1 else 's'} in hand"
+    if unit == "balls":
+        used = overs_words(BALLS_PER_INNINGS - margin)
+        if met or scenario.overs_required is None:
+            return f"chased in {used} overs"
+        return f"chased in {used} overs, over the {scenario.overs_required} allowed"
+    hand = f"{margin} wicket{'' if margin == 1 else 's'} in hand"
+    if met or scenario.wickets_required is None:
+        return f"chased, {hand}"
+    return f"chased, but only {hand} of the {scenario.wickets_required} needed"
 
 
 # --- the day, in the database ---------------------------------------------------------------
@@ -710,15 +727,17 @@ def leaderboard(conn, challenge_date, limit: int = 50) -> list[dict]:
     reads as the board being wrong."""
     rows = conn.execute(
         f"""
-        select a.username, r.objective_met, r.margin, r.bonus_points, r.bonuses
+        select a.username, r.objective_met, r.margin, r.bonus_points, r.bonuses,
+               a.kit_name, a.kit_monogram, a.kit_colour
           from daily_results r join accounts a using (account_id)
          where r.challenge_date = %s
          order by {_BOARD_ORDER}
          limit %s
         """, (challenge_date, limit)).fetchall()
     return [{"username": u, "objective_met": met, "margin": m,
-             "bonus_points": bp, "bonuses": list(bs or [])}
-            for u, met, m, bp, bs in rows]
+             "bonus_points": bp, "bonuses": list(bs or []),
+             "kit": {"name": kn, "monogram": km, "colour": kc} if kn is not None else None}
+            for u, met, m, bp, bs, kn, km, kc in rows]
 
 
 def rank_of(conn, challenge_date, account_id: int) -> int | None:

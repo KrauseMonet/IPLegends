@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=34a7d65509">
+<link rel="stylesheet" href="/static/style.css?v=8c8b946676">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -73,11 +73,13 @@
   <section id="dailyDone" class="hide"></section>
 
   <section id="draft" class="hide">
-    <div class="report compact" id="dailyBanner" style="margin-bottom:18px">
-      <div class="over-line" id="dailyDate">—</div>
-      <div id="dailyCrest"></div>
-      <div class="call" id="dailyScenario">—</div>
-      <div class="margin" id="dailyBonuses"></div>
+    <div class="mr dbn" id="dailyBanner">
+      <div class="dbn-crest" id="dailyCrest"></div>
+      <div class="dbn-body">
+        <div class="mr-stage" id="dailyDate">—</div>
+        <div class="dbn-scenario" id="dailyScenario">—</div>
+        <div class="dr-chips dbn-chips" id="dailyBonuses"></div>
+      </div>
     </div>
     <div class="folio">
       <div class="col">
@@ -287,8 +289,8 @@
 <!-- Set BEFORE draft.js: it decides whether draft.js runs its own solo resume-from-hash
      boot. daily.js loads afterwards and cannot answer that question in time. -->
 <script>window.DAILY_PAGE = true;</script>
-<script src="/static/reveal.js?v=acc6b4fc74"></script>
+<script src="/static/reveal.js?v=fad22f4bbc"></script>
 <script src="/static/draft.js?v=935a541076"></script>
-<script src="/static/daily.js?v=b8fba1f11a"></script>
+<script src="/static/daily.js?v=824f03c6e6"></script>
 </body>
 </html>

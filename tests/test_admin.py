@@ -226,3 +226,37 @@ def test_the_session_secret_is_not_needed_to_hash(monkeypatch):
     # set_password hashes, and hashing must not require SESSION_SECRET (auth.py's rule).
     monkeypatch.delenv("SESSION_SECRET", raising=False)
     assert auth.hash_password("longenough").startswith("pbkdf2_sha256$")
+
+
+# --- the profile's history query, against a real Postgres -----------------------------------
+
+@needs_pg
+def test_profile_history_counts_orders_and_scopes_to_one_account(pg):
+    """The profile's one extra round trip: games by kind, the newest games first, and the
+    daily record. Run against real SQL because the fake connection never reads it (A108).
+    A second account's rows are present throughout, so a query that forgot its
+    `account_id` filter counts them and fails."""
+    me, other = _account(pg, "hist_me"), _account(pg, "hist_other")
+    for i, (acct, src, champ) in enumerate([(me, "solo", True), (me, "room", False),
+                                            (me, "solo", False), (other, "solo", True)]):
+        pg.execute("insert into game_results (account_id, source, natural_key, champion, "
+                   "matches_played, matches_won, completed_at) values "
+                   "(%s, %s, %s, %s, 14, %s, now() - make_interval(hours => %s))",
+                   (acct, src, f"k{i}", champ, 8 + i, 10 - i))
+    days = [datetime.date(2026, 10, d) for d in (5, 7, 8, 9)]
+    for d in days:
+        pg.execute("insert into daily_challenges (challenge_date, seed, scenario_kind, "
+                   "scenario, deck_fs_ids) values (%s, 1, 'x', '{}', '[]') "
+                   "on conflict do nothing", (d,))
+    for acct, d, met in [(me, days[0], True), (me, days[2], False), (me, days[3], True),
+                         (other, days[1], True)]:
+        pg.execute("insert into daily_results (challenge_date, account_id, state, "
+                   "objective_met, margin) values (%s, %s, 's', %s, 1)", (d, acct, met))
+
+    h = accounts.profile_history(pg, me)
+    assert (h.solo_games, h.room_games) == (2, 1)
+    # completed `10 - i` hours ago, so the last of my three games (won 10) is the newest
+    assert [g["matches_won"] for g in h.recent_games] == [10, 9, 8]
+    assert h.daily_dates == [days[0], days[2], days[3]]
+    assert [(d["challenge_date"], d["objective_met"]) for d in h.recent_dailies] == [
+        ("2026-10-09", True), ("2026-10-08", False), ("2026-10-05", True)]

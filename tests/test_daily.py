@@ -528,6 +528,30 @@ def test_a_defence_shares_in_runs_and_a_chase_in_wickets():
     assert "1 wicket in hand" in chased, "singular, not '1 wickets'"
 
 
+def test_a_missed_requirement_is_never_worded_as_a_success():
+    """The margin alone used to be printed, and on two of the three units a MISS can carry
+    a good margin: today's 2026-10-09 daily allowed 17 overs, the chase took 19, and the
+    screen and the share line both said "chased with 1.0 overs to spare". Every unit is
+    checked both ways round, so a version that ignores the requirement fails one side."""
+    from game.scenarios import CHASE_IN_OVERS, WIN_BY_RUNS, WIN_BY_WICKETS
+    overs = _day(CHASE_IN_OVERS, overs_required=17).scenario
+    assert daily.outcome_words(overs, False, 6) == "chased in 19.0 overs, over the 17 allowed"
+    assert daily.outcome_words(overs, True, 20) == "chased in 16.4 overs"
+    assert "spare" not in daily.share_text(
+        _day(CHASE_IN_OVERS, overs_required=17),
+        {"objective_met": False, "margin": 6, "bonuses": []})
+
+    wkts = _day(WIN_BY_WICKETS, wickets_required=4).scenario
+    assert daily.outcome_words(wkts, False, 2) == \
+        "chased, but only 2 wickets in hand of the 4 needed"
+    assert daily.outcome_words(wkts, True, 6) == "chased, 6 wickets in hand"
+
+    runs = _day(WIN_BY_RUNS, runs_required=20).scenario
+    assert daily.outcome_words(runs, False, 12) == "won by 12 runs, not the 21+ needed"
+    assert daily.outcome_words(runs, True, 31) == "won by 31 runs"
+    assert daily.outcome_words(runs, False, -5) == "lost by 5 runs"
+
+
 def test_bonus_lines_appear_only_when_earned():
     from game.scenarios import CHASE
     none = daily.share_text(_day(CHASE, target=151),

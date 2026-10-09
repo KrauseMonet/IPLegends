@@ -3187,3 +3187,198 @@ html{scroll-padding-top:80px}
   .auc-fill-tools .fchip{flex:none}
   .auc-fill-tools .lbl{min-width:54px;flex:none}
 }
+
+/* --- the daily challenge's finished day: the season's result card plus the challenge
+   strip and today's board (daily.js showDone) --------------------------------------- */
+.dr{margin-top:6px}
+.dr-match{color:var(--ink-3);font-weight:500}
+.dr-ask{display:flex;align-items:center;gap:12px;margin:18px 0 0;padding:12px 14px;border-radius:12px;
+  background:rgba(0,0,0,.22);border:1px solid var(--line);color:var(--ink-2);font-size:14px;line-height:1.4;
+  position:relative;z-index:1}
+.dr-ask-crest{width:38px;height:34px;object-fit:contain;flex:none}
+.dr-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px;position:relative;z-index:1}
+.dr-chip{display:inline-flex;align-items:baseline;gap:8px;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:13.5px;color:var(--ink-2)}
+.dr-chip i{font:700 9.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;font-style:normal;color:var(--ink-3)}
+.dr-chip b{color:var(--ink);font-weight:800}
+.dr-chip em{font-style:normal;color:var(--ink-3);font-size:12px}
+.dr-chip.gold{border-color:color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.dr-chip.gold b{color:var(--gold-2)}
+.dr-chip.fire{border-color:color-mix(in srgb,var(--hot) 45%,transparent)}
+
+.db{max-width:820px;margin:30px auto 0}
+.db-head{display:flex;justify-content:space-between;align-items:baseline;padding:0 4px 10px;
+  border-bottom:2px solid var(--gold)}
+.db-head span{font-family:var(--display);font-size:26px;letter-spacing:.02em;text-transform:uppercase;color:var(--ink)}
+.db-head em{font:600 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;font-style:normal;color:var(--ink-3)}
+.db-row{display:grid;grid-template-columns:34px 36px minmax(0,1fr) 28px auto 44px;align-items:center;gap:10px;
+  padding:10px 8px;border-bottom:1px solid var(--line)}
+.db-row.you{background:color-mix(in srgb,var(--gold) 9%,transparent);box-shadow:inset 3px 0 0 var(--gold)}
+.db-rank{font-family:var(--display);font-size:20px;color:var(--ink-3);text-align:center}
+.db-row.top .db-rank{color:var(--gold-2)}
+.db-badge.kit-badge,.db-badge.team-badge{width:32px;height:32px;font-size:11px;margin:0}
+.db-name{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-name em{font:700 9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;font-style:normal;color:var(--gold)}
+.db-met{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800}
+.db-met.y{background:var(--green);color:#04231a}
+.db-met.n{background:transparent;border:1px solid var(--red);color:var(--red-2)}
+.db-margin{font-size:13.5px;color:var(--ink-2);text-align:right}
+.db-bonus{font:700 12px var(--mono);color:var(--gold-2);text-align:right}
+.db-empty,.db-foot{color:var(--ink-3);font-size:14px;padding:14px 4px 0}
+@media (max-width:560px){
+  /* The margin moves under the name: beside it, a long "over the 17 allowed" left the
+     name three letters wide. */
+  .db-row{grid-template-columns:26px 30px minmax(0,1fr) auto 24px;
+    grid-template-areas:"rank badge name bonus met" "rank badge margin margin met";
+    gap:2px 8px;padding:9px 4px}
+  .db-rank{grid-area:rank}.db-badge{grid-area:badge}.db-name{grid-area:name}
+  .db-met{grid-area:met}.db-bonus{grid-area:bonus}
+  .db-margin{grid-area:margin;text-align:left;font-size:12.5px}
+  .dr-ask{font-size:13px}
+}
+
+/* The daily's scenario banner, above the draft: the result card's language, compact. */
+.dbn{display:flex;align-items:center;gap:22px;margin:6px auto 22px;max-width:none;padding:20px 24px}
+.dbn-crest{flex:none}
+.dbn-crest .daily-crest{height:92px;margin:0}
+.dbn-body{min-width:0;position:relative;z-index:1}
+.dbn .mr-stage{text-align:left;margin-bottom:8px}
+.dbn-scenario{font-family:var(--display);font-size:clamp(22px,3vw,32px);line-height:1.12;color:var(--ink);
+  letter-spacing:.01em;text-transform:uppercase}
+.dbn-chips{justify-content:flex-start;margin-top:12px}
+@media (max-width:560px){
+  .dbn{flex-direction:column;align-items:flex-start;gap:12px;padding:18px}
+  .dbn-crest .daily-crest{height:64px}
+}
+
+/* --- the profile: a player card in your own kit's colours ------------------------------ */
+.pf{max-width:980px;margin:0 auto;padding-bottom:30px}
+.pf-hero{max-width:none;margin:22px 0 0;display:flex;align-items:center;justify-content:space-between;
+  gap:24px;flex-wrap:wrap;padding:28px 30px}
+.pf-hero::after{content:"";position:absolute;right:-12%;top:-60%;width:60%;height:200%;pointer-events:none;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--team) 22%,transparent),transparent)}
+.pf-id{display:flex;align-items:center;gap:20px;min-width:0;position:relative;z-index:1}
+.pf-badge.kit-badge{width:88px;height:88px;font-size:26px;margin:0;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.pf-who{min-width:0}
+.pf-who .mr-stage{text-align:left;margin-bottom:6px}
+.pf-name{font-family:var(--display);font-size:clamp(34px,6vw,58px);line-height:1;margin:0;color:var(--ink);
+  overflow-wrap:anywhere}
+.pf-team{display:flex;align-items:center;gap:12px;margin-top:10px;color:var(--team-ink,var(--gold-2));
+  font-weight:700;font-size:15px}
+.pf-kit-btn{padding:5px 10px;font-size:10.5px;white-space:nowrap;flex:none}
+.pf-heroes{display:flex;gap:28px;position:relative;z-index:1}
+.pf-heroes div{text-align:center}
+.pf-heroes b{display:block;font-family:var(--display);font-size:clamp(38px,5vw,56px);line-height:1;color:var(--gold-2)}
+.pf-heroes span,.pf-stats span{display:block;font:600 9.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;
+  color:var(--ink-3);margin-top:6px}
+
+.pf-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+.pf-panel{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:18px 20px}
+.pf-head{display:flex;flex-wrap:wrap;gap:4px 14px;justify-content:space-between;align-items:baseline;font:700 11px var(--mono);
+  letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);padding-bottom:12px;
+  border-bottom:1px solid var(--line);margin-bottom:14px}
+.pf-link{color:var(--gold);letter-spacing:.08em;text-decoration:none}
+.pf-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.pf-stats.two{grid-template-columns:repeat(2,1fr)}
+.pf-stats b{display:block;font-family:var(--display);font-size:32px;line-height:1;color:var(--ink)}
+.pf-form{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;justify-content:center}
+.pf-form i{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:800 11px var(--mono);font-style:normal}
+.pf-form i.w{background:var(--green);color:#04231a}
+.pf-form i.l{border:1px solid var(--red);color:var(--red-2)}
+
+.pf-recent{margin-top:16px}
+.pf-game{display:grid;grid-template-columns:minmax(0,1fr) 70px 130px 70px;align-items:center;gap:12px;
+  padding:10px 4px;border-bottom:1px solid var(--line);font-size:14px;color:var(--ink-2)}
+.pf-game:last-child{border-bottom:0}
+.pf-game-kind{font-weight:700;color:var(--ink)}
+.pf-game-rec{font:700 14px var(--mono);color:var(--ink);text-align:center}
+.pf-game-res{color:var(--gold-2);font-weight:700}
+.pf-game-date{font:600 11px var(--mono);color:var(--ink-3);text-align:right;letter-spacing:.06em}
+.pf-game.champ{box-shadow:inset 3px 0 0 var(--gold);padding-left:12px}
+.pf .caps{margin-top:22px}
+@media (max-width:700px){
+  .pf-hero{padding:22px 20px}
+  .pf-badge.kit-badge{width:64px;height:64px;font-size:20px}
+  .pf-heroes{width:100%;justify-content:space-around;gap:10px}
+  .pf-split{grid-template-columns:1fr}
+  .pf-game{grid-template-columns:minmax(0,1fr) 54px auto;gap:8px}
+  .pf-game-date{grid-column:1;text-align:left;margin-top:-6px}
+  .pf-game-res{grid-column:2 / -1;grid-row:1 / 3;align-self:center;text-align:right;grid-column:3}
+}
+
+/* --- a room's lobby: the code first, then the seats as cards --------------------------- */
+.lb{max-width:760px;margin:0 auto;padding:6px 0 30px}
+.lb-card{max-width:none;text-align:center}
+.lb-code{font-family:var(--display);font-size:clamp(64px,13vw,112px);line-height:1;letter-spacing:.08em;
+  color:var(--gold-2);margin:10px 0 14px;position:relative;z-index:1;
+  text-shadow:0 8px 40px color-mix(in srgb,var(--gold) 35%,transparent)}
+.lb-copy{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;position:relative;z-index:1}
+.lb-note{color:var(--ink-3);font-size:13.5px;line-height:1.5;margin:14px auto 0;max-width:460px;position:relative;z-index:1}
+.lb-block{margin-top:22px}
+.lb-block .pf-head em{font-style:normal;letter-spacing:.06em;text-transform:none;color:var(--ink-3);font-weight:500}
+.lb-seats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lb-seat{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;min-width:0;
+  border:1px solid var(--line);background:linear-gradient(135deg,color-mix(in srgb,var(--team-deep,var(--panel-2)) 60%,var(--panel)),var(--panel));
+  box-shadow:inset 3px 0 0 var(--team,var(--line-strong))}
+.lb-seat.me{border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.lb-mark{flex:none;display:grid;place-items:center;width:40px;height:40px}
+.lb-mark .kit-badge,.lb-mark .team-badge{width:40px;height:40px;font-size:13px;margin:0}
+.lb-mark .row-crest{width:40px;height:36px;object-fit:contain}
+.lb-who{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.lb-who b{color:var(--ink);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.lb-who em{font-style:normal;font-size:12.5px;color:var(--ink-3);display:flex;align-items:center;gap:6px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-tag{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font:700 9px var(--mono);
+  letter-spacing:.14em;text-transform:uppercase;vertical-align:2px}
+.lb-tag.host{background:color-mix(in srgb,var(--gold) 18%,transparent);color:var(--gold-2)}
+.lb-tag.you{background:rgba(255,255,255,.08);color:var(--ink-2)}
+.lb-name{display:flex;align-items:center;gap:6px;min-width:0}
+.lb-name .lb-tag{flex:none;margin-left:0}
+.lb-kick{flex:none;padding:5px 10px;font-size:10.5px}
+.lb-seat.empty{background:transparent;border:1px dashed var(--line-strong);box-shadow:none}
+.lb-seat.empty .lb-mark i{width:36px;height:36px;border-radius:50%;border:1px dashed var(--line-strong)}
+.lb-seat.empty b{color:var(--ink-3)}
+.lb-seat.more{justify-content:center}
+.lb-seat.more .lb-who{align-items:center;flex-direction:row;gap:8px;flex:none}
+.lb-actions{justify-content:center;margin-top:26px}
+.lb-wait{text-align:center;color:var(--ink-3);margin-top:10px}
+@media (max-width:560px){
+  .lb-seats{grid-template-columns:1fr}
+}
+
+/* --- a room's in-between screens: the result card's language for waiting, reviewing and
+   finishing (room.js roomCard) -------------------------------------------------------- */
+.rs{text-align:center;margin-top:18px}
+.rs-title{font-family:var(--display);font-size:clamp(34px,6vw,54px);line-height:1;color:var(--ink);
+  margin:6px 0 14px;position:relative;z-index:1}
+.rs-title span{font-size:.5em;color:var(--ink-3);letter-spacing:.02em}
+.rs-status{color:var(--ink-2);font-size:14.5px;margin:12px 0 0;min-height:1em;position:relative;z-index:1}
+.rs-status:empty{display:none}
+.rs-note{color:var(--ink-2);font-size:14.5px;line-height:1.55;max-width:520px;margin:0 auto;position:relative;z-index:1}
+.rs-reason{margin-top:10px;font:12px var(--mono);color:var(--ink-3)}
+.rs-actions{justify-content:center;margin-top:16px;position:relative;z-index:1}
+.rs-gauge{max-width:460px;margin:4px auto 0}
+.rs.out{--team:var(--red)}
+.rs-fx{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 12px;margin-top:10px;
+  border-radius:14px;background:rgba(0,0,0,.22);border:1px solid var(--line);position:relative;z-index:1}
+.rs-fx.mine{border-color:color-mix(in srgb,var(--gold) 50%,transparent)}
+.rs-fx-stage{font:700 10px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.rs-fx-stage em{font-style:normal;color:var(--gold);margin-left:6px}
+.rs-fx-teams{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+.rs-fx-teams i{font:700 11px var(--mono);color:var(--ink-3);font-style:normal;text-transform:uppercase}
+.rs-side{display:flex;align-items:center;gap:8px;min-width:0}
+.rs-side b{color:var(--ink);font-weight:800}
+.rs-badge.team-crest{width:38px;height:34px;margin:0;object-fit:contain}
+.rs-badge.kit-badge,.rs-badge.team-badge{width:34px;height:34px;font-size:11px;margin:0}
+.rs-fx-wait{font-size:13px;color:var(--ink-2)}
+.rs-squad-id{display:flex;align-items:center;justify-content:center;gap:16px;position:relative;z-index:1}
+.rs-squad-id .rs-title{margin:6px 0}
+.rs-squad-badge.kit-badge{width:58px;height:58px;font-size:18px;margin:0}
+.rs-ratings{display:flex;justify-content:center;gap:34px;margin-top:12px;position:relative;z-index:1}
+.rs-ratings b{display:block;font-family:var(--display);font-size:40px;line-height:1;color:var(--gold-2)}
+.rs-ratings span{display:block;font:600 9.5px var(--mono);letter-spacing:.2em;color:var(--ink-3);margin-top:6px}
+.rs-bar{max-width:820px;margin:14px auto 0;font:600 11px var(--mono);letter-spacing:.24em;text-transform:uppercase;
+  color:var(--ink-3);text-align:center}
+.rs-bar b{color:var(--gold-2);letter-spacing:.16em}
+.rs-list{max-width:820px;margin-left:auto;margin-right:auto}
+.rs-kit{position:relative;z-index:1;margin-top:4px;padding:5px 10px;font-size:10.5px}

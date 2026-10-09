@@ -47,17 +47,22 @@ function keepAnonAttempt(date, state){
   try { localStorage.setItem(DAILY_ANON_KEY, JSON.stringify({date, state})); } catch(e){}
 }
 
+// The challenge, before a ball is drafted -- in the result card's own language, tinted in
+// the opposition's colours, so the page looks the same before the match and after it.
 function dailyBanner(d){
-  $('#dailyDate').textContent = 'Daily challenge · ' + d.challenge_date;
+  $('#dailyDate').textContent = `Daily challenge · ${d.challenge_date} · ${d.stage}`;
   $('#dailyScenario').textContent = d.scenario;
   $('#dailyCrest').innerHTML = crestImg(d.opposition_crest, 'daily-crest');
+  const banner = $('#dailyBanner');
+  const t = sideTint({crest: d.opposition_crest});
+  banner.className = 'mr dbn' + (t.cls ? ' ' + t.cls : '');
   // A day carries ONE bonus, rotated, so this reads as a thing to chase rather than a
   // list header. The plural form is kept for the stored days generated before the
   // rotation, which really do offer several.
   const bs = d.bonuses;
   $('#dailyBonuses').innerHTML = (bs.length
-      ? (bs.length === 1 ? `Today's bonus: <em>${bs[0]}</em>`
-                         : 'Bonus: ' + bs.map(b => `<em>${b}</em>`).join(' · '))
+      ? `<span class="dr-chip gold"><i>${bs.length === 1 ? "Today's bonus" : 'Bonuses'}</i>${
+          bs.map(esc).join(' · ')}</span>`
       : '') + streakLine(d, false);
 }
 
@@ -67,10 +72,10 @@ function dailyBanner(d){
 // extended is noise, and telling them they might lose it is worse.
 function streakLine(d, done){
   if (!d.streak) return '';
-  const best = d.longest_streak > d.streak ? ` · best ${d.longest_streak}` : '';
-  if (done) return `<div class="margin">🔥 <em>${d.streak}-day streak</em>${best}</div>`;
+  const best = d.longest_streak > d.streak ? ` <em>best ${d.longest_streak}</em>` : '';
+  if (done) return `<span class="dr-chip fire"><i>Streak</i>🔥 ${d.streak} day${d.streak === 1 ? '' : 's'}${best}</span>`;
   if (d.streak < 2) return '';
-  return `<div class="margin">🔥 <em>${d.streak}-day streak</em>${best} — play today to keep it.</div>`;
+  return `<span class="dr-chip fire"><i>Streak</i>🔥 ${d.streak} days${best} <em>play today to keep it</em></span>`;
 }
 
 // draft.js calls this instead of its own "Play the season" behaviour once the twelve is
@@ -165,42 +170,9 @@ function dailyFinishReveal(){
   showDone();
 }
 
-// Balls as cricket writes them. `overs_words` in game/scenarios.py is the same rule; two
-// copies of one formatting convention is the least of the things that could drift here,
-// and the alternative is a round trip to render a number the page already has.
-function oversWords(balls){ return `${Math.floor(balls / 6)}.${balls % 6}`; }
-
-// A raw margin is not readable on its own -- "-14" and "7" mean entirely different things
-// and neither says which. The unit is today's, from the scenario.
-//
-// The SIGN carries the failure, not `met`, and that distinction is load-bearing on two of
-// the three units: a chase completed with too few wickets in hand, or a beat too slowly,
-// MISSES the objective while still carrying a perfectly good positive margin. Reading
-// "not met" as "fell short" would have printed "-2 short" at somebody who chased it.
-function marginWords(met, margin, unit){
-  if (unit === 'runs'){
-    if (margin > 0) return `by ${margin} runs`;
-    if (margin < 0) return `lost by ${-margin}`;
-    return 'tied';
-  }
-  if (margin < 0) return `${-margin} short`;
-  return unit === 'balls' ? `${oversWords(margin)} ov to spare`
-                          : `${margin} wkt${margin === 1 ? '' : 's'} in hand`;
-}
-
-function outcomeLine(d){
-  const r = d.result, unit = d.margin_unit;
-  const verdict = r.objective_met ? 'Challenge met' : 'Challenge missed';
-  if (unit === 'runs'){
-    const what = r.margin > 0 ? `won by ${r.margin} runs`
-               : r.margin < 0 ? `lost by ${-r.margin} runs` : 'tied';
-    return `${verdict} — ${what}`;
-  }
-  if (r.margin < 0) return `${verdict} — fell ${-r.margin} short`;
-  return `${verdict} — ` + (unit === 'balls'
-    ? `chased with ${oversWords(r.margin)} overs to spare`
-    : `chased with ${r.margin} wicket${r.margin === 1 ? '' : 's'} in hand`);
-}
+// The outcome's wording comes from the server (`result.outcome`, `margin_words` on each
+// board row): it must agree with the scoring, and two copies of it here had already
+// drifted into calling a too-slow chase "1.0 overs to spare".
 
 // Prefer the platform's own share sheet where there is one -- on a phone that is how
 // people actually send something to a friend, and it reaches WhatsApp or Messages in one
@@ -228,51 +200,105 @@ function dailyScorecard(){
   if (DAY && DAY.match){ setDailySide(DAY.match); renderScorecard(DAY.match); }
 }
 
+// The finished day as a broadcast card -- the season's own result card (A169), with the
+// challenge strip and today's board under it. Both scores lead, because the old screen
+// printed a verdict and never the match it was a verdict on.
 async function showDone(){
-  const d = DAY, r = d.result;
+  const d = DAY, r = d.result, m = d.match;
   $('#draft').classList.add('hide');
   const done = $('#dailyDone');
   done.classList.remove('hide');
 
   let board = [];
   try { board = await api('/api/daily/leaderboard'); } catch(e){ /* the result still stands */ }
-  const rows = board.map(b => `<div class="line${b.username === (ME && ME.username) ? ' you' : ''}">
-      <span class="pos">${b.rank}</span>
-      <span class="nm">${b.username}</span>
-      <span class="sc">${b.objective_met ? '✓' : ''}</span>
-      <span class="sc">${marginWords(b.objective_met, b.margin, d.margin_unit)}${
-        b.bonus_points ? ` <em>+${b.bonus_points}</em>` : ''}</span>
-    </div>`).join('');
 
-  done.innerHTML = `<div class="report compact">
-      <div class="over-line">Daily challenge · ${d.challenge_date}</div>
-      <div class="call ${r.objective_met ? 'won' : ''}">${outcomeLine(d)}</div>
-      <div class="margin">${d.scenario}</div>
-      ${d.rank ? `<div class="margin">You are <em>#${d.rank}</em> of ${d.players_today} today.</div>` : ''}
-      ${d.anonymous && d.would_rank ? `<div class="margin">You'd have ranked
-        <em>#${d.would_rank}</em> of ${d.players_today + 1} today — not recorded, because
-        you're signed out.</div>` : ''}
-      ${streakLine(d, true)}
-      ${r.bonuses.length
-        ? `<div class="margin">Bonus earned: ${(r.bonus_labels || r.bonuses).join(', ')} (+${r.bonus_points})</div>`
-        : '<div class="margin">No bonus today.</div>'}
-      <div class="foot-actions">
+  let teams = '', stars = '', tint = {cls: '', style: ''}, won = null;
+  if (m){
+    setDailySide(m);
+    const home = resolveSide(m.home, m.home_crest), away = resolveSide(m.away, m.away_crest);
+    const winner = m.winner === m.home ? home : (m.winner === m.away ? away : null);
+    won = winner ? winner.short === MY_SIDE.short : null;
+    tint = sideTint(winner || MY_SIDE);
+    teams = `<button class="mr-teams" onclick="dailyScorecard()" title="Open the scorecard">
+        ${resultTeamHtml(home, m.home_score, m.home_innings, m.winner === m.home)}
+        <span class="mr-v">v</span>
+        ${resultTeamHtml(away, m.away_score, m.away_innings, m.winner === m.away)}
+      </button>`;
+    if (m.home_innings && m.away_innings){
+      stars = `<div class="mr-stars">
+        <div><span class="mr-lbl">${esc(home.name)}</span>${sideStarsHtml(m.home_innings, m.away_innings)}</div>
+        <div><span class="mr-lbl">${esc(away.name)}</span>${sideStarsHtml(m.away_innings, m.home_innings)}</div>
+      </div>`;
+    }
+  }
+  const met = r.objective_met;
+  const matchLine = won === null ? '' : won ? 'You won the match' : 'You lost the match';
+
+  done.innerHTML = `
+    <div class="mr dr${met ? ' you-won' : ' you-lost'}${tint.cls ? ' ' + tint.cls : ''}"
+        ${tint.style ? `style="${tint.style}"` : ''}>
+      <div class="mr-stage">Daily challenge · ${esc(d.challenge_date)} · ${esc(d.stage)}</div>
+      <div class="mr-headline ${met ? 'won' : 'lost'}">${met ? 'Challenge met' : 'Challenge missed'}</div>
+      <div class="mr-margin">${esc(cap(r.outcome || ''))}${matchLine ? ` <span class="dr-match">· ${matchLine}</span>` : ''}</div>
+      ${teams}
+      ${stars}
+      <div class="dr-ask">${crestImg(d.opposition_crest, 'dr-ask-crest')}<span>${esc(d.scenario)}</span></div>
+      <div class="dr-chips">
+        ${rankChip(d)}
+        ${r.bonuses.length
+          ? `<span class="dr-chip gold"><i>Bonus</i>${esc((r.bonus_labels || r.bonuses).join(', '))} <b>+${r.bonus_points}</b></span>`
+          : `<span class="dr-chip"><i>Bonus</i>${d.bonuses.length ? esc(d.bonuses.join(', ')) + ' — not earned' : 'none today'}</span>`}
+        ${streakLine(d, true)}
+      </div>
+    </div>
+    <div class="mr-actions">
+      <div class="actions mr-primary">
         ${d.anonymous ? `<a class="act lead" href="/profile?next=${encodeURIComponent('/daily')}"
           title="Your own deal and one ranked attempt at today's challenge.">Sign in to be ranked</a>` : ''}
         <button class="act ${d.anonymous ? '' : 'lead'}" id="shareBtn" onclick="shareResult(this)">Share result</button>
-        ${d.match ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
-        ${d.match ? '<button class="act" onclick="dailyReveal()">Watch again</button>' : ''}
-        <a class="act" href="/">Home</a>
+        ${m ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
+      </div>
+      <div class="actions mr-secondary">
+        ${m ? '<button class="act minor" onclick="dailyReveal()">Watch again</button>' : ''}
+        <a class="act minor" href="/">Home</a>
         ${d.can_reset ? `<button class="act quiet" onclick="dailyReset(this)"
           title="Discard this attempt and play today again.">Reset attempt</button>` : ''}
       </div>
     </div>
-    <div class="col-head" style="margin:20px 0 0"><span>Today's leaderboard</span></div>
-    ${rows || '<div class="margin">Nobody has finished today yet.</div>'}
-    <div class="margin" style="margin-top:14px">${d.anonymous
-      ? `Signed in, you get your own deal and one ranked attempt at today's challenge, and
-         every day you play counts toward a streak.`
-      : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</div>`;
+    <div class="db">
+      <div class="db-head"><span>Today's leaderboard</span><em>${board.length
+        ? `${board.length} played` : ''}</em></div>
+      ${board.length ? board.map(boardRow).join('')
+        : '<div class="db-empty">Nobody has finished today yet. Yours could be the first name here.</div>'}
+      <p class="db-foot">${d.anonymous
+        ? `Signed in, you get your own deal and one ranked attempt at today's challenge, and
+           every day you play counts toward a streak.`
+        : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</p>
+    </div>`;
+}
+
+function cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function rankChip(d){
+  if (d.rank) return `<span class="dr-chip"><i>Rank</i><b>#${d.rank}</b> of ${d.players_today}</span>`;
+  if (d.anonymous && d.would_rank) return `<span class="dr-chip"><i>Would rank</i><b>#${d.would_rank}</b>
+    of ${d.players_today + 1} <em>not recorded</em></span>`;
+  return '';
+}
+
+// One board row. A player without a kit gets a badge from their name, the same fallback
+// every other unbadged side uses.
+function boardRow(b){
+  const you = ME && b.username === ME.username;
+  const side = {short: b.username, name: b.username, kit: b.kit};
+  return `<div class="db-row${you ? ' you' : ''}${b.rank <= 3 ? ' top' : ''}">
+      <span class="db-rank">${b.rank}</span>
+      ${sideBadge(side, 'db-badge')}
+      <span class="db-name">${esc(b.username)}${you ? ' <em>you</em>' : ''}</span>
+      <span class="db-met ${b.objective_met ? 'y' : 'n'}" title="${b.objective_met ? 'Challenge met' : 'Challenge missed'}">${b.objective_met ? '✓' : '✕'}</span>
+      <span class="db-margin">${esc(b.margin_words)}</span>
+      <span class="db-bonus">${b.bonus_points ? '+' + b.bonus_points : ''}</span>
+    </div>`;
 }
 
 // The reveal speed is one preference across every page [A148]: Normal until the player

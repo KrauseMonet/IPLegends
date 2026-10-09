@@ -467,4 +467,6 @@ def test_a_daily_carries_its_super_over_through_to_the_scorecard():
 
 class _DailyScenario:
     stage = "Final"
+    margin_unit = "runs"         # the match's margin is worded against the day's requirement
+    runs_required = 10
     opposition_fs_id = None      # every real Scenario names its opposition

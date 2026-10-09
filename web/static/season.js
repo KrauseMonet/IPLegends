@@ -297,20 +297,6 @@ function inningsStarsHtml(inn){
 
 // One side's best batter (from the innings it batted) and best bowler (from the innings
 // it bowled at).
-function sideStarsHtml(batted, bowledAt){
-  const bat = inningsTopBatter(batted), bowl = inningsTopBowler(bowledAt);
-  const parts = [];
-  if (bat) parts.push(`<span><b>${esc(bat.name)}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
-  if (bowl) parts.push(`<span><b>${esc(bowl.name)}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
-  return parts.join('');
-}
-
-// A tinted panel for one side: its colours (crest or kit) as inline variables or a class.
-function tintAttrs(side, base){
-  const t = sideTint(side);
-  return `class="${base}${t.cls ? ' ' + t.cls : ''}"${t.style ? ` style="${t.style}"` : ''}`;
-}
-
 function impactTile(c, slot, suggested){
   const kind = ICON[c.kind] || ICON.unrated;
   return `<button type="button" class="ib-tile${slot === suggested ? ' suggested' : ''}"
@@ -431,23 +417,6 @@ function flickerHeadline(el, finalText, won){
   step();
 }
 
-// The engine's margin names the winner ("YOU by 6 wickets"); the headline already does,
-// so the line under it keeps only what follows.
-function marginText(match, winnerShort){
-  let m = match.margin || '';
-  if (winnerShort && m.startsWith(winnerShort + ' ')) m = m.slice(winnerShort.length + 1);
-  m = m.replace(/\b1 (wickets|runs)\b/, (_, u) => '1 ' + u.slice(0, -1));
-  return m.charAt(0).toUpperCase() + m.slice(1);
-}
-
-function resultTeamHtml(side, score, inn, won){
-  const overs = inn ? `<small>${inn.overs} ov</small>` : '';
-  return `<div ${tintAttrs(side, 'mr-team' + (won ? ' won' : ''))}>
-      ${sideBadge(side, 'mr-badge')}
-      <b class="mr-name">${esc(side.name)}</b>
-      <span class="mr-score">${esc(score)}${overs}</span>
-    </div>`;
-}
 
 // One cell per league match: played ones carry their result, the rest wait.
 function formStripHtml(d){

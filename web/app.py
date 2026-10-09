@@ -1043,6 +1043,14 @@ class ProfileOut(BaseModel):
     friend_titles: int = 0
     top_batters: list[LeaderOut] = Field(description="up to 5, by total runs desc")
     top_bowlers: list[LeaderOut] = Field(description="up to 5, by total wickets desc")
+    solo_games: int = 0
+    room_games: int = 0
+    recent_games: list[dict] = Field(default=[], description="newest first; kind, champion "
+                                     "and match record only -- nothing else was stored")
+    daily_streak: int = 0
+    daily_best: int = 0
+    daily_played: int = 0
+    recent_dailies: list[dict] = Field(default=[], description="newest first: date, met")
 
 
 class SaveResultIn(BaseModel):
@@ -2537,7 +2545,13 @@ def profile(request: Request) -> ProfileOut:
         raise HTTPException(status_code=401, detail="sign in to see your profile")
     with _db() as conn:
         stats = accounts.profile_stats(conn, account_id)
+        history = accounts.profile_history(conn, account_id)
+    streak, best = daily_lib.streaks(history.daily_dates, _today())
     return ProfileOut(
+        solo_games=history.solo_games, room_games=history.room_games,
+        recent_games=history.recent_games,
+        daily_streak=streak, daily_best=best, daily_played=len(history.daily_dates),
+        recent_dailies=history.recent_dailies,
         username=stats.username, games_played=stats.games_played,
         titles_won=stats.titles_won,
         total_runs=stats.total_runs, total_wickets=stats.total_wickets,
@@ -3081,6 +3095,9 @@ class DailyBoardRow(BaseModel):
     margin: int
     bonus_points: int
     bonuses: list[str]
+    margin_words: str = Field(description="the margin in words, against the day's own "
+                                          "requirement -- the same wording as the result")
+    kit: dict | None = Field(default=None, description="the account's team kit, if it has one")
 
 
 def _daily_innings_out(innings, *, bowled_by_a_player: bool) -> dict:
@@ -3102,6 +3119,10 @@ def _daily_innings_out(innings, *, bowled_by_a_player: bool) -> dict:
         for o in out["over_log"]:
             o["bowler_balls"] = o["bowler_runs"] = o["bowler_wickets"] = 0
     return out
+
+
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def _daily_match_out(play, scenario) -> dict:
@@ -3135,7 +3156,10 @@ def _daily_match_out(play, scenario) -> dict:
         "away_score": _score(second.runs, second.wickets),
         "winner": (player_label if player_won else other_label)
                   if first.runs != second.runs else None,
-        "margin": play.outcome.summary,
+        # The day's own wording, which knows what was ASKED -- `summary` alone said "1.0
+        # overs to spare" for a chase that took 19 on a day allowing 17.
+        "margin": _sentence(daily_lib.outcome_words(scenario, play.outcome.objective_met,
+                                                    play.outcome.margin)),
         "yours": True,
         # [A151] which side is the player's, so the page can put their kit on it.
         "you_home": player_is_first,
@@ -3168,7 +3192,9 @@ def _anon_daily_out(conn, player: str, day, finished_state: str | None) -> Daily
         # never recorded, and a line claiming one would be a figure nothing backs.
         share = daily_lib.share_text(day, result)
         would = daily_lib.would_rank(conn, day.challenge_date, outcome)
-        result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b) for b in result["bonuses"]])
+        result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b) for b in result["bonuses"]],
+                      outcome=daily_lib.outcome_words(day.scenario, outcome.objective_met,
+                                                      outcome.margin))
         play = daily_lib.play_and_score(STATE["deck"], STATE["model"], day, player,
                                         finished_state)
         match = _daily_match_out(play, day.scenario)
@@ -3216,7 +3242,9 @@ def _daily_out(conn, account_id: int | str, day,
         # The page shows what was earned in words, not the storage key -- the result screen
         # was reading "finished_early" straight out of the database at the player.
         result = dict(result, bonus_labels=[BONUS_LABELS.get(b, b)
-                                            for b in (result.get("bonuses") or [])])
+                                            for b in (result.get("bonuses") or [])],
+                      outcome=daily_lib.outcome_words(day.scenario, result["objective_met"],
+                                                      result["margin"]))
         play = daily_lib.play_and_score(STATE["deck"], STATE["model"], day,
                                         account_id, result["state"])
         match = _daily_match_out(play, day.scenario)
@@ -3410,7 +3438,9 @@ def daily_board(limit: int = 50) -> list[DailyBoardRow]:
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         rows = daily_lib.leaderboard(conn, day.challenge_date, limit)
-    return [DailyBoardRow(rank=i, **r) for i, r in enumerate(rows, 1)]
+    return [DailyBoardRow(rank=i, margin_words=daily_lib.outcome_words(
+                              day.scenario, r["objective_met"], r["margin"]), **r)
+            for i, r in enumerate(rows, 1)]
 
 
 @app.post("/api/rooms", response_model=CreatedRoomOut)

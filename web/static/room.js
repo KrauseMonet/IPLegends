@@ -605,12 +605,13 @@ function renderRoomFailed(r){
 function renderRoomLobby(r){
   const auction = r.game !== 'draft';
   $('#lobbyCode').textContent = r.code;
-  $('#lobbySeats').textContent = `${r.players.length} of ${r.seats}`;
-  $('#lobbyFormat').textContent = !auction ? r.format.toUpperCase()
-    : (r.game === 'mega' ? 'MEGA AUCTION · RETENTIONS & RTM' : 'AUCTION · LEAGUE');
-  $('#lobbyTimer').textContent = auction ? '15s a lot, +5s a bid' : r.timer_seconds + 's per pick';
-  $('#lobbyMode').textContent = auction ? '₹120 crore each'
-                                        : (r.draft_mode === 'memory' ? 'Memory' : 'Stat');
+  $('#lobbySeats').textContent = `${r.players.length} of ${r.seats} seats`;
+  const chips = !auction
+    ? [r.format.charAt(0).toUpperCase() + r.format.slice(1), `${r.timer_seconds}s a pick`, r.draft_mode === 'memory' ? 'Memory draft' : 'Stat draft']
+    : [r.game === 'mega' ? 'Mega auction · retentions & RTM' : 'Auction · league',
+       '15s a lot · a bid leaves 10s', '₹120 crore each'];
+  if (r.is_open != null) chips.push(r.is_open ? 'Open room' : 'Private room');
+  $('#lobbyChips').innerHTML = chips.map(c => `<span class="dr-chip">${esc(c)}</span>`).join('');
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyFranchises(r);
@@ -620,20 +621,41 @@ function renderRoomLobby(r){
   $('#lobbyKitWrap').classList.toggle('hide', auction || !mine || !mine.kit);
   if (!auction && mine && mine.kit) $('#lobbyKit').innerHTML = roomKitStrip(mine);
   const amHost = MY_PID === r.host_id;
-  $('#lobbyPlayers').innerHTML = r.players.map(p => {
+
+  const open = Math.max(0, r.seats - r.players.length);
+  $('#lobbyFill').textContent = open
+    ? `${open} open · ${auction ? 'computer teams take the rest' : 'historical sides fill the rest'} at the start`
+    : 'room full';
+  const seats = r.players.map(p => {
     const isHost = p.player_id === r.host_id;
     // Only the host sees this, and never against their own seat -- rooms.kick_player
     // refuses both cases too, this just keeps the button from ever being offered.
     const kickBtn = (amHost && !isHost)
-      ? `<span class="picks"><button class="act" onclick="kickRoomPlayer('${p.player_id}', this)"
-           >Kick</button></span>` : '';
-    const fr = p.franchise ? ` ${chip(p.franchise)}` : '';
+      ? `<button class="act minor lb-kick" onclick="kickRoomPlayer('${p.player_id}', this)">Kick</button>` : '';
     // The team name only where it says something the player's own name does not.
-    const team = p.kit && p.kit.name !== p.name ? ` <em class="kit-team">${esc(p.kit.name)}</em>` : '';
-    return `<div class="entry"><span class="nm">${roomSeatMark(p)}${esc(p.name)}${isHost
-      ? ' <em style="color:var(--gold);font-style:normal">· host</em>' : ''}${fr}${team}</span>${kickBtn}</div>`;
-  }).join('');
+    const team = p.kit && p.kit.name !== p.name ? esc(p.kit.name) : '';
+    const tags = [isHost ? '<b class="lb-tag host">Host</b>' : '',
+                  p.player_id === MY_PID ? '<b class="lb-tag you">You</b>' : ''].join('');
+    const t = p.kit ? kitStyle(p.kit) : '';
+    return `<div class="lb-seat${p.player_id === MY_PID ? ' me' : ''}"${t ? ` style="${t}"` : ''}>
+        <span class="lb-mark">${roomSeatMark(p) || sideBadge({short: p.name})}</span>
+        <span class="lb-who"><span class="lb-name"><b>${esc(p.name)}</b>${tags}</span>
+          ${team || p.franchise ? `<em>${p.franchise ? chip(p.franchise) + ' ' : ''}${team}</em>` : ''}</span>
+        ${kickBtn}
+      </div>`;
+  });
+  // A ten-seat room with one person in it would be nine identical empty cards; three say
+  // "there is room" and a count says how much.
+  const shown = Math.min(open, 3);
+  for (let i = 0; i < shown; i++){
+    seats.push(`<div class="lb-seat empty"><span class="lb-mark"><i></i></span>
+      <span class="lb-who"><b>Open seat</b><em>waiting for a player</em></span></div>`);
+  }
+  if (open > shown) seats.push(`<div class="lb-seat empty more"><span class="lb-who"><b>+${open - shown}</b>
+    <em>more open seat${open - shown === 1 ? '' : 's'}</em></span></div>`);
+  $('#lobbyPlayers').innerHTML = seats.join('');
   $('#lobbyStartBtn').classList.toggle('hide', !amHost);
+  $('#lobbyWaitNote').classList.toggle('hide', amHost);
 }
 
 // --- team kits [A151] ------------------------------------------------------------------------
@@ -1095,6 +1117,29 @@ function roomTableHtml(m){
   return standingsHtml(m.table, {complete: settled, champion: m.complete ? m.champion : null});
 }
 
+// One card for every in-between screen of a room's match phase, in the result card's own
+// language (.mr), so a waiting screen reads as part of the same broadcast rather than as
+// a line of italic text.
+function roomCard(stage, title, inner, cls = ''){
+  return `<div class="mr rs ${cls}">
+    <div class="mr-stage">${esc(stage)}</div>
+    ${title ? `<div class="rs-title">${title}</div>` : ''}
+    ${inner}
+  </div>`;
+}
+
+function roomFixtureRow(cm){
+  const isMine = cm.a_pid === MY_PID || cm.b_pid === MY_PID;
+  const waitingOn = cm.pending_toss_winner_pid === cm.a_pid ? cm.a_name : cm.b_name;
+  const side = (name, crest, kit) => `<span class="rs-side">${sideBadge({short: name, name, crest, kit}, 'rs-badge')}
+    <b>${esc(name)}</b></span>`;
+  return `<div class="rs-fx${isMine ? ' mine' : ''}">
+      <span class="rs-fx-stage">${esc(cm.stage)}${isMine ? ' <em>your match</em>' : ''}</span>
+      <div class="rs-fx-teams">${side(cm.a_name, cm.a_crest, cm.a_kit)}<i>v</i>${side(cm.b_name, cm.b_crest, cm.b_kit)}</div>
+      <span class="rs-fx-wait">${esc(waitingOn)} to call the toss</span>
+    </div>`;
+}
+
 function roomWaitingHtml(m, myMatch){
   // A league room's own group stage: paced one fixture at a time (or all at once via
   // Skip ahead), mutually exclusive with the knockout-round logic below it since this
@@ -1104,20 +1149,19 @@ function roomWaitingHtml(m, myMatch){
     // The host no longer CLICKS through seventy fixtures -- the countdown does it, and
     // the buttons are there to override it rather than to drive it.
     const actions = m.you_decide_league_reveal
-      ? `<div class="foot-actions room-actions">
+      ? `<div class="rs-status" id="roomAutoLine"></div>
+         <div class="actions rs-actions">
            <button class="act lead" onclick="roomAutoNow()">Continue now</button>
            <button class="act" onclick="roomAutoPause(this)">Pause</button>
-           <button class="act" onclick="roomSkipTo('group_stage', this)">Skip group stage</button>
-           <button class="act" onclick="roomSkipTo('tournament', this)">Skip to end</button>
-         </div>
-         <div class="margin" id="roomAutoLine"></div>`
-      : `<div class="margin">Up next shortly…</div>`;
+           <button class="act minor" onclick="roomSkipTo('group_stage', this)">Skip group stage</button>
+           <button class="act minor" onclick="roomSkipTo('tournament', this)">Skip to end</button>
+         </div>`
+      : `<div class="rs-status">Next match shortly…</div>`;
     const leagueTableHtml = roomTableHtml(m);
-    return `<div class="report compact">
-      <div class="over-line">League: ${m.league_revealed} of ${m.league_total} played</div>
-      <div class="margin">Playing…</div>
-      ${actions}
-    </div>
+    const pct = Math.round(100 * m.league_revealed / m.league_total);
+    return `${roomCard('Group stage',
+        `${m.league_revealed}<span> of ${m.league_total} played</span>`,
+        `<div class="gauge rs-gauge"><i style="width:${pct}%"></i></div>${actions}`)}
     ${leagueTableHtml ? `<div class="room-gap">${leagueTableHtml}</div>` : ''}`;
   }
 
@@ -1125,51 +1169,38 @@ function roomWaitingHtml(m, myMatch){
   // at once (a cup's two semis, a league's Qualifier 1 + Eliminator), and a resolved
   // one needs no placeholder here at all: it already appears in the results list below
   // the moment it finishes, exactly like any earlier round's match.
-  const pendingRows = m.current_matches.filter(cm => cm.result === null).map(cm => {
-    const isMine = cm.a_pid === MY_PID || cm.b_pid === MY_PID;
-    const waitingOn = cm.pending_toss_winner_pid === cm.a_pid ? cm.a_name : cm.b_name;
-    const a = {name: cm.a_name, crest: cm.a_crest, kit: cm.a_kit};
-    const b = {name: cm.b_name, crest: cm.b_crest, kit: cm.b_kit};
-    return `<div class="fx">
-      <span>${cm.stage}${isMine ? ' (you)' : ''}</span>
-      <span>${sideMark(a)}${esc(a.name)} v ${sideMark(b)}${esc(b.name)}</span>
-      <span class="sc">${esc(waitingOn)} to call the toss</span>
-    </div>`;
-  }).join('');
+  const pendingRows = m.current_matches.filter(cm => cm.result === null).map(roomFixtureRow).join('');
 
   const advanceHtml = m.advance_ready
     ? (m.you_decide_advance
-        ? `<div class="foot-actions room-actions">
+        ? `<div class="rs-status" id="roomAutoLine"></div>
+           <div class="actions rs-actions">
              <button class="act lead" onclick="roomAutoNow()">Continue now</button>
              <button class="act" onclick="roomAutoPause(this)">Pause</button>
-             <button class="act" onclick="roomSkipTo('tournament', this)">Skip to end</button>
-           </div>
-           <div class="margin" id="roomAutoLine"></div>`
+             <button class="act minor" onclick="roomSkipTo('tournament', this)">Skip to end</button>
+           </div>`
         // Not "waiting for the host" any more: nobody is waiting ON anyone, the next
         // round is simply coming. The wording used to describe a dependency that is no
         // longer there, which is its own small piece of the room feeling stuck.
-        : `<div class="margin">Next round shortly…</div>`)
+        : `<div class="rs-status">Next round shortly…</div>`)
     : '';
 
   const tableHtml = roomTableHtml(m);
 
-  return `<div class="report compact">
-    <div class="over-line">${m.round_label || ''}</div>
-    ${pendingRows || '<div class="margin">Playing…</div>'}
-    ${advanceHtml}
-  </div>
+  const title = pendingRows ? 'Waiting on the toss' : (m.advance_ready ? 'Round complete' : 'Playing…');
+  return `${roomCard(m.round_label || 'Playoffs', title, `${pendingRows}${advanceHtml}`)}
   ${tableHtml ? `<div class="room-gap">${tableHtml}</div>` : ''}`;
 }
 
 function roomSpectateChoiceHtml(){
-  return `<div class="report compact">
-    <div class="call">Your run in this tournament is over</div>
-    <div class="foot-actions room-actions">
-      <button class="act lead" onclick="roomChooseSpectateExit('card')">See your journey card</button>
-      <button class="act" onclick="roomChooseSpectateExit('follow')">Follow the tournament</button>
-    </div>
-    <div class="margin" id="roomAutoLine"></div>
-  </div>`;
+  return roomCard('Knocked out', 'Your run is over',
+    `<p class="rs-note">The tournament plays on. Look back at your own run, or keep watching
+       to see who lifts the trophy.</p>
+     <div class="actions rs-actions">
+       <button class="act lead" onclick="roomChooseSpectateExit('card')">See your journey card</button>
+       <button class="act" onclick="roomChooseSpectateExit('follow')">Follow the tournament</button>
+     </div>
+     <div class="rs-status" id="roomAutoLine"></div>`, 'out');
 }
 
 function roomChooseSpectateExit(choice){
@@ -1318,22 +1349,26 @@ function renderRoomStartReview(m){
   const me = ROOM.players.find(p => p.player_id === MY_PID);
   const el = $('#roomMatchBody');
   if (!me){
-    el.innerHTML = '<div class="report compact"><div class="margin">Waiting for the host to continue…</div></div>';
+    el.innerHTML = roomCard('Squads complete', 'Waiting for the host', '');
     return;
   }
   const rows = me.order.map((got, i) => roomOrderRow(i + 1, got, `${i + 1}`, new Set(), false, true, true));
   rows.push(roomOrderRow(12, me.impact, 'IMP', new Set(), true, true, true));
   const actions = m.you_decide_start
-    ? `<div class="foot-actions room-actions">
-         <button class="act lead" onclick="roomStartMatches(this)">Continue</button>
+    ? `<div class="actions rs-actions">
+         <button class="act lead" onclick="roomStartMatches(this)">Start the matches</button>
        </div>`
-    : `<div class="margin">Waiting for the host to continue…</div>`;
-  el.innerHTML = `${me.kit ? roomKitStrip(me) : ''}<div class="report compact">
-      <div class="over-line">Your squad</div>
-      <div class="ledger" style="grid-template-columns:repeat(3,1fr)">${teamRatingsHtml(me)}</div>
+    : `<div class="rs-status">The host starts the matches when everyone has had a look.</div>`;
+  const style = me.kit ? kitStyle(me.kit) : '';
+  el.innerHTML = `<div class="mr rs rs-squad"${style ? ` style="${style}"` : ''}>
+      <div class="mr-stage">Squads complete · your twelve</div>
+      <div class="rs-squad-id">${me.kit ? kitBadge(me.kit, 'rs-squad-badge') : ''}
+        <div class="rs-title">${esc(me.kit ? me.kit.name : me.name)}</div></div>
+      ${me.kit ? `<button class="act minor rs-kit" onclick="editRoomKit()">Edit kit</button>` : ''}
+      <div class="rs-ratings">${teamRatingsHtml(me)}</div>
+      ${actions}
     </div>
-    <div class="room-gap">${rows.join('')}</div>
-    ${actions}`;
+    <div class="room-gap rs-list">${rows.join('')}</div>`;
 }
 
 function showRoomMatch(m){
@@ -1497,17 +1532,34 @@ function showRoomMatchComplete(m){
 
   if (m.format === 'final'){
     const res = m.results[0].result;
-    el.innerHTML = `<div class="report compact">
-      <div class="call ${res.winner ? 'won' : ''}">${res.winner
-        ? esc(resolveSide(res.winner, null, res.winner === res.home ? res.home_kit : res.away_kit).name) + ' win'
-        : 'Tied'}</div>
-      <div class="figures">${res.home_score} · ${res.away_score}</div>
-      <div class="margin">${res.margin}</div>
-      <div class="foot-actions room-actions">
+    // The season's and the daily's own result card, so a final reads like every other
+    // finished match on the site.
+    const home = resolveSide(res.home, res.home_crest, res.home_kit);
+    const away = resolveSide(res.away, res.away_crest, res.away_kit);
+    const winner = res.winner === res.home ? home : (res.winner === res.away ? away : null);
+    const t = sideTint(winner || home);
+    const stars = res.home_innings && res.away_innings ? `<div class="mr-stars">
+        <div><span class="mr-lbl">${esc(home.name)}</span>${sideStarsHtml(res.home_innings, res.away_innings)}</div>
+        <div><span class="mr-lbl">${esc(away.name)}</span>${sideStarsHtml(res.away_innings, res.home_innings)}</div>
+      </div>` : '';
+    el.innerHTML = `<div class="mr${m.you_champion ? ' you-won' : (winner ? ' you-lost' : '')}${t.cls ? ' ' + t.cls : ''}"
+          ${t.style ? `style="${t.style}"` : ''}>
+        <div class="mr-stage">The final</div>
+        <div class="mr-headline ${m.you_champion ? 'won' : (winner ? 'lost' : '')}">${
+          winner ? (m.you_champion ? 'You win' : 'Won by ' + esc(winner.name)) : 'Tied'}</div>
+        <div class="mr-margin">${esc(marginText(res, res.winner))}</div>
+        <button class="mr-teams" onclick="showRoomScorecard(0)" title="Open the scorecard">
+          ${resultTeamHtml(home, res.home_score, res.home_innings, res.winner === res.home)}
+          <span class="mr-v">v</span>
+          ${resultTeamHtml(away, res.away_score, res.away_innings, res.winner === res.away)}
+        </button>
+        ${stars}
+      </div>
+      <div class="actions rs-actions">
         ${playAgainBtn}
         <button class="act" onclick="showRoomScorecard(0)">Scorecard</button>
         ${journeyBtn}
-      </div></div>`;
+      </div>`;
     return;
   }
 
@@ -1515,11 +1567,16 @@ function showRoomMatchComplete(m){
     // Every cup match IS a playoff match (a cup has no 'league' stage at all), so
     // roomPlayoffsHtml alone covers the whole tournament here -- grouped by stage with
     // its margin line, not the flat "stage: home v away" rows this replaced.
-    el.innerHTML = `<div class="report compact">
-      <div class="call won room-banner">${esc(m.champion)} win the cup</div>
-      </div>
-      ${roomPlayoffsHtml(m)}
-      <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}</div>`;
+    // [A153]'s champion block, as the league uses: your champion's moment if it is yours.
+    const me = ROOM && ROOM.players.find(p => p.player_id === MY_PID);
+    const champ = roomChampionSide(m);
+    el.innerHTML = `${seasonHeroHtml({
+        youChampion: m.you_champion,
+        you: me ? {name: me.kit ? me.kit.name : me.name, crest: me.crest || null, kit: me.kit || null} : null,
+        row: null, teams: 0, champion: champ ? {...champ, name: m.champion} : {name: m.champion},
+        finishLine: 'Won the semi-final and the final.'})}
+      <div class="room-gap">${roomPlayoffsHtml(m)}</div>
+      <div class="actions rs-actions">${playAgainBtn}${journeyBtn}</div>`;
     return;
   }
 

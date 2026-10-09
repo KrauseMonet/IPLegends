@@ -27,7 +27,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=34a7d65509">
+<link rel="stylesheet" href="/static/style.css?v=8c8b946676">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -62,29 +62,72 @@
        season-long awards -- so they are named and coloured as such rather than as two
        generic "top N" tables. --cap-orange/--cap-purple already existed as tokens for
        exactly this reason; nothing new was invented to make this page louder. -->
-  <section id="profile" class="prose-page">
-    <div class="report">
-      <div class="over-line">Player card</div>
-      <div class="call" id="profileUsername"></div>
-      <!-- [A151] the kit your drafted sides wear, saved to this account -->
-      <div id="profileKit"></div>
+  <section id="profile" class="pf">
+    <!-- Your card, in your own kit's colours: the same colours your drafted sides wear in
+         solo, the daily and rooms [A151]. -->
+    <div class="mr pf-hero" id="profileHero">
+      <div class="pf-id">
+        <div id="profileBadge"></div>
+        <div class="pf-who">
+          <div class="mr-stage">Player card</div>
+          <h1 class="pf-name" id="profileUsername"></h1>
+          <div class="pf-team"><span id="profileTeam"></span>
+            <button class="act minor pf-kit-btn" onclick="editMyKit()">Edit kit</button></div>
+        </div>
+      </div>
+      <div class="pf-heroes">
+        <div><b id="profileGames">–</b><span>Games</span></div>
+        <div><b id="profileTitles">–</b><span>Titles</span></div>
+        <div><b id="profileRate">–</b><span>Title rate</span></div>
+      </div>
     </div>
 
-    <div class="career-band">
-      <div><b id="profileGames">–</b><span>Games played</span></div>
-      <div><b id="profileTitles">–</b><span>Titles won</span></div>
-      <div><b id="profileRate">–</b><span>Title rate</span></div>
+    <div class="pf-split">
+      <div class="pf-panel">
+        <div class="pf-head">Solo seasons</div>
+        <div class="pf-stats">
+          <div><b id="soloGames">–</b><span>Seasons</span></div>
+          <div><b id="soloTitles">–</b><span>Titles</span></div>
+          <div><b id="soloMatches">–</b><span>Matches won</span></div>
+        </div>
+      </div>
+      <div class="pf-panel">
+        <div class="pf-head">With friends</div>
+        <div class="pf-stats">
+          <div><b id="roomGames">–</b><span>Rooms</span></div>
+          <div><b id="roomTitles">–</b><span>Titles</span></div>
+          <div><b id="roomMatches">–</b><span>Matches won</span></div>
+        </div>
+      </div>
     </div>
 
-    <div class="career-grid">
-      <div><b id="totRuns">–</b><span>Total runs scored</span></div>
-      <div><b id="totWickets">–</b><span>Total wickets taken</span></div>
-      <div><b id="totMatches">–</b><span>Total matches won</span></div>
-      <div><b id="totFriendMatches">–</b><span>Friend matches won</span></div>
-      <div><b id="totLeagues">–</b><span>Total leagues won</span></div>
-      <div><b id="totFriendLeagues">–</b><span>Friend titles won</span></div>
+    <div class="pf-split">
+      <div class="pf-panel">
+        <div class="pf-head">Daily challenge <a class="pf-link" href="/daily">Play today →</a></div>
+        <div class="pf-stats">
+          <div><b id="dailyStreak">–</b><span>Current streak</span></div>
+          <div><b id="dailyBest">–</b><span>Best streak</span></div>
+          <div><b id="dailyPlayed">–</b><span>Days played</span></div>
+        </div>
+        <div class="pf-form" id="dailyForm"></div>
+      </div>
+      <div class="pf-panel">
+        <div class="pf-head">Career with your drafts</div>
+        <div class="pf-stats two">
+          <div><b id="totRuns">–</b><span>Runs scored</span></div>
+          <div><b id="totWickets">–</b><span>Wickets taken</span></div>
+        </div>
+      </div>
     </div>
 
+    <div class="pf-panel pf-recent">
+      <div class="pf-head">Recent games</div>
+      <div id="recentGames"></div>
+    </div>
+
+    <!-- The two lists here ARE the Orange Cap and the Purple Cap -- the IPL's own real
+         season-long awards -- so they are named and coloured as such rather than as two
+         generic "top N" tables. -->
     <div class="caps">
       <div class="cap-col orange">
         <div class="cap-head"><span class="dot"></span>Orange Cap<em>most runs</em></div>
@@ -94,10 +137,6 @@
         <div class="cap-head"><span class="dot"></span>Purple Cap<em>most wickets</em></div>
         <div id="profileBowlers"></div>
       </div>
-    </div>
-
-    <div class="foot-actions" style="justify-content:center;padding:34px 0 30px">
-      <a class="act" href="/">Home</a>
     </div>
   </section>
 
@@ -156,6 +195,6 @@
 
 <script src="/static/common.js?v=a43774c27f"></script>
 <script src="/static/auth.js?v=c7731f2193"></script>
-<script src="/static/profile.js?v=a49f17742a"></script>
+<script src="/static/profile.js?v=050e3d129c"></script>
 </body>
 </html>

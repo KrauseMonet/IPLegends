@@ -263,10 +263,10 @@ def test_the_share_line_is_the_rhythm_of_the_run_with_no_names(small):
     st = C.replay(w, p["a"], ["c", "b", "d", "c"])       # strike, link, strike, link
     text = C.share_text(w, st, "9 Oct 2026", daily=True, seed=739898)
     lines = text.splitlines()
-    assert lines[0] == "Almanack Chain · 9 Oct 2026 · 2 links"
+    assert lines[0] == "Fine Leg XI · Chain · 9 Oct 2026 · 2 links"
     assert lines[1] == "🟥🟩🟥🟩"
     assert lines[2] == "1 club"                          # singular, not "1 clubs"
-    assert lines[-1] == "iplegends.vercel.app/chain"
+    assert lines[-1] == "finelegxi.in/chain"
     for person in p.values():
         assert person.name not in text
 
@@ -344,7 +344,7 @@ def test_the_run_ends_on_the_third_strike_with_the_share_and_the_missed_names(cl
     r = client.post("/api/chain/play", json={"seed": 739898, "guesses": strangers[:2],
                                              "guess": strangers[2]}).json()["state"]
     assert r["finished"] and r["strikes"] == 3 and r["strikes_left"] == 0
-    assert r["share"].startswith("Almanack Chain · 9 Oct 2026 · 0 links") and r["missed"]
+    assert r["share"].startswith("Fine Leg XI · Chain · 9 Oct 2026 · 0 links") and r["missed"]
 
 
 def test_stopping_banks_the_chain(client, players, real):

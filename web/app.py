@@ -33,6 +33,7 @@ from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
 )
 from game.simulator import load_model
+from game.site import SITE_NAME
 from web import accounts
 from web import admin as admin_lib
 from web.crests import all_crests, crest_url, unambiguous_crest
@@ -152,7 +153,7 @@ def _load_unrated(conn) -> dict[int, list]:
     return out
 
 
-app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title=SITE_NAME, version="0.1.0", lifespan=lifespan)
 app.include_router(bingo_routes.router)
 app.include_router(chain_routes.router)
 app.include_router(guess_routes.router)

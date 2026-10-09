@@ -265,11 +265,11 @@ def test_the_share_line_is_squares_per_guess_and_names_nobody(players):
     st = G.replay(players, answer, others + [answer.person_id])
     text = G.share_text(players, answer, st, "9 Oct 2026", daily=True, seed=739898)
     lines = text.splitlines()
-    assert lines[0] == "Almanack Guess the Player · 9 Oct 2026 · 3/8"
+    assert lines[0] == "Fine Leg XI · Guess the Player · 9 Oct 2026 · 3/8"
     assert len(lines) == 1 + 3 + 1
     assert all(len(r) == 8 and set(r) <= set("🟩🟨⬛") for r in lines[1:4])
     assert lines[3] == "🟩" * 8                         # the last row is the answer himself
-    assert lines[4] == "iplegends.vercel.app/guess"
+    assert lines[4] == "finelegxi.in/guess"
     for p in players.values():
         assert p.name not in text                     # a spoiler is the whole failure here
 
@@ -330,7 +330,7 @@ def test_the_right_guess_finishes_and_reveals(client, players):
     st = r["state"]
     assert r["correct"] is True and st["solved"] and st["finished"]
     assert st["answer"]["name"] == answer.name
-    assert st["share"].startswith("Almanack Guess the Player · 9 Oct 2026 · 1/8")
+    assert st["share"].startswith("Fine Leg XI · Guess the Player · 9 Oct 2026 · 1/8")
 
 
 def test_play_replays_the_guesses_so_far(client, players):

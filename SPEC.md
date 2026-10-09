@@ -2757,3 +2757,13 @@ Flashback quiz) share a second bar that appears on their pages only, and `/puzzl
 shows which of the four daily puzzles are finished today and one streak across them. A day counts
 toward that streak if any daily puzzle was finished on it. Progress is kept in the visitor's own
 browser (each game under its own key), so the hub needs no account and no request beyond today's date.
+
+
+## 19. Name and identity [A187]
+
+The site is **Fine Leg XI**, at **finelegxi.in**. Its name and address live in `game/site.py` (Python) and
+`SITE_ORIGIN` in `web/static/common.js` (browser), kept equal by a test; share lines and links name the real
+site rather than the host a page is served from. The logo is one transparent master in `assets/brand/`; every
+served brand image (emblem, full logo, favicons, install icons, maskable icon, link-preview image) is built from
+it by `tools.build_brand`, and `--check` is a deploy gate. Brand images are content-stamped in the pages like
+scripts, because they are cached for 30 days under their own name.

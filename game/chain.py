@@ -31,13 +31,14 @@ from dataclasses import dataclass, field
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.guess import pool
 from game.puzzle_facts import PlayerFacts
+from game.site import SITE_HOST, SITE_NAME
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
 STRIKES = 3
 MAX_GUESSES = 120              # a bound on the replayed list, not a goal; well past any real run
 SHARE_SQUARES = 40             # a longer chain is shown as its first forty and a count
-SHARE_HOST = "iplegends.vercel.app/chain"
+SHARE_HOST = f"{SITE_HOST}/chain"
 HINT_NAMES = 5                 # how many teammates are named once the chain is over
 
 
@@ -194,7 +195,7 @@ def share_text(world: World, state: State, label: str, *, daily: bool, seed: int
     if len(marks) > SHARE_SQUARES:
         shown += f" +{len(marks) - SHARE_SQUARES}"
     plural = "link" if state.links == 1 else "links"
-    lines = [f"Almanack Chain · {label} · {state.links} {plural}", shown or "⬛",
+    lines = [f"{SITE_NAME} · Chain · {label} · {state.links} {plural}", shown or "⬛",
              (f"{state.clubs()} club" + ("" if state.clubs() == 1 else "s")) if state.links else "",
              SHARE_HOST if daily else f"{SHARE_HOST}?seed={seed}"]
     return "\n".join(line for line in lines if line)

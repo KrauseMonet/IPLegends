@@ -34,6 +34,7 @@ from game.scenarios import (
     choose_deck, daily_seed, evaluate, generate, overs_words, rank_key,
 )
 from game.season import Side
+from game.site import SITE_HOST, SITE_NAME
 from game.simulator import Innings, Model, Player, play_innings
 from web import session as sess
 
@@ -447,7 +448,7 @@ def played_dates(conn, account_id: int) -> list:
 # result pasted into a chat has to work for whoever reads it, and a link built from
 # whatever host the submitter happened to use would carry a preview deployment's URL into
 # other people's messages.
-SHARE_URL = "iplegends.vercel.app/daily"
+SHARE_URL = f"{SITE_HOST}/daily"
 
 
 def share_text(day: "Day", result: dict, rank: int | None = None,
@@ -468,7 +469,7 @@ def share_text(day: "Day", result: dict, rank: int | None = None,
     from game.scenarios import BONUS_LABELS
 
     sc = day.scenario
-    lines = [f"Legends Almanack — {day.challenge_date.day} {day.challenge_date:%b}"]
+    lines = [f"{SITE_NAME} · Daily · {day.challenge_date.day} {day.challenge_date:%b}"]
 
     stage = sc.stage if sc.stage.startswith("Qualifier") else f"the {sc.stage}"
     lines.append(f"{sc.short()} · {sc.opposition_name} · {stage}")

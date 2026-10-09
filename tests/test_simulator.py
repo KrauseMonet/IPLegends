@@ -545,3 +545,77 @@ def test_a_bowler_who_never_batted_bats_at_his_bands_pooled_level_not_at_average
     assert bat_split(card, _SplitModel()) == pytest.approx((-0.50 - 0.05, 1.80))
     card = Card(1, "x", "x", band="middle", season_year=2016)
     assert bat_split(card, _SplitModel()) == pytest.approx((-0.20 - 0.05, 1.20))
+
+
+# --- [A181] the speed-ups must not change a single result --------------------------------
+
+def _tilt_as_it_was(probs, values, target):
+    """The bisection exactly as it stood before A181: all 80 steps, the full peak scan.
+    Kept here as the reference the faster version must match to the bit -- a faster
+    `tilt` that moved any probability, however slightly, could flip a random roll near a
+    boundary and change a match that was already played and saved."""
+    import math
+    lo_v, hi_v = min(values), max(values)
+    target = min(max(target, lo_v + 1e-6), hi_v - 1e-6)
+
+    def mean_at(theta):
+        peak = max(theta * v for v in values)
+        weights = [p * math.exp(theta * v - peak) for p, v in zip(probs, values)]
+        return sum(w * v for w, v in zip(weights, values)) / sum(weights)
+
+    lo, hi = -5.0, 5.0
+    for _ in range(80):
+        mid = (lo + hi) / 2
+        if mean_at(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    theta = (lo + hi) / 2
+    peak = max(theta * v for v in values)
+    weights = [p * math.exp(theta * v - peak) for p, v in zip(probs, values)]
+    total = sum(weights)
+    return tuple(w / total for w in weights)
+
+
+def _random_tilt_inputs(n, seed=11):
+    rng = random.Random(seed)
+    for _ in range(n):
+        values = (rng.uniform(-30.0, 0.0),) + tuple(float(r) for r in range(7))
+        raw = [rng.random() ** rng.choice([1, 3, 8]) for _ in values]
+        if rng.random() < 0.2:
+            raw[rng.randrange(len(raw))] = 0.0
+        total = sum(raw)
+        probs = tuple(r / total for r in raw)
+        mean = sum(p * v for p, v in zip(probs, values))
+        yield probs, values, mean + rng.choice(
+            [rng.gauss(0, 0.3), rng.gauss(0, 3.0), rng.uniform(-40, 40), 0.0])
+
+
+def test_tilt_matches_the_original_bisection_to_the_bit():
+    """Early stopping and the two-ended peak are only safe if they are EXACT; equal to
+    within a tolerance is not enough here, so this compares with `==`."""
+    for probs, values, target in _random_tilt_inputs(3000):
+        assert tilt(probs, values, target) == _tilt_as_it_was(probs, values, target)
+
+
+def test_a_remembered_ball_is_the_same_as_a_computed_one(monkeypatch):
+    """The cache must key on EVERY input: a key missing one would hand back another
+    batter's odds. Each call is checked against a fresh computation with the cache empty."""
+    from game import simulator
+    monkeypatch.setattr(simulator, "_SPLIT_CACHE", {})
+    rng = random.Random(5)
+    cases = [(p, v, rng.gauss(0, 0.4), rng.lognormvariate(0, 0.5))
+             for p, v, _ in _random_tilt_inputs(200, seed=3)]
+    cases += [(p, v, s, d * 1.5) for p, v, s, d in cases[:50]]      # same but dismissal
+    cases += [(p, v, s + 0.1, d) for p, v, s, d in cases[:50]]      # same but scoring
+    for p, v, s, d in cases + cases:                                 # second pass: hits
+        assert split_ball(p, v, s, d) == simulator._split_ball(p, v, s, d)
+
+
+def test_the_ball_cache_stays_bounded(monkeypatch):
+    from game import simulator
+    monkeypatch.setattr(simulator, "_SPLIT_CACHE", {})
+    monkeypatch.setattr(simulator, "SPLIT_CACHE_MAX", 20)
+    for scoring in range(100):
+        split_ball(PROBS, VALUES, scoring / 100, 1.0)
+        assert len(simulator._SPLIT_CACHE) <= 20

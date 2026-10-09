@@ -349,7 +349,10 @@ def tilt(probs: tuple[float, ...], values: tuple[float, ...],
     def mean_at(theta: float) -> float:
         # Shifted before exponentiating: theta * 25 is a plausible argument here and
         # exp of it is not, so the shift is what keeps a heavy tilt from overflowing.
-        peak = max(theta * v for v in values)
+        # [A181] max(theta * v) is always theta times the smallest or the largest value:
+        # multiplying by theta keeps or reverses the order, and IEEE rounding is monotone,
+        # so the two ends give the same float the full scan did, in two products not eight.
+        peak = max(theta * lo_v, theta * hi_v)
         weights = [p * math.exp(theta * v - peak) for p, v in zip(probs, values)]
         total = sum(weights)
         return sum(w * v for w, v in zip(weights, values)) / total
@@ -357,9 +360,17 @@ def tilt(probs: tuple[float, ...], values: tuple[float, ...],
     lo, hi = -5.0, 5.0
     for _ in range(80):
         mid = (lo + hi) / 2
+        # [A181] A step is a pure function of (lo, hi), so the first step that leaves
+        # them unchanged means every later one would too: stopping there gives the SAME
+        # theta to the bit, it only skips the no-ops. Measured, the interval reaches the
+        # limit of float resolution after 54-74 steps, median 60, against the 80 run.
         if mean_at(mid) < target:
+            if mid == lo:
+                break
             lo = mid
         else:
+            if mid == hi:
+                break
             hi = mid
 
     theta = (lo + hi) / 2
@@ -369,8 +380,31 @@ def tilt(probs: tuple[float, ...], values: tuple[float, ...],
     return tuple(w / total for w in weights)
 
 
+# [A181] `split_ball` is a pure function of its four inputs and was 95% of a season's
+# CPU (8.8 s on Vercel for one season, 1.3 s on a developer Mac), and the same situation
+# -- the same state, batter and bowler -- recurs: 68% of one season's calls repeat an
+# earlier one, and a "match by match" season replays every earlier match on each step.
+# So answers are remembered. Exact by construction: a hit returns the very tuple the
+# computation produced, so no match result can change. Bounded by clearing when full
+# rather than by LRU bookkeeping; a season needs about 5,000 entries.
+SPLIT_CACHE_MAX = 50_000
+_SPLIT_CACHE: dict = {}
+
+
 def split_ball(probs: tuple[float, ...], values: tuple[float, ...],
                scoring: float, dismissal: float) -> tuple[float, ...]:
+    key = (tuple(probs), tuple(values), scoring, dismissal)
+    hit = _SPLIT_CACHE.get(key)
+    if hit is None:
+        hit = _split_ball(probs, values, scoring, dismissal)
+        if len(_SPLIT_CACHE) >= SPLIT_CACHE_MAX:
+            _SPLIT_CACHE.clear()
+        _SPLIT_CACHE[key] = hit
+    return hit
+
+
+def _split_ball(probs: tuple[float, ...], values: tuple[float, ...],
+                scoring: float, dismissal: float) -> tuple[float, ...]:
     """[A160] One ball's outcome probabilities for a given batter and bowler.
 
     The dismissal chance keeps the state's own ODDS times `dismissal` (batter's times

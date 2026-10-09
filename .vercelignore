@@ -14,6 +14,9 @@ data/*
 # -- and it would LOOK fine, because the fallback works. `vercel.json`'s own `includeFiles`
 # names it too; this exception is what stops it being stripped before that can matter.
 !data/deck_snapshot.json.gz
+# [A182] The puzzle games' facts (Bingo and what follows). Same trap, same reason: a missing
+# file does not break the site, it makes every puzzle route answer 503.
+!data/puzzle_facts.json.gz
 tests/
 validation/
 migrations/

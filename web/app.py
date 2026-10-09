@@ -39,6 +39,7 @@ from web.crests import all_crests, crest_url, unambiguous_crest
 from web import auction_session
 from web import room_auction
 from web import auth
+from web import bingo_routes
 from web import client_failures
 from web import daily as daily_lib
 from web import db
@@ -149,6 +150,7 @@ def _load_unrated(conn) -> dict[int, list]:
 
 
 app = FastAPI(title="IPLegends", version="0.1.0", lifespan=lifespan)
+app.include_router(bingo_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -337,6 +339,11 @@ def records_page() -> FileResponse:
 @app.get("/flashback", include_in_schema=False)
 def flashback_page() -> FileResponse:
     return FileResponse(STATIC / "flashback.html")
+
+
+@app.get("/bingo", include_in_schema=False)
+def bingo_page() -> FileResponse:
+    return FileResponse(STATIC / "bingo.html")
 
 
 @app.get("/about", include_in_schema=False)
@@ -1397,6 +1404,10 @@ def health() -> dict:
         # a snapshot the deployment forgot degrades to a working, slower site, and without
         # this there would be nothing to tell the two apart from outside.
         "source": STATE.get("source"),
+        # [A182] Whether the puzzle games have their data. False means the committed
+        # data/puzzle_facts.json.gz did not reach the deployment (A107's silent-packaging
+        # trap), and every Bingo route would answer 503.
+        "puzzles": bingo_routes._facts() is not None,
         # Connection reuse, for the same reason: it is invisible when it works, so a
         # process that had silently stopped reusing (and gone back to paying a connect on
         # every request) would look like nothing more than a slower site. `reused` far

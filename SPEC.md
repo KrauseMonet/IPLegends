@@ -2666,3 +2666,39 @@ colours may repeat. Kits lock when the host starts the matches, because a drafte
 plays under its kit name and monogram (`room_match._sides_with_pid`) and must be named the
 same way on every replay of the tournament.
 
+
+
+## 17. Puzzle games [A182]
+
+The site grows beyond the simulations into short daily puzzles built from the archive. They
+share one foundation and none of them touches the database at runtime.
+
+**Facts, not cards.** The draft and the auction ask about a player-SEASON; a puzzle asks
+whether a PERSON ever did something. `game/puzzle_facts.py` holds one row per person (804
+today) -- franchises (the 15 canonical, never the era's display name), calendar years, the
+overseas and keeper flags, career runs and wickets, the best season for each, and four
+counts the deck lacks: hundreds, fifties, four-wicket hauls and sixes, read from
+`deliveries` with super overs excluded. It is frozen to `data/puzzle_facts.json.gz` (29 kB)
+by `tools.snapshot_facts`, whose `--check` compares it with the archive. "Played" means
+batted or bowled (A27); a substitute fielder is not a player here.
+
+**Bingo** (`game/bingo.py`, `web/bingo_routes.py`, `/bingo`). A 3x3 grid: three franchises
+down the side (each with 60+ players), three criteria across the top (a franchise with 45+
+players, or one of fifteen career facts). Each cell wants one player who fits both. Rules,
+ratified before building: **nine guesses in all, a player may fill one cell only, a filled
+cell closes, a wrong guess costs a guess and nothing else does.** A cell scores
+`round(100/sqrt(n))` for its `n` valid players, so a grid is won on its hard cells; rarity is
+the cell's own answer count, not a "% of players who picked him", which needs a results table
+and is deliberately left until there is a reason to build one.
+
+The generator **rejects rather than repairs**: a grid is kept only if every cell has 3+
+answers and at most two have 4 or fewer. Measured over 14,000 random draws, 83% pass, there
+are about **205,000** distinct playable grids, and a typical cell has 22 valid answers.
+A grid is a pure function of its seed (`random.Random(f"bingo:{seed}")`, never `hash()`); the
+daily seed is the UTC date's ordinal (about 740,000) and practice seeds start at 10,000,000
+so the two never collide. The game is stateless like the draft (A62): the client holds the
+guess list, each move sends it, and the server replays it. State lives in `localStorage`
+(the guess list, and the days a daily was finished, from which a streak is computed by A130's
+rule). **No account, no table, no migration.** The share line is built on the server and
+names nobody (A129): `🟩` a cell filled, `🟪` a rare one (5 or fewer answers), `⬛` empty.
+Names are the archive's initials form ("V Kohli"), so a search is by surname.

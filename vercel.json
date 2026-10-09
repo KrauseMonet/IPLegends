@@ -7,7 +7,7 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
-        "includeFiles": "data/deck_snapshot.json.gz"
+        "includeFiles": "data/*.json.gz"
       }
     },
     { "src": "web/static/**", "use": "@vercel/static" }
@@ -54,6 +54,7 @@
     { "src": "/admin", "dest": "/web/static/admin.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/records", "dest": "/web/static/records.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/flashback", "dest": "/web/static/flashback.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/bingo", "dest": "/web/static/bingo.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/about", "dest": "/web/static/about.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/faq", "dest": "/web/static/faq.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/terms", "dest": "/web/static/terms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },

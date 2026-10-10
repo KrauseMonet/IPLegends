@@ -19,10 +19,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
 PARTIALS = ROOT / "web" / "partials"
 
-PUZZLE_PAGES = {"puzzles": "/puzzles", "bingo": "/bingo", "guess": "/guess", "chain": "/chain",
+PUZZLE_PAGES = {"puzzles": "/puzzles", "bingo": "/bingo", "guess": "/guess", "commonground": "/common",
                 "xi": "/xi", "flashback": "/flashback"}
 DAILY_KEYS = {"/bingo": ("bingo.js", "BG_KEY"), "/guess": ("guess.js", "GP_KEY"),
-              "/chain": ("chain.js", "CH_KEY"), "/xi": ("xi.js", "XI_KEY")}
+              "/common": ("commonground.js", "CG_KEY"), "/xi": ("xi.js", "XI_KEY")}
 
 
 def hrefs(text: str) -> list[str]:
@@ -85,7 +85,7 @@ def test_the_home_page_has_two_heroes_and_one_quiet_puzzle_strip():
     second = html.split('class="modes more"')[1].split("puzzle-strip")[0]
     assert sorted(re.findall(r'<a class="mode" href="([^"]+)"', second)) == ["/daily", "/rooms"]
     assert 'class="puzzle-strip" href="/puzzles"' in html
-    assert not re.search(r'<a class="mode[^"]*" href="/(flashback|bingo|guess|chain|xi)"', html)
+    assert not re.search(r'<a class="mode[^"]*" href="/(flashback|bingo|guess|common|xi)"', html)
 
 
 @pytest.mark.parametrize("path,key_file", [(p, v) for p, v in DAILY_KEYS.items()])
@@ -102,14 +102,14 @@ def test_each_hub_card_reads_the_key_its_game_actually_saves_under(path, key_fil
 def test_the_hub_lists_the_four_dailies_and_flashback_and_nothing_else():
     hub = (STATIC / "puzzles.html").read_text()
     cards = re.findall(r'<a class="pz-card" href="([^"]+)"', hub)
-    assert cards == ["/bingo", "/guess", "/chain", "/xi", "/flashback"]
+    assert cards == ["/bingo", "/guess", "/common", "/xi", "/flashback"]
 
 
 def test_every_daily_game_records_a_finished_day_the_hub_can_count():
     """The hub counts a day if the game's saved `days` list holds it, so each game must write
     that list when a puzzle finishes."""
     for js_name, const in (("bingo.js", "BG_KEY"), ("guess.js", "GP_KEY"),
-                           ("chain.js", "CH_KEY"), ("xi.js", "XI_KEY")):
+                           ("commonground.js", "CG_KEY"), ("xi.js", "XI_KEY")):
         text = (STATIC / js_name).read_text()
         assert re.search(r"Save\(\{days: days\.concat\(", text), js_name
 

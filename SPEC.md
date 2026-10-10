@@ -2720,19 +2720,22 @@ guess list is the whole state, each move replays it, the mystery is named only w
 puzzle is over, and the share line is one row of squares per guess with no names.
 Browser-side helpers shared by both games live in `web/static/puzzle.js`.
 
-**Teammate Chain** (`game/chain.py`, `web/chain_routes.py`, `/chain`, A184). A daily starting
-player and a chain from him: name a teammate, then a teammate of that player, and so on, nobody
-twice. Teammates are players who batted or bowled for the **same franchise in the same season**
-(`PlayerFacts.squads`, facts format 3). A name that never shared a squad with the chain's last
-player is a strike; three strikes end the chain, and its length in links is the score. A run may
-be stopped and banked early. Each link shows the shared squad; a finished run names the five
-best-known teammates of the last player not already used.
-
-It is deliberately NOT "link A to B in the fewest steps". Measured on the real graph the
-average player has 54 teammates, 74% of well-known pairs share exactly one bridge player and
-0.9% are three steps apart, and neither banning franchises nor forcing each link onto a new
-club changes that. The start walks a fixed shuffle of the same 197-player pool as Guess the
-Player, with its own key. Same stateless shape as the other two: the guess list is the state.
+**Common Ground** (`game/ground.py`, `web/ground_routes.py`, `/common`, A188; it replaced Teammate
+Chain, A184, whose `/chain` address now redirects). Two well-known players are shown and, in four
+minutes, you name everyone who was a teammate of BOTH. A teammate is the same franchise in the same
+season (`PlayerFacts.squads`), and the two seasons may differ: he can have played with one in 2010
+and the other in 2016. Each find scores 100, each wrong guess costs 20 (never below nothing), and
+finding the whole set earns 1 point per whole second left. The pair is drawn only from pairs whose
+FULL set holds 4 to 8 players, at least three of them well known: measured over the 19,306 pairs of
+the 197 well-known players the median pair has 17 common teammates and a quarter have 30 or more,
+which nobody can name in four minutes, so 3,037 pairs (about eight years of dailies) qualify, and
+every member of the set, fringe players included, is a valid answer. A miss says how it missed
+(played with only one of them, or neither). The clock is the page's in anonymous play: each guess
+carries its milliseconds since the clock started and the server checks only order and the limit;
+a ranked attempt (A188 phase 2) takes its times from the server. Same stateless shape as the other
+games: the move list is the state. The original plan for Teammate Chain ("link A to B in the fewest
+steps") was measured and dropped (74% of pairs share exactly one bridge); the endurance chain that
+replaced it was in turn replaced by this.
 
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the
@@ -2752,7 +2755,7 @@ puzzle games; the daily walks a fixed shuffle of the 254 sides.
 Draft and Auction lead. The top bar is `Draft, Auction, Rooms, Daily, Puzzles, Records` and does not
 grow: a new game is a card on the Puzzles hub, never a new top-level item. On the home page Draft &
 season and Auction are the only large tiles; Rooms and the daily challenge are a smaller row; the
-puzzles are one strip. The puzzle games (Bingo, Guess the Player, Teammate Chain, Name the XI, the
+puzzles are one strip. The puzzle games (Bingo, Guess the Player, Common Ground, Name the XI, the
 Flashback quiz) share a second bar that appears on their pages only, and `/puzzles` is a hub that
 shows which of the four daily puzzles are finished today and one streak across them. A day counts
 toward that streak if any daily puzzle was finished on it. Progress is kept in the visitor's own

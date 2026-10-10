@@ -22,7 +22,7 @@ from typing import Literal
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -41,7 +41,7 @@ from web import auction_session
 from web import room_auction
 from web import auth
 from web import bingo_routes
-from web import chain_routes
+from web import ground_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -155,7 +155,7 @@ def _load_unrated(conn) -> dict[int, list]:
 
 app = FastAPI(title=SITE_NAME, version="0.1.0", lifespan=lifespan)
 app.include_router(bingo_routes.router)
-app.include_router(chain_routes.router)
+app.include_router(ground_routes.router)
 app.include_router(guess_routes.router)
 app.include_router(xi_routes.router)
 
@@ -358,9 +358,15 @@ def bingo_page() -> FileResponse:
     return FileResponse(STATIC / "bingo.html")
 
 
+@app.get("/common", include_in_schema=False)
+def common_page() -> FileResponse:
+    return FileResponse(STATIC / "commonground.html")
+
+
 @app.get("/chain", include_in_schema=False)
-def chain_page() -> FileResponse:
-    return FileResponse(STATIC / "chain.html")
+def chain_page() -> RedirectResponse:
+    """Teammate Chain became Common Ground (A188); an old shared link still lands somewhere."""
+    return RedirectResponse("/common", status_code=308)
 
 
 @app.get("/xi", include_in_schema=False)

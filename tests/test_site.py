@@ -46,9 +46,9 @@ def test_the_scripts_that_build_links_use_the_shared_origin_not_their_own():
 
 
 def test_every_share_line_points_at_the_site_and_names_it():
-    from game import bingo, chain, guess, xi
+    from game import bingo, ground, guess, xi
     from web import daily
-    for module, path in ((bingo, "bingo"), (guess, "guess"), (chain, "chain"), (xi, "xi")):
+    for module, path in ((bingo, "bingo"), (guess, "guess"), (ground, "common"), (xi, "xi")):
         assert module.SHARE_HOST == f"{site.SITE_HOST}/{path}"
     assert daily.SHARE_URL == f"{site.SITE_HOST}/daily"
 

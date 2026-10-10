@@ -17,7 +17,7 @@ never on the field would be marked a wrong answer for one who was. 254 of 298 si
 do not are dropped rather than guessed at. An Impact-era side has twelve names, and says so.
 
 **The daily walks a fixed shuffle of the sides** so none returns until all have had a day, as
-Guess the Player's and Teammate Chain's do, with its own key.
+Guess the Player's and Common Ground's do, with its own key.
 """
 
 from __future__ import annotations

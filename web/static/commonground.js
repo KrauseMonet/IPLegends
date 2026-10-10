@@ -1,0 +1,307 @@
+// Common Ground: two players, four minutes, name everyone who played with both. [A188]
+//
+// Same shape as Bingo and Guess the Player: the server owns the rules, the moves so far are the
+// whole state, and each request sends them and gets the whole position back. What `puzzle.js`
+// provides -- storage, streaks, name search, sharing -- is not repeated here.
+//
+// The clock is this page's: it starts when the player presses Start, is kept as a wall-clock
+// timestamp (so a reload resumes the same countdown rather than restarting it), and every guess
+// carries the milliseconds since then. A ranked attempt will take its times from the server.
+
+const CG_KEY = 'iplegends_cground_v1';
+
+let CG = {mode: 'daily', puzzle: null, started: null, moves: [], ended: null, state: null,
+          matches: [], active: 0, busy: false, timer: null};
+
+const cgStore = () => pzStore(CG_KEY);
+const cgSave = patch => pzSave(CG_KEY, patch);
+
+const cgClock = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const cgLimitMs = () => CG.puzzle.limit_seconds * 1000;
+const cgElapsed = () => Math.min(Math.max(0, Date.now() - CG.started), cgLimitMs());
+
+function cgPersist(){
+  const p = CG.puzzle;
+  const rec = {started: CG.started, moves: CG.moves, ended: CG.ended};
+  if (CG.mode === 'daily') cgSave({daily: Object.assign({date: p.date}, rec)});
+  else cgSave({practice: Object.assign({seed: p.seed}, rec)});
+}
+
+function cgPaintStreak(){
+  const best = cgStore().best;
+  const streak = CG.mode === 'daily' && CG.puzzle
+    ? pzStreakHtml(cgStore().days || [], CG.puzzle.date, 'pair') : '';
+  $('#cgStreak').innerHTML = [streak, best ? `Your best score: <b>${best}</b>.` : '']
+    .filter(Boolean).join(' ');
+}
+
+// --- loading ------------------------------------------------------------------------------
+
+async function cgFetchPuzzle(mode, fresh){
+  if (mode === 'daily') return api('/api/ground/today');
+  const urlSeed = new URLSearchParams(location.search).get('seed');
+  const saved = cgStore().practice;
+  const seed = !fresh && urlSeed ? urlSeed : (!fresh && saved ? saved.seed : null);
+  return api('/api/ground' + (seed ? '?seed=' + encodeURIComponent(seed) : ''));
+}
+
+async function cgMode(mode, fresh){
+  if (CG.busy) return;
+  cgStopTick();
+  CG.mode = mode;
+  document.querySelectorAll('#cgTabs .room-choice')
+    .forEach(b => b.classList.toggle('sel', b.dataset.mode === mode));
+  try {
+    const puzzle = await cgFetchPuzzle(mode, fresh);
+    await cgLoad(puzzle, fresh);
+    history.replaceState(null, '', mode === 'daily' ? '/common' : '/common?seed=' + puzzle.seed);
+  } catch(e){ slip(e.message); }
+}
+
+async function cgLoad(puzzle, fresh){
+  CG.puzzle = puzzle;
+  const s = cgStore();
+  const saved = CG.mode === 'daily'
+    ? (s.daily && s.daily.date === puzzle.date ? s.daily : null)
+    : (!fresh && s.practice && String(s.practice.seed) === String(puzzle.seed) ? s.practice : null);
+  CG.started = saved ? saved.started || null : null;
+  CG.moves = saved ? saved.moves || [] : [];
+  CG.ended = saved ? saved.ended || null : null;
+  CG.state = null;
+  $('#cgDone').classList.add('hide');
+  if (CG.started){
+    // The clock may have run out while the page was closed: that attempt is over, and the
+    // server is told it ended at the limit rather than at the (later) moment of this reload.
+    if (!CG.ended && Date.now() - CG.started >= cgLimitMs()) CG.ended = {t: cgLimitMs()};
+    try { CG.state = await cgReplay(); }
+    catch(e){ CG.started = null; CG.moves = []; CG.ended = null; }   // a list the server refuses is dropped
+  }
+  cgPersist();
+  cgRender();
+  if (CG.state && CG.state.finished) cgFinish(false);
+  else if (CG.started) cgStartTick();
+}
+
+async function cgPost(extra){
+  return api('/api/ground/play', {method: 'POST', retry: true, headers: PZ_JSON,
+    body: JSON.stringify(Object.assign({seed: CG.puzzle.seed, guesses: CG.moves}, extra))});
+}
+
+async function cgReplay(){
+  const r = await cgPost(CG.ended ? {end: true, end_t: CG.ended.t} : {});
+  return r.state;
+}
+
+// --- the clock ----------------------------------------------------------------------------
+
+function cgStopTick(){ if (CG.timer){ clearInterval(CG.timer); CG.timer = null; } }
+
+function cgStartTick(){
+  cgStopTick();
+  cgTick();
+  CG.timer = setInterval(cgTick, 200);
+}
+
+function cgTick(){
+  if (!CG.started || (CG.state && CG.state.finished)) { cgStopTick(); return; }
+  const left = cgLimitMs() - (Date.now() - CG.started);
+  $('#cgTime').textContent = cgClock(left);
+  $('#cgBar').style.width = Math.max(0, Math.min(100, left / cgLimitMs() * 100)) + '%';
+  $('#cgClock').classList.toggle('urgent', left <= 30000);
+  if (left <= 0) cgTimeUp();
+}
+
+async function cgTimeUp(){
+  cgStopTick();
+  if (CG.busy || (CG.state && CG.state.finished)) return;
+  CG.ended = {t: cgLimitMs()};
+  await cgEnd();
+}
+
+async function cgGiveUp(){
+  if (CG.busy || !CG.started || (CG.state && CG.state.finished)) return;
+  cgStopTick();
+  CG.ended = {t: cgElapsed()};
+  await cgEnd();
+}
+
+async function cgEnd(){
+  CG.busy = true;
+  try {
+    CG.state = await cgReplay();
+    cgPersist(); cgRender(); cgFinish(true);
+  } catch(e){ CG.ended = null; slip(e.message); if (CG.started) cgStartTick(); }
+  finally { CG.busy = false; }
+}
+
+// --- rendering ----------------------------------------------------------------------------
+
+function cgCrests(urls){
+  return urls.map(u => `<img class="gp-club" src="${esc(u)}" alt="" width="22" height="22">`).join('');
+}
+
+function cgPlayerHtml(p){
+  return `<b>${esc(p.name)}</b><span class="gp-clubs">${cgCrests(p.crests)}</span>`;
+}
+
+function cgRender(fresh){
+  const p = CG.puzzle, st = CG.state;
+  const started = !!CG.started;
+  $('#cgIntro').classList.toggle('hide', started);
+  $('#cgPlay').classList.toggle('hide', !started);
+  $('#cgIntroTime').textContent = cgClock(cgLimitMs());
+  $('#cgIntroRules').textContent =
+    `Two well-known players appear, and ${p.total} other players were a teammate of both. `
+    + `Each one you name scores ${p.points_per_teammate}; each wrong guess costs ${p.penalty_per_wrong}. `
+    + `Name all ${p.total} and every second left on the clock is worth ${p.bonus_per_second} more.`;
+  const chal = $('#cgChallenge');
+  const shared = new URLSearchParams(location.search).get('seed');
+  chal.classList.toggle('hide', !(shared && CG.mode === 'practice' && !started));
+  if (!chal.classList.contains('hide')) chal.innerHTML = `Somebody sent you <b>${esc(p.label)}</b>. Can you beat them to it?`;
+  cgPaintStreak();
+  if (!started) return;
+
+  $('#cgA').innerHTML = cgPlayerHtml(p.a);
+  $('#cgB').innerHTML = cgPlayerHtml(p.b);
+  const found = st ? st.found : [], wrong = st ? st.wrong : [];
+  $('#cgFound').textContent = found.length;
+  $('#cgOf').textContent = `of ${p.total}`;
+  $('#cgPoints').textContent = st ? st.score.points : 0;
+  const over = !!(st && st.finished);
+  $('#cgPicker').classList.toggle('hide', over);
+  $('#cgStopRow').classList.toggle('hide', over);
+  // The newest find first, so it sits just under the box that made it.
+  $('#cgFoundList').innerHTML = found.slice().reverse().map((a, k) => `
+    <div class="cg-hit${fresh && k === 0 ? ' fresh' : ''}">
+      <div class="cg-hit-name"><b>${esc(a.name)}</b><span class="gp-clubs">${cgCrests(a.crests)}</span></div>
+      <div class="cg-hit-with"><i>${esc(p.a.name)}</i> ${a.with_a.map(esc).join(' · ')}</div>
+      <div class="cg-hit-with"><i>${esc(p.b.name)}</i> ${a.with_b.map(esc).join(' · ')}</div>
+    </div>`).join('');
+  $('#cgWrongList').innerHTML = wrong.length
+    ? wrong.map(w => `<span class="xi-chip${w.kind === 'neither' ? '' : ' other'}" title="${esc(w.name + ' ' + cgWhy(w.kind))}">${esc(w.name)}</span>`).join('') : '';
+}
+
+function cgWhy(kind){
+  const p = CG.puzzle;
+  return kind === 'only_a' ? `played with ${p.a.name}, never with ${p.b.name}`
+       : kind === 'only_b' ? `played with ${p.b.name}, never with ${p.a.name}`
+       : 'played with neither of them';
+}
+
+// --- guessing -----------------------------------------------------------------------------
+
+function cgFilter(){
+  const tried = new Set(CG.moves.map(m => m.id));
+  const pair = new Set([CG.puzzle.a.person_id, CG.puzzle.b.person_id]);
+  const m = pzMatches($('#cgInput').value,
+    p => pair.has(p.id) ? 'one of the pair' : tried.has(p.id) ? 'tried' : '');
+  CG.matches = m.list.map(x => x.p); CG.active = m.active;
+  $('#cgResults').innerHTML = pzResultsHtml(m, 'cgGuess',
+    'Nobody by that name. Names are as the scorecard prints them: V Kohli.');
+}
+
+function cgKey(e){
+  if (!CG.matches.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    CG.active = (CG.active + (e.key === 'ArrowDown' ? 1 : -1) + CG.matches.length) % CG.matches.length;
+    document.querySelectorAll('#cgResults button').forEach((b, k) => b.classList.toggle('act-row', k === CG.active));
+  } else if (e.key === 'Enter'){
+    e.preventDefault();
+    const p = CG.matches[CG.active];
+    if (p) cgGuess(p.id);
+  }
+}
+
+async function cgGuess(pid){
+  if (CG.busy || !CG.started || (CG.state && CG.state.finished)) return;
+  const t = cgElapsed();                                  // when it was typed, not when it came back
+  if (t >= cgLimitMs()){ cgTimeUp(); return; }
+  CG.busy = true;
+  try {
+    const r = await cgPost({guess: {id: pid, t}});
+    CG.moves.push({id: pid, t});
+    CG.state = r.state;
+    cgPersist();
+    $('#cgInput').value = ''; $('#cgResults').innerHTML = ''; CG.matches = [];
+    cgRender(r.hit);
+    if (!r.hit){
+      const name = (PZ_PLAYERS.find(p => p.id === pid) || {}).name || 'That player';
+      slip(`${name}: ${cgWhy(r.kind)}. −${CG.puzzle.penalty_per_wrong}.`);
+      const box = $('#cgPicker'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+    }
+    if (CG.state.finished) cgFinish(true);
+    else $('#cgInput').focus({preventScroll: true});
+  } catch(e){
+    if (/time is up/i.test(e.message)){ CG.busy = false; cgTimeUp(); return; }
+    slip(e.message);
+  }
+  finally { CG.busy = false; }
+}
+
+async function cgStart(){
+  if (CG.started || CG.busy) return;
+  CG.started = Date.now();
+  CG.moves = []; CG.ended = null; CG.state = null;
+  cgPersist();
+  cgRender();
+  cgStartTick();
+  $('#cgInput').focus({preventScroll: true});
+}
+
+// --- finishing ----------------------------------------------------------------------------
+
+function cgTitle(st){
+  const sc = st.score;
+  if (st.reason === 'all') return sc.wrong === 0 ? 'Flawless' : 'Full house';
+  const share = sc.found / sc.total;
+  return share >= .75 ? 'Almost the lot' : share >= .5 ? 'Good company' : sc.found ? 'A start' : 'Not this time';
+}
+
+function cgFinish(fresh){
+  cgStopTick();
+  const st = CG.state, p = CG.puzzle, sc = st.score;
+  if (CG.mode === 'daily'){
+    const days = cgStore().days || [];
+    if (!days.includes(p.date)) cgSave({days: days.concat(p.date).sort().slice(-400)});
+  }
+  if (sc.points > (cgStore().best || 0)) cgSave({best: sc.points});
+  $('#cgPlay').classList.add('hide');
+  $('#cgDone').classList.remove('hide');
+  $('#cgDoneLabel').textContent = `COMMON GROUND · ${p.label.toUpperCase()}`;
+  $('#cgDoneTitle').textContent = cgTitle(st);
+  $('#cgFinal').textContent = sc.points;
+  const time = st.reason === 'time' ? 'time up' : cgClock(st.elapsed_ms) + ' taken';
+  $('#cgStats').innerHTML = `<span><b>${sc.found}/${sc.total}</b> found</span>`
+    + `<span><b>${sc.wrong}</b> wrong</span><span><b>${time}</b></span>`;
+  $('#cgSum').innerHTML = [
+    `<span>${sc.found} × ${p.points_per_teammate}</span><b>+${sc.base}</b>`,
+    sc.wrong ? `<span>${sc.wrong} wrong × ${p.penalty_per_wrong}</span><b>−${sc.penalty}</b>` : '',
+    st.reason === 'all' ? `<span>${cgClock(cgLimitMs() - st.elapsed_ms)} left on the clock</span><b>+${sc.bonus}</b>` : '',
+  ].filter(Boolean).map(x => `<div>${x}</div>`).join('');
+  const rows = st.found.map(a => cgRevealRow(a, true)).concat(st.unfound.map(a => cgRevealRow(a, false)));
+  $('#cgReveal').innerHTML = `<div class="gp-name">Everyone who played with both ${esc(p.a.name)} and ${esc(p.b.name)}:</div>${rows.join('')}`;
+  $('#cgSharePreview').textContent = st.share || '';
+  cgPaintStreak();
+  if (fresh) $('#cgDone').scrollIntoView({block: 'start', behavior: 'smooth'});
+}
+
+function cgRevealRow(a, got){
+  return `<div class="cg-hit ${got ? 'got' : 'missed'}">
+    <div class="cg-hit-name"><b>${esc(a.name)}</b><span class="gp-clubs">${cgCrests(a.crests)}</span></div>
+    <div class="cg-hit-with"><i>${esc(CG.puzzle.a.name)}</i> ${a.with_a.map(esc).join(' · ')}</div>
+    <div class="cg-hit-with"><i>${esc(CG.puzzle.b.name)}</i> ${a.with_b.map(esc).join(' · ')}</div></div>`;
+}
+
+const cgShare = () => pzShare(CG.state && CG.state.share);
+const cgLink = () => pzCopyLink(`${PZ_ORIGIN}/common?seed=${CG.puzzle.seed}`);
+
+// --- boot ---------------------------------------------------------------------------------
+
+(async function cgBoot(){
+  loadMe();
+  loadMeta().then(renderDeckStats).catch(() => {});
+  const seeded = new URLSearchParams(location.search).get('seed');
+  await cgMode(seeded ? 'practice' : 'daily');
+  pzPlayers().catch(() => {});       // ready before the first keystroke, off the critical path
+})();

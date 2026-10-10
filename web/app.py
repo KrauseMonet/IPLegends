@@ -41,7 +41,7 @@ from web import auction_session
 from web import room_auction
 from web import auth
 from web import bingo_routes
-from web import ground_routes
+from web import ground_routes, puzzle_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -156,6 +156,7 @@ def _load_unrated(conn) -> dict[int, list]:
 app = FastAPI(title=SITE_NAME, version="0.1.0", lifespan=lifespan)
 app.include_router(bingo_routes.router)
 app.include_router(ground_routes.router)
+app.include_router(puzzle_routes.router)
 app.include_router(guess_routes.router)
 app.include_router(xi_routes.router)
 

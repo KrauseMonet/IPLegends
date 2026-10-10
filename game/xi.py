@@ -34,6 +34,9 @@ __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 MISTAKES = 5
 MAX_GUESSES = 40               # a bound on the replayed list: 13 found plus 5 wrong is the most
 SHARE_HOST = f"{SITE_HOST}/xi"
+POINTS_PER_FIND = 100          # [A188] the leaderboard score: each man named
+PENALTY_PER_MISTAKE = 20       # ... each wrong name costs this much
+BONUS_PER_MISTAKE_LEFT = 20    # ... and a complete side earns this for every mistake not made
 
 FOUND, OTHER_SIDE, WRONG = "found", "other_side", "wrong"
 
@@ -124,6 +127,15 @@ def replay(players: dict[str, PlayerFacts], side: XiSide, guesses: list[str],
     if gave_up and not finished(side, state):
         state.gave_up = True
     return state
+
+
+def points(side: XiSide, state: State) -> int:
+    """The leaderboard score [A188]: 100 for every man named, 20 off for every mistake (never
+    below nothing), and -- only for a COMPLETE side -- 20 back for every mistake you did not
+    use, so a flawless XI is worth a little more than a lucky one. Declared, like the other
+    games' (the way `REPUTATION` is)."""
+    base = max(0, POINTS_PER_FIND * len(state.found) - PENALTY_PER_MISTAKE * len(state.wrong))
+    return base + (BONUS_PER_MISTAKE_LEFT * state.mistakes_left if solved(side, state) else 0)
 
 
 # --- sharing ------------------------------------------------------------------------------

@@ -261,14 +261,17 @@ def clear_kit(conn, actor: int, target: int) -> None:
 
 
 def delete_account(conn, actor: int, target: int) -> None:
-    """Deletes the account and, through 027's and 032's cascades, every game it saved and
-    every daily attempt it made. Room seats hold no account id, so live rooms are
-    untouched."""
+    """Deletes the account and, through 027's, 032's and 046's cascades, every game it saved,
+    every daily attempt it made and every puzzle result. Its puzzle PICKS (046) hold the voter
+    as plain text, not a foreign key -- they are shared counts, and a signed-out player's are
+    there too -- so they are deleted here by name. Room seats hold no account id, so live rooms
+    are untouched."""
     _guard_target(actor, target, allow_self=False)
     row = conn.execute("delete from accounts where account_id = %s returning username",
                        (target,)).fetchone()
     if row is None:
         raise AdminError(f"no account {target}")
+    conn.execute("delete from puzzle_picks where voter = %s", (f"a:{target}",))
     _log(actor, "deleted", f"account {target} ({row[0]})")
 
 

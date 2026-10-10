@@ -48,6 +48,7 @@ CLOSE_RUNS_FLOOR = 100        # ... but never tighter than this many runs,
 CLOSE_WICKETS_FLOOR = 10      # ... or this many wickets: a tail-ender's 12 runs is not "far"
 CURRENT_SEASON = 2026         # "last played" of a man still in the league
 SHARE_HOST = f"{SITE_HOST}/guess"
+POINTS_PER_GUESS_LEFT = 100   # [A188] the leaderboard score: 100 for each guess you did NOT need
 
 ROLE_LABEL = {"batter": "Batter", "bowler": "Bowler", "allrounder": "All-rounder",
               "keeper": "Keeper"}
@@ -170,6 +171,13 @@ def replay(players: dict[str, PlayerFacts], answer: PlayerFacts,
     if gave_up and not state.finished:
         state.gave_up = True
     return state
+
+
+def points(state: State) -> int:
+    """The leaderboard score [A188]: nothing if he was not found, otherwise 100 for every guess
+    left over -- finding him with your first of eight is 800, with your last is 100. Declared,
+    like the other games' (the way `REPUTATION` is): there is nothing to measure it against."""
+    return POINTS_PER_GUESS_LEFT * (GUESSES + 1 - len(state.guesses)) if state.solved else 0
 
 
 # --- sharing ------------------------------------------------------------------------------

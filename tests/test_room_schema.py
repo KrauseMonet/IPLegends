@@ -16,11 +16,19 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROOM_CODE = [ROOT / "web" / f for f in ("rooms.py", "room_auction.py", "room_match.py")]
 
 
+def rooms_statements(text: str) -> list[str]:
+    """Only the statements that create or alter the `rooms` table. A constraint on `status` or
+    `game` is read from these and nowhere else: migration 046 gave `puzzle_results` a column
+    called `game` with its own CHECK, and a scan of every migration took THAT for the rooms
+    constraint (A188)."""
+    return [st for st in re.split(r";\s*\n", text) if re.search(r"\b(create|alter) table rooms\b", st, re.I)]
+
+
 def allowed_statuses() -> set[str]:
     """The constraint as the LAST migration to define it left it."""
     found: set[str] | None = None
     for path in sorted((ROOT / "migrations").glob("*.sql")):
-        text = path.read_text()
+        text = "\n".join(rooms_statements(path.read_text()))
         for m in re.finditer(r"check\s*\(\s*status\s+in\s*\(([^)]*)\)\s*\)", text, re.I):
             found = set(re.findall(r"'([^']+)'", m.group(1)))
     assert found, "no status constraint found in the migrations"
@@ -49,7 +57,8 @@ def test_every_status_the_room_code_sets_is_one_the_database_allows():
 def allowed_games() -> set[str]:
     found: set[str] | None = None
     for path in sorted((ROOT / "migrations").glob("*.sql")):
-        for m in re.finditer(r"check\s*\(\s*game\s+in\s*\(([^)]*)\)\s*\)", path.read_text(), re.I):
+        text = "\n".join(rooms_statements(path.read_text()))
+        for m in re.finditer(r"check\s*\(\s*game\s+in\s*\(([^)]*)\)\s*\)", text, re.I):
             found = set(re.findall(r"'([^']+)'", m.group(1)))
     assert found, "no game constraint found in the migrations"
     return found

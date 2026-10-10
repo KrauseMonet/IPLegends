@@ -174,9 +174,15 @@ def test_rename_password_kit_and_delete_really_change_the_row(pg, monkeypatch):
     detail = admin.account_detail(pg, target)
     assert detail["username"] == "renamed_user" and detail["games_played"] == 0
 
+    day = datetime.date(2001, 1, 1)
+    pg.execute("insert into puzzle_picks (game, day, slot, voter, person_id) values "
+               "('bingo', %s, '0', %s, 'p'), ('bingo', %s, '0', %s, 'q')",
+               (day, f"a:{target}", day, f"a:{other}"))
     admin.delete_account(pg, actor, target)
     assert accounts.get_account(pg, target) is None
     assert accounts.get_account(pg, other) is not None
+    # the deleted player's picks go with them (they are not a foreign key), the other's stay
+    assert pg.execute("select voter from puzzle_picks").fetchall() == [(f"a:{other}",)]
     with pytest.raises(admin.AdminError, match="no account"):
         admin.delete_account(pg, actor, target)
 

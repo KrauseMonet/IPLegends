@@ -2737,6 +2737,16 @@ games: the move list is the state. The original plan for Teammate Chain ("link A
 steps") was measured and dropped (74% of pairs share exactly one bridge); the endurance chain that
 replaced it was in turn replaced by this.
 
+**Puzzle results** (`game/puzzle_results.py`, `web/puzzle_results.py`, `web/puzzle_routes.py`, migration 046,
+A189). The first persistence the puzzle games have: `puzzle_results` (one row per account, game and day, by
+primary key) and `puzzle_picks` (the correct answers each voter, signed in or not, put in each slot, which rarity
+reads). A signed-in player's finished daily is submitted as its MOVES, replayed server-side against the day's
+puzzle, and the replayed outcome is recorded; the score is the game's own (Bingo `100/sqrt(n)` per cell, Guess the
+Player 100 per guess left, Name the XI 100 per man less 20 per mistake, Common Ground as above). Common Ground's
+timed attempt is clocked by the database, not the page: Start stamps an open row, each guess is stamped on
+arrival, and a clock that runs out unobserved is finished by a sweep at the limit. Only the day's own daily
+(or yesterday's) is ranked; signed-out play is unchanged and unranked.
+
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the
 side. Five mistakes end it; a player who played for the other side is a mistake that says so.

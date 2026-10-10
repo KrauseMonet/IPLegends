@@ -2759,6 +2759,12 @@ small sample never moves a score. In Bingo the share is the part of the players 
 this answer; in Name the XI and Common Ground it is the part of the day's players who found it. Signed-out
 players' picks are counted (under a browser id) and never ranked.
 
+**Badges** (`game/badges.py`, A192). Thirteen, derived from a player's finished dailies each time they are shown
+and never stored: streaks of 7, 30 and 100 days; a perfect Bingo grid; Guess the Player in two guesses or fewer;
+a full Common Ground set, and one inside 90 seconds; the full XI, and a flawless one; all four dailies on one day;
+25 and 100 puzzles finished; and a pick fewer than one player in twenty made. Each shows the day it was first won
+and progress toward the rest. They are on the profile page, from `GET /api/puzzles/me`.
+
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the
 side. Five mistakes end it; a player who played for the other side is a mistake that says so.

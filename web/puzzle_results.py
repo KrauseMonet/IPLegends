@@ -23,7 +23,7 @@ import json
 
 import re
 
-from game import ground, puzzle_results as pr, rarity
+from game import badges, ground, puzzle_results as pr, rarity
 
 CLOCK_GRACE_MS = 2000       # a guess typed on the last tick, in flight when the clock ran out
 
@@ -337,3 +337,40 @@ def combine(boards: dict[str, list[dict]]) -> list[dict]:
 def overall(conn, day: datetime.date, g: ground.Ground | None = None) -> list[dict]:
     """Every game's finished board for the day, combined."""
     return combine({game: board(conn, game, day, g, limit=0) for game in pr.GAMES})
+
+
+# --- what a player has done, for the profile and its badges -----------------------------------
+
+def account_results(conn, account_id: int) -> list[badges.Result]:
+    """Every finished daily this account has made, oldest first."""
+    rows = conn.execute(
+        "select game, day, score, solved, elapsed_ms, detail from puzzle_results "
+        "where account_id = %s and finished_at is not null order by day, game", (account_id,)).fetchall()
+    return [badges.Result(g, d, s, bool(sv), el, detail or {}) for g, d, s, sv, el, detail in rows]
+
+
+def rare_pick_days(conn, account_id: int) -> list[datetime.date]:
+    """The days on which this account made a correct pick that fewer than 1 player in
+    `badges.RARE_SHARE_ONE_IN` made, among at least `rarity.MIN_VOTERS`.
+
+    The counting rule is `game.rarity`'s, written a second time in SQL so one statement can
+    answer for every day at once instead of one query per day -- the same arrangement as the
+    daily board's order and `scenarios.rank_key`, and for the same reason it is checked: a
+    test builds real rows and asserts this agrees with `rarity.share` on them."""
+    rows = conn.execute(
+        """
+        select distinct m.day
+          from puzzle_picks m
+         cross join lateral (
+               select (select count(*) from puzzle_picks p
+                        where p.game = m.game and p.day = m.day and p.slot = m.slot
+                          and p.person_id = m.person_id) as chose,
+                      case when m.game = 'bingo'
+                           then (select count(*) from puzzle_picks p
+                                  where p.game = m.game and p.day = m.day and p.slot = m.slot)
+                           else (select count(distinct p.voter) from puzzle_picks p
+                                  where p.game = m.game and p.day = m.day) end as den) c
+         where m.voter = %s and c.den >= %s and c.chose * %s <= c.den
+         order by m.day
+        """, (f"a:{account_id}", rarity.MIN_VOTERS, badges.RARE_SHARE_ONE_IN)).fetchall()
+    return [r[0] for r in rows]

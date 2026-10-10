@@ -96,10 +96,46 @@ function renderProfileKit(){
 }
 document.addEventListener('kitchange', () => { if (ME && ME.account_id) renderProfileKit(); });
 
+// The puzzle record and its badges: derived on the server from the finished dailies every time
+// (nothing about a badge is stored), so this only draws them.
+const PZ_GAMES = {bingo: 'Bingo', guess: 'Guess the Player', common: 'Common Ground', xi: 'Name the XI'};
+
+function badgeHtml(b){
+  const when = b.earned_on ? new Date(b.earned_on + 'T00:00:00Z')
+    .toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'}) : '';
+  const bar = !b.earned && b.target > 1
+    ? `<div class="pzbg-bar"><i style="width:${Math.round(100 * b.progress / b.target)}%"></i></div>
+       <em>${b.progress} of ${b.target}</em>` : '';
+  return `<div class="pzbg${b.earned ? ' on' : ''}" title="${esc(b.blurb)}">
+      <span class="pzbg-mark">${b.earned ? '★' : '·'}</span>
+      <b>${esc(b.name)}</b><span>${esc(b.blurb)}</span>
+      ${b.earned ? `<em>${esc(when)}</em>` : bar}</div>`;
+}
+
+function renderPuzzles(r){
+  const n = v => (v == null ? '–' : v.toLocaleString());
+  $('#pzFinished').textContent = n(r.finished);
+  $('#pzStreak').textContent = r.streak ? `🔥 ${r.streak}` : '0';
+  $('#pzBestStreak').textContent = n(r.best_streak);
+  $('#pzGames').innerHTML = Object.entries(PZ_GAMES).map(([k, name]) => {
+    const g = r.games[k];
+    return `<div class="pz-game"><b>${esc(name)}</b>
+      <span>${g.played ? `${g.played} played · best ${g.best}` : 'not played yet'}</span></div>`;
+  }).join('');
+  const earned = r.badges.filter(b => b.earned).length;
+  $('#pzBadgeCount').textContent = `${earned} of ${r.badges.length}`;
+  // Earned first, in the order they were won; then the ones still to win, nearest first.
+  const sorted = r.badges.slice().sort((a, b) =>
+    (b.earned - a.earned) || (a.earned ? a.earned_on.localeCompare(b.earned_on)
+                                       : (b.progress / b.target) - (a.progress / a.target)));
+  $('#pzBadges').innerHTML = sorted.map(badgeHtml).join('');
+}
+
 async function boot(){
   const meta = loadMeta().then(m => { renderDeckStats(m); });
   const me = loadMe();
   const profile = api('/api/profile').catch(err => err);   // 401 handled below, not thrown
+  const puzzles = api('/api/puzzles/me').catch(() => null);  // an extra: its absence must not blank the page
 
   await Promise.all([meta, me]);
   if (!ME || !ME.account_id){
@@ -109,6 +145,8 @@ async function boot(){
   const p = await profile;
   if (p instanceof Error){ slip(p.message); return; }
   render(p);
+  const record = await puzzles;
+  if (record) renderPuzzles(record);
 }
 
 boot();

@@ -18,8 +18,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from game import bingo, ground, guess as guess_game, puzzle_results as pr, rarity, xi as xi_game
-from web import auth, bingo_routes, db, ground_routes, puzzle_results, xi_routes
+from game import badges, bingo, ground, guess as guess_game, puzzle_results as pr, rarity, xi as xi_game
+from web import auth, bingo_routes, daily as daily_lib, db, ground_routes, puzzle_results, xi_routes
 
 router = APIRouter()
 
@@ -374,3 +374,55 @@ def board(game: str, request: Request, response: Response, date: str | None = No
     me = next((r for r in out[BOARD_TOP:] if r.you), None)
     return BoardOut(game=game, label=GAME_LABELS[game], date=day.isoformat(), finished=len(out),
                     rows=top, me=me)
+
+
+# --- a player's own puzzle record ------------------------------------------------------------
+
+class BadgeOut(BaseModel):
+    key: str
+    name: str
+    blurb: str
+    group: str
+    target: int
+    progress: int
+    earned: bool
+    earned_on: str | None = None
+
+
+class GameRecordOut(BaseModel):
+    played: int
+    solved: int
+    best: int                         # the game's own score, rarity aside
+
+
+class PuzzleRecordOut(BaseModel):
+    finished: int
+    days: int                         # distinct days with a puzzle finished
+    streak: int
+    best_streak: int
+    games: dict[str, GameRecordOut]
+    badges: list[BadgeOut]
+
+
+@router.get("/api/puzzles/me", response_model=PuzzleRecordOut)
+def my_record(request: Request, response: Response) -> PuzzleRecordOut:
+    """What the signed-in player has done in the daily puzzles, and the badges that adds up to.
+    Derived from their results every time it is asked (A19): nothing about a badge is stored."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    with db.connection() as conn:
+        results = puzzle_results.account_results(conn, account_id)
+        rare = puzzle_results.rare_pick_days(conn, account_id)
+    days = sorted({r.day for r in results})
+    streak, best = daily_lib.streaks(days, bingo_routes.today())
+    games = {}
+    for game in badges.GAMES:
+        mine = [r for r in results if r.game == game]
+        games[game] = GameRecordOut(played=len(mine), solved=sum(r.solved for r in mine),
+                                    best=max((r.score for r in mine), default=0))
+    return PuzzleRecordOut(
+        finished=len(results), days=len(days), streak=streak, best_streak=best, games=games,
+        badges=[BadgeOut(key=b.key, name=b.name, blurb=b.blurb, group=b.group, target=b.target,
+                         progress=b.progress, earned=b.earned,
+                         earned_on=b.earned_on.isoformat() if b.earned_on else None)
+                for b in badges.evaluate(results, rare)])

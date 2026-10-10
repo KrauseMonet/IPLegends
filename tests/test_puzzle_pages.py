@@ -95,3 +95,23 @@ def test_common_ground_uses_the_servers_clock_only_when_signed_in_on_the_daily()
     assert "/api/ground/ranked/start" in js and "/api/ground/ranked/play" in js
     # a signed-out finish blocks a ranked second look: the answers were on screen
     assert "cgSave({anonDone: p.date})" in js and "cgStore().anonDone === puzzle.date" in js
+
+
+def test_the_profile_reads_only_fields_the_record_endpoint_sends():
+    from web.puzzle_routes import BadgeOut, GameRecordOut, PuzzleRecordOut
+    js = (STATIC / "profile.js").read_text()
+    body = js[js.index("function badgeHtml"):js.index("async function boot")]
+    top = set(re.findall(r"\br\.([a-z_]+)", body))
+    assert top and top <= set(PuzzleRecordOut.model_fields), top - set(PuzzleRecordOut.model_fields)
+    badge = set(re.findall(r"\bb\.([a-z_]+)", body)) - {"length"}
+    assert badge <= set(BadgeOut.model_fields), badge - set(BadgeOut.model_fields)
+    game = set(re.findall(r"\bg\.([a-z_]+)", body))
+    assert game <= set(GameRecordOut.model_fields), game - set(GameRecordOut.model_fields)
+
+
+def test_the_profile_lists_exactly_the_games_the_badges_know():
+    from game.badges import GAMES
+    js = (STATIC / "profile.js").read_text()
+    shown = re.findall(r"(\w+): '([^']+)'", re.search(r"const PZ_GAMES = \{(.*?)\}", js, re.S).group(1))
+    assert {k for k, _ in shown} == set(GAMES)
+    assert 'id="puzzlePanel"' in (STATIC / "profile.html").read_text()

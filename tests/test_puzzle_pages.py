@@ -25,6 +25,24 @@ def test_every_game_page_has_a_slot_for_the_rank_and_the_board():
         assert 'id="pzRank"' in html and 'id="pzBoard"' in html, page
 
 
+def test_the_games_with_picks_have_a_slot_for_rarity_and_guess_the_player_does_not():
+    for page in ("bingo.html", "xi.html", "commonground.html"):
+        assert 'id="pzRarity"' in (STATIC / page).read_text(), page
+    assert 'id="pzRarity"' not in (STATIC / "guess.html").read_text()
+    assert "if (game === 'guess') return null;" in (STATIC / "puzzle.js").read_text()
+
+
+def test_a_signed_out_finish_sends_the_picks_route_only_fields_it_accepts():
+    from web.puzzle_routes import PicksIn
+    for js in ("bingo.js", "xi.js"):
+        call = re.search(r"pzRankDaily\('\w+', \{(.*?)\}, [\w.]+\)", (STATIC / js).read_text(), re.S).group(1)
+        top = re.sub(r"\(\{[^}]*\}\)", "", call)
+        assert set(re.findall(r"\b([a-z_]+):", top)) <= set(PicksIn.model_fields), js
+    cg = re.search(r"pzCountPicks\('common', \{(.*?)\}\)", (STATIC / "commonground.js").read_text(), re.S).group(1)
+    assert set(re.findall(r"\b([a-z_]+):", cg)) <= set(PicksIn.model_fields)
+    assert "X-Daily-Device" in (STATIC / "puzzle.js").read_text()
+
+
 @pytest.mark.parametrize("game", sorted(GAMES))
 def test_each_untimed_game_submits_only_fields_the_api_accepts(game):
     from web.puzzle_routes import SubmitIn
@@ -66,7 +84,7 @@ def test_every_route_the_browser_calls_for_ranking_exists():
     served = set(app.openapi()["paths"])
     js = "".join((STATIC / f).read_text() for f in ("puzzle.js", "commonground.js", "puzzles.js"))
     called = set(re.findall(r"['`](/api/(?:puzzles|ground)/[a-z/]+)", js))
-    assert {"/api/puzzles/submit", "/api/ground/ranked", "/api/ground/ranked/start"} <= called
+    assert {"/api/puzzles/submit", "/api/puzzles/picks", "/api/ground/ranked", "/api/ground/ranked/start"} <= called
     for path in called:
         assert path.rstrip("/") in served or path.rstrip("/") + "/{game}" in served, path
 

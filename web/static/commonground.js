@@ -71,7 +71,7 @@ async function cgLoad(puzzle, fresh){
   CG.peeked = CG.mode === 'daily' && cgStore().anonDone === puzzle.date;
   CG.signedIn = await pzSignedIn();
   CG.ranked = CG.mode === 'daily' && CG.signedIn && !CG.peeked;
-  CG.rank = null; CG.of = 0;
+  CG.rank = null; CG.of = 0; CG.points = 0; CG.bonus = 0; CG.rarity = null;
   if (CG.ranked){ await cgLoadRanked(); return; }
   const s = cgStore();
   const saved = CG.mode === 'daily'
@@ -110,7 +110,7 @@ async function cgLoadRanked(){
 // Take the server's reading of the attempt: the position, and how much of the clock is left,
 // from which the page's own start time is rebuilt (so the countdown is the server's).
 function cgApplyRanked(r){
-  CG.rank = r.rank; CG.of = r.of;
+  CG.rank = r.rank; CG.of = r.of; CG.points = r.points; CG.bonus = r.bonus; CG.rarity = r.rarity;
   if (!r.started){ CG.started = null; CG.state = null; CG.moves = []; return; }
   CG.state = r.state;
   CG.started = Date.now() - (cgLimitMs() - r.remaining_ms);
@@ -361,15 +361,21 @@ function cgFinish(fresh){
 // Where the attempt placed, and today's board. Only a ranked attempt has a place; a signed-out
 // daily gets the way to earn one, and practice gets neither.
 async function cgRankPanel(){
-  const el = $('#pzRank'), board = $('#pzBoard');
-  if (CG.mode !== 'daily'){ el.innerHTML = ''; board.innerHTML = ''; return; }
+  const el = $('#pzRank'), board = $('#pzBoard'), rar = $('#pzRarity');
+  if (CG.mode !== 'daily'){ el.innerHTML = ''; board.innerHTML = ''; rar.innerHTML = ''; return; }
   const st = CG.state;
   el.innerHTML = CG.ranked && CG.rank
-    ? `<div class="pzr-chip"><i>Today's rank</i><b>#${CG.rank}</b> of ${CG.of}<span>${st.score.points} pts</span></div>`
+    ? `<div class="pzr-chip"><i>Today's rank</i><b>#${CG.rank}</b> of ${CG.of}<span>${CG.points} pts${
+        CG.bonus ? ` · ${st.score.points} + ${CG.bonus} rarity` : ''}</span></div>`
     : CG.signedIn ? `<div class="pzr-note">Not ranked: this pair was played in this browser while signed out.</div>`
     : `<div class="pzr-note">Sign in to be ranked on today's board.
         <button class="act minor" onclick="openAuthModal('login')">Sign in</button></div>`;
   pzLoadBoard('common', '#pzBoard', CG.puzzle.date);
+  if (CG.ranked){ rar.innerHTML = pzRarityHtml(CG.rarity); return; }
+  // Signed out: still counted toward rarity, under this browser's id, and never ranked.
+  rar.innerHTML = '';
+  rar.innerHTML = pzRarityHtml(await pzCountPicks('common', {seed: CG.puzzle.seed, moves: CG.moves,
+    end_t: CG.state && CG.state.reason !== 'all' && CG.ended ? CG.ended.t : null}));
 }
 
 // Signing in on this page redraws it. A player looking at a finished signed-out attempt is not

@@ -646,7 +646,8 @@ def test_guess_and_xi_results_over_http(client, pg, facts, sides):
 def test_common_ground_ranked_over_http_from_start_to_finish(client, pg, real):
     a = sign_in(client, pg)
     assert client.get("/api/ground/ranked").json() == {"started": False, "finished": False, "late": False,
-                                                       "remaining_ms": 0, "state": None, "rank": None, "of": 0}
+                                                       "remaining_ms": 0, "state": None, "rank": None, "of": 0,
+                                                       "points": 0, "bonus": 0, "rarity": None}
     assert client.post("/api/ground/ranked/play", json={"guess": "x"}).status_code == 409    # no Start yet
     started = client.post("/api/ground/ranked/start").json()
     assert started["started"] and not started["finished"] and started["remaining_ms"] > 235_000

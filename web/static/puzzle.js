@@ -181,25 +181,71 @@ async function pzLoadBoard(game, targetSel, date){
 // After a daily is finished: record it if signed in, say how it ranked, and show the board.
 // `body` is the game's moves for /api/puzzles/submit. Idempotent on the server, so a reload of a
 // finished page simply reports the result that was already recorded.
+// One id per browser, shared with the daily challenge (same key): what a signed-out player's
+// picks are counted under for rarity. It ranks nobody -- clearing the browser mints a new one,
+// which is exactly why a signed-out result is never on a board.
+const PZ_DEVICE_KEY = 'iplegends_daily_device';
+function pzDeviceId(){
+  let id = null;
+  try { id = localStorage.getItem(PZ_DEVICE_KEY); } catch(e){ /* blocked storage */ }
+  if (!/^[0-9a-f]{32}$/.test(id || '')){
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    id = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+    try { localStorage.setItem(PZ_DEVICE_KEY, id); } catch(e){ /* a per-visit id then */ }
+  }
+  return id;
+}
+
+// How rare the player's picks were. Until a slot has enough voters there is nothing to say, and
+// the panel says when there will be rather than showing a zero that reads like a verdict.
+function pzRarityHtml(r){
+  if (!r) return '';
+  if (!r.enough)
+    return `<div class="pzy-note">Rarity scoring starts once ${r.min_voters} players have finished today's
+      puzzle. ${r.voters} so far.</div>`;
+  const scored = r.picks.filter(p => p.share !== null).sort((a, b) => a.share - b.share);
+  const rare = scored.slice(0, 3).map(p => `<span><b>${esc(p.name)}</b> ${Math.round(p.share * 100)}%</span>`).join('');
+  return `<div class="pzy"><div class="pzy-head"><i>Rarity</i><b>+${r.bonus}</b>
+    <span>for picks few others made</span></div>${rare ? `<div class="pzy-rare"><i>Your rarest</i>${rare}</div>` : ''}</div>`;
+}
+
 let PZ_RANK_ARGS = null;
 // Somebody who finished while signed out and signs in on the same page is ranked right then.
 document.addEventListener('signedin', () => { if (PZ_RANK_ARGS) pzRankDaily(...PZ_RANK_ARGS); });
+
+// A signed-out finish is still COUNTED toward rarity (Bingo and Name the XI; Guess the Player has
+// no picks), under this browser's id. It is never ranked.
+async function pzCountPicks(game, body){
+  if (game === 'guess') return null;
+  try {
+    const r = await api('/api/puzzles/picks', {method: 'POST', retry: true,
+      headers: Object.assign({'X-Daily-Device': pzDeviceId()}, PZ_JSON),
+      body: JSON.stringify(Object.assign({game}, body))});
+    return r.rarity;
+  } catch(e){ return null; }
+}
 
 async function pzRankDaily(game, body, date){
   const rankEl = $('#pzRank');
   if (!rankEl) return;
   PZ_RANK_ARGS = [game, body, date];
+  const rarEl = $('#pzRarity');
   if (!(await pzSignedIn())){
     rankEl.innerHTML = `<div class="pzr-note">Sign in to be ranked on today's board.
       <button class="act minor" onclick="openAuthModal('login')">Sign in</button></div>`;
     pzLoadBoard(game, '#pzBoard', date);
+    const rar = await pzCountPicks(game, body);
+    if (rarEl) rarEl.innerHTML = pzRarityHtml(rar);
     return;
   }
   try {
-    const r = await api('/api/puzzles/submit', {method: 'POST', retry: true, headers: PZ_JSON,
+    const r = await api('/api/puzzles/submit', {method: 'POST', retry: true,
+      headers: Object.assign({'X-Daily-Device': pzDeviceId()}, PZ_JSON),
       body: JSON.stringify(Object.assign({game}, body))});
     rankEl.innerHTML = `<div class="pzr-chip"><i>Today's rank</i><b>#${r.rank}</b> of ${r.of}
-      <span>${r.score} pts${r.recorded ? '' : ' · already recorded'}</span></div>`;
+      <span>${r.points} pts${r.bonus ? ` · ${r.score} + ${r.bonus} rarity` : ''}${r.recorded ? '' : ' · already recorded'}</span></div>`;
+    if (rarEl) rarEl.innerHTML = pzRarityHtml(r.rarity);
   } catch(e){
     rankEl.innerHTML = `<div class="pzr-note">${esc(e.message)}</div>`;
   }

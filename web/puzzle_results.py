@@ -21,7 +21,9 @@ from __future__ import annotations
 import datetime
 import json
 
-from game import ground, puzzle_results as pr
+import re
+
+from game import ground, puzzle_results as pr, rarity
 
 CLOCK_GRACE_MS = 2000       # a guess typed on the last tick, in flight when the clock ran out
 
@@ -44,7 +46,60 @@ def _insert_picks(conn, game: str, day: datetime.date, voter: str, picks) -> Non
                  [x for row in rows for x in row])
 
 
-def record(conn, account_id: int, day: datetime.date, outcome: pr.Outcome, moves: list) -> bool:
+_DEVICE = re.compile(r"[0-9a-f]{32}")
+
+
+def device_voter(device_id: str | None) -> str:
+    """The voter key for a signed-out browser: `d:` and the 32 hex characters it keeps. Refused
+    unless it is exactly that, so an arbitrary header cannot become a row (the table's CHECK is
+    the second line of defence)."""
+    if not device_id or not _DEVICE.fullmatch(device_id):
+        raise pr.PuzzleResultError("A signed-out pick needs a valid device id.")
+    return f"d:{device_id}"
+
+
+def record_device_picks(conn, game: str, day: datetime.date, voter: str, picks) -> bool:
+    """A signed-out player's correct picks, counted toward rarity and never ranked. Returns
+    whether any was new -- a repeat from the same browser changes nothing."""
+    before = conn.execute("select count(*) from puzzle_picks where game = %s and day = %s and voter = %s",
+                          (game, day, voter)).fetchone()[0]
+    _insert_picks(conn, game, day, voter, picks)
+    after = conn.execute("select count(*) from puzzle_picks where game = %s and day = %s and voter = %s",
+                         (game, day, voter)).fetchone()[0]
+    return after > before
+
+
+def counts(conn, game: str, day: datetime.date) -> rarity.Counts:
+    """What the day's picks add up to, for `game.rarity`. One statement: the voter total rides on
+    every row so a day with no picks costs nothing extra."""
+    rows = conn.execute(
+        "select slot, person_id, count(*), "
+        "(select count(distinct voter) from puzzle_picks where game = %s and day = %s) "
+        "from puzzle_picks where game = %s and day = %s group by slot, person_id",
+        (game, day, game, day)).fetchall()
+    c = rarity.Counts()
+    for slot, pid, n, voters in rows:
+        c.by_pick[(slot, pid)] = n
+        c.by_slot[slot] = c.by_slot.get(slot, 0) + n
+        c.voters = voters
+    return c
+
+
+def rarity_of(conn, game: str, day: datetime.date, picks) -> dict:
+    """How rare each of these picks is today, and what the lot earns: the breakdown a finish
+    screen shows. `picks` are `game.puzzle_results.Pick`s. `enough` is false while no slot has the
+    voters to say."""
+    c = counts(conn, game, day)
+    rows = [{"slot": p.slot, "person_id": p.person_id,
+             "share": rarity.share(game, p.slot, p.person_id, c),
+             "bonus": rarity.bonus_for(game, p.slot, p.person_id, c)} for p in picks]
+    return {"voters": c.voters, "min_voters": rarity.MIN_VOTERS, "rarity_max": rarity.RARITY_MAX,
+            "enough": any(r["share"] is not None for r in rows), "bonus": sum(r["bonus"] for r in rows),
+            "picks": rows}
+
+
+def record(conn, account_id: int, day: datetime.date, outcome: pr.Outcome, moves: list,
+           device_id: str | None = None) -> bool:
     """Record one finished untimed attempt. Returns whether it was new: a second submission of
     the same game and day is ignored, so a reload or a double click cannot rewrite a result."""
     written = conn.execute(
@@ -58,6 +113,11 @@ def record(conn, account_id: int, day: datetime.date, outcome: pr.Outcome, moves
         (account_id, outcome.game, day, json.dumps(moves), outcome.ended, outcome.score,
          outcome.solved, outcome.elapsed_ms, json.dumps(outcome.detail()))).fetchone()
     if written is not None:
+        # The same person finishing signed out and then signed in must count once: their
+        # browser's picks are dropped in favour of the account's.
+        if device_id and _DEVICE.fullmatch(device_id) and outcome.game in pr.PICK_GAMES:
+            conn.execute("delete from puzzle_picks where game = %s and day = %s and voter = %s",
+                         (outcome.game, day, f"d:{device_id}"))
         _insert_picks(conn, outcome.game, day, f"a:{account_id}", outcome.picks)
     return written is not None
 
@@ -212,23 +272,32 @@ def board(conn, game: str, day: datetime.date, g: ground.Ground | None = None,
           from puzzle_results r join accounts a using (account_id)
          where r.game = %s and r.day = %s and r.finished_at is not null
         """, (game, day)).fetchall()
-    out = [{"account_id": acc, "username": u,
-            "kit": {"name": kn, "monogram": km, "colour": kc} if kn is not None else None,
-            "score": score, "points": score, "solved": solved, "elapsed_ms": elapsed,
-            "finished_at": finished, "detail": detail}
-           for acc, u, kn, km, kc, score, solved, elapsed, finished, detail in rows]
+    c = counts(conn, game, day) if game in pr.PICK_GAMES and rows else None
+    out = []
+    for acc, u, kn, km, kc, score, solved, elapsed, finished, detail in rows:
+        bonus = rarity.total_bonus(game, (detail or {}).get("picks", ()), c) if c is not None else 0
+        out.append({"account_id": acc, "username": u,
+                    "kit": {"name": kn, "monogram": km, "colour": kc} if kn is not None else None,
+                    "score": score, "bonus": bonus, "points": score + bonus, "solved": solved,
+                    "elapsed_ms": elapsed, "finished_at": finished, "detail": detail})
     out.sort(key=rank_key)
     for i, row in enumerate(out, 1):
         row["rank"] = i
     return out[:limit] if limit else out
 
 
+def standing(conn, game: str, day: datetime.date, account_id: int,
+             g: ground.Ground | None = None) -> tuple[dict | None, int]:
+    """This player's own board row (with its rarity bonus) and how many finished."""
+    rows = board(conn, game, day, g, limit=0)
+    return next((r for r in rows if r["account_id"] == account_id), None), len(rows)
+
+
 def rank_of(conn, game: str, day: datetime.date, account_id: int,
             g: ground.Ground | None = None) -> tuple[int | None, int]:
     """This player's place today and how many finished -- 'third of twelve'."""
-    rows = board(conn, game, day, g, limit=0)
-    mine = next((r["rank"] for r in rows if r["account_id"] == account_id), None)
-    return mine, len(rows)
+    mine, n = standing(conn, game, day, account_id, g)
+    return (mine["rank"] if mine else None), n
 
 
 # --- the day's overall board -----------------------------------------------------------------

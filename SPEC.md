@@ -2753,6 +2753,12 @@ best in it, out of 100, and sums the games a player finished (a perfect day is 4
 computed in Python from the day's finished rows when read, so a rarity adjustment (A191) never leaves a stored
 number stale. The Puzzles hub shows them as tabs and each game's finish screen shows its own.
 
+**Rarity** (`game/rarity.py`, A191). A correct pick few other players made earns a bonus of up to 50 on top of the
+base score; one everybody made earns none. A slot earns nothing until 20 players have been counted in it, so a
+small sample never moves a score. In Bingo the share is the part of the players who filled that cell who chose
+this answer; in Name the XI and Common Ground it is the part of the day's players who found it. Signed-out
+players' picks are counted (under a browser id) and never ranked.
+
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the
 side. Five mistakes end it; a player who played for the other side is a mistake that says so.

@@ -18,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from game import bingo, ground, guess as guess_game, puzzle_results as pr, xi as xi_game
+from game import bingo, ground, guess as guess_game, puzzle_results as pr, rarity, xi as xi_game
 from web import auth, bingo_routes, db, ground_routes, puzzle_results, xi_routes
 
 router = APIRouter()
@@ -47,14 +47,51 @@ class SubmitIn(BaseModel):
     gave_up: bool = False
 
 
+class RarityPickOut(BaseModel):
+    slot: str
+    person_id: str
+    name: str
+    share: float | None = None        # the part of the field that made this pick; None while the sample is small
+    bonus: int = 0
+
+
+class RarityOut(BaseModel):
+    voters: int
+    min_voters: int
+    rarity_max: int
+    enough: bool                      # at least one pick has a big enough sample to be scored
+    bonus: int                        # the whole result's rarity bonus
+    picks: list[RarityPickOut]
+
+
 class SubmitOut(BaseModel):
     recorded: bool          # false if this account had already finished this puzzle
     game: str
     date: str
-    score: int
+    score: int              # the game's own score for the moves
+    bonus: int = 0          # rarity, on top (0 until a slot has the voters for it)
+    points: int = 0         # score + bonus: what the board ranks
     solved: bool
     rank: int | None = None
     of: int = 0
+    rarity: RarityOut | None = None
+
+
+DEVICE_HEADER = "X-Daily-Device"
+
+
+def _rarity_out(conn, game: str, day, picks) -> RarityOut | None:
+    """Rarity for a result's correct picks, named. None for a game whose picks are not counted."""
+    if game not in pr.PICK_GAMES:
+        return None
+    raw = puzzle_results.rarity_of(conn, game, day, picks)
+    players = bingo_routes.facts().players
+    return RarityOut(**{**raw, "picks": [RarityPickOut(**p, name=players[p["person_id"]].name)
+                                         for p in raw["picks"]]})
+
+
+def _picks_from_detail(detail: dict) -> list[pr.Pick]:
+    return [pr.Pick(slot, pid, base) for slot, pid, base in (detail or {}).get("picks", [])]
 
 
 def _outcome(body: SubmitIn) -> tuple[pr.Outcome, list]:
@@ -79,14 +116,78 @@ def submit(body: SubmitIn, request: Request, response: Response) -> SubmitOut:
         outcome, moves = _outcome(body)
     except pr.PuzzleResultError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    device = request.headers.get(DEVICE_HEADER)
     with db.connection() as conn:
-        new = puzzle_results.record(conn, account_id, day, outcome, moves)
+        new = puzzle_results.record(conn, account_id, day, outcome, moves, device_id=device)
         mine = puzzle_results.result_for(conn, account_id, body.game, day)
-        rank, of = puzzle_results.rank_of(conn, body.game, day, account_id)
-    # The stored result is what counts: a repeat submission reports the first one, never this one.
+        row, of = puzzle_results.standing(conn, body.game, day, account_id)
+        # The stored result is what counts: a repeat submission reports the first one, never this one.
+        stored = _picks_from_detail(mine["detail"]) if mine else list(outcome.picks)
+        rar = _rarity_out(conn, body.game, day, stored)
     return SubmitOut(recorded=new, game=body.game, date=day.isoformat(),
                      score=mine["score"] if mine else outcome.score,
-                     solved=mine["solved"] if mine else outcome.solved, rank=rank, of=of)
+                     bonus=row["bonus"] if row else 0, points=row["points"] if row else outcome.score,
+                     solved=mine["solved"] if mine else outcome.solved,
+                     rank=row["rank"] if row else None, of=of, rarity=rar)
+
+
+# --- a signed-out player's picks, for rarity -------------------------------------------------
+
+class MoveIn(BaseModel):
+    id: str = Field(max_length=64)
+    t: int = Field(ge=0, le=ground.LIMIT_MS)
+
+
+class PicksIn(BaseModel):
+    game: Literal["bingo", "xi", "common"]
+    seed: int = Field(ge=1)
+    cells: list[CellGuess] = Field(default_factory=list, max_length=bingo.GUESSES)
+    ids: list[str] = Field(default_factory=list, max_length=xi_game.MAX_GUESSES)
+    moves: list[MoveIn] = Field(default_factory=list, max_length=ground.MAX_GUESSES)   # Common Ground's
+    end_t: int | None = Field(default=None, ge=0, le=ground.LIMIT_MS)
+    gave_up: bool = False
+
+
+class PicksOut(BaseModel):
+    counted: bool            # false for a repeat, or for somebody signed in (their result carries them)
+    rarity: RarityOut | None = None
+
+
+def _picks_outcome(body: PicksIn) -> pr.Outcome:
+    facts = bingo_routes.facts()
+    if body.game == "bingo":
+        grid = bingo.make_grid(facts, body.seed)
+        return pr.verify_bingo(grid, facts, [(c.cell, c.id) for c in body.cells])
+    if body.game == "xi":
+        side = xi_game.pick_side(xi_routes.sides(), body.seed)
+        return pr.verify_xi(facts.players, side, list(body.ids), body.gave_up)
+    g = ground_routes.ground()
+    return pr.verify_common(g, g.puzzle(body.seed), [ground.Move(m.id, m.t) for m in body.moves],
+                            end_t=body.end_t)
+
+
+@router.post("/api/puzzles/picks", response_model=PicksOut)
+def picks(body: PicksIn, request: Request, response: Response) -> PicksOut:
+    """Count a SIGNED-OUT player's correct picks toward rarity, and say how rare they were.
+
+    They are never ranked: a pick is a row of counts with a browser's random id, so nothing here
+    can put anybody on a board. The moves are replayed exactly as a ranked result's are, so a
+    forged list either fails to replay or replays into a real set of picks. Somebody signed in
+    is not counted here at all -- their result carries their picks -- so the same person cannot
+    count twice by being on two routes."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        day = pr.daily_date(body.seed, bingo_routes.today())
+        outcome = _picks_outcome(body)
+        signed_in = _soft_account(request) is not None
+        voter = None if signed_in else puzzle_results.device_voter(request.headers.get(DEVICE_HEADER))
+    except pr.PuzzleResultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with db.connection() as conn:
+        counted = False if voter is None else puzzle_results.record_device_picks(
+            conn, body.game, day, voter, outcome.picks)
+        rar = _rarity_out(conn, body.game, day, outcome.picks)
+    return PicksOut(counted=counted, rarity=rar)
 
 
 # --- Common Ground, on the server's clock ----------------------------------------------------
@@ -99,6 +200,9 @@ class RankedOut(BaseModel):
     state: ground_routes.StateOut | None = None
     rank: int | None = None
     of: int = 0
+    points: int = 0                    # what the board ranks: the score plus the rarity bonus
+    bonus: int = 0
+    rarity: RarityOut | None = None
 
 
 class RankedPlayIn(BaseModel):
@@ -128,12 +232,17 @@ def _ranked_out(conn, account_id: int, day, seed: int, g: ground.Ground, puzzle:
         moves = [ground.Move(m["id"], int(m["t"])) for m in view["moves"]]
         end_t = (view.get("detail") or {}).get("end_t") if view["finished"] and view["ended"] else None
         state = ground.replay(g, puzzle, moves, end_t=end_t)
-    rank = of = None
+    rank = of = rar = None
+    points = bonus = 0
     if view["finished"]:
-        rank, of = puzzle_results.rank_of(conn, "common", day, account_id, g)
+        row, of = puzzle_results.standing(conn, "common", day, account_id, g)
+        if row is not None:
+            rank, points, bonus = row["rank"], row["points"], row["bonus"]
+        rar = _rarity_out(conn, "common", day, [pr.Pick(m.id, m.id) for m in state.found])
     return RankedOut(started=True, finished=view["finished"], late=bool(view.get("late")),
                      remaining_ms=0 if view["finished"] else _remaining(view["elapsed_ms"]),
-                     state=ground_routes._state_out(g, state, seed), rank=rank, of=of or 0)
+                     state=ground_routes._state_out(g, state, seed), rank=rank, of=of or 0,
+                     points=points, bonus=bonus, rarity=rar)
 
 
 @router.get("/api/ground/ranked", response_model=RankedOut)

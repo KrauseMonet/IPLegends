@@ -1093,10 +1093,10 @@ async function drawJourneyCard(d, header, side){
   ctx.textAlign = 'left';
   ctx.fillStyle = ink;
   ctx.font = `400 30px ${CARD_DISPLAY}`;
-  ctx.fillText('FINE LEG', M, fy);
-  const lw = ctx.measureText('FINE LEG ').width;
+  ctx.fillText('THE LEGENDS', M, fy);
+  const lw = ctx.measureText('THE LEGENDS ').width;
   ctx.fillStyle = gold;
-  ctx.fillText('XI', M + lw, fy);
+  ctx.fillText('ALMANACK', M + lw, fy);
 
   ctx.strokeStyle = col.team;
   ctx.lineWidth = 6;

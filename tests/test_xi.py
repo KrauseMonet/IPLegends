@@ -355,9 +355,9 @@ def test_the_share_line_marks_named_slots_in_order_and_names_nobody(world):
     st = X.replay(people, side, ["p0", "zz", "p2", "o1"])
     text = X.share_text(side, st, "9 Oct 2026", daily=True, seed=739898)
     lines = text.splitlines()
-    assert lines[0] == "Fine Leg XI · Name the XI · 9 Oct 2026 · 2/11"
+    assert lines[0] == "Almanack Name the XI · 9 Oct 2026 · 2/11"
     assert lines[1] == "🟩⬛🟩" + "⬛" * 8
-    assert lines[2] == "2 wrong" and lines[3] == "finelegxi.in/xi"
+    assert lines[2] == "2 wrong" and lines[3] == "iplegends.vercel.app/xi"
     for p in people.values():
         assert p.name not in text
 

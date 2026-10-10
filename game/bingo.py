@@ -33,7 +33,6 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
 
 GUESSES = 9
 MIN_ANSWERS = 3          # every cell has at least this many valid players
@@ -221,7 +220,7 @@ def reveal(grid: Grid, facts: Facts, per_cell: int = 6) -> list[dict]:
 
 # --- sharing ------------------------------------------------------------------------------
 
-SHARE_HOST = f"{SITE_HOST}/bingo"
+SHARE_HOST = "iplegends.vercel.app/bingo"
 
 
 def share_text(grid: Grid, state: State, label: str, *, daily: bool) -> str:
@@ -229,7 +228,7 @@ def share_text(grid: Grid, state: State, label: str, *, daily: bool) -> str:
     grid is hunting the same players, so naming one would hand a reader the answer instead
     of the challenge (A129's rule for the daily). 🟩 a cell filled, 🟪 a RARE cell filled,
     ⬛ a cell left empty."""
-    lines = [f"{SITE_NAME} · Bingo · {label}"]
+    lines = [f"Almanack Bingo · {label}"]
     for r in range(3):
         row = ""
         for c in range(3):

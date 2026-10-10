@@ -27,13 +27,12 @@ from dataclasses import dataclass, field
 
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.puzzle_facts import PlayerFacts, XiPlayer, XiSide
-from game.site import SITE_HOST, SITE_NAME
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
 MISTAKES = 5
 MAX_GUESSES = 40               # a bound on the replayed list: 13 found plus 5 wrong is the most
-SHARE_HOST = f"{SITE_HOST}/xi"
+SHARE_HOST = "iplegends.vercel.app/xi"
 POINTS_PER_FIND = 100          # [A188] the leaderboard score: each man named
 PENALTY_PER_MISTAKE = 20       # ... each wrong name costs this much
 BONUS_PER_MISTAKE_LEFT = 20    # ... and a complete side earns this for every mistake not made
@@ -145,7 +144,7 @@ def share_text(side: XiSide, state: State, label: str, *, daily: bool, seed: int
     everybody is naming the same XI, so one name would hand a reader a slot (A129)."""
     got = set(state.found)
     squares = "".join("🟩" if q.person_id in got else "⬛" for q in side.players)
-    lines = [f"{SITE_NAME} · Name the XI · {label} · {len(state.found)}/{len(side.players)}", squares]
+    lines = [f"Almanack Name the XI · {label} · {len(state.found)}/{len(side.players)}", squares]
     if state.wrong:
         lines.append(f"{len(state.wrong)} wrong")
     lines.append(SHARE_HOST if daily else f"{SHARE_HOST}?seed={seed}")

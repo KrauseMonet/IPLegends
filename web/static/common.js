@@ -8,11 +8,6 @@
 
 const $ = s => document.querySelector(s);
 
-// The site's own address, for links that will be PASTED somewhere else (a share line, a copied
-// link): they must name the real site, not whatever host this page is served from. The one
-// copy of it in the browser; `game/site.py` holds the Python side and a test keeps them equal.
-const SITE_ORIGIN = 'https://finelegxi.in';
-
 // Every request that ever hung indefinitely -- diagnosed as drafts intermittently
 // freezing on a pick, the whole panel dimmed by busyClick's own busy-wait with no way
 // out -- did so because nothing here ever gave up on it. The server now fails a stuck
@@ -530,7 +525,7 @@ function fieldWheel(seats, filled, opts){
    generating it per request (or shipping a QR library to the browser) would be work done
    forever to produce the same bytes. */
 const UPI_ID = 'mishrakoustav01-1@okaxis';
-const UPI_PAYEE = 'Fine Leg XI';
+const UPI_PAYEE = 'The Legends Almanack';
 
 function tipsEnabled(){ return !!UPI_ID; }
 
@@ -551,7 +546,7 @@ function ensureTipChrome(){
     <div class="scorecard-shell tip-frame">
       <div class="scorecard-frame">
         <div class="tip-hero">
-          <div class="tip-eyebrow">Support Fine Leg XI</div>
+          <div class="tip-eyebrow">Support the Almanack</div>
           <div class="tip-title">Buy me a ball</div>
           <p class="tip-sub">This runs on a database, a host and a domain, paid for by one
             person. Anything you send covers those. Nothing here is paywalled and nothing

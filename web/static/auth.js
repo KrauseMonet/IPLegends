@@ -65,7 +65,7 @@ function ensureAuthChrome(){
   if (!frame || frame.querySelector('.auth-hero')) return;
   const hero = document.createElement('div');
   hero.className = 'auth-hero';
-  hero.innerHTML = `<div class="auth-hero-eyebrow">Fine Leg XI</div>
+  hero.innerHTML = `<div class="auth-hero-eyebrow">The Legends Almanack</div>
     <div class="auth-hero-title" id="authHeroTitle"></div>
     <div class="auth-hero-sub" id="authHeroSub"></div>`;
   frame.insertBefore(hero, frame.firstChild);

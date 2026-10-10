@@ -18,7 +18,7 @@
 //
 // 3. Hashed static assets are CACHE-FIRST and long-lived, which is safe precisely because
 //    the URL changes when the content does. That is the whole point of stamping them.
-const VERSION = 'finelegxi-v1';
+const VERSION = 'almanack-v1';
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 const PAGES = `${VERSION}-pages`;

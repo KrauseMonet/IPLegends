@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from game import ground as G
+from game import site
 from game import puzzle_facts
 from web import bingo_routes, ground_routes
 
@@ -395,10 +396,10 @@ def test_the_share_line_is_the_rhythm_the_score_and_no_names(small):
     g, people, puzzle = small
     st = play(g, puzzle, ("z", 1000), ("x", 2000), ("o", 3000), end_t=G.LIMIT_MS)
     lines = G.share_text(st, "9 Oct 2026", daily=True, seed=739898).splitlines()
-    assert lines[0] == "Fine Leg XI · Common Ground · 9 Oct 2026"
+    assert lines[0] == f"{site.SITE_NAME} · Common Ground · 9 Oct 2026"
     assert lines[1] == f"2/4 · {G.score(st).points} pts"
     assert lines[2] == "🟥🟩🟩⬛⬛"                           # miss, two finds, two never found
-    assert lines[-1] == "finelegxi.in/common"
+    assert lines[-1] == f"{site.SITE_HOST}/common"
     text = "\n".join(lines)
     for person in people.values():
         assert person.name not in text
@@ -471,7 +472,7 @@ def test_the_whole_set_finishes_it_with_the_bonus_the_reveal_and_the_share(clien
     n = len(moves)
     assert st["finished"] and st["reason"] == "all" and st["elapsed_ms"] == 1000 * n
     assert st["score"]["bonus"] == G.LIMIT_SECONDS - n and st["score"]["points"] == 100 * n + G.LIMIT_SECONDS - n
-    assert st["unfound"] == [] and st["share"].startswith("Fine Leg XI · Common Ground · 9 Oct 2026")
+    assert st["unfound"] == [] and st["share"].startswith(f"{site.SITE_NAME} · Common Ground · 9 Oct 2026")
 
 
 def test_time_up_and_giving_up_end_it_and_reveal_who_was_missed(client, real):

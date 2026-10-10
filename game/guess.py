@@ -33,7 +33,6 @@ from dataclasses import dataclass
 
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
@@ -47,7 +46,7 @@ CLOSE_RATIO = 0.25            # career runs or wickets within a quarter of the a
 CLOSE_RUNS_FLOOR = 100        # ... but never tighter than this many runs,
 CLOSE_WICKETS_FLOOR = 10      # ... or this many wickets: a tail-ender's 12 runs is not "far"
 CURRENT_SEASON = 2026         # "last played" of a man still in the league
-SHARE_HOST = f"{SITE_HOST}/guess"
+SHARE_HOST = "iplegends.vercel.app/guess"
 POINTS_PER_GUESS_LEFT = 100   # [A188] the leaderboard score: 100 for each guess you did NOT need
 
 ROLE_LABEL = {"batter": "Batter", "bowler": "Bowler", "allrounder": "All-rounder",
@@ -188,7 +187,7 @@ def share_text(players: dict[str, PlayerFacts], answer: PlayerFacts, state: Stat
     hunting the same man, so naming him (or anybody who narrowed it down) would hand a reader
     the answer instead of the challenge (A129). `X/8` when it was not found."""
     score = f"{len(state.guesses)}/{GUESSES}" if state.solved else f"X/{GUESSES}"
-    lines = [f"{SITE_NAME} · Guess the Player · {label} · {score}"]
+    lines = [f"Almanack Guess the Player · {label} · {score}"]
     for pid in state.guesses:
         lines.append("".join(SQUARE[t.status] for t in compare(players[pid], answer)))
     lines.append(SHARE_HOST if daily else f"{SHARE_HOST}?seed={seed}")

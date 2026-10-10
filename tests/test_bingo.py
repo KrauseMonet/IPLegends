@@ -306,11 +306,11 @@ def test_the_share_line_shows_the_shape_and_names_nobody(grid, facts):
         bingo.guess(grid, facts, st, cell, sorted(grid.cells[cell])[0])
     text = bingo.share_text(grid, st, "9 Oct 2026", daily=True)
     rows = text.splitlines()
-    assert rows[0] == "Fine Leg XI · Bingo · 9 Oct 2026"
+    assert rows[0] == "Almanack Bingo · 9 Oct 2026"
     assert sum(r.count("⬛") for r in rows[1:4]) == 7
     assert sum(r.count("🟩") + r.count("🟪") for r in rows[1:4]) == 2
     assert rows[4] == f"2/9 · {st.score} pts"
-    assert rows[5] == "finelegxi.in/bingo"
+    assert rows[5] == "iplegends.vercel.app/bingo"
     for p in facts.players.values():
         assert p.name not in text                    # a spoiler is the whole failure here
 
@@ -402,7 +402,7 @@ def test_the_finished_state_carries_the_share_text(client, facts):
     losers = [p for p in sorted(facts.players) if p not in g.cells[0]][:9]
     r = client.post("/api/bingo/play", json={"seed": 739898, "guesses": [[0, p] for p in losers[:8]],
                                              "guess": [0, losers[8]]}).json()
-    assert r["state"]["finished"] and r["state"]["share"].startswith("Fine Leg XI · Bingo · 9 Oct 2026")
+    assert r["state"]["finished"] and r["state"]["share"].startswith("Almanack Bingo · 9 Oct 2026")
 
 
 def test_players_list_names_everybody_and_hints_at_nothing(client, facts):

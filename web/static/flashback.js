@@ -10,7 +10,7 @@
 const QZ_BEST_KEY = 'iplegends_flashback_best';
 // A shared link has to work for whoever reads it, so it names the real site rather than
 // whatever host this page happens to be on (A129's reasoning for the daily's share line).
-const QZ_SHARE_ORIGIN = SITE_ORIGIN;
+const QZ_SHARE_ORIGIN = 'https://iplegends.vercel.app';
 const QZ_POINTS = 100, QZ_SPEED = 50, QZ_STREAK = 20, QZ_STREAK_CAP = 100;
 
 let QZ = null;           // the quiz payload

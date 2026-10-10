@@ -121,3 +121,87 @@ async function pzCopyLink(url){
   try { await navigator.clipboard.writeText(url); slip('Link copied.'); }
   catch(e){ slip(url); }
 }
+
+// --- ranking [A188] -----------------------------------------------------------------------
+// A signed-in player's finished DAILY is sent to the server as its moves, never as a score: the
+// server replays them and records what it computes. Signed out, every game plays as before and
+// simply is not ranked -- the page says so, with the way to fix it.
+
+async function pzSignedIn(){
+  if (typeof ME === 'undefined') return false;
+  if (ME === null){ try { await loadMe(); } catch(e){ return false; } }
+  return !!(ME && ME.account_id);
+}
+
+const PZ_GAME_NAMES = {bingo: 'Bingo', guess: 'Guess the Player', xi: 'Name the XI',
+                       common: 'Common Ground', overall: 'Overall'};
+
+function pzFmtTime(ms){
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// One board row. `overall` rows carry a per-game share; a game's own rows carry what it found.
+function pzBoardRowHtml(r, game){
+  const side = {short: r.username, name: r.username, kit: r.kit};
+  let note = '';
+  if (game === 'overall') note = `${r.played} game${r.played === 1 ? '' : 's'}`;
+  else if (game === 'common') note = `${r.found}/${r.total}${r.solved && r.elapsed_ms != null ? ' · ' + pzFmtTime(r.elapsed_ms) : ''}`;
+  else if (game === 'bingo') note = `${r.found}/${r.total}`;
+  else if (game === 'xi') note = `${r.found}/${r.total}`;
+  else if (game === 'guess') note = r.solved ? `${r.wrong + 1} guess${r.wrong ? 'es' : ''}` : 'not found';
+  return `<div class="pzb-row${r.you ? ' you' : ''}${r.rank <= 3 ? ' top' : ''}">
+    <span class="pzb-rank">${r.rank}</span>${sideBadge(side, 'pzb-badge')}
+    <span class="pzb-name">${esc(r.username)}${r.you ? ' <em>you</em>' : ''}</span>
+    <span class="pzb-note">${esc(note)}</span><b class="pzb-pts">${r.points}</b></div>`;
+}
+
+function pzBoardHtml(data, signedIn){
+  const game = data.game;
+  const head = `<div class="pzb-head"><span>${esc(data.label)} · today</span>
+    <em>${data.finished ? data.finished + ' finished' : ''}</em></div>`;
+  if (!data.rows.length)
+    return head + `<div class="pzb-empty">Nobody has finished ${game === 'overall' ? 'a puzzle' : 'this one'} today yet.
+      ${signedIn ? 'Yours could be the first name here.' : 'Sign in and yours could be the first.'}</div>`;
+  const rows = data.rows.map(r => pzBoardRowHtml(r, game)).join('');
+  const me = data.me ? `<div class="pzb-gap">⋯</div>${pzBoardRowHtml(data.me, game)}` : '';
+  return head + rows + me;
+}
+
+async function pzLoadBoard(game, targetSel, date){
+  const el = $(targetSel);
+  if (!el) return null;
+  try {
+    const data = await api(`/api/puzzles/board/${game}${date ? '?date=' + date : ''}`);
+    el.innerHTML = pzBoardHtml(data, await pzSignedIn());
+    return data;
+  } catch(e){ el.innerHTML = ''; return null; }       // a board that will not load must not hide the result
+}
+
+// After a daily is finished: record it if signed in, say how it ranked, and show the board.
+// `body` is the game's moves for /api/puzzles/submit. Idempotent on the server, so a reload of a
+// finished page simply reports the result that was already recorded.
+let PZ_RANK_ARGS = null;
+// Somebody who finished while signed out and signs in on the same page is ranked right then.
+document.addEventListener('signedin', () => { if (PZ_RANK_ARGS) pzRankDaily(...PZ_RANK_ARGS); });
+
+async function pzRankDaily(game, body, date){
+  const rankEl = $('#pzRank');
+  if (!rankEl) return;
+  PZ_RANK_ARGS = [game, body, date];
+  if (!(await pzSignedIn())){
+    rankEl.innerHTML = `<div class="pzr-note">Sign in to be ranked on today's board.
+      <button class="act minor" onclick="openAuthModal('login')">Sign in</button></div>`;
+    pzLoadBoard(game, '#pzBoard', date);
+    return;
+  }
+  try {
+    const r = await api('/api/puzzles/submit', {method: 'POST', retry: true, headers: PZ_JSON,
+      body: JSON.stringify(Object.assign({game}, body))});
+    rankEl.innerHTML = `<div class="pzr-chip"><i>Today's rank</i><b>#${r.rank}</b> of ${r.of}
+      <span>${r.score} pts${r.recorded ? '' : ' · already recorded'}</span></div>`;
+  } catch(e){
+    rankEl.innerHTML = `<div class="pzr-note">${esc(e.message)}</div>`;
+  }
+  pzLoadBoard(game, '#pzBoard', date);
+}

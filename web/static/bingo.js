@@ -228,6 +228,8 @@ async function bgFinish(fresh){
   const rare = st.placed.filter(p => p.answers <= 5).length;
   $('#bgStats').innerHTML = `<span><b>${st.placed.length}</b>/9 squares</span>`
     + (rare ? `<span><b>${rare}</b> rare</span>` : '') + `<span><b>${BG.guesses.length}</b> guesses</span>`;
+  if (BG.mode === 'daily')
+    pzRankDaily('bingo', {seed: g.seed, cells: BG.guesses.map(x => ({cell: x[0], id: x[1]}))}, g.date);
   try { BG.answers = await api(`/api/bingo/answers?seed=${g.seed}`); } catch(e){ /* still finished */ }
   bgRender();
   if (fresh) $('#bgDone').scrollIntoView({block: 'start', behavior: 'smooth'});

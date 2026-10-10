@@ -3620,3 +3620,37 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .pz-card.done{border-color:rgba(61,220,151,.5);background:linear-gradient(160deg,rgba(61,220,151,.08),var(--panel))}
 .pz-card.done .pz-go{color:var(--mint)}
 @media (max-width:640px){.pz-grid{grid-template-columns:1fr}.pz-card{min-height:0}}
+
+
+/* --- puzzle boards and ranks [A188] ---------------------------------------------------- */
+.pzb{margin:18px 0}
+.pzb-head{display:flex;justify-content:space-between;align-items:baseline;padding:0 4px 10px;
+  border-bottom:1px solid var(--line)}
+.pzb-head span{font-family:var(--display);font-size:24px;letter-spacing:.02em;text-transform:uppercase;color:var(--ink)}
+.pzb-head em{font:600 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;font-style:normal;color:var(--ink-3)}
+.pzb-row{display:grid;grid-template-columns:30px 34px minmax(0,1fr) auto 56px;align-items:center;gap:10px;
+  padding:9px 6px;border-bottom:1px solid rgba(255,255,255,.05)}
+.pzb-row.you{background:color-mix(in srgb,var(--gold) 9%,transparent);box-shadow:inset 3px 0 0 var(--gold)}
+.pzb-rank{font-family:var(--display);font-size:19px;color:var(--ink-3);text-align:center}
+.pzb-row.top .pzb-rank{color:var(--gold-2)}
+.pzb-badge.kit-badge,.pzb-badge.team-badge{width:30px;height:30px;font-size:10.5px;margin:0}
+.pzb-name{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pzb-name em{font:700 9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;font-style:normal;color:var(--gold)}
+.pzb-note{font:600 12px var(--mono);color:var(--ink-3);text-align:right;white-space:nowrap}
+.pzb-pts{font:700 15px var(--mono);color:var(--gold-2);text-align:right}
+.pzb-gap{text-align:center;color:var(--ink-3);padding:2px 0;letter-spacing:.3em}
+.pzb-empty{color:var(--ink-3);font-size:14px;padding:14px 4px}
+.pzr{margin:14px 0 4px}
+.pzr-chip{display:inline-flex;align-items:baseline;gap:10px;padding:9px 16px;border:1px solid var(--gold);
+  border-radius:999px;background:rgba(245,184,61,.08);font:600 13px var(--mono);color:var(--ink-2)}
+.pzr-chip i{font-style:normal;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.pzr-chip b{font:400 24px var(--display);color:var(--gold-2)}
+.pzr-chip span{color:var(--ink-3)}
+.pzr-note{color:var(--ink-3);font-size:14px}
+.pzr-note .act{margin-left:8px}
+.pz-tabs{margin:0 0 4px}
+.pz-note{margin:6px 0 0}
+@media (max-width:560px){
+  .pzb-row{grid-template-columns:24px 30px minmax(0,1fr) 48px;gap:8px}
+  .pzb-note{display:none}
+}

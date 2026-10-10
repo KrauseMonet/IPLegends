@@ -22,7 +22,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=a9fd6e30d8">
+<link rel="stylesheet" href="/static/style.css?v=969a869daf">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -86,6 +86,7 @@
     <div class="cg-intro" id="cgIntro">
       <div class="cg-intro-n" id="cgIntroTime">4:00</div>
       <p id="cgIntroRules"></p>
+      <p class="room-note" id="cgNote"></p>
       <button class="act lead" onclick="cgStart()">Start the clock</button>
       <p class="room-note">The pair appears when you press it, and the clock starts then.</p>
     </div>
@@ -129,6 +130,8 @@
       <div class="qz-stats" id="cgStats"></div>
       <div class="cg-sum" id="cgSum"></div>
       <div class="cg-reveal" id="cgReveal"></div>
+      <div class="pzr" id="pzRank"></div>
+      <div class="pzb" id="pzBoard"></div>
       <pre class="bg-share-preview" id="cgSharePreview"></pre>
       <div class="foot-actions" style="justify-content:flex-start">
         <button class="act lead" onclick="cgShare()">Share result</button>
@@ -191,8 +194,8 @@
 </div>
 
 <script src="/static/common.js?v=18ec271915"></script>
-<script src="/static/auth.js?v=ff23a88806"></script>
-<script src="/static/puzzle.js?v=4deadc15ca"></script>
-<script src="/static/commonground.js?v=25e4bc2697"></script>
+<script src="/static/auth.js?v=bf7bef535d"></script>
+<script src="/static/puzzle.js?v=4eec6486df"></script>
+<script src="/static/commonground.js?v=a230ae59ce"></script>
 </body>
 </html>

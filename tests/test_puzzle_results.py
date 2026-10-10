@@ -509,6 +509,40 @@ def test_the_board_limit_cuts_the_list_but_never_a_players_true_rank(pg):
     assert puzzle_results.rank_of(pg, "bingo", TODAY, ids[0]) == (6, 6)
 
 
+# --- the overall board (pure) ------------------------------------------------------------------
+
+def brow(account_id, points, rank, when=1, name=None):
+    return {"account_id": account_id, "username": name or f"u{account_id}", "kit": None,
+            "points": points, "rank": rank, "finished_at": when}
+
+
+def test_the_overall_board_is_a_share_of_the_days_best_in_each_game():
+    boards = {"bingo": [brow(1, 200, 1), brow(2, 100, 2)],
+              "guess": [brow(2, 800, 1), brow(3, 400, 2)],
+              "xi": [], "common": []}
+    out = puzzle_results.combine(boards)
+    by = {r["account_id"]: r for r in out}
+    assert by[1]["total"] == 100 and by[2]["total"] == 50 + 100 and by[3]["total"] == 50
+    assert [r["account_id"] for r in out] == [2, 1, 3] and [r["rank"] for r in out] == [1, 2, 3]
+    assert by[2]["games"]["bingo"] == {"points": 100, "share": 50, "rank": 2} and by[2]["played"] == 2
+
+
+def test_a_game_nobody_scored_in_is_worth_nothing_not_a_division_by_zero():
+    out = puzzle_results.combine({"guess": [brow(1, 0, 1), brow(2, 0, 2)], "bingo": [brow(1, 50, 1)]})
+    assert {r["account_id"]: r["total"] for r in out} == {1: 100, 2: 0}
+
+
+def test_equal_totals_go_to_whoever_played_more_games_then_finished_first():
+    boards = {"bingo": [brow(1, 100, 1, when=5), brow(2, 100, 1, when=2), brow(3, 100, 1, when=9)],
+              "guess": [brow(3, 0, 1, when=9)]}
+    out = puzzle_results.combine(boards)
+    assert [r["account_id"] for r in out] == [3, 2, 1]          # 3 played two games; then 2 finished before 1
+
+
+def test_an_empty_day_has_an_empty_overall_board():
+    assert puzzle_results.combine({g: [] for g in pr.GAMES}) == []
+
+
 # --- the routes ----------------------------------------------------------------------------------
 
 @pytest.fixture
@@ -643,3 +677,58 @@ def test_a_refused_ranked_move_is_a_400_and_costs_nothing(client, pg, real):
     r = client.post("/api/ground/ranked/play", json={"guess": puzzle.a})
     assert r.status_code == 400 and "one of the two" in r.json()["detail"]
     assert client.get("/api/ground/ranked").json()["state"]["wrong"] == []
+
+
+@needs_pg
+def test_a_board_is_public_ranked_and_marks_the_caller(client, pg):
+    ids = {n: account(pg, n) for n in ("ava", "ben", "cyrus")}
+    for n, score in (("ava", 300), ("ben", 900), ("cyrus", 600)):
+        puzzle_results.record(pg, ids[n], TODAY, outcome(score=score, picks=[pr.Pick("0", "p", 5)]), [])
+    anon = client.get("/api/puzzles/board/bingo").json()
+    assert [r["username"] for r in anon["rows"]] == ["ben", "cyrus", "ava"] and anon["finished"] == 3
+    assert anon["date"] == "2026-10-09" and anon["label"] == "Bingo" and not any(r["you"] for r in anon["rows"])
+    client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(ids["cyrus"]))
+    mine = client.get("/api/puzzles/board/bingo").json()
+    assert [r["you"] for r in mine["rows"]] == [False, True, False]
+    assert mine["rows"][0]["points"] == 900 and mine["rows"][0]["found"] == 9
+
+
+@needs_pg
+def test_a_player_outside_the_top_rows_is_still_shown_as_themselves(client, pg, monkeypatch):
+    monkeypatch.setattr(puzzle_routes, "BOARD_TOP", 2)
+    ids = [account(pg, f"player{i}") for i in range(4)]
+    for i, who in enumerate(ids):
+        puzzle_results.record(pg, who, TODAY, outcome(score=100 * (i + 1)), [])
+    client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(ids[0]))
+    out = client.get("/api/puzzles/board/bingo").json()
+    assert len(out["rows"]) == 2 and out["finished"] == 4
+    assert out["me"]["rank"] == 4 and out["me"]["you"] is True
+    client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(ids[3]))
+    assert client.get("/api/puzzles/board/bingo").json()["me"] is None       # already in the rows
+
+
+@needs_pg
+def test_the_overall_board_over_http(client, pg):
+    a, b = account(pg, "ava"), account(pg, "ben")
+    puzzle_results.record(pg, a, TODAY, outcome(game="bingo", score=200), [])
+    puzzle_results.record(pg, b, TODAY, outcome(game="bingo", score=100), [])
+    puzzle_results.record(pg, b, TODAY, outcome(game="guess", score=800), [])
+    puzzle_results.record(pg, a, TODAY, outcome(game="xi", score=1000), [])
+    puzzle_results.record(pg, b, TODAY, outcome(game="common", score=600, elapsed=80_000), [])
+    out = client.get("/api/puzzles/board/overall").json()
+    assert [(r["username"], r["points"], r["played"]) for r in out["rows"]] == [("ben", 250, 3), ("ava", 200, 2)]
+    assert set(out["rows"][0]["games"]) == {"bingo", "guess", "common"} and set(out["rows"][1]["games"]) == {"bingo", "xi"}
+    assert out["rows"][0]["games"]["guess"]["share"] == 100 and out["label"] == "Overall"
+
+
+@needs_pg
+def test_a_past_days_board_is_kept_and_an_unknown_or_future_one_is_refused(client, pg):
+    a = account(pg, "ava")
+    yesterday = TODAY - datetime.timedelta(days=1)
+    puzzle_results.record(pg, a, yesterday, outcome(score=77), [])
+    out = client.get(f"/api/puzzles/board/bingo?date={yesterday.isoformat()}").json()
+    assert out["rows"][0]["points"] == 77 and out["date"] == yesterday.isoformat()
+    assert client.get("/api/puzzles/board/bingo").json()["rows"] == []
+    assert client.get("/api/puzzles/board/chess").status_code == 404
+    assert client.get("/api/puzzles/board/bingo?date=2099-01-01").status_code == 400
+    assert client.get("/api/puzzles/board/bingo?date=tomorrow").status_code == 400

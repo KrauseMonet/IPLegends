@@ -4,14 +4,18 @@
 // whole state, and each request sends them and gets the whole position back. What `puzzle.js`
 // provides -- storage, streaks, name search, sharing -- is not repeated here.
 //
-// The clock is this page's: it starts when the player presses Start, is kept as a wall-clock
-// timestamp (so a reload resumes the same countdown rather than restarting it), and every guess
-// carries the milliseconds since then. A ranked attempt will take its times from the server.
+// Two ways to play, and the difference is whose clock counts:
+//   * Practice, and the daily while signed out: the page's. It starts when the player presses
+//     Start, is kept as a wall-clock timestamp (so a reload resumes the same countdown rather
+//     than restarting it), and every guess carries the milliseconds since then. Never ranked.
+//   * The daily while signed in [A188]: the SERVER's. Start stamps the database's clock, every
+//     guess is stamped on arrival, and the page only displays a countdown built from the
+//     time-left each response reports -- re-synced on every one, so it cannot drift. Ranked.
 
 const CG_KEY = 'iplegends_cground_v1';
 
 let CG = {mode: 'daily', puzzle: null, started: null, moves: [], ended: null, state: null,
-          matches: [], active: 0, busy: false, timer: null};
+          matches: [], active: 0, busy: false, timer: null, ranked: false, rank: null, of: 0};
 
 const cgStore = () => pzStore(CG_KEY);
 const cgSave = patch => pzSave(CG_KEY, patch);
@@ -60,6 +64,15 @@ async function cgMode(mode, fresh){
 
 async function cgLoad(puzzle, fresh){
   CG.puzzle = puzzle;
+  // A signed-out finish shows every answer, and the pair is the same for everybody, so a browser
+  // that has already finished today's pair signed out is not offered a ranked attempt at it:
+  // the second look would be a look at the answers. (Honesty still has to carry the rest -- a
+  // friend can say the answers aloud -- but this stops the accidental route.)
+  CG.peeked = CG.mode === 'daily' && cgStore().anonDone === puzzle.date;
+  CG.signedIn = await pzSignedIn();
+  CG.ranked = CG.mode === 'daily' && CG.signedIn && !CG.peeked;
+  CG.rank = null; CG.of = 0;
+  if (CG.ranked){ await cgLoadRanked(); return; }
   const s = cgStore();
   const saved = CG.mode === 'daily'
     ? (s.daily && s.daily.date === puzzle.date ? s.daily : null)
@@ -80,6 +93,30 @@ async function cgLoad(puzzle, fresh){
   cgRender();
   if (CG.state && CG.state.finished) cgFinish(false);
   else if (CG.started) cgStartTick();
+}
+
+// The signed-in daily: the server holds the attempt, so there is nothing to restore from this
+// browser -- ask it where this player stands.
+async function cgLoadRanked(){
+  CG.started = null; CG.moves = []; CG.ended = null; CG.state = null;
+  $('#cgDone').classList.add('hide');
+  try { cgApplyRanked(await api('/api/ground/ranked')); }
+  catch(e){ slip(e.message); }
+  cgRender();
+  if (CG.state && CG.state.finished) cgFinish(false);
+  else if (CG.started) cgStartTick();
+}
+
+// Take the server's reading of the attempt: the position, and how much of the clock is left,
+// from which the page's own start time is rebuilt (so the countdown is the server's).
+function cgApplyRanked(r){
+  CG.rank = r.rank; CG.of = r.of;
+  if (!r.started){ CG.started = null; CG.state = null; CG.moves = []; return; }
+  CG.state = r.state;
+  CG.started = Date.now() - (cgLimitMs() - r.remaining_ms);
+  CG.moves = r.state.found.map(f => ({id: f.person_id, t: f.t || 0}))
+    .concat(r.state.wrong.map(w => ({id: w.person_id, t: w.t}))).sort((a, b) => a.t - b.t);
+  CG.ended = r.finished ? {t: 0} : null;
 }
 
 async function cgPost(extra){
@@ -128,6 +165,12 @@ async function cgGiveUp(){
 async function cgEnd(){
   CG.busy = true;
   try {
+    if (CG.ranked){
+      const r = await api('/api/ground/ranked/play', {method: 'POST', retry: true, headers: PZ_JSON,
+        body: JSON.stringify({end: true})});
+      cgApplyRanked(r); cgRender(); cgFinish(true);
+      return;
+    }
     CG.state = await cgReplay();
     cgPersist(); cgRender(); cgFinish(true);
   } catch(e){ CG.ended = null; slip(e.message); if (CG.started) cgStartTick(); }
@@ -154,6 +197,13 @@ function cgRender(fresh){
     `Two well-known players appear, and ${p.total} other players were a teammate of both. `
     + `Each one you name scores ${p.points_per_teammate}; each wrong guess costs ${p.penalty_per_wrong}. `
     + `Name all ${p.total} and every second left on the clock is worth ${p.bonus_per_second} more.`;
+  $('#cgNote').innerHTML = CG.ranked
+    ? `<b>Ranked.</b> The clock is the server's, and it starts when you press Start.`
+    : CG.mode !== 'daily' ? `Practice. It isn't ranked, and the clock is yours.`
+    : CG.peeked ? `<b>Not ranked.</b> You already played today's pair in this browser while signed out, so
+        a second attempt can't be ranked.`
+    : `<b>Not ranked.</b> You are signed out, so this attempt is not recorded.
+        <a href="#" onclick="openAuthModal('login');return false">Sign in</a> to be on today's board.`;
   const chal = $('#cgChallenge');
   const shared = new URLSearchParams(location.search).get('seed');
   chal.classList.toggle('hide', !(shared && CG.mode === 'practice' && !started));
@@ -219,13 +269,21 @@ async function cgGuess(pid){
   if (t >= cgLimitMs()){ cgTimeUp(); return; }
   CG.busy = true;
   try {
-    const r = await cgPost({guess: {id: pid, t}});
-    CG.moves.push({id: pid, t});
-    CG.state = r.state;
-    cgPersist();
+    let r;
+    if (CG.ranked){
+      r = await api('/api/ground/ranked/play', {method: 'POST', retry: true, headers: PZ_JSON,
+        body: JSON.stringify({guess: pid})});
+      cgApplyRanked(r);
+      if (r.late) slip('Time is up.');
+    } else {
+      r = await cgPost({guess: {id: pid, t}});
+      CG.moves.push({id: pid, t});
+      CG.state = r.state;
+      cgPersist();
+    }
     $('#cgInput').value = ''; $('#cgResults').innerHTML = ''; CG.matches = [];
     cgRender(r.hit);
-    if (!r.hit){
+    if (r.hit === false){
       const name = (PZ_PLAYERS.find(p => p.id === pid) || {}).name || 'That player';
       slip(`${name}: ${cgWhy(r.kind)}. −${CG.puzzle.penalty_per_wrong}.`);
       const box = $('#cgPicker'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
@@ -241,6 +299,18 @@ async function cgGuess(pid){
 
 async function cgStart(){
   if (CG.started || CG.busy) return;
+  if (CG.ranked){
+    CG.busy = true;
+    try {
+      cgApplyRanked(await api('/api/ground/ranked/start', {method: 'POST', retry: true}));
+    } catch(e){ slip(e.message); CG.busy = false; return; }
+    CG.busy = false;
+    cgRender();
+    if (CG.state && CG.state.finished){ cgFinish(false); return; }
+    cgStartTick();
+    $('#cgInput').focus({preventScroll: true});
+    return;
+  }
   CG.started = Date.now();
   CG.moves = []; CG.ended = null; CG.state = null;
   cgPersist();
@@ -266,6 +336,7 @@ function cgFinish(fresh){
     if (!days.includes(p.date)) cgSave({days: days.concat(p.date).sort().slice(-400)});
   }
   if (sc.points > (cgStore().best || 0)) cgSave({best: sc.points});
+  if (CG.mode === 'daily' && !CG.ranked) cgSave({anonDone: p.date});    // see cgLoad: no ranked second look
   $('#cgPlay').classList.add('hide');
   $('#cgDone').classList.remove('hide');
   $('#cgDoneLabel').textContent = `COMMON GROUND · ${p.label.toUpperCase()}`;
@@ -283,8 +354,28 @@ function cgFinish(fresh){
   $('#cgReveal').innerHTML = `<div class="gp-name">Everyone who played with both ${esc(p.a.name)} and ${esc(p.b.name)}:</div>${rows.join('')}`;
   $('#cgSharePreview').textContent = st.share || '';
   cgPaintStreak();
+  cgRankPanel();
   if (fresh) $('#cgDone').scrollIntoView({block: 'start', behavior: 'smooth'});
 }
+
+// Where the attempt placed, and today's board. Only a ranked attempt has a place; a signed-out
+// daily gets the way to earn one, and practice gets neither.
+async function cgRankPanel(){
+  const el = $('#pzRank'), board = $('#pzBoard');
+  if (CG.mode !== 'daily'){ el.innerHTML = ''; board.innerHTML = ''; return; }
+  const st = CG.state;
+  el.innerHTML = CG.ranked && CG.rank
+    ? `<div class="pzr-chip"><i>Today's rank</i><b>#${CG.rank}</b> of ${CG.of}<span>${st.score.points} pts</span></div>`
+    : CG.signedIn ? `<div class="pzr-note">Not ranked: this pair was played in this browser while signed out.</div>`
+    : `<div class="pzr-note">Sign in to be ranked on today's board.
+        <button class="act minor" onclick="openAuthModal('login')">Sign in</button></div>`;
+  pzLoadBoard('common', '#pzBoard', CG.puzzle.date);
+}
+
+// Signing in on this page redraws it. A player looking at a finished signed-out attempt is not
+// ranked for it (the clock of an attempt the server did not time is not trusted, and `anonDone`
+// stops a second, informed look); anyone else is offered a ranked attempt.
+document.addEventListener('signedin', () => { if (CG.puzzle) cgMode(CG.mode); });
 
 function cgRevealRow(a, got){
   return `<div class="cg-hit ${got ? 'got' : 'missed'}">

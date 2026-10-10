@@ -184,3 +184,84 @@ def ranked_play(body: RankedPlayIn, request: Request, response: Response) -> Ran
     if applied:
         hit, kind = state.hits[-1], state.kinds[-1]
     return RankedPlayOut(**out.model_dump(), hit=hit, kind=kind)
+
+
+# --- the boards ------------------------------------------------------------------------------
+
+BOARD_TOP = 20                  # rows shown; a player outside them is shown below as themselves
+GAME_LABELS = {"bingo": "Bingo", "guess": "Guess the Player", "common": "Common Ground",
+               "xi": "Name the XI", "overall": "Overall"}
+
+
+class BoardRowOut(BaseModel):
+    rank: int
+    username: str
+    kit: dict | None = None
+    points: int
+    solved: bool | None = None
+    elapsed_ms: int | None = None
+    found: int | None = None
+    total: int | None = None
+    wrong: int | None = None
+    games: dict | None = None         # the overall board only: each game's points, share and rank
+    played: int | None = None
+    you: bool = False
+
+
+class BoardOut(BaseModel):
+    game: str
+    label: str
+    date: str
+    finished: int                     # how many players are on the board
+    rows: list[BoardRowOut]
+    me: BoardRowOut | None = None     # the caller's own row when it is not among `rows`
+
+
+def _soft_account(request: Request) -> int | None:
+    token = request.cookies.get(auth.COOKIE_NAME)
+    return auth.verify_session_cookie(token) if token is not None else None
+
+
+def _board_date(raw: str | None) -> datetime.date:
+    today = bingo_routes.today()
+    if raw is None:
+        return today
+    try:
+        day = datetime.date.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="That is not a date.") from None
+    if day > today:
+        raise HTTPException(status_code=400, detail="That day has not happened yet.")
+    return day
+
+
+def _row_out(row: dict, mine: int | None, overall_board: bool) -> BoardRowOut:
+    d = row.get("detail") or {}
+    return BoardRowOut(
+        rank=row["rank"], username=row["username"], kit=row["kit"],
+        points=row["total"] if overall_board else row["points"],
+        solved=None if overall_board else row["solved"], elapsed_ms=None if overall_board else row["elapsed_ms"],
+        found=d.get("found"), total=d.get("total"), wrong=d.get("wrong"),
+        games=row["games"] if overall_board else None, played=row.get("played"),
+        you=mine is not None and row["account_id"] == mine)
+
+
+@router.get("/api/puzzles/board/{game}", response_model=BoardOut)
+def board(game: str, request: Request, response: Response, date: str | None = None) -> BoardOut:
+    """One day's board for a game, or `overall` for the combined one. Public: a leaderboard is a
+    thing to look at before you have played. If the caller is signed in and not among the top
+    rows, their own row comes back as `me` so they can still find themselves."""
+    if game not in GAME_LABELS:
+        raise HTTPException(status_code=404, detail="No such board.")
+    response.headers["Cache-Control"] = "private, max-age=10"
+    day = _board_date(date)
+    mine = _soft_account(request)
+    g = ground_routes.ground()
+    with db.connection() as conn:
+        rows = (puzzle_results.overall(conn, day, g) if game == "overall"
+                else puzzle_results.board(conn, game, day, g, limit=0))
+    out = [_row_out(r, mine, game == "overall") for r in rows]
+    top = out[:BOARD_TOP]
+    me = next((r for r in out[BOARD_TOP:] if r.you), None)
+    return BoardOut(game=game, label=GAME_LABELS[game], date=day.isoformat(), finished=len(out),
+                    rows=top, me=me)

@@ -2747,6 +2747,12 @@ timed attempt is clocked by the database, not the page: Start stamps an open row
 arrival, and a clock that runs out unobserved is finished by a sweep at the limit. Only the day's own daily
 (or yesterday's) is ranked; signed-out play is unchanged and unranked.
 
+**Leaderboards** (A190). `/api/puzzles/board/{game}` serves a day's board for each game and for `overall`: more
+points, then the quicker, then whoever finished first. The overall board scores each game as a share of the day's
+best in it, out of 100, and sums the games a player finished (a perfect day is 400). Boards are public; they are
+computed in Python from the day's finished rows when read, so a rarity adjustment (A191) never leaves a stored
+number stale. The Puzzles hub shows them as tabs and each game's finish screen shows its own.
+
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the
 side. Five mistakes end it; a player who played for the other side is a mistake that says so.

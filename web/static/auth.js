@@ -123,6 +123,7 @@ async function submitLogin(ctrl){
       renderAuthArea();
       syncKitToAccount();
       document.dispatchEvent(new Event('kitchange'));
+      document.dispatchEvent(new Event('signedin'));     // a page that was waiting on who you are
       $('#authOverlay').classList.add('hide');
     } catch(e){ $('#authError').textContent = e.message; }
   });
@@ -142,6 +143,7 @@ async function submitRegister(ctrl){
       renderAuthArea();
       syncKitToAccount();
       document.dispatchEvent(new Event('kitchange'));
+      document.dispatchEvent(new Event('signedin'));     // a page that was waiting on who you are
       $('#authOverlay').classList.add('hide');
     } catch(e){ $('#authError').textContent = e.message; }
   });

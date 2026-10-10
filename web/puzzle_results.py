@@ -229,3 +229,42 @@ def rank_of(conn, game: str, day: datetime.date, account_id: int,
     rows = board(conn, game, day, g, limit=0)
     mine = next((r["rank"] for r in rows if r["account_id"] == account_id), None)
     return mine, len(rows)
+
+
+# --- the day's overall board -----------------------------------------------------------------
+
+OVERALL_PER_GAME = 100          # the day's best in each game is worth this many overall points
+
+
+def combine(boards: dict[str, list[dict]]) -> list[dict]:
+    """The overall board: for every game, a player's score as a share of the day's BEST in that
+    game, out of `OVERALL_PER_GAME`; their total is the sum over the games they finished, and a
+    game they skipped is simply worth nothing.
+
+    Chosen over summing ranks because ranks do not compare across games of different sizes (a
+    win among three is not a win among thirty) and over summing raw points because the games'
+    scales differ (a Bingo grid is ~200, a full Name the XI ~1,300). A share of the day's best
+    is one number on one scale, and it is explainable in a sentence. A game nobody scored in
+    (a best of 0) contributes nothing to anybody rather than dividing by zero."""
+    best = {g: max((r["points"] for r in rows), default=0) for g, rows in boards.items()}
+    people: dict[int, dict] = {}
+    for game, rows in boards.items():
+        for r in rows:
+            who = people.setdefault(r["account_id"], {
+                "account_id": r["account_id"], "username": r["username"], "kit": r["kit"],
+                "total": 0, "games": {}, "played": 0, "last": r["finished_at"]})
+            # integer round-half-up: no float, and none of Python round()'s banker's halves
+            share = (2 * OVERALL_PER_GAME * r["points"] + best[game]) // (2 * best[game]) if best[game] else 0
+            who["games"][game] = {"points": r["points"], "share": share, "rank": r["rank"]}
+            who["total"] += share
+            who["played"] += 1
+            who["last"] = max(who["last"], r["finished_at"])
+    out = sorted(people.values(), key=lambda w: (-w["total"], -w["played"], w["last"], w["account_id"]))
+    for i, row in enumerate(out, 1):
+        row["rank"] = i
+    return out
+
+
+def overall(conn, day: datetime.date, g: ground.Ground | None = None) -> list[dict]:
+    """Every game's finished board for the day, combined."""
+    return combine({game: board(conn, game, day, g, limit=0) for game in pr.GAMES})

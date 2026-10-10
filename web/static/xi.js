@@ -210,6 +210,7 @@ function xiFinish(fresh){
   $('#xiFinalOf').textContent = `of ${st.size} named`;
   $('#xiSharePreview').textContent = st.share || '';
   xiPaintStreak();
+  if (XI.mode === 'daily') pzRankDaily('xi', {seed: p.seed, ids: XI.guesses, gave_up: XI.gaveUp}, p.date);
   if (fresh) $('#xiDone').scrollIntoView({block: 'start', behavior: 'smooth'});
 }
 

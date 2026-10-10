@@ -31,4 +31,16 @@ async function pzHub(){
   $('#pzStreak').innerHTML = pzStreakHtml([...all].sort(), today, 'puzzle');
 }
 
+// The day's boards, one tab each. Nothing is cached here: a board is a thing to look at again.
+async function pzHubBoard(game){
+  document.querySelectorAll('#pzTabs .room-choice')
+    .forEach(b => b.classList.toggle('sel', b.dataset.game === game));
+  await pzLoadBoard(game, '#pzHubBoard');
+}
+
 pzHub();
+pzHubBoard('overall');
+document.addEventListener('signedin', () => {
+  const on = document.querySelector('#pzTabs .sel');
+  pzHubBoard(on ? on.dataset.game : 'overall');
+});

@@ -191,6 +191,7 @@ function gpFinish(fresh){
        <div class="gp-tiles">${a.tiles.map((t, i) => gpTile(t, i, false)).join('')}</div>` : '';
   $('#gpSharePreview').textContent = st.share || '';
   gpPaintStreak();
+  if (GP.mode === 'daily') pzRankDaily('guess', {seed: p.seed, ids: GP.guesses, gave_up: GP.gaveUp}, p.date);
   if (fresh) $('#gpDone').scrollIntoView({block: 'start', behavior: 'smooth'});
 }
 

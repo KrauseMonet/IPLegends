@@ -3112,10 +3112,12 @@ def _daily_player(request: Request) -> int | str:
     """Who is playing today's daily: the signed-in account if there is one, otherwise the
     anonymous key for the device id the page sends.
 
-    The account always wins. Somebody who played signed out and then signs in gets their
-    account's own deal and a fresh, ranked attempt -- the anonymous one is never carried
-    over, because clearing the browser deals a new anonymous hand and a result that could
-    be claimed afterwards could be shopped for."""
+    The account always wins. Somebody who played signed out and then signs in has that
+    attempt recorded against the account by an explicit claim (`DailySubmitIn.claim`,
+    A194) rather than by this function quietly switching identity: a plain read as an
+    account is still the account's own deal. The cost, accepted at the owner's direction,
+    is that a result can be shopped for -- clearing the browser deals a fresh anonymous
+    hand, and any of them can be claimed."""
     account_id = _current_account_id(request)
     if account_id is not None:
         return account_id
@@ -3176,7 +3178,8 @@ class DailyOut(BaseModel):
     anonymous: bool = Field(
         default=False,
         description="true when playing signed out: the result is scored exactly as a ranked "
-                    "one but never recorded, and nothing about the player is stored")
+                    "one but not recorded -- until the player signs in and claims it -- and "
+                    "nothing about the player is stored")
     would_rank: int | None = Field(
         default=None,
         description="for an anonymous result only: where it WOULD stand on today's board, "
@@ -3185,6 +3188,11 @@ class DailyOut(BaseModel):
 
 class DailySubmitIn(BaseModel):
     state: str
+    claim: bool = Field(
+        default=False,
+        description="signed in, record the attempt this browser made signed out instead of "
+                    "playing again. The state must be the one dealt to this browser's "
+                    "device id (the X-Daily-Device header).")
 
 
 class DailyBoardRow(BaseModel):
@@ -3325,6 +3333,9 @@ def _daily_out(conn, account_id: int | str, day,
         return _anon_daily_out(conn, account_id, day, finished_state)
     from game.scenarios import BONUS_LABELS, bonuses_on_offer
     result = daily_lib.result_for(conn, day.challenge_date, account_id)
+    # The key the recorded state was drafted under: the account's own, unless it was a
+    # signed-out attempt the account claimed. Internal -- never sent to the page.
+    dealt_as = result.pop("dealt_as") if result is not None else None
     # Read whether or not today has been played: an unplayed day still has a streak to
     # keep, and that is precisely when saying so is worth anything.
     streak, longest = daily_lib.streaks(
@@ -3345,7 +3356,7 @@ def _daily_out(conn, account_id: int | str, day,
                       outcome=daily_lib.outcome_words(day.scenario, result["objective_met"],
                                                       result["margin"]))
         play = daily_lib.play_and_score(STATE["deck"], STATE["model"], day,
-                                        account_id, result["state"])
+                                        dealt_as or account_id, result["state"])
         match = _daily_match_out(play, day.scenario)
     return DailyOut(
         can_reset=_may_reset_daily(account_id),
@@ -3489,15 +3500,21 @@ def daily_submit(body: DailySubmitIn, request: Request) -> DailyOut:
     replays into a real, played result.
 
     Signed out, the same checks and the same scoring run and nothing is written: the page
-    keeps the state and sends it again on a reload."""
+    keeps the state and sends it again on a reload. Signed in afterwards, it sends that same
+    state once more with `claim` and the attempt is recorded and ranked [A194]."""
     account_id = _daily_player(request)
     with _db() as conn:
         day = daily_lib.ensure_day(conn, _today(), STATE["deck"], STATE["model"])
         try:
             if daily_lib.is_anonymous(account_id):
                 return _daily_out(conn, account_id, day, finished_state=body.state)
+            dealt_as = None
+            if body.claim:
+                if daily_lib.is_anonymous(account_id):
+                    raise daily_lib.DailyError("sign in to claim a signed-out attempt")
+                dealt_as = daily_lib.anon_key(request.headers.get(DAILY_DEVICE_HEADER))
             daily_lib.submit(conn, day.challenge_date, account_id, body.state,
-                             STATE["deck"], STATE["model"])
+                             STATE["deck"], STATE["model"], dealt_as=dealt_as)
         except daily_lib.DailyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except sess.InvalidState as exc:

@@ -79,9 +79,9 @@ def anon_key(device_id: str | None) -> str:
     digits only, so no anonymous key can ever produce an account's seed, and the other
     way round.
 
-    Nothing about an anonymous player is stored, so this key protects no leaderboard --
-    clearing the browser deals a new hand, which is exactly why an anonymous result is
-    never ranked. The format check exists so an arbitrary header cannot become part of a
+    Nothing about an anonymous player is stored until an account claims an attempt (A194),
+    so this key protects no leaderboard on its own -- clearing the browser deals a new
+    hand, which is why an unclaimed anonymous result is never ranked. The format check exists so an arbitrary header cannot become part of a
     seed string."""
     if (not device_id or len(device_id) != _ANON_ID_LEN
             or any(c not in "0123456789abcdef" for c in device_id)):
@@ -662,7 +662,7 @@ def mark(full: Deck, model: Model, day: "Day", player: int | str,
 
 
 def submit(conn, challenge_date, account_id: int, state: str,
-           full: Deck, model: Model) -> tuple[Outcome, bool]:
+           full: Deck, model: Model, dealt_as: str | None = None) -> tuple[Outcome, bool]:
     """Mark one player's attempt and record it. Returns (outcome, was_new).
 
     The client sends only a STATE -- never a score. Everything below is recomputed here, so
@@ -676,22 +676,36 @@ def submit(conn, challenge_date, account_id: int, state: str,
 
     Accounts only: an anonymous key would reach the insert below with a string where an
     account id belongs, and an anonymous result is never recorded.
+
+    `dealt_as` is the CLAIM path: somebody played today signed out and then signed in, and
+    their attempt is recorded against the account instead of being played again. The state
+    is then checked against the anonymous key it was drafted under, not the account's seed,
+    and that key is stored so the row can be replayed. One browser's attempt can be claimed
+    by one account only (migration 047's unique index).
     """
     if is_anonymous(account_id):
         raise DailyError("a signed-out attempt is never recorded")
+    if dealt_as is not None and not is_anonymous(dealt_as):
+        raise DailyError("only a signed-out attempt can be claimed")
     day = ensure_day(conn, challenge_date, full, model)
-    outcome = mark(full, model, day, account_id, state)
+    outcome = mark(full, model, day, dealt_as or account_id, state)
 
     written = conn.execute(
         """
         insert into daily_results (challenge_date, account_id, state, objective_met,
-                                   margin, bonus_points, bonuses)
-        values (%s, %s, %s, %s, %s, %s, %s)
-        on conflict (challenge_date, account_id) do nothing
+                                   margin, bonus_points, bonuses, dealt_as)
+        values (%s, %s, %s, %s, %s, %s, %s, %s)
+        on conflict do nothing
         returning 1
         """,
         (challenge_date, account_id, state, outcome.objective_met, outcome.margin,
-         outcome.bonus_points, json.dumps(list(outcome.bonuses_met)))).fetchone()
+         outcome.bonus_points, json.dumps(list(outcome.bonuses_met)), dealt_as)).fetchone()
+    # `on conflict do nothing` without a target also swallows the claim index. Telling the
+    # two apart: an account that already has its row simply played first; one that does
+    # not was refused because another account already took this browser's attempt.
+    if written is None and dealt_as is not None and result_for(
+            conn, challenge_date, account_id) is None:
+        raise DailyError("this attempt has already been claimed by another account")
     return outcome, written is not None
 
 
@@ -786,11 +800,11 @@ def result_for(conn, challenge_date, account_id: int) -> dict | None:
     """This player's own recorded attempt, if they have made one -- what the page shows
     instead of a draft once the day is spent."""
     row = conn.execute(
-        "select state, objective_met, margin, bonus_points, bonuses from daily_results "
-        "where challenge_date = %s and account_id = %s",
+        "select state, objective_met, margin, bonus_points, bonuses, dealt_as "
+        "from daily_results where challenge_date = %s and account_id = %s",
         (challenge_date, account_id)).fetchone()
     if row is None:
         return None
-    state, met, margin, bonus, bonuses = row
+    state, met, margin, bonus, bonuses, dealt_as = row
     return {"state": state, "objective_met": met, "margin": margin,
-            "bonus_points": bonus, "bonuses": list(bonuses or [])}
+            "bonus_points": bonus, "bonuses": list(bonuses or []), "dealt_as": dealt_as}

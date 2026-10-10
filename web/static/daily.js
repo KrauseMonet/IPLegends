@@ -46,6 +46,9 @@ function keptAnonAttempt(date){
 function keepAnonAttempt(date, state){
   try { localStorage.setItem(DAILY_ANON_KEY, JSON.stringify({date, state})); } catch(e){}
 }
+function dropAnonAttempt(){
+  try { localStorage.removeItem(DAILY_ANON_KEY); } catch(e){}
+}
 
 // The challenge, before a ball is drafted -- in the result card's own language, tinted in
 // the opposition's colours, so the page looks the same before the match and after it.
@@ -254,7 +257,7 @@ async function showDone(){
     <div class="mr-actions">
       <div class="actions mr-primary">
         ${d.anonymous ? `<a class="act lead" href="/profile?next=${encodeURIComponent('/daily')}"
-          title="Your own deal and one ranked attempt at today's challenge.">Sign in to be ranked</a>` : ''}
+          title="Your result is saved to your account and placed on today's board.">Sign in to be ranked</a>` : ''}
         <button class="act ${d.anonymous ? '' : 'lead'}" id="shareBtn" onclick="shareResult(this)">Share result</button>
         ${m ? '<button class="act" onclick="dailyScorecard()">Scorecard</button>' : ''}
       </div>
@@ -271,8 +274,8 @@ async function showDone(){
       ${board.length ? board.map(boardRow).join('')
         : '<div class="db-empty">Nobody has finished today yet. Yours could be the first name here.</div>'}
       <p class="db-foot">${d.anonymous
-        ? `Signed in, you get your own deal and one ranked attempt at today's challenge, and
-           every day you play counts toward a streak.`
+        ? `Sign in and this result is saved to your account and ranked, with no need to play
+           it again. Every day you play counts toward a streak.`
         : `One attempt a day. Come back tomorrow for a new scenario and a new set of squads.`}</p>
     </div>`;
 }
@@ -323,6 +326,24 @@ boot().then(async () => {
   DAY = d;
   dailyBanner(d);
   if (d.played){ await showDone(); return; }
+  // [A194] Played signed out, then signed in: the attempt this browser kept is recorded
+  // against the account rather than played again.
+  const claimable = !d.anonymous && keptAnonAttempt(d.challenge_date);
+  if (claimable){
+    try {
+      DAY = await api('/api/daily/submit', {
+        method: 'POST', retry: true, headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({state: claimable, claim: true})});
+      dropAnonAttempt();
+      dailyBanner(DAY);
+      await showDone();
+      return;
+    } catch(e){
+      // A refusal (already claimed by another account, or no longer valid) is final, so
+      // the kept attempt goes. A network failure keeps it for the next load.
+      if (e.status >= 400 && e.status < 500) dropAnonAttempt();
+    }
+  }
   // Signed out, the server remembers nothing, so an attempt already made today is the one
   // this browser kept -- scored again (the same state always plays the same match) rather
   // than offering a fresh draft to somebody who has had their go.

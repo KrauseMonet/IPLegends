@@ -1424,3 +1424,108 @@ def test_the_match_is_played_with_the_rearranged_order(monkeypatch):
         daily.play_and_score(FULL, MODEL, day_obj, 1,
                              sess.encode(daily.player_seed(DAY, 1), arranged))
     assert seen["xi"] == list(want.order) and seen["impact"] is want.impact
+
+
+# --- claiming a signed-out attempt [A194] -------------------------------------------------
+#
+# Real Postgres (opt-in, IPLEGENDS_SCRATCH_DB): what is under test is the insert, the unique
+# index and the replay of the stored row, and a fake connection implements none of them.
+
+_SCRATCH = __import__("os").environ.get("IPLEGENDS_SCRATCH_DB")
+needs_scratch = pytest.mark.skipif(
+    not _SCRATCH, reason="set IPLEGENDS_SCRATCH_DB to a throwaway, fully migrated database")
+
+
+@pytest.fixture
+def pg():
+    import psycopg
+    conn = psycopg.connect(_SCRATCH)
+    try:
+        yield conn
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def _new_account(pg, name):
+    from web import accounts
+    return accounts.create_account(pg, name, f"{name}@example.com", "password1").account_id
+
+
+def _day_and_attempt(pg, device="0123456789abcdef0123456789abcdef"):
+    day = daily.ensure_day(pg, DAY, FULL, MODEL)
+    anon = daily.anon_key(device)
+    return day, anon, _finished_state(day, anon)
+
+
+@needs_scratch
+def test_a_signed_out_attempt_is_recorded_against_the_account_that_claims_it(pg):
+    day, anon, state = _day_and_attempt(pg)
+    acct = _new_account(pg, "claimer_a")
+    outcome, was_new = daily.submit(pg, DAY, acct, state, FULL, MODEL, dealt_as=anon)
+    assert was_new
+    row = daily.result_for(pg, DAY, acct)
+    assert row["state"] == state and row["dealt_as"] == anon
+    assert (row["objective_met"], row["margin"], row["bonus_points"]) == (
+        outcome.objective_met, outcome.margin, outcome.bonus_points)
+    # ...and it is on the board and ranked like any other attempt.
+    assert daily.rank_of(pg, DAY, acct) is not None
+    # The stored row still replays: the match is re-derived under the key it was dealt.
+    replay = daily.play_and_score(FULL, MODEL, day, row["dealt_as"], row["state"])
+    assert replay.outcome == outcome
+
+
+@needs_scratch
+def test_the_claim_scores_exactly_as_the_signed_out_page_scored_it(pg):
+    day, anon, state = _day_and_attempt(pg)
+    shown = daily.mark(FULL, MODEL, day, anon, state)
+    acct = _new_account(pg, "claimer_b")
+    recorded, _ = daily.submit(pg, DAY, acct, state, FULL, MODEL, dealt_as=anon)
+    assert recorded == shown
+
+
+@needs_scratch
+def test_a_state_dealt_to_another_browser_cannot_be_claimed(pg):
+    day, anon, state = _day_and_attempt(pg)
+    other = daily.anon_key("fedcba9876543210fedcba9876543210")
+    acct = _new_account(pg, "claimer_c")
+    with pytest.raises(daily.DailyError):
+        daily.submit(pg, DAY, acct, state, FULL, MODEL, dealt_as=other)
+
+
+@needs_scratch
+def test_a_claim_cannot_be_made_with_an_account_key(pg):
+    day = daily.ensure_day(pg, DAY, FULL, MODEL)
+    acct = _new_account(pg, "claimer_d")
+    state = _finished_state(day, acct)
+    with pytest.raises(daily.DailyError):
+        daily.submit(pg, DAY, acct, state, FULL, MODEL, dealt_as=str(acct))
+
+
+@needs_scratch
+def test_one_browsers_attempt_can_be_claimed_by_one_account_only(pg):
+    day, anon, state = _day_and_attempt(pg)
+    first, second = _new_account(pg, "claimer_e"), _new_account(pg, "claimer_f")
+    daily.submit(pg, DAY, first, state, FULL, MODEL, dealt_as=anon)
+    with pytest.raises(daily.DailyError, match="already been claimed"):
+        daily.submit(pg, DAY, second, state, FULL, MODEL, dealt_as=anon)
+    assert daily.result_for(pg, DAY, second) is None
+
+
+@needs_scratch
+def test_claiming_after_already_playing_keeps_the_first_result(pg):
+    day, anon, state = _day_and_attempt(pg)
+    acct = _new_account(pg, "claimer_g")
+    own = _finished_state(day, acct)
+    daily.submit(pg, DAY, acct, own, FULL, MODEL)
+    _, was_new = daily.submit(pg, DAY, acct, state, FULL, MODEL, dealt_as=anon)
+    assert not was_new
+    assert daily.result_for(pg, DAY, acct)["state"] == own
+
+
+@needs_scratch
+def test_an_ordinary_attempt_still_records_no_claim_key(pg):
+    day = daily.ensure_day(pg, DAY, FULL, MODEL)
+    acct = _new_account(pg, "claimer_h")
+    daily.submit(pg, DAY, acct, _finished_state(day, acct), FULL, MODEL)
+    assert daily.result_for(pg, DAY, acct)["dealt_as"] is None

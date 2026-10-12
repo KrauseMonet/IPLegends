@@ -31,8 +31,10 @@ import datetime
 import os
 import sys
 
+from game import puzzle_results as pz_rules
 from web import accounts, auth
 from web import daily as daily_lib
+from web import puzzle_results as puzzle_lib
 
 ADMIN_ACCOUNT_IDS = "ADMIN_ACCOUNT_IDS"
 FALLBACK_ADMIN_VAR = "DAILY_RESET_ACCOUNT_ID"
@@ -101,7 +103,11 @@ def overview(conn, today: datetime.date) -> dict:
               where completed_at > now() - interval '7 days'),
             (select count(*) from daily_results where challenge_date = %(today)s),
             (select count(*) from daily_results),
-            (select count(*) from rooms where is_open and status = 'lobby')
+            (select count(*) from rooms where is_open and status = 'lobby'),
+            (select count(*) from puzzle_results
+              where day = %(today)s and finished_at is not null),
+            (select count(distinct account_id) from puzzle_results
+              where day = %(today)s and finished_at is not null)
         """, {"today": today}).fetchone()
     rooms_by_status = {s: n for s, n in conn.execute(
         "select status, count(*) from rooms group by status order by status")}
@@ -112,6 +118,7 @@ def overview(conn, today: datetime.date) -> dict:
         "games_saved": row[3], "games_7d": row[4], "active_accounts_7d": row[5],
         "daily_today": row[6], "daily_all_time": row[7],
         "open_lobbies": row[8], "rooms_by_status": rooms_by_status,
+        "puzzles_today": row[9], "puzzle_players_today": row[10],
         "signups_by_day": signups, "games_by_day": games,
     }
 
@@ -200,6 +207,15 @@ def account_detail(conn, account_id: int) -> dict:
               from daily_results where account_id = %s
              order by challenge_date desc limit 10
             """, (account_id,))]
+    puzzles = [
+        {"game": g, "day": d.isoformat(), "score": sc, "solved": sv,
+         "finished_at": at.isoformat() if at else None}
+        for g, d, sc, sv, at in conn.execute(
+            """
+            select game, day, score, solved, finished_at
+              from puzzle_results where account_id = %s
+             order by day desc, game limit 12
+            """, (account_id,))]
     return {
         "account_id": account_id, "username": row[0], "email": row[1],
         "created_at": row[2].isoformat(),
@@ -210,7 +226,7 @@ def account_detail(conn, account_id: int) -> dict:
         "total_runs": stats.total_runs, "total_wickets": stats.total_wickets,
         "top_batters": [{"name": b.name, "total": b.total} for b in stats.top_batters],
         "top_bowlers": [{"name": b.name, "total": b.total} for b in stats.top_bowlers],
-        "recent_games": games, "recent_dailies": dailies,
+        "recent_games": games, "recent_dailies": dailies, "recent_puzzles": puzzles,
     }
 
 
@@ -314,6 +330,56 @@ def remove_daily_result(conn, actor: int, challenge_date: datetime.date,
     if row is None:
         raise AdminError("no such result")
     _log(actor, "removed the daily result of", f"account {target} on {challenge_date}")
+
+
+# --- the puzzles [A195] --------------------------------------------------------------------
+
+def _puzzle_game(game: str) -> str:
+    if game not in pz_rules.GAMES:
+        raise AdminError(f"no puzzle called {game!r}")
+    return game
+
+
+def puzzle_view(conn, game: str, day: datetime.date, g=None) -> dict:
+    """One game's WHOLE board for one day, best first, with account ids so a row can be acted
+    on -- the public board's own rows and order (`puzzle_results.board`, reused rather than
+    copied), including the rarity bonus as the board shows it. `g` is Common Ground's puzzle
+    world; with it, attempts whose clock ran out unobserved are finished first, exactly as the
+    public board does. Also says how many attempts are still running (Common Ground only) and
+    how many voters, signed in or not, have been counted toward rarity."""
+    _puzzle_game(game)
+    board = puzzle_lib.board(conn, game, day, g, limit=0)
+    running, voters = conn.execute(
+        """
+        select (select count(*) from puzzle_results
+                 where game = %(g)s and day = %(d)s and finished_at is null),
+               (select count(distinct voter) from puzzle_picks
+                 where game = %(g)s and day = %(d)s)
+        """, {"g": game, "d": day}).fetchone()
+    return {
+        "game": game, "day": day.isoformat(), "running": running, "voters": voters,
+        "board": [
+            {"rank": r["rank"], "account_id": r["account_id"], "username": r["username"],
+             "score": r["score"], "bonus": r["bonus"], "points": r["points"],
+             "solved": r["solved"], "elapsed_ms": r["elapsed_ms"],
+             "found": (r["detail"] or {}).get("found"), "total": (r["detail"] or {}).get("total"),
+             "wrong": (r["detail"] or {}).get("wrong"),
+             "guesses": (r["detail"] or {}).get("guesses"),
+             "finished_at": r["finished_at"].isoformat()}
+            for r in board],
+    }
+
+
+def remove_puzzle_result(conn, actor: int, game: str, day: datetime.date, target: int) -> None:
+    """Takes one player's attempt at one game on one day off the board, with its rarity picks,
+    which also hands them the puzzle back to play again. Allowed on the admin's own row -- the
+    puzzle reset, from the console -- and on anybody else's except another admin's, the same
+    rule as the daily. Signed-out players' picks are never touched: they rank nobody."""
+    _guard_target(actor, target, allow_self=True)
+    _puzzle_game(game)
+    if not puzzle_lib.remove_result(conn, target, game, day):
+        raise AdminError("no such result")
+    _log(actor, "removed the puzzle result of", f"account {target}, {game} on {day}")
 
 
 # --- rooms ------------------------------------------------------------------------------

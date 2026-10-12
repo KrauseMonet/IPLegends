@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=edc8297a52">
+<link rel="stylesheet" href="/static/style.css?v=f5931c7be1">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -77,6 +77,7 @@
         <button class="room-choice sel" data-tab="overview" onclick="adminTab('overview')">Overview</button>
         <button class="room-choice" data-tab="accounts" onclick="adminTab('accounts')">Accounts</button>
         <button class="room-choice" data-tab="daily" onclick="adminTab('daily')">Daily</button>
+        <button class="room-choice" data-tab="puzzles" onclick="adminTab('puzzles')">Puzzles</button>
         <button class="room-choice" data-tab="rooms" onclick="adminTab('rooms')">Rooms</button>
       </div>
 
@@ -97,6 +98,20 @@
           <button class="act" type="submit">Show</button>
         </form>
         <div id="adminDaily"></div>
+      </div>
+
+      <div id="tab-puzzles" class="adm-panel hide">
+        <form class="adm-search" onsubmit="event.preventDefault(); loadPuzzles()">
+          <select id="adminPuzzleGame" class="room-input" onchange="loadPuzzles()">
+            <option value="bingo">Bingo</option>
+            <option value="guess">Guess the Player</option>
+            <option value="xi">Name the XI</option>
+            <option value="common">Common Ground</option>
+          </select>
+          <input id="adminPuzzleDate" class="room-input" type="date">
+          <button class="act" type="submit">Show</button>
+        </form>
+        <div id="adminPuzzles"></div>
       </div>
 
       <div id="tab-rooms" class="adm-panel hide">
@@ -171,6 +186,6 @@
 
 <script src="/static/common.js?v=2875dd81ec"></script>
 <script src="/static/auth.js?v=cf87aaad5a"></script>
-<script src="/static/admin.js?v=c1c7a91a7a"></script>
+<script src="/static/admin.js?v=dc172ec440"></script>
 </body>
 </html>

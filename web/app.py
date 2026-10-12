@@ -2786,6 +2786,30 @@ def admin_remove_daily(date: str, account_id: int, request: Request,
     return {"ok": True}
 
 
+@app.get("/api/admin/puzzles")
+def admin_puzzles(request: Request, response: Response, game: str = "bingo",
+                  date: str | None = None) -> dict:
+    """[A195] One puzzle game's whole board for a day. A past day is fine (it is history);
+    a future one simply has nobody on it."""
+    _admin(request, response)
+    try:
+        g = ground_routes.ground()      # so a Common Ground clock that ran out is finished first
+    except HTTPException:
+        g = None                        # no puzzle facts on this deployment: show what is stored
+    with _db() as conn:
+        return _admin_action(admin_lib.puzzle_view, conn, game, _admin_date(date), g)
+
+
+@app.delete("/api/admin/puzzles/{game}/{date}/{account_id}")
+def admin_remove_puzzle(game: str, date: str, account_id: int, request: Request,
+                        response: Response) -> dict:
+    actor = _admin(request, response)
+    with _db() as conn:
+        _admin_action(admin_lib.remove_puzzle_result, conn, actor, game, _admin_date(date),
+                      account_id)
+    return {"ok": True}
+
+
 @app.get("/api/admin/rooms")
 def admin_rooms(request: Request, response: Response) -> dict:
     _admin(request, response)

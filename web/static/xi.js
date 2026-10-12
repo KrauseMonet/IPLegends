@@ -13,6 +13,7 @@ let XI = {mode: 'daily', puzzle: null, guesses: [], gaveUp: false, state: null,
 
 const xiStore = () => pzStore(XI_KEY);
 const xiSave = patch => pzSave(XI_KEY, patch);
+pzOnReset(XI_KEY, () => xiMode('daily'));      // an admin's replay [A195]
 
 function xiPersist(){
   const p = XI.puzzle, rec = {guesses: XI.guesses, gaveUp: XI.gaveUp};

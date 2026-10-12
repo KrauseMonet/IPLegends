@@ -80,11 +80,20 @@ def test_an_admin_cannot_delete_their_own_account(monkeypatch):
     lambda c: admin.rename_account(c, 5, 6, "someone"),
     lambda c: admin.clear_kit(c, 5, 6),
     lambda c: admin.remove_daily_result(c, 5, datetime.date(2026, 9, 1), 6),
+    lambda c: admin.remove_puzzle_result(c, 5, "bingo", datetime.date(2026, 9, 1), 6),
 ])
 def test_no_action_touches_another_admins_account(monkeypatch, action):
     monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, "5,6")
     with pytest.raises(admin.AdminError, match="admin"):
         action(_NoSql())
+
+
+def test_an_unknown_puzzle_is_refused_before_any_sql(monkeypatch):
+    monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, "5")
+    with pytest.raises(admin.AdminError, match="no puzzle"):
+        admin.remove_puzzle_result(_NoSql(), 5, "chess", datetime.date(2026, 9, 1), 7)
+    with pytest.raises(admin.AdminError, match="no puzzle"):
+        admin.puzzle_view(_NoSql(), "chess", datetime.date(2026, 9, 1))
 
 
 def test_a_rename_is_held_to_the_registration_rules(monkeypatch):
@@ -135,6 +144,7 @@ def test_overview_counts_and_fills_quiet_days_with_zeroes(pg):
     assert len(days) == admin.TREND_DAYS
     assert days[-1]["date"] == datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     assert sum(d["count"] for d in days) - sum(d["count"] for d in before["signups_by_day"]) == 2
+    assert {"puzzles_today", "puzzle_players_today"} <= o.keys()
 
 
 @needs_pg
@@ -210,6 +220,50 @@ def test_daily_board_removal_is_scoped_to_one_player_and_one_day(pg, monkeypatch
     assert pg.execute("select 1 from daily_challenges where challenge_date = %s",
                       (day,)).fetchone() is not None                # the day survives
     assert admin.daily_view(pg, datetime.date(2000, 1, 1))["scenario"] is None
+
+
+@needs_pg
+def test_puzzle_board_and_removal_are_scoped_to_one_player_one_game_one_day(pg, monkeypatch):
+    actor = _account(pg, "the_admin")
+    monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, str(actor))
+    p1, p2 = _account(pg, "player_one"), _account(pg, "player_two")
+    day, other_day = datetime.date(2001, 1, 1), datetime.date(2001, 1, 2)
+
+    def result(who, game, d, score, finished=True):
+        pg.execute(
+            "insert into puzzle_results (account_id, game, day, started_at, finished_at, moves, "
+            "score, solved, detail) values (%s, %s, %s, now(), "
+            + ("now(), '[]', %s, true, %s)" if finished else "null, '[]', null, null, %s)"),
+            (who, game, d, score, '{"found": 9, "total": 9, "wrong": 0, "guesses": 9, "picks": []}')
+            if finished else (who, game, d, '{}'))
+        pg.execute("insert into puzzle_picks (game, day, slot, voter, person_id) values "
+                   "(%s, %s, '0', %s, 'p')", (game, d, f"a:{who}"))
+
+    result(p1, "bingo", day, 200)
+    result(p2, "bingo", day, 500)
+    result(p1, "xi", day, 300)
+    result(p1, "bingo", other_day, 100)
+    result(actor, "common", day, None, finished=False)          # a clock still running
+    result(p2, "common", other_day, None, finished=False)       # ... and one on another day
+    view = admin.puzzle_view(pg, "bingo", day)
+    assert [r["account_id"] for r in view["board"]] == [p2, p1]   # the public board's order
+    assert view["board"][0]["points"] == 500 and view["board"][0]["guesses"] == 9
+    assert view["voters"] == 2 and view["running"] == 0
+    assert admin.puzzle_view(pg, "common", day)["running"] == 1
+
+    admin.remove_puzzle_result(pg, actor, "bingo", day, p1)
+    assert [r["account_id"] for r in admin.puzzle_view(pg, "bingo", day)["board"]] == [p2]
+    left = set(pg.execute("select account_id, game, day from puzzle_results "
+                          "where account_id in (%s, %s)", (p1, p2)).fetchall())
+    assert left == {(p2, "bingo", day), (p2, "common", other_day), (p1, "xi", day), (p1, "bingo", other_day)}
+    assert pg.execute("select count(*) from puzzle_picks where voter = %s and game = 'bingo' "
+                      "and day = %s", (f"a:{p1}", day)).fetchone()[0] == 0
+    with pytest.raises(admin.AdminError, match="no such result"):
+        admin.remove_puzzle_result(pg, actor, "bingo", day, p1)
+    admin.remove_puzzle_result(pg, actor, "common", day, actor)  # an admin's own: the reset
+    assert admin.puzzle_view(pg, "common", day)["running"] == 0
+    recent = admin.account_detail(pg, p1)["recent_puzzles"]
+    assert [(r["game"], r["day"]) for r in recent] == [("bingo", "2001-01-02"), ("xi", "2001-01-01")]
 
 
 @needs_pg

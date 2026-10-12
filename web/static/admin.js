@@ -34,6 +34,7 @@ function adminTab(tab){
   ADM.loaded[tab] = true;
   if (tab === 'accounts') loadAccounts();
   if (tab === 'daily') loadDaily();
+  if (tab === 'puzzles') loadPuzzles();
   if (tab === 'rooms') loadRooms();
 }
 
@@ -73,6 +74,8 @@ async function loadOverview(){
       ${statTile(o.games_saved, 'Games saved')}
       ${statTile(o.games_7d, 'Games this week')}
       ${statTile(o.daily_today, "Today's daily")}
+      ${statTile(o.puzzles_today, 'Puzzles finished today')}
+      ${statTile(o.puzzle_players_today, 'Puzzle players today')}
       ${statTile(liveRooms, 'Live rooms')}
     </div>
     <div class="adm-two">
@@ -177,6 +180,10 @@ function renderAccount(a){
   const dailies = a.recent_dailies.map(d => `<tr><td>${esc(d.challenge_date)}</td>
       <td>${d.objective_met ? 'met' : 'missed'}</td><td>${d.margin}</td>
       <td>+${d.bonus_points}</td></tr>`).join('');
+  const puzzles = (a.recent_puzzles || []).map(p => `<tr><td>${esc(p.day)}</td>
+      <td>${esc(PZ_LABELS[p.game] || p.game)}</td>
+      <td>${p.finished_at ? fmtNum(p.score) : '<span class="adm-dim">running</span>'}</td>
+      <td>${p.solved ? 'solved' : '–'}</td></tr>`).join('');
   const leaders = (rows, unit) => rows.length
     ? rows.map(r => `${esc(r.name)} <span class="adm-dim">${r.total} ${unit}</span>`).join('<br>')
     : '<span class="adm-dim">–</span>';
@@ -199,6 +206,8 @@ function renderAccount(a){
       ${games ? `<div class="adm-scroll"><table class="adm-table"><thead><tr><th>Mode</th><th>Result</th><th>Won</th><th>When</th></tr></thead><tbody>${games}</tbody></table></div>` : '<p class="adm-empty">None saved.</p>'}</div>
     <div class="adm-card"><div class="adm-card-head">Recent dailies</div>
       ${dailies ? `<div class="adm-scroll"><table class="adm-table"><thead><tr><th>Day</th><th>Objective</th><th>Margin</th><th>Bonus</th></tr></thead><tbody>${dailies}</tbody></table></div>` : '<p class="adm-empty">None played.</p>'}</div>
+    <div class="adm-card"><div class="adm-card-head">Recent puzzles</div>
+      ${puzzles ? `<div class="adm-scroll"><table class="adm-table"><thead><tr><th>Day</th><th>Puzzle</th><th>Score</th><th>Solved</th></tr></thead><tbody>${puzzles}</tbody></table></div>` : '<p class="adm-empty">None played signed in.</p>'}</div>
     ${locked ? '<p class="room-note">This is another admin\'s account, so it can only be viewed here.</p>' : `
     <div class="adm-card adm-actions">
       <div class="adm-card-head">Manage</div>
@@ -306,6 +315,53 @@ async function adminRemoveDaily(ctrl, date, id, username){
   }
 }
 
+// --- the puzzles [A195] -------------------------------------------------------------------
+
+const PZ_LABELS = {bingo: 'Bingo', guess: 'Guess the Player', xi: 'Name the XI', common: 'Common Ground'};
+
+function puzzleResult(game, r){
+  if (game === 'guess') return r.solved ? `solved in ${r.guesses ?? '?'}` : 'missed';
+  if (game === 'common') {
+    const t = r.elapsed_ms == null ? '' : ` · ${Math.floor(r.elapsed_ms / 60000)}:${String(Math.floor(r.elapsed_ms / 1000) % 60).padStart(2, '0')}`;
+    return `${r.found ?? 0}/${r.total ?? '?'} found${r.wrong ? `, ${r.wrong} wrong` : ''}${t}`;
+  }
+  return `${r.found ?? 0}/${r.total ?? '?'}${r.wrong ? `, ${r.wrong} wrong` : ''}${r.solved ? ' · solved' : ''}`;
+}
+
+async function loadPuzzles(){
+  const game = $('#adminPuzzleGame').value, input = $('#adminPuzzleDate');
+  const el = $('#adminPuzzles');
+  el.innerHTML = '<p class="adm-empty">Loading…</p>';
+  try {
+    const d = await api(`/api/admin/puzzles?game=${game}` + (input.value ? '&date=' + input.value : ''));
+    if (!input.value) input.value = d.day;
+    const rows = d.board.map(r => `<tr>
+      <td class="adm-dim">${r.rank}</td>
+      <td><a href="#" onclick="openAccount(${r.account_id});return false"><b>${esc(r.username)}</b></a></td>
+      <td>${esc(puzzleResult(game, r))}</td>
+      <td>${fmtNum(r.score)}</td><td>${r.bonus ? '+' + r.bonus : '–'}</td><td><b>${fmtNum(r.points)}</b></td>
+      <td>${when(r.finished_at)}</td>
+      <td><button class="act minor" onclick="adminRemovePuzzle(this, '${game}', '${esc(d.day)}', ${r.account_id}, '${esc(r.username)}')">Remove</button></td>
+    </tr>`).join('');
+    el.innerHTML = `
+      <div class="adm-card">
+        <div class="adm-card-head">${esc(PZ_LABELS[game])} · ${esc(d.day)}<em>${d.board.length} finished${d.running ? ` · ${d.running} still on the clock` : ''}</em></div>
+        ${game === 'guess' ? '' : `<p class="adm-dim">${fmtNum(d.voters)} voter${d.voters === 1 ? '' : 's'} counted toward rarity, signed in or not.</p>`}
+      </div>
+      ${rows ? `<div class="adm-scroll"><table class="adm-table"><thead><tr><th>#</th><th>Player</th><th>Result</th><th>Score</th><th>Rarity</th><th>Points</th><th>Finished</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+             : '<p class="adm-empty">Nobody signed in has finished this puzzle on this day.</p>'}
+      <p class="room-note">Removing a result takes it off the board with its rarity picks, and lets that player play the puzzle again while it is still open (today, or yesterday's).</p>`;
+  } catch(e){ el.innerHTML = `<p class="adm-empty">${esc(e.message)}</p>`; }
+}
+
+async function adminRemovePuzzle(ctrl, game, date, id, username){
+  if (!confirm(`Remove @${username}'s ${PZ_LABELS[game]} result for ${date}?`)) return;
+  if (await adminPost(ctrl, `/api/admin/puzzles/${game}/${date}/${id}`, null, 'DELETE')){
+    slip('Result removed.');
+    loadPuzzles();
+  }
+}
+
 // --- rooms ---------------------------------------------------------------------------
 
 async function loadRooms(){
@@ -353,7 +409,7 @@ async function boot(){
   ADM.loaded.overview = true;
   $('#adminBody').classList.remove('hide');
   const tab = location.hash.slice(1);
-  if (['accounts', 'daily', 'rooms'].includes(tab)) adminTab(tab);
+  if (['accounts', 'daily', 'puzzles', 'rooms'].includes(tab)) adminTab(tab);
 }
 
 boot();

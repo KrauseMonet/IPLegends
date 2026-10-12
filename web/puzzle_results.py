@@ -122,6 +122,25 @@ def record(conn, account_id: int, day: datetime.date, outcome: pr.Outcome, moves
     return written is not None
 
 
+def remove_result(conn, account_id: int, game: str, day: datetime.date) -> bool:
+    """Take ONE account's attempt at one game on one day off the board, and give them the day
+    back [A195]. Returns whether there was anything to remove.
+
+    Its rarity picks go too, and that is not tidiness: picks are one per voter per slot and the
+    first one stands (`_insert_picks`), so a second attempt's picks would be silently refused while
+    the first attempt's went on counting toward everybody else's rarity. A Common Ground attempt
+    whose clock is still running is removed as well -- it is a row like any other, and leaving it
+    would make Start report the old clock.
+
+    Who may call this is decided above it (the admin's own reset, or the console); this function
+    only ever touches the one account it is handed."""
+    row = conn.execute("delete from puzzle_results where account_id = %s and game = %s and day = %s "
+                       "returning 1", (account_id, game, day)).fetchone()
+    picks = conn.execute("delete from puzzle_picks where game = %s and day = %s and voter = %s "
+                         "returning 1", (game, day, f"a:{account_id}")).fetchall()
+    return row is not None or bool(picks)
+
+
 def result_for(conn, account_id: int, game: str, day: datetime.date) -> dict | None:
     """This player's own finished attempt, if they have made one."""
     row = conn.execute(

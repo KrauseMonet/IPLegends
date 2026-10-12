@@ -3648,6 +3648,7 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .pzr-chip span{color:var(--ink-3)}
 .pzr-note{color:var(--ink-3);font-size:14px}
 .pzr-note .act{margin-left:8px}
+.pzr-reset{display:block;margin:10px 0 0}
 .pz-tabs{margin:0 0 4px}
 .pz-note{margin:6px 0 0}
 @media (max-width:560px){

@@ -19,6 +19,7 @@ let CG = {mode: 'daily', puzzle: null, started: null, moves: [], ended: null, st
 
 const cgStore = () => pzStore(CG_KEY);
 const cgSave = patch => pzSave(CG_KEY, patch);
+pzOnReset(CG_KEY, () => cgMode('daily'));      // an admin's replay [A195]
 
 const cgClock = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const cgLimitMs = () => CG.puzzle.limit_seconds * 1000;
@@ -370,6 +371,7 @@ async function cgRankPanel(){
     : CG.signedIn ? `<div class="pzr-note">Not ranked: this pair was played in this browser while signed out.</div>`
     : `<div class="pzr-note">Sign in to be ranked on today's board.
         <button class="act minor" onclick="openAuthModal('login')">Sign in</button></div>`;
+  if (CG.signedIn) el.innerHTML += pzResetHtml('common', CG.puzzle.seed);
   pzLoadBoard('common', '#pzBoard', CG.puzzle.date);
   if (CG.ranked){ rar.innerHTML = pzRarityHtml(CG.rarity); return; }
   // Signed out: still counted toward rarity, under this browser's id, and never ranked.

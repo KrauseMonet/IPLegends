@@ -244,10 +244,44 @@ async function pzRankDaily(game, body, date){
       headers: Object.assign({'X-Daily-Device': pzDeviceId()}, PZ_JSON),
       body: JSON.stringify(Object.assign({game}, body))});
     rankEl.innerHTML = `<div class="pzr-chip"><i>Today's rank</i><b>#${r.rank}</b> of ${r.of}
-      <span>${r.points} pts${r.bonus ? ` · ${r.score} + ${r.bonus} rarity` : ''}${r.recorded ? '' : ' · already recorded'}</span></div>`;
+      <span>${r.points} pts${r.bonus ? ` · ${r.score} + ${r.bonus} rarity` : ''}${r.recorded ? '' : ' · already recorded'}</span></div>`
+      + pzResetHtml(game, body.seed);
     if (rarEl) rarEl.innerHTML = pzRarityHtml(r.rarity);
   } catch(e){
-    rankEl.innerHTML = `<div class="pzr-note">${esc(e.message)}</div>`;
+    rankEl.innerHTML = `<div class="pzr-note">${esc(e.message)}</div>` + pzResetHtml(game, body.seed);
   }
   pzLoadBoard(game, '#pzBoard', date);
+}
+
+// --- an admin's replay [A195] -------------------------------------------------------------
+// An admin may discard their own result at today's puzzle and play it again, as the daily
+// challenge already lets them. The server decides who may (`/api/puzzles/reset` is a 404 to
+// anybody else), so the button showing is a convenience and nothing more.
+//
+// The page's own game registers where it keeps today's moves and how to start it again,
+// because a replay has to forget BOTH copies: the server's result, and this browser's saved
+// guesses -- otherwise the page would resume the finished game it just discarded. Common
+// Ground's `anonDone` goes too, since it would otherwise refuse the ranked attempt (A190).
+// The finished day stays in the streak: it was finished.
+
+let PZ_RESET = null;
+function pzOnReset(key, reload){ PZ_RESET = {key, reload}; }
+
+function pzResetHtml(game, seed){
+  if (!PZ_RESET || typeof ME === 'undefined' || !ME || !ME.is_admin) return '';
+  return `<button class="act minor pzr-reset" onclick="pzReset(this, '${game}', ${Number(seed)})">Replay today · admin</button>`;
+}
+
+async function pzReset(ctrl, game, seed){
+  if (!confirm("Discard your result at this puzzle and play it again? Your place on today's board goes with it.")) return;
+  ctrl.disabled = true;
+  try {
+    await api('/api/puzzles/reset', {method: 'POST', retry: true, headers: PZ_JSON,
+      body: JSON.stringify({game, seed})});
+  } catch(e){ ctrl.disabled = false; slip(e.message); return; }
+  pzSave(PZ_RESET.key, {daily: null, anonDone: null});
+  PZ_RANK_ARGS = null;
+  ['#pzRank', '#pzRarity', '#pzBoard'].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ''; });
+  slip('Result discarded. It is yours to play again.');
+  PZ_RESET.reload();
 }

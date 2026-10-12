@@ -733,3 +733,125 @@ def test_a_past_days_board_is_kept_and_an_unknown_or_future_one_is_refused(clien
     assert client.get("/api/puzzles/board/chess").status_code == 404
     assert client.get("/api/puzzles/board/bingo?date=2099-01-01").status_code == 400
     assert client.get("/api/puzzles/board/bingo?date=tomorrow").status_code == 400
+
+
+# --- an admin's replay [A195] ----------------------------------------------------------------------
+
+@needs_pg
+def test_removing_a_result_takes_its_picks_and_touches_nobody_and_nothing_else(pg):
+    a, b = account(pg, "ava"), account(pg, "ben")
+    yesterday = TODAY - datetime.timedelta(days=1)
+    pick = [pr.Pick("0", "p1", 50)]
+    for who in (a, b):
+        puzzle_results.record(pg, who, TODAY, outcome(picks=pick), [])
+    puzzle_results.record(pg, a, yesterday, outcome(picks=pick), [])          # another day
+    puzzle_results.record(pg, a, TODAY, outcome(game="xi", picks=pick), [])   # another game
+    puzzle_results.record_device_picks(pg, "bingo", TODAY, "d:" + "a" * 32, pick)
+    assert puzzle_results.remove_result(pg, a, "bingo", TODAY) is True
+    rows = set(pg.execute("select account_id, game, day from puzzle_results").fetchall())
+    assert rows == {(b, "bingo", TODAY), (a, "bingo", yesterday), (a, "xi", TODAY)}
+    voters = set(pg.execute("select voter, game, day from puzzle_picks").fetchall())
+    assert voters == {(f"a:{b}", "bingo", TODAY), (f"a:{a}", "bingo", yesterday),
+                      (f"a:{a}", "xi", TODAY), ("d:" + "a" * 32, "bingo", TODAY)}
+    assert puzzle_results.remove_result(pg, a, "bingo", TODAY) is False      # nothing left to remove
+
+
+@needs_pg
+def test_a_replay_records_the_second_attempt_and_its_picks(pg):
+    """The picks have to go with the result: the first pick in a slot stands, so without that the
+    second attempt's picks would be refused and the first's would go on counting."""
+    a = account(pg, "ava")
+    puzzle_results.record(pg, a, TODAY, outcome(score=100, picks=[pr.Pick("0", "p1", 50)]), [])
+    puzzle_results.remove_result(pg, a, "bingo", TODAY)
+    assert puzzle_results.record(pg, a, TODAY, outcome(score=300, picks=[pr.Pick("0", "p9", 50)]), []) is True
+    assert puzzle_results.result_for(pg, a, "bingo", TODAY)["score"] == 300
+    assert pg.execute("select person_id from puzzle_picks").fetchall() == [("p9",)]
+
+
+@pytest.fixture
+def admin_env(monkeypatch):
+    from web import admin
+    monkeypatch.delenv(admin.ADMIN_ACCOUNT_IDS, raising=False)
+    monkeypatch.delenv(admin.FALLBACK_ADMIN_VAR, raising=False)
+    return lambda *ids: monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, ",".join(map(str, ids)))
+
+
+@needs_pg
+@needs_facts
+def test_only_an_admin_may_reset_and_everybody_else_is_told_it_does_not_exist(client, pg, facts, admin_env):
+    assert client.post("/api/puzzles/reset", json={"game": "bingo", "seed": SEED}).status_code == 401
+    a = sign_in(client, pg)
+    client.post("/api/puzzles/submit", json=bingo_body(facts))
+    admin_env(a + 1000)                                    # somebody else is the admin
+    assert client.post("/api/puzzles/reset", json={"game": "bingo", "seed": SEED}).status_code == 404
+    assert puzzle_results.result_for(pg, a, "bingo", TODAY) is not None
+
+
+@needs_pg
+@needs_facts
+def test_an_admin_resets_their_own_result_and_can_be_ranked_again(client, pg, facts, admin_env):
+    other = account(pg, "ben")
+    puzzle_results.record(pg, other, TODAY, outcome(), [])
+    a = sign_in(client, pg)
+    admin_env(a)
+    client.post("/api/puzzles/submit", json=bingo_body(facts))
+    r = client.post("/api/puzzles/reset", json={"game": "bingo", "seed": SEED})
+    assert r.status_code == 200 and r.json() == {"removed": True, "game": "bingo", "date": "2026-10-09"}
+    assert puzzle_results.result_for(pg, a, "bingo", TODAY) is None
+    assert puzzle_results.result_for(pg, other, "bingo", TODAY) is not None   # only their own
+    again = client.post("/api/puzzles/submit", json=bingo_body(facts)).json()
+    assert again["recorded"] is True
+    assert client.post("/api/puzzles/reset", json={"game": "bingo", "seed": SEED}).json()["removed"] is True
+    assert client.post("/api/puzzles/reset", json={"game": "bingo", "seed": SEED}).json()["removed"] is False
+
+
+@needs_pg
+def test_a_reset_is_held_to_the_days_that_can_still_be_ranked(client, pg, admin_env):
+    a = sign_in(client, pg)
+    admin_env(a)
+    for seed in (bingo.PRACTICE_SEED_FLOOR + 1, SEED - 5, SEED + 3):
+        assert client.post("/api/puzzles/reset", json={"game": "bingo", "seed": seed}).status_code == 400, seed
+    assert client.post("/api/puzzles/reset", json={"game": "chess", "seed": SEED}).status_code == 422
+
+
+@needs_pg
+@needs_facts
+def test_resetting_common_ground_gives_a_fresh_clock(client, pg, real, admin_env):
+    a = sign_in(client, pg)
+    admin_env(a)
+    client.post("/api/ground/ranked/start")
+    pg.execute("update puzzle_results set started_at = now() - interval '200 seconds' where account_id = %s", (a,))
+    assert client.get("/api/ground/ranked").json()["remaining_ms"] < 45_000
+    assert client.post("/api/puzzles/reset", json={"game": "common", "seed": SEED}).json()["removed"] is True
+    assert client.get("/api/ground/ranked").json()["started"] is False
+    assert client.post("/api/ground/ranked/start").json()["remaining_ms"] > 235_000
+
+
+# The page half of the replay is a hook each game registers in its own script. A typo there fails
+# for nobody but an admin on a finished daily, so the wiring is read out of the scripts and
+# compared with what the server and the games actually use.
+RESET_GAMES = {"bingo.js": ("BG_KEY", "bgMode"), "guess.js": ("GP_KEY", "gpMode"),
+               "xi.js": ("XI_KEY", "xiMode"), "commonground.js": ("CG_KEY", "cgMode")}
+
+
+@pytest.mark.parametrize("js,names", list(RESET_GAMES.items()))
+def test_each_daily_game_registers_its_own_key_and_restarts_its_own_daily(js, names):
+    key, mode = names
+    src = (ROOT / "web" / "static" / js).read_text()
+    assert re.search(rf"pzOnReset\({key}, \(\) => {mode}\('daily'\)\)", src)
+    assert re.search(rf"^const {key} = '", src, re.M) and re.search(rf"^async function {mode}\(", src, re.M)
+    # what the replay forgets is what the game resumes from
+    assert re.search(r"Save\(\{daily: ", src)
+
+
+def test_the_replay_button_names_games_and_a_route_the_server_accepts():
+    static = ROOT / "web" / "static"
+    games = set(re.findall(r"pzRankDaily\('(\w+)'", "".join(p.read_text() for p in static.glob("*.js"))))
+    games |= set(re.findall(r"pzResetHtml\('(\w+)'", (static / "commonground.js").read_text()))
+    assert games == set(pr.GAMES)
+    assert set(puzzle_routes.ResetIn.model_fields["game"].annotation.__args__) == set(pr.GAMES)
+    assert "'/api/puzzles/reset'" in (static / "puzzle.js").read_text()
+    paths = {r.path for r in puzzle_routes.router.routes}
+    assert "/api/puzzles/reset" in paths
+    assert "anonDone: null" in (static / "puzzle.js").read_text()
+    assert "anonDone: p.date" in (static / "commonground.js").read_text()

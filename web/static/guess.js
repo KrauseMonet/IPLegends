@@ -13,6 +13,7 @@ let GP = {mode: 'daily', puzzle: null, guesses: [], gaveUp: false, state: null,
 
 const gpStore = () => pzStore(GP_KEY);
 const gpSave = patch => pzSave(GP_KEY, patch);
+pzOnReset(GP_KEY, () => gpMode('daily'));      // an admin's replay [A195]
 
 function gpPersist(){
   const p = GP.puzzle, rec = {guesses: GP.guesses, gaveUp: GP.gaveUp};

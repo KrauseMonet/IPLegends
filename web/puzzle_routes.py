@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import badges, bingo, ground, guess as guess_game, puzzle_results as pr, rarity, xi as xi_game
-from web import auth, bingo_routes, daily as daily_lib, db, ground_routes, puzzle_results, xi_routes
+from web import admin as admin_lib, auth, bingo_routes, daily as daily_lib, db, ground_routes, puzzle_results, xi_routes
 
 router = APIRouter()
 
@@ -129,6 +129,43 @@ def submit(body: SubmitIn, request: Request, response: Response) -> SubmitOut:
                      bonus=row["bonus"] if row else 0, points=row["points"] if row else outcome.score,
                      solved=mine["solved"] if mine else outcome.solved,
                      rank=row["rank"] if row else None, of=of, rarity=rar)
+
+
+# --- an admin's own replay [A195] ------------------------------------------------------------
+
+class ResetIn(BaseModel):
+    game: Literal["bingo", "guess", "xi", "common"]
+    seed: int = Field(ge=1)
+
+
+class ResetOut(BaseModel):
+    removed: bool           # false if there was nothing recorded to discard
+    game: str
+    date: str
+
+
+@router.post("/api/puzzles/reset", response_model=ResetOut)
+def reset(body: ResetIn, request: Request, response: Response) -> ResetOut:
+    """Discard your OWN result at a daily puzzle and play it again -- the daily challenge's reset
+    (`/api/daily/reset`), for the puzzles.
+
+    Answers 404 rather than 403 to anybody who is not an admin, so the route does not advertise
+    itself. The seed must be a day that can still be ranked (today, or yesterday's for a puzzle
+    begun before midnight UTC), because that is the only result a replay could replace. Who may
+    call it is decided here and what it touches in `puzzle_results.remove_result`, which is handed
+    the caller's own session account and nothing they sent -- so a mistake in this check costs an
+    admin their own attempt and can never cost anybody else theirs."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    if not admin_lib.is_admin(account_id):
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        day = pr.daily_date(body.seed, bingo_routes.today())
+    except pr.PuzzleResultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with db.connection() as conn:
+        removed = puzzle_results.remove_result(conn, account_id, body.game, day)
+    return ResetOut(removed=removed, game=body.game, date=day.isoformat())
 
 
 # --- a signed-out player's picks, for rarity -------------------------------------------------

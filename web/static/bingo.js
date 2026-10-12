@@ -18,6 +18,7 @@ let BG = {mode: 'daily', grid: null, guesses: [], state: null, sel: null,
 
 const bgStore = () => pzStore(BG_KEY);
 const bgSave = patch => pzSave(BG_KEY, patch);
+pzOnReset(BG_KEY, () => bgMode('daily'));      // an admin's replay [A195]
 
 function bgPersist(){
   const g = BG.grid;

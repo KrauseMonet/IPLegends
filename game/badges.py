@@ -22,7 +22,7 @@ from dataclasses import dataclass
 GAMES = ("bingo", "guess", "xi", "common", "trio")
 # Three to Make arrived on this day [A196]. A grand slam is every daily that EXISTED that day, so
 # the four-game slams already earned stay earned rather than being taken back by a fifth game.
-TRIO_FROM = datetime.date(2026, 10, 14)
+TRIO_FROM = datetime.date(2026, 10, 13)
 
 STREAKS = (7, 30, 100)                 # days running with any puzzle finished
 SHARP_EYE_GUESSES = 2                  # Guess the Player found in this many or fewer

@@ -20,9 +20,10 @@ STATIC = ROOT / "web" / "static"
 PARTIALS = ROOT / "web" / "partials"
 
 PUZZLE_PAGES = {"puzzles": "/puzzles", "bingo": "/bingo", "guess": "/guess", "commonground": "/common",
-                "xi": "/xi", "flashback": "/flashback"}
+                "xi": "/xi", "trio": "/trio", "flashback": "/flashback"}
 DAILY_KEYS = {"/bingo": ("bingo.js", "BG_KEY"), "/guess": ("guess.js", "GP_KEY"),
-              "/common": ("commonground.js", "CG_KEY"), "/xi": ("xi.js", "XI_KEY")}
+              "/common": ("commonground.js", "CG_KEY"), "/xi": ("xi.js", "XI_KEY"),
+              "/trio": ("trio.js", "TR_KEY")}
 
 
 def hrefs(text: str) -> list[str]:
@@ -99,17 +100,17 @@ def test_each_hub_card_reads_the_key_its_game_actually_saves_under(path, key_fil
     assert card and card.group(1) == saved_key
 
 
-def test_the_hub_lists_the_four_dailies_and_flashback_and_nothing_else():
+def test_the_hub_lists_the_five_dailies_and_flashback_and_nothing_else():
     hub = (STATIC / "puzzles.html").read_text()
     cards = re.findall(r'<a class="pz-card" href="([^"]+)"', hub)
-    assert cards == ["/bingo", "/guess", "/common", "/xi", "/flashback"]
+    assert cards == ["/bingo", "/guess", "/common", "/xi", "/trio", "/flashback"]
 
 
 def test_every_daily_game_records_a_finished_day_the_hub_can_count():
     """The hub counts a day if the game's saved `days` list holds it, so each game must write
     that list when a puzzle finishes."""
     for js_name, const in (("bingo.js", "BG_KEY"), ("guess.js", "GP_KEY"),
-                           ("commonground.js", "CG_KEY"), ("xi.js", "XI_KEY")):
+                           ("commonground.js", "CG_KEY"), ("xi.js", "XI_KEY"), ("trio.js", "TR_KEY")):
         text = (STATIC / js_name).read_text()
         assert re.search(r"Save\(\{days: days\.concat\(", text), js_name
 

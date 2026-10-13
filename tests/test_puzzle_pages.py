@@ -67,7 +67,7 @@ def test_the_hub_tabs_are_exactly_the_boards_the_api_serves():
     from web.puzzle_routes import GAME_LABELS
     hub = (STATIC / "puzzles.html").read_text()
     tabs = re.findall(r'data-game="(\w+)" onclick="pzHubBoard', hub)
-    assert tabs == ["overall", "bingo", "guess", "common", "xi"]
+    assert tabs == ["overall", "bingo", "guess", "common", "xi", "trio"]
     assert set(tabs) == set(GAME_LABELS)
 
 

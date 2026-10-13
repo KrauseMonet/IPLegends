@@ -6,7 +6,7 @@ Two kinds of result land in the same table:
 * **Untimed** (Bingo, Guess the Player, Name the XI): the page sends the moves it made when it
   finishes, `game.puzzle_results` replays them, and the replayed outcome is recorded. Nothing
   the page says about how it did is believed.
-* **Timed** (Common Ground): the four minutes have to be the SERVER's, because a page can claim
+* **Timed** (Common Ground, and Three to Make [A196]): the clock has to be the SERVER's, because a page can claim
   any time it likes. So pressing Start inserts an open row stamped with the database's clock;
   every guess is stamped on arrival with the database's clock too; and the row is finished when
   the set is complete, when the player stops, or when the clock runs out. A row whose clock ran
@@ -23,7 +23,7 @@ import json
 
 import re
 
-from game import badges, ground, puzzle_results as pr, rarity
+from game import badges, ground, puzzle_results as pr, rarity, trio
 
 CLOCK_GRACE_MS = 2000       # a guess typed on the last tick, in flight when the clock ran out
 
@@ -158,7 +158,7 @@ def result_for(conn, account_id: int, game: str, day: datetime.date) -> dict | N
 
 _OPEN_ROW = ("select moves, finished_at, ended, detail, "
              "(extract(epoch from (now() - started_at)) * 1000)::bigint "
-             "from puzzle_results where account_id = %s and game = 'common' and day = %s")
+             "from puzzle_results where account_id = %s and game = %s and day = %s")
 
 
 def _moves(raw: list) -> list[ground.Move]:
@@ -186,10 +186,10 @@ def _finish(conn, account_id: int, day: datetime.date, g, puzzle, moves: list[gr
     return outcome
 
 
-def ranked_view(conn, account_id: int, day: datetime.date) -> dict | None:
-    """Where this player's attempt at today's pair stands, or None if they have not started.
+def ranked_view(conn, account_id: int, day: datetime.date, game: str = "common") -> dict | None:
+    """Where this player's timed attempt today stands, or None if they have not started.
     `elapsed_ms` is the SERVER's reading, which is what the page's countdown is built from."""
-    row = conn.execute(_OPEN_ROW, (account_id, day)).fetchone()
+    row = conn.execute(_OPEN_ROW, (account_id, game, day)).fetchone()
     if row is None:
         return None
     raw, finished_at, ended, detail, elapsed = row
@@ -197,13 +197,15 @@ def ranked_view(conn, account_id: int, day: datetime.date) -> dict | None:
             "detail": detail, "elapsed_ms": int(elapsed)}
 
 
-def ranked_start(conn, account_id: int, day: datetime.date) -> dict:
+def ranked_start(conn, account_id: int, day: datetime.date, game: str = "common") -> dict:
     """Press Start: stamp the database's clock on a new open row. Idempotent -- a second press
     (or a reload) does not restart the clock, it reports the one already running."""
+    if game not in pr.TIMED_GAMES:
+        raise pr.PuzzleResultError("That puzzle has no clock.")
     conn.execute(
-        "insert into puzzle_results (account_id, game, day, started_at) values (%s, 'common', %s, now()) "
-        "on conflict (account_id, game, day) do nothing", (account_id, day))
-    view = ranked_view(conn, account_id, day)
+        "insert into puzzle_results (account_id, game, day, started_at) values (%s, %s, %s, now()) "
+        "on conflict (account_id, game, day) do nothing", (account_id, game, day))
+    view = ranked_view(conn, account_id, day, game)
     assert view is not None
     return view
 
@@ -214,7 +216,7 @@ def ranked_play(conn, g: ground.Ground, puzzle: ground.Puzzle, account_id: int, 
     its row's view, and whether the guess was APPLIED (it is not when the attempt was already
     over or the clock had run out). Raises OpenAttempt if the player never pressed Start, and
     PuzzleResultError for a move the rules refuse (which changes nothing)."""
-    row = conn.execute(_OPEN_ROW + " for update", (account_id, day)).fetchone()
+    row = conn.execute(_OPEN_ROW + " for update", (account_id, "common", day)).fetchone()
     if row is None:
         raise OpenAttempt("Press Start first.")
     raw, finished_at, ended, detail, elapsed = row
@@ -251,8 +253,8 @@ def ranked_play(conn, g: ground.Ground, puzzle: ground.Puzzle, account_id: int, 
 
 
 def sweep_expired(conn, g: ground.Ground, day: datetime.date) -> int:
-    """Finish every timed attempt of this day whose clock ran out unobserved, at the limit.
-    Called before a board is read, so an abandoned attempt still takes its place."""
+    """Finish every Common Ground attempt of this day whose clock ran out unobserved, at the
+    limit. Called before a board is read, so an abandoned attempt still takes its place."""
     rows = conn.execute(
         "select account_id, moves from puzzle_results where game = 'common' and day = %s "
         "and finished_at is null and now() > started_at + (%s * interval '1 millisecond') "
@@ -269,21 +271,107 @@ def _seed_for(day: datetime.date) -> int:
     return ground.daily_seed(day)
 
 
+# --- Three to Make, on the server's clock [A196] ---------------------------------------------
+
+def _trio_finish(conn, account_id: int, day: datetime.date, g: trio.Trio, puzzle: trio.Puzzle,
+                 ids: list[str] | None, t: int) -> pr.Outcome:
+    """Close a Three to Make attempt, once: `ids` locked in at `t`, or None for a clock that ran
+    out with no full trio held."""
+    outcome = pr.verify_trio(g, puzzle, ids, t)
+    conn.execute(
+        "update puzzle_results set finished_at = now(), moves = %s::jsonb, ended = %s, score = %s, "
+        "solved = %s, elapsed_ms = %s, detail = %s::jsonb "
+        "where account_id = %s and game = 'trio' and day = %s and finished_at is null",
+        (json.dumps(list(ids or [])), outcome.ended, outcome.score, outcome.solved, outcome.elapsed_ms,
+         json.dumps(outcome.detail()), account_id, day))
+    _insert_picks(conn, "trio", day, f"a:{account_id}", outcome.picks)
+    return outcome
+
+
+def _trio_timeout(conn, account_id, day, g, puzzle, held: list[str]) -> pr.Outcome:
+    """The clock ran out. A FULL trio held at that moment is locked in at the limit -- the player
+    had chosen it and the page simply did not get the button pressed in time -- and anything
+    less is no trio at all."""
+    full = len(held) == trio.PICKS
+    return _trio_finish(conn, account_id, day, g, puzzle, list(held) if full else None, trio.LIMIT_MS)
+
+
+def trio_play(conn, g: trio.Trio, puzzle: trio.Puzzle, account_id: int, day: datetime.date,
+              picks: list[str], lock: bool = False) -> tuple[dict, bool]:
+    """Hold `picks` (up to three) and, with `lock`, lock them in -- on the server's clock. Returns
+    the row's view and whether THIS call finished the attempt with the trio it sent (False when
+    the attempt was already over, or the clock had run out first). Raises OpenAttempt without a
+    Start, and PuzzleResultError for a selection the rules refuse (which changes nothing)."""
+    row = conn.execute(_OPEN_ROW + " for update", (account_id, "trio", day)).fetchone()
+    if row is None:
+        raise OpenAttempt("Press Start first.")
+    raw, finished_at, _ended, _detail, elapsed = row
+    elapsed = int(elapsed)
+    if finished_at is not None:
+        return ranked_view(conn, account_id, day, "trio") or {}, False
+    held = list(raw or [])
+    if elapsed >= trio.LIMIT_MS + CLOCK_GRACE_MS:
+        # Nobody was looking when the clock ran out (a closed tab): it ended at the limit with
+        # whatever was held then, and what arrives now is too late. Returned, not raised: an
+        # exception would roll back the write that records the finish.
+        _trio_timeout(conn, account_id, day, g, puzzle, held)
+        view = ranked_view(conn, account_id, day, "trio") or {}
+        return {**view, "late": True}, False
+    try:
+        chosen = trio.check_picks(g, picks, complete=lock)
+    except trio.TrioError as exc:
+        raise pr.PuzzleResultError(str(exc)) from exc
+    if lock:
+        # A lock-in typed on the last tick and in flight when the clock ran out still counts,
+        # at the limit (CLOCK_GRACE_MS), the rooms' A146 reasoning.
+        _trio_finish(conn, account_id, day, g, puzzle, list(chosen), min(elapsed, trio.LIMIT_MS))
+        return ranked_view(conn, account_id, day, "trio") or {}, True
+    if elapsed >= trio.LIMIT_MS:
+        _trio_timeout(conn, account_id, day, g, puzzle, list(chosen))
+        return ranked_view(conn, account_id, day, "trio") or {}, False
+    conn.execute("update puzzle_results set moves = %s::jsonb where account_id = %s and game = 'trio' "
+                 "and day = %s and finished_at is null", (json.dumps(list(chosen)), account_id, day))
+    return ranked_view(conn, account_id, day, "trio") or {}, False
+
+
+def trio_sweep(conn, g: trio.Trio, day: datetime.date) -> int:
+    """Finish every Three to Make attempt whose clock ran out unobserved, with what it held."""
+    rows = conn.execute(
+        "select account_id, moves from puzzle_results where game = 'trio' and day = %s "
+        "and finished_at is null and now() > started_at + (%s * interval '1 millisecond') "
+        "for update", (day, trio.LIMIT_MS + CLOCK_GRACE_MS)).fetchall()
+    if not rows:
+        return 0
+    puzzle = g.puzzle(trio.daily_seed(day))
+    for account_id, raw in rows:
+        _trio_timeout(conn, account_id, day, g, puzzle, list(raw or []))
+    return len(rows)
+
+
 # --- the board -------------------------------------------------------------------------------
 
-def rank_key(row: dict) -> tuple:
+def rank_key(row: dict, game: str = "") -> tuple:
     """Best first: more points, then the quicker (a timed game's elapsed; the untimed games have
     none), then whoever finished first -- so the order is total and stable. The same rule
-    everywhere a rank is shown."""
+    everywhere a rank is shown.
+
+    Three to Make is the exception and says so: nearer the target first, THEN the rarer trio,
+    then the quicker (`trio.rank_key`). Rarity there is a tie-break, never added to the score."""
+    if game == "trio":
+        d = row.get("detail") or {}
+        return trio.rank_key(d.get("distance"), row["bonus"], row["elapsed_ms"]) + (
+            row["finished_at"], row["account_id"])
     elapsed = row["elapsed_ms"] if row["elapsed_ms"] is not None else 0
     return (-row["points"], elapsed, row["finished_at"], row["account_id"])
 
 
 def board(conn, game: str, day: datetime.date, g: ground.Ground | None = None,
-          limit: int = 50) -> list[dict]:
+          limit: int = 50, t: trio.Trio | None = None) -> list[dict]:
     """The day's finished results for one game, best first, each with its rank."""
     if game == "common" and g is not None:
         sweep_expired(conn, g, day)
+    if game == "trio" and t is not None:
+        trio_sweep(conn, t, day)
     rows = conn.execute(
         """
         select r.account_id, a.username, a.kit_name, a.kit_monogram, a.kit_colour, r.score,
@@ -295,27 +383,29 @@ def board(conn, game: str, day: datetime.date, g: ground.Ground | None = None,
     out = []
     for acc, u, kn, km, kc, score, solved, elapsed, finished, detail in rows:
         bonus = rarity.total_bonus(game, (detail or {}).get("picks", ()), c) if c is not None else 0
+        # Three to Make's rarity breaks ties and is not a bonus, so it is not in its points.
+        points = score if game == "trio" else score + bonus
         out.append({"account_id": acc, "username": u,
                     "kit": {"name": kn, "monogram": km, "colour": kc} if kn is not None else None,
-                    "score": score, "bonus": bonus, "points": score + bonus, "solved": solved,
+                    "score": score, "bonus": bonus, "points": points, "solved": solved,
                     "elapsed_ms": elapsed, "finished_at": finished, "detail": detail})
-    out.sort(key=rank_key)
+    out.sort(key=lambda r: rank_key(r, game))
     for i, row in enumerate(out, 1):
         row["rank"] = i
     return out[:limit] if limit else out
 
 
 def standing(conn, game: str, day: datetime.date, account_id: int,
-             g: ground.Ground | None = None) -> tuple[dict | None, int]:
+             g: ground.Ground | None = None, t: trio.Trio | None = None) -> tuple[dict | None, int]:
     """This player's own board row (with its rarity bonus) and how many finished."""
-    rows = board(conn, game, day, g, limit=0)
+    rows = board(conn, game, day, g, limit=0, t=t)
     return next((r for r in rows if r["account_id"] == account_id), None), len(rows)
 
 
 def rank_of(conn, game: str, day: datetime.date, account_id: int,
-            g: ground.Ground | None = None) -> tuple[int | None, int]:
+            g: ground.Ground | None = None, t: trio.Trio | None = None) -> tuple[int | None, int]:
     """This player's place today and how many finished -- 'third of twelve'."""
-    mine, n = standing(conn, game, day, account_id, g)
+    mine, n = standing(conn, game, day, account_id, g, t)
     return (mine["rank"] if mine else None), n
 
 
@@ -353,9 +443,10 @@ def combine(boards: dict[str, list[dict]]) -> list[dict]:
     return out
 
 
-def overall(conn, day: datetime.date, g: ground.Ground | None = None) -> list[dict]:
+def overall(conn, day: datetime.date, g: ground.Ground | None = None,
+            t: trio.Trio | None = None) -> list[dict]:
     """Every game's finished board for the day, combined."""
-    return combine({game: board(conn, game, day, g, limit=0) for game in pr.GAMES})
+    return combine({game: board(conn, game, day, g, limit=0, t=t) for game in pr.GAMES})
 
 
 # --- what a player has done, for the profile and its badges -----------------------------------

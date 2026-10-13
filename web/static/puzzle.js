@@ -134,10 +134,11 @@ async function pzSignedIn(){
 }
 
 const PZ_GAME_NAMES = {bingo: 'Bingo', guess: 'Guess the Player', xi: 'Name the XI',
-                       common: 'Common Ground', overall: 'Overall'};
+                       common: 'Common Ground', trio: 'Three to Make', overall: 'Overall'};
 
+// A time TAKEN, rounded down as every share line does (game.ground.clock, game.trio.clock).
 function pzFmtTime(ms){
-  const s = Math.round(ms / 1000);
+  const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
@@ -150,10 +151,15 @@ function pzBoardRowHtml(r, game){
   else if (game === 'bingo') note = `${r.found}/${r.total}`;
   else if (game === 'xi') note = `${r.found}/${r.total}`;
   else if (game === 'guess') note = r.solved ? `${r.wrong + 1} guess${r.wrong ? 'es' : ''}` : 'not found';
+  // Three to Make ranks on distance, so its number column is the distance, not points [A196].
+  else if (game === 'trio') note = r.distance == null ? 'out of time'
+    : `${r.elapsed_ms != null ? pzFmtTime(r.elapsed_ms) : ''}${r.bonus ? ' · rarity ' + r.bonus : ''}`;
   return `<div class="pzb-row${r.you ? ' you' : ''}${r.rank <= 3 ? ' top' : ''}">
     <span class="pzb-rank">${r.rank}</span>${sideBadge(side, 'pzb-badge')}
     <span class="pzb-name">${esc(r.username)}${r.you ? ' <em>you</em>' : ''}</span>
-    <span class="pzb-note">${esc(note)}</span><b class="pzb-pts">${r.points}</b></div>`;
+    <span class="pzb-note">${esc(note)}</span><b class="pzb-pts">${game === 'trio'
+      ? (r.distance == null ? '–' : r.distance === 0 ? 'exact' : '±' + Number(r.distance).toLocaleString('en-IN'))
+      : r.points}</b></div>`;
 }
 
 function pzBoardHtml(data, signedIn){
@@ -199,15 +205,17 @@ function pzDeviceId(){
 
 // How rare the player's picks were. Until a slot has enough voters there is nothing to say, and
 // the panel says when there will be rather than showing a zero that reads like a verdict.
-function pzRarityHtml(r){
+// `tiebreak` is for Three to Make, where rarity is not added to anything and only orders a tie.
+function pzRarityHtml(r, tiebreak){
   if (!r) return '';
   if (!r.enough)
     return `<div class="pzy-note">Rarity scoring starts once ${r.min_voters} players have finished today's
       puzzle. ${r.voters} so far.</div>`;
   const scored = r.picks.filter(p => p.share !== null).sort((a, b) => a.share - b.share);
   const rare = scored.slice(0, 3).map(p => `<span><b>${esc(p.name)}</b> ${Math.round(p.share * 100)}%</span>`).join('');
-  return `<div class="pzy"><div class="pzy-head"><i>Rarity</i><b>+${r.bonus}</b>
-    <span>for picks few others made</span></div>${rare ? `<div class="pzy-rare"><i>Your rarest</i>${rare}</div>` : ''}</div>`;
+  const head = tiebreak ? `<i>Rarity</i><b>${r.bonus}</b><span>breaks a tie with anyone as close</span>`
+    : `<i>Rarity</i><b>+${r.bonus}</b><span>for picks few others made</span>`;
+  return `<div class="pzy"><div class="pzy-head">${head}</div>${rare ? `<div class="pzy-rare"><i>Your rarest</i>${rare}</div>` : ''}</div>`;
 }
 
 let PZ_RANK_ARGS = null;

@@ -40,7 +40,7 @@ from web import auction_session
 from web import room_auction
 from web import auth
 from web import bingo_routes
-from web import ground_routes, puzzle_routes
+from web import ground_routes, puzzle_routes, trio_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -158,6 +158,7 @@ app.include_router(ground_routes.router)
 app.include_router(puzzle_routes.router)
 app.include_router(guess_routes.router)
 app.include_router(xi_routes.router)
+app.include_router(trio_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -361,6 +362,11 @@ def bingo_page() -> FileResponse:
 @app.get("/common", include_in_schema=False)
 def common_page() -> FileResponse:
     return FileResponse(STATIC / "commonground.html")
+
+
+@app.get("/trio", include_in_schema=False)
+def trio_page() -> FileResponse:
+    return FileResponse(STATIC / "trio.html")
 
 
 @app.get("/chain", include_in_schema=False)
@@ -2793,11 +2799,12 @@ def admin_puzzles(request: Request, response: Response, game: str = "bingo",
     a future one simply has nobody on it."""
     _admin(request, response)
     try:
-        g = ground_routes.ground()      # so a Common Ground clock that ran out is finished first
+        g = ground_routes.ground()      # so a timed attempt whose clock ran out is finished first
+        t = trio_routes.trio()
     except HTTPException:
-        g = None                        # no puzzle facts on this deployment: show what is stored
+        g = t = None                    # no puzzle facts on this deployment: show what is stored
     with _db() as conn:
-        return _admin_action(admin_lib.puzzle_view, conn, game, _admin_date(date), g)
+        return _admin_action(admin_lib.puzzle_view, conn, game, _admin_date(date), g, t)
 
 
 @app.delete("/api/admin/puzzles/{game}/{date}/{account_id}")

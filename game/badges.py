@@ -19,7 +19,10 @@ import datetime
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-GAMES = ("bingo", "guess", "xi", "common")
+GAMES = ("bingo", "guess", "xi", "common", "trio")
+# Three to Make arrived on this day [A196]. A grand slam is every daily that EXISTED that day, so
+# the four-game slams already earned stay earned rather than being taken back by a fifth game.
+TRIO_FROM = datetime.date(2026, 10, 14)
 
 STREAKS = (7, 30, 100)                 # days running with any puzzle finished
 SHARP_EYE_GUESSES = 2                  # Guess the Player found in this many or fewer
@@ -78,6 +81,11 @@ def run_reached(days: Iterable[datetime.date], n: int) -> datetime.date | None:
     return None
 
 
+def games_on(day: datetime.date) -> set[str]:
+    """The daily puzzles that existed on `day`."""
+    return set(GAMES) if day >= TRIO_FROM else set(GAMES) - {"trio"}
+
+
 def _first(results: list[Result], test) -> datetime.date | None:
     days = sorted(r.day for r in results if test(r))
     return days[0] if days else None
@@ -113,6 +121,8 @@ def evaluate(results: list[Result], rare_pick_days: Iterable[datetime.date] = ()
     add("lightning", "Lightning",
         f"Find every common teammate in under {LIGHTNING_MS // 1000} seconds.", "Mastery", 1, 0,
         _first(by("common"), lambda r: r.solved and r.elapsed_ms is not None and r.elapsed_ms < LIGHTNING_MS))
+    add("bang_on", "Bang on", "Make the Three to Make target exactly.", "Mastery", 1, 0,
+        _first(by("trio"), lambda r: r.solved))
     add("full_xi", "The full XI", "Name every player in a Name the XI side.", "Mastery", 1, 0,
         _first(by("xi"), lambda r: r.solved))
     add("flawless_xi", "Flawless XI", "Name the whole side without a single mistake.", "Mastery", 1, 0,
@@ -121,8 +131,8 @@ def evaluate(results: list[Result], rare_pick_days: Iterable[datetime.date] = ()
     per_day: dict[datetime.date, set[str]] = {}
     for r in results:
         per_day.setdefault(r.day, set()).add(r.game)
-    add("grand_slam", "Grand slam", "Finish all four daily puzzles on the same day.", "Habit", 1, 0,
-        next((d for d in sorted(per_day) if per_day[d] >= set(GAMES)), None))
+    add("grand_slam", "Grand slam", "Finish every daily puzzle on the same day.", "Habit", 1, 0,
+        next((d for d in sorted(per_day) if per_day[d] >= games_on(d)), None))
     dates = sorted(r.day for r in results)
     for key, name, at in (("regular", "Regular", REGULAR_AT), ("veteran", "Veteran", VETERAN_AT)):
         add(key, name, f"Finish {at} daily puzzles.", "Habit", at, len(results), _nth(dates, at))

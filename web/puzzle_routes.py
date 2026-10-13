@@ -18,8 +18,9 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from game import badges, bingo, ground, guess as guess_game, puzzle_results as pr, rarity, xi as xi_game
-from web import admin as admin_lib, auth, bingo_routes, daily as daily_lib, db, ground_routes, puzzle_results, xi_routes
+from game import badges, bingo, ground, guess as guess_game, puzzle_results as pr, rarity, trio as trio_game, xi as xi_game
+from web import (admin as admin_lib, auth, bingo_routes, daily as daily_lib, db, ground_routes, puzzle_results,
+                 trio_routes, xi_routes)
 
 router = APIRouter()
 
@@ -134,7 +135,7 @@ def submit(body: SubmitIn, request: Request, response: Response) -> SubmitOut:
 # --- an admin's own replay [A195] ------------------------------------------------------------
 
 class ResetIn(BaseModel):
-    game: Literal["bingo", "guess", "xi", "common"]
+    game: Literal["bingo", "guess", "xi", "common", "trio"]
     seed: int = Field(ge=1)
 
 
@@ -176,10 +177,10 @@ class MoveIn(BaseModel):
 
 
 class PicksIn(BaseModel):
-    game: Literal["bingo", "xi", "common"]
+    game: Literal["bingo", "xi", "common", "trio"]
     seed: int = Field(ge=1)
     cells: list[CellGuess] = Field(default_factory=list, max_length=bingo.GUESSES)
-    ids: list[str] = Field(default_factory=list, max_length=xi_game.MAX_GUESSES)
+    ids: list[str] = Field(default_factory=list, max_length=xi_game.MAX_GUESSES)   # Three to Make: the trio
     moves: list[MoveIn] = Field(default_factory=list, max_length=ground.MAX_GUESSES)   # Common Ground's
     end_t: int | None = Field(default=None, ge=0, le=ground.LIMIT_MS)
     gave_up: bool = False
@@ -198,6 +199,10 @@ def _picks_outcome(body: PicksIn) -> pr.Outcome:
     if body.game == "xi":
         side = xi_game.pick_side(xi_routes.sides(), body.seed)
         return pr.verify_xi(facts.players, side, list(body.ids), body.gave_up)
+    if body.game == "trio":
+        # The trio is counted toward rarity; when it was locked in does not matter to that.
+        t = trio_routes.trio()
+        return pr.verify_trio(t, t.puzzle(body.seed), list(body.ids), 0)
     g = ground_routes.ground()
     return pr.verify_common(g, g.puzzle(body.seed), [ground.Move(m.id, m.t) for m in body.moves],
                             end_t=body.end_t)
@@ -332,11 +337,113 @@ def ranked_play(body: RankedPlayIn, request: Request, response: Response) -> Ran
     return RankedPlayOut(**out.model_dump(), hit=hit, kind=kind)
 
 
+# --- Three to Make, on the server's clock [A196] ---------------------------------------------
+
+class HeldOut(BaseModel):
+    person_id: str
+    name: str                          # never his figure: that would give the game away mid-attempt
+
+
+class TrioRankedOut(BaseModel):
+    started: bool
+    finished: bool = False
+    late: bool = False                 # what arrived came after the clock had run out
+    remaining_ms: int = 0              # the SERVER's reading: the page's countdown is built from it
+    held: list[HeldOut] = []           # the trio held so far, while the clock runs
+    result: trio_routes.ResultOut | None = None
+    rank: int | None = None
+    of: int = 0
+    rarity: RarityOut | None = None
+
+
+class TrioPlayIn(BaseModel):
+    picks: list[str] = Field(default_factory=list, max_length=trio_game.PICKS)
+    lock: bool = False
+
+
+def _trio_out(conn, account_id: int, day, seed: int, view: dict | None) -> TrioRankedOut:
+    if view is None:
+        return TrioRankedOut(started=False)
+    t = trio_routes.trio()
+    held = [str(x) for x in (view["moves"] or [])]
+    if not view["finished"]:
+        return TrioRankedOut(started=True, late=bool(view.get("late")),
+                             remaining_ms=max(0, trio_game.LIMIT_MS - view["elapsed_ms"]),
+                             held=[HeldOut(person_id=x, name=t.players[x].name) for x in held])
+    detail = view.get("detail") or {}
+    puzzle = t.puzzle(seed)
+    # Rebuilt from what was stored: the trio locked in (none for a clock that ran out empty-handed)
+    # and the SERVER's time for it.
+    result = trio_game.play(t, puzzle, held or None, int(detail.get("elapsed_ms", 0) or 0))
+    row, of = puzzle_results.standing(conn, "trio", day, account_id, t=t)
+    rar = _rarity_out(conn, "trio", day, [pr.Pick(x, x) for x in sorted(held)]) if held else None
+    return TrioRankedOut(started=True, finished=True, late=bool(view.get("late")),
+                         result=trio_routes.result_out(seed, result),
+                         rank=row["rank"] if row else None, of=of, rarity=rar)
+
+
+def _trio_view(conn, account_id: int, day) -> dict | None:
+    """The row as `_trio_out` reads it: its view plus the elapsed time stored at the finish."""
+    view = puzzle_results.ranked_view(conn, account_id, day, "trio")
+    if view is not None and view["finished"]:
+        stored = puzzle_results.result_for(conn, account_id, "trio", day)
+        view["detail"] = {**(view.get("detail") or {}), "elapsed_ms": stored["elapsed_ms"] if stored else 0}
+    return view
+
+
+@router.get("/api/trio/ranked", response_model=TrioRankedOut)
+def trio_ranked_state(request: Request, response: Response) -> TrioRankedOut:
+    """Where this player's attempt at today's target stands: not started, running (with the time
+    left on the server's clock and the trio held) or finished (with the figures and their rank)."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    day, seed = _today_seed()
+    with db.connection() as conn:
+        view = _trio_view(conn, account_id, day)
+        if view is not None and not view["finished"] and view["elapsed_ms"] >= trio_game.LIMIT_MS + puzzle_results.CLOCK_GRACE_MS:
+            puzzle_results.trio_sweep(conn, trio_routes.trio(), day)      # a clock that ran out while away
+            view = _trio_view(conn, account_id, day)
+        return _trio_out(conn, account_id, day, seed, view)
+
+
+@router.post("/api/trio/ranked/start", response_model=TrioRankedOut)
+def trio_ranked_start(request: Request, response: Response) -> TrioRankedOut:
+    """Press Start: the target appears and the ninety seconds begin, on the database's clock.
+    Pressing it again reports the clock already running."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    day, seed = _today_seed()
+    with db.connection() as conn:
+        puzzle_results.ranked_start(conn, account_id, day, "trio")
+        return _trio_out(conn, account_id, day, seed, _trio_view(conn, account_id, day))
+
+
+@router.post("/api/trio/ranked/play", response_model=TrioRankedOut)
+def trio_ranked_play(body: TrioPlayIn, request: Request, response: Response) -> TrioRankedOut:
+    """Hold a trio (so a clock that runs out keeps it) or, with `lock`, lock it in."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    day, seed = _today_seed()
+    t = trio_routes.trio()
+    try:
+        with db.connection() as conn:
+            view, _ = puzzle_results.trio_play(conn, t, t.puzzle(seed), account_id, day,
+                                               list(body.picks), lock=body.lock)
+            late = bool(view.get("late"))
+            out = _trio_out(conn, account_id, day, seed, _trio_view(conn, account_id, day))
+    except puzzle_results.OpenAttempt as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except pr.PuzzleResultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out.late = late
+    return out
+
+
 # --- the boards ------------------------------------------------------------------------------
 
 BOARD_TOP = 20                  # rows shown; a player outside them is shown below as themselves
 GAME_LABELS = {"bingo": "Bingo", "guess": "Guess the Player", "common": "Common Ground",
-               "xi": "Name the XI", "overall": "Overall"}
+               "xi": "Name the XI", "trio": "Three to Make", "overall": "Overall"}
 
 
 class BoardRowOut(BaseModel):
@@ -349,6 +456,8 @@ class BoardRowOut(BaseModel):
     found: int | None = None
     total: int | None = None
     wrong: int | None = None
+    distance: int | None = None       # Three to Make: how far from the target (None: no trio)
+    bonus: int | None = None          # Three to Make: the rarity that breaks a tie
     games: dict | None = None         # the overall board only: each game's points, share and rank
     played: int | None = None
     you: bool = False
@@ -388,6 +497,8 @@ def _row_out(row: dict, mine: int | None, overall_board: bool) -> BoardRowOut:
         points=row["total"] if overall_board else row["points"],
         solved=None if overall_board else row["solved"], elapsed_ms=None if overall_board else row["elapsed_ms"],
         found=d.get("found"), total=d.get("total"), wrong=d.get("wrong"),
+        distance=None if overall_board else d.get("distance"),
+        bonus=None if overall_board else row.get("bonus"),
         games=row["games"] if overall_board else None, played=row.get("played"),
         you=mine is not None and row["account_id"] == mine)
 
@@ -403,9 +514,10 @@ def board(game: str, request: Request, response: Response, date: str | None = No
     day = _board_date(date)
     mine = _soft_account(request)
     g = ground_routes.ground()
+    t = trio_routes.trio()
     with db.connection() as conn:
-        rows = (puzzle_results.overall(conn, day, g) if game == "overall"
-                else puzzle_results.board(conn, game, day, g, limit=0))
+        rows = (puzzle_results.overall(conn, day, g, t) if game == "overall"
+                else puzzle_results.board(conn, game, day, g, limit=0, t=t))
     out = [_row_out(r, mine, game == "overall") for r in rows]
     top = out[:BOARD_TOP]
     me = next((r for r in out[BOARD_TOP:] if r.you), None)

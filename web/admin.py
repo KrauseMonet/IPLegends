@@ -340,15 +340,16 @@ def _puzzle_game(game: str) -> str:
     return game
 
 
-def puzzle_view(conn, game: str, day: datetime.date, g=None) -> dict:
+def puzzle_view(conn, game: str, day: datetime.date, g=None, t=None) -> dict:
     """One game's WHOLE board for one day, best first, with account ids so a row can be acted
     on -- the public board's own rows and order (`puzzle_results.board`, reused rather than
     copied), including the rarity bonus as the board shows it. `g` is Common Ground's puzzle
-    world; with it, attempts whose clock ran out unobserved are finished first, exactly as the
-    public board does. Also says how many attempts are still running (Common Ground only) and
+    world and `t` Three to Make's; with them, attempts whose clock ran out unobserved are finished
+    first, exactly as the public board does. Also says how many attempts are still running (the
+    two timed games only) and
     how many voters, signed in or not, have been counted toward rarity."""
     _puzzle_game(game)
-    board = puzzle_lib.board(conn, game, day, g, limit=0)
+    board = puzzle_lib.board(conn, game, day, g, limit=0, t=t)
     running, voters = conn.execute(
         """
         select (select count(*) from puzzle_results
@@ -365,6 +366,7 @@ def puzzle_view(conn, game: str, day: datetime.date, g=None) -> dict:
              "found": (r["detail"] or {}).get("found"), "total": (r["detail"] or {}).get("total"),
              "wrong": (r["detail"] or {}).get("wrong"),
              "guesses": (r["detail"] or {}).get("guesses"),
+             "distance": (r["detail"] or {}).get("distance"),
              "finished_at": r["finished_at"].isoformat()}
             for r in board],
     }

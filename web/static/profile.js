@@ -98,7 +98,7 @@ document.addEventListener('kitchange', () => { if (ME && ME.account_id) renderPr
 
 // The puzzle record and its badges: derived on the server from the finished dailies every time
 // (nothing about a badge is stored), so this only draws them.
-const PZ_GAMES = {bingo: 'Bingo', guess: 'Guess the Player', common: 'Common Ground', xi: 'Name the XI'};
+const PZ_GAMES = {bingo: 'Bingo', guess: 'Guess the Player', common: 'Common Ground', xi: 'Name the XI', trio: 'Three to Make'};
 
 function badgeHtml(b){
   const when = b.earned_on ? new Date(b.earned_on + 'T00:00:00Z')

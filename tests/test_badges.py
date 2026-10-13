@@ -111,12 +111,25 @@ def test_a_badge_is_earned_on_the_first_day_it_was_won_not_the_latest():
     assert badge(rs, "perfect_grid").earned_on == D(2026, 3, 2)
 
 
-def test_a_grand_slam_is_all_four_on_one_day():
-    four = [res(game=g, day=D(2026, 3, 4)) for g in B.GAMES]
+def test_a_grand_slam_is_every_daily_that_existed_that_day():
+    # Before Three to Make [A196] there were four, and a four-game slam then stays earned.
+    old = [g for g in B.GAMES if g != "trio"]
+    four = [res(game=g, day=D(2026, 3, 4)) for g in old]
     assert badge(four, "grand_slam").earned_on == D(2026, 3, 4)
     assert not badge(four[:3], "grand_slam").earned
-    spread = [res(game=g, day=D(2026, 3, i + 1)) for i, g in enumerate(B.GAMES)]
+    spread = [res(game=g, day=D(2026, 3, i + 1)) for i, g in enumerate(old)]
     assert not badge(spread, "grand_slam").earned
+    # From its first day, all five.
+    day = B.TRIO_FROM
+    assert not badge([res(game=g, day=day) for g in old], "grand_slam").earned
+    assert badge([res(game=g, day=day) for g in B.GAMES], "grand_slam").earned_on == day
+    assert B.games_on(day - datetime.timedelta(days=1)) == set(old)
+
+
+def test_bang_on_is_an_exact_three_to_make():
+    assert badge([res("trio", solved=True, distance=0)], "bang_on").earned
+    assert not badge([res("trio", solved=False, distance=3)], "bang_on").earned
+    assert not badge([res("common", solved=True)], "bang_on").earned
 
 
 def test_the_habit_badges_count_every_finished_puzzle_and_are_earned_on_the_nth():
@@ -138,7 +151,7 @@ def test_nothing_is_earned_without_results_and_every_badge_is_listed_once_in_a_f
     out = B.evaluate([])
     assert not any(b.earned for b in out) and all(b.progress == 0 for b in out)
     keys = [b.key for b in out]
-    assert len(keys) == len(set(keys)) == 13
+    assert len(keys) == len(set(keys)) == 14
     assert keys == [b.key for b in B.evaluate([res()])]
     assert {b.group for b in out} == {"Streaks", "Mastery", "Habit", "Rare"}
 

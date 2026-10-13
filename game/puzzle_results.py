@@ -7,7 +7,7 @@ either fails to replay or replays into a real result, so no signature is needed.
 
 Pure functions of already-built puzzles: no database, no web framework, no clock. The caller
 builds the day's grid, side or pair from the seed and hands it in, which keeps this testable from
-hand-built players and lets the four games share one `Outcome`.
+hand-built players and lets the games share one `Outcome`.
 
 The score is each game's OWN (`bingo.State.score`, `guess.points`, `xi.points`, `ground.score`).
 Rarity -- how few other players picked the same answer -- is deliberately not here: it depends on
@@ -19,10 +19,11 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 
-from game import bingo, ground, guess as guess_game, xi
+from game import bingo, ground, guess as guess_game, trio, xi
 
-GAMES = ("bingo", "guess", "xi", "common")
-PICK_GAMES = ("bingo", "xi", "common")      # the games whose picks are counted for rarity
+GAMES = ("bingo", "guess", "xi", "common", "trio")
+PICK_GAMES = ("bingo", "xi", "common", "trio")    # the games whose picks are counted for rarity
+TIMED_GAMES = ("common", "trio")            # the server holds the clock for a ranked attempt
 SUBMIT_GRACE_DAYS = 1                       # a puzzle opened before midnight UTC may finish after it
 
 
@@ -32,7 +33,7 @@ class PuzzleResultError(ValueError):
 
 @dataclass(frozen=True)
 class Pick:
-    slot: str          # Bingo: the cell; Name the XI: the batting position; Common Ground: the player
+    slot: str          # Bingo: the cell; Name the XI: the batting position; Common Ground and Three to Make: the player
     person_id: str
     base: int = 0      # what this pick scored by itself (Bingo's answer-count points); else 0
 
@@ -49,6 +50,7 @@ class Outcome:
     picks: tuple[Pick, ...]           # the correct ones, in a fixed order
     elapsed_ms: int | None = None     # only a timed game has one
     ended: str | None = None          # None, "gave_up" or "time"
+    extra: tuple[tuple[str, object], ...] = ()   # game-specific facts the board reads (Three to Make: distance)
 
     @property
     def perfect(self) -> bool:
@@ -59,7 +61,8 @@ class Outcome:
         """The summary stored beside the moves: what the board and the badges read without a
         replay. Picks are [slot, person_id, base]."""
         return {"guesses": self.guesses, "wrong": self.wrong, "found": self.found,
-                "total": self.total, "picks": [[p.slot, p.person_id, p.base] for p in self.picks]}
+                "total": self.total, "picks": [[p.slot, p.person_id, p.base] for p in self.picks],
+                **dict(self.extra)}
 
 
 def daily_date(seed: int, today: datetime.date) -> datetime.date:
@@ -143,3 +146,20 @@ def verify_common(g: ground.Ground, puzzle: ground.Puzzle, moves: list[ground.Mo
     picks = tuple(Pick(m.id, m.id) for m in sorted(state.found, key=lambda m: m.id))
     return Outcome("common", sc.points, state.complete, len(state.moves), sc.wrong, state.total, sc.found,
                    picks, elapsed_ms=state.elapsed_ms, ended=None if state.complete else state.ended)
+
+
+# --- Three to Make [A196] --------------------------------------------------------------------
+
+def verify_trio(g: trio.Trio, puzzle: trio.Puzzle, ids: list[str] | None, t: int) -> Outcome:
+    """`ids` None means the clock ran out with no trio locked in. `t` is the SERVER's in a ranked
+    attempt. Each of the three is a rarity slot of its own (the player IS the slot, as in Common
+    Ground): a trio of names few others reached for wins a tie."""
+    try:
+        result = trio.play(g, puzzle, ids, t)
+    except trio.TrioError as exc:
+        raise PuzzleResultError(str(exc)) from exc
+    picks = tuple(Pick(pid, pid) for pid in sorted(result.picks))
+    extra = (("distance", result.distance), ("sum", result.total), ("target", puzzle.target),
+             ("stat", puzzle.stat.key))
+    return Outcome("trio", trio.score(puzzle, result), result.exact, len(result.picks), 0, trio.PICKS,
+                   len(result.picks), picks, elapsed_ms=result.t, ended=result.ended, extra=extra)

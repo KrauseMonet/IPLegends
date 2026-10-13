@@ -2749,7 +2749,8 @@ arrival, and a clock that runs out unobserved is finished by a sweep at the limi
 
 **Leaderboards** (A190). `/api/puzzles/board/{game}` serves a day's board for each game and for `overall`: more
 points, then the quicker, then whoever finished first. The overall board scores each game as a share of the day's
-best in it, out of 100, and sums the games a player finished (a perfect day is 400). Boards are public; they are
+best in it, out of 100, and sums the games a player finished (a perfect day is 500 since Three to Make, A196;
+it was 400 with four games). Boards are public; they are
 computed in Python from the day's finished rows when read, so a rarity adjustment (A191) never leaves a stored
 number stale. The Puzzles hub shows them as tabs and each game's finish screen shows its own.
 
@@ -2759,11 +2760,27 @@ small sample never moves a score. In Bingo the share is the part of the players 
 this answer; in Name the XI and Common Ground it is the part of the day's players who found it. Signed-out
 players' picks are counted (under a browser id) and never ranked.
 
-**Badges** (`game/badges.py`, A192). Thirteen, derived from a player's finished dailies each time they are shown
+**Badges** (`game/badges.py`, A192). Fourteen (thirteen until A196 added "Bang on"), derived from a player's finished dailies each time they are shown
 and never stored: streaks of 7, 30 and 100 days; a perfect Bingo grid; Guess the Player in two guesses or fewer;
-a full Common Ground set, and one inside 90 seconds; the full XI, and a flawless one; all four dailies on one day;
+a full Common Ground set, and one inside 90 seconds; the full XI, and a flawless one; an exact Three to Make; every
+daily that existed on that day finished on it (four before `TRIO_FROM`, five after, so an earlier slam stays earned);
 25 and 100 puzzles finished; and a pick fewer than one player in twenty made. Each shows the day it was first won
 and progress toward the rest. They are on the profile page, from `GET /api/puzzles/me`.
+
+**Three to Make** (`game/trio.py`, `web/trio_routes.py`, `/trio`, migration 048, A196). A daily target -- a
+total of one stat, rotating day by day through IPL career runs, career wickets, career sixes and runs in a
+player's best single season -- and ninety seconds to pick three different players whose figures add up as close
+to it as possible. Every player who has appeared is a valid pick. The target is always the sum of three real
+well-known players (the guessing pool, each above a per-stat floor), so an exact answer exists; the figures stay
+hidden until the trio is locked in. **Ranking is by distance, then rarity, then time**: rarity breaks ties and is
+never added to anything, because measured over 300 targets an exact answer is never unique (median 3,336 exact
+trios for career runs among all 804 players, tens of thousands for wickets and sixes), so a distance-only board is
+a tie for first. Hundreds, fifties and four-wicket hauls were measured and left out: millions of trios hit any
+target. The stored score is a 0-1000 closeness (1000 exact, down by the miss as a share of the target, rounded so
+any miss is below exact), which is only what the overall board puts beside the other games. The ranked attempt is
+clocked by the database as Common Ground's is; the trio held is sent on every change, so a clock that runs out
+with a full trio held counts it at the limit and anything less is no answer. A refresh of the facts mid-season
+changes that day's target for anyone who starts after it; stored scores do not move (the board reads them).
 
 **Name the XI** (`game/xi.py`, `web/xi_routes.py`, `/xi`, A185). A famous match's scorecard with
 the names blanked. Each blank keeps the man's batting position and his figures that day; name the

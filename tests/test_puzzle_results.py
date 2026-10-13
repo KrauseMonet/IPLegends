@@ -223,10 +223,23 @@ def _table(name: str) -> str:
     return re.search(rf"create table {name} \((.*?)\n\);", _migration(), re.S).group(1)
 
 
+def _latest_game_check(table: str) -> set[str]:
+    """The game CHECK a table carries after EVERY migration: 046 created it, and a later migration
+    that admits a new game (048, Three to Make) replaces it -- so the last one written wins."""
+    found = None
+    for path in sorted((ROOT / "migrations").glob("*.sql")):
+        sql = path.read_text()
+        created = re.search(rf"create table {table} \((.*?)\n\);", sql, re.S)
+        if created:
+            found = re.search(r"game\s+text not null check \(game in \(([^)]*)\)", created.group(1)).group(1)
+        for m in re.finditer(rf"alter table {table} add constraint {table}_game_check\s+check \(game in \(([^)]*)\)\)", sql):
+            found = m.group(1)
+    return set(re.findall(r"'(\w+)'", found))
+
+
 def test_the_games_the_code_can_write_are_the_games_the_table_accepts():
-    results = set(re.findall(r"'(\w+)'", re.search(r"game\s+text not null check \(game in \(([^)]*)\)", _table("puzzle_results")).group(1)))
-    picks = set(re.findall(r"'(\w+)'", re.search(r"game\s+text not null check \(game in \(([^)]*)\)", _table("puzzle_picks")).group(1)))
-    assert results == set(pr.GAMES) and picks == set(pr.PICK_GAMES)
+    assert _latest_game_check("puzzle_results") == set(pr.GAMES)
+    assert _latest_game_check("puzzle_picks") == set(pr.PICK_GAMES)
 
 
 def test_the_endings_the_code_can_write_are_the_endings_the_table_accepts():
@@ -286,7 +299,7 @@ def test_the_same_account_may_play_every_game_and_every_day(pg):
     for game in pr.GAMES:
         assert puzzle_results.record(pg, a, TODAY, outcome(game=game), [])
     assert puzzle_results.record(pg, a, TODAY - datetime.timedelta(days=1), outcome(), [])
-    assert pg.execute("select count(*) from puzzle_results where account_id = %s", (a,)).fetchone()[0] == 5
+    assert pg.execute("select count(*) from puzzle_results where account_id = %s", (a,)).fetchone()[0] == len(pr.GAMES) + 1
 
 
 @needs_pg
@@ -847,7 +860,8 @@ def test_each_daily_game_registers_its_own_key_and_restarts_its_own_daily(js, na
 def test_the_replay_button_names_games_and_a_route_the_server_accepts():
     static = ROOT / "web" / "static"
     games = set(re.findall(r"pzRankDaily\('(\w+)'", "".join(p.read_text() for p in static.glob("*.js"))))
-    games |= set(re.findall(r"pzResetHtml\('(\w+)'", (static / "commonground.js").read_text()))
+    for timed in ("commonground.js", "trio.js"):       # the timed games rank themselves, not via pzRankDaily
+        games |= set(re.findall(r"pzResetHtml\('(\w+)'", (static / timed).read_text()))
     assert games == set(pr.GAMES)
     assert set(puzzle_routes.ResetIn.model_fields["game"].annotation.__args__) == set(pr.GAMES)
     assert "'/api/puzzles/reset'" in (static / "puzzle.js").read_text()

@@ -317,10 +317,11 @@ async function adminRemoveDaily(ctrl, date, id, username){
 
 // --- the puzzles [A195] -------------------------------------------------------------------
 
-const PZ_LABELS = {bingo: 'Bingo', guess: 'Guess the Player', xi: 'Name the XI', common: 'Common Ground'};
+const PZ_LABELS = {bingo: 'Bingo', guess: 'Guess the Player', xi: 'Name the XI', common: 'Common Ground', trio: 'Three to Make'};
 
 function puzzleResult(game, r){
   if (game === 'guess') return r.solved ? `solved in ${r.guesses ?? '?'}` : 'missed';
+  if (game === 'trio') return r.distance == null ? 'no trio' : r.distance === 0 ? 'exact' : `${r.distance} off`;
   if (game === 'common') {
     const t = r.elapsed_ms == null ? '' : ` · ${Math.floor(r.elapsed_ms / 60000)}:${String(Math.floor(r.elapsed_ms / 1000) % 60).padStart(2, '0')}`;
     return `${r.found ?? 0}/${r.total ?? '?'} found${r.wrong ? `, ${r.wrong} wrong` : ''}${t}`;

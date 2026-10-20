@@ -638,3 +638,15 @@ def test_a_finisher_keeps_his_place_down_to_his_own_bar(deck, model, monkeypatch
     assert [r.squad for r in c.seasons] == [False, False, False] and not c.released
     opener = C.play_career(deck, model, seed, _setup("opener"), ["o0", "o0"])
     assert opener.released
+
+
+def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
+    """Every season poor, so the second is a squad season; with the captaincy card drawn for
+    it, it must arrive as a quiet pre-season instead."""
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
+    seed = next(s for s in range(500) if C.draw_event(s, 1).key == "captain"
+                and len(C.draw_event(s, 0).options) == 1)
+    first = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    assert first.seasons[0].squad is False and first.complete      # released after two
+    second = first.seasons[1]
+    assert second.squad and not second.captain and second.event == "quiet"

@@ -2186,14 +2186,18 @@ body{
 .home-h2{font:400 36px/1 var(--display);text-transform:uppercase;margin:72px 0 8px;letter-spacing:.01em}
 .home-sub{color:var(--ink-2);margin:0 0 26px}
 .modes{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:16px}
-/* [A186] Draft and Auction are the two heroes: equal, large, and the only big tiles. Rooms
-   and the daily challenge are a smaller second row, and the puzzles are one quiet strip. */
-.modes.heroes{grid-template-columns:1fr 1fr}
+/* [A186] Draft and Auction are the heroes: equal, large, and the only big tiles. Rooms and
+   the daily challenge are a smaller second row, and the puzzles are one quiet strip.
+   [A199] Build a Career is the third hero, ratified by the user; three equal columns, which
+   fall to two and then one as the screen narrows. */
+.modes.heroes{grid-template-columns:repeat(3,1fr)}
+@media (max-width:1100px){ .modes.heroes{grid-template-columns:1fr 1fr} .modes.heroes .mode.big:last-child{grid-column:1/-1;min-height:0} }
 .modes.heroes .mode.big{grid-row:auto;min-height:268px}
-/* The art sits in the top corner: in a half-width tile it used to run into the description. */
-.modes.heroes .mode.big .mode-art{top:20px;bottom:auto;right:20px}
-.modes.heroes .mode.big .mode-art img{height:54px;margin-left:-16px}
-.modes.heroes .mode.big h3{font-size:42px}
+/* The art sits in the bottom corner beside the "Start" link: in the top corner of a
+   third-width tile it ran into the title (A199), and the link line has room for it. */
+.modes.heroes .mode.big .mode-art{top:auto;bottom:16px;right:18px}
+.modes.heroes .mode.big .mode-art img{height:44px;margin-left:-14px}
+.modes.heroes .mode.big h3{font-size:38px}
 .modes.more{grid-template-columns:1fr 1fr;margin-top:16px}
 .modes.more .mode{min-height:158px}
 .puzzle-strip{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin-top:16px;
@@ -3721,3 +3725,108 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .pzbg-bar{height:4px;border-radius:2px;background:var(--panel-3);margin-top:4px;overflow:hidden}
 .pzbg-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2))}
 @media (max-width:560px){.pz-games{grid-template-columns:1fr}.pz-badges{grid-template-columns:1fr}}
+
+/* ===== Build a Career [A199] ============================================================
+   `cr-`, not `career-`: the profile page already owns .career-grid. One column of steps
+   under a running header and a strip of season cards, so the career so far is always in
+   view while the next decision is made. */
+.cr{max-width:860px;margin:0 auto}
+.cr-panel{max-width:620px;margin:0 auto}
+.cr-label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin:22px 0 8px}
+.cr-row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cr-select{appearance:auto}
+.cr-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;
+  flex-wrap:wrap;padding:6px 0 14px;border-bottom:1px solid var(--line)}
+.cr-who b{display:block;font-family:var(--display);font-size:clamp(30px,5vw,44px);
+  letter-spacing:.01em;line-height:1.05}
+.cr-who span{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+.cr-tot{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.cr-tot b{color:var(--mint);font-size:16px}
+.cr-timeline{display:flex;gap:8px;overflow-x:auto;padding:14px 0 6px}
+.cr-tl{flex:0 0 auto;width:58px;padding:8px 4px 6px;border:1px solid var(--line);border-radius:12px;
+  background:var(--panel);text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px}
+.cr-tl b{font-family:var(--mono);font-size:17px;font-variant-numeric:tabular-nums}
+.cr-tl span{font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.cr-tl.champ{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.cr-tl.squad{opacity:.55}
+.cr-tl-crest{height:24px;width:24px;object-fit:contain}
+.cr-stage{padding-top:18px}
+.cr-step{max-width:720px;margin:0 auto}
+.cr-step > .over-line{font-family:var(--mono);font-size:11px;letter-spacing:.24em;color:var(--gold);text-align:center}
+.cr-h{font-family:var(--display);font-size:clamp(32px,5vw,48px);font-weight:400;text-align:center;margin:6px 0 14px}
+.cr-warn{background:rgba(226,71,46,.12);border:1px solid rgba(226,71,46,.4);border-radius:12px;
+  padding:12px 16px;color:var(--ink);font-size:14.5px;margin:6px 0 16px}
+.cr-offers{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+.cr-offer{position:relative;font:inherit;color:var(--ink);background:linear-gradient(170deg,var(--panel-2),var(--panel));
+  border:1px solid var(--line-strong);border-radius:16px;padding:20px 14px 16px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;transition:transform .12s,border-color .12s}
+.cr-offer:hover,.cr-offer:focus-visible{transform:translateY(-2px);border-color:var(--gold)}
+.cr-offer b{font-size:15px;line-height:1.25}
+.cr-offer-crest{height:64px;width:64px;object-fit:contain}
+.cr-price{font-family:var(--mono);font-size:18px;font-weight:800;color:var(--mint)}
+.cr-strength{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.cr-strength b{color:var(--ink)}
+.cr-tag{position:absolute;top:10px;left:10px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;background:var(--gold);color:#1a1204;border-radius:6px;padding:2px 7px}
+.cr-event{background:var(--panel);border:1px solid var(--line-strong);border-radius:18px;padding:26px 22px;text-align:center}
+.cr-event p{color:var(--ink-2);font-size:16px;max-width:46ch;margin:0 auto 18px}
+.cr-event-opts{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.cr-opt{display:flex;flex-direction:column;align-items:center;gap:6px}
+.cr-opt span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.cr-loading{display:flex;flex-direction:column;align-items:center;gap:8px;padding:60px 0;text-align:center}
+.cr-loading b{font-family:var(--display);font-size:32px;font-weight:400}
+.cr-loading span{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.cr-ball{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ff6a4d,#a3200f);
+  animation:cr-bounce .7s ease-in-out infinite alternate}
+@keyframes cr-bounce{from{transform:translateY(-12px)}to{transform:translateY(12px)}}
+.cr-spin{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:8px 0 6px}
+.cr-spin-card{background:var(--panel);border:1px solid var(--line-strong);border-radius:18px;padding:22px 16px;
+  text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.cr-spin-card.ceiling{border-color:var(--gold);background:linear-gradient(170deg,#2a2208,var(--panel) 70%)}
+.cr-spin-label{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.cr-spin-crest{height:56px;width:56px;object-fit:contain}
+.cr-roll{font-family:var(--display);font-size:clamp(24px,4vw,34px);font-weight:400;min-height:1.2em}
+.cr-roll.settled{color:var(--gold-2)}
+.cr-spin-card span{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+.cr-season,.cr-final{background:linear-gradient(170deg,var(--panel-2),var(--panel));border:1px solid var(--line-strong);
+  border-radius:20px;padding:22px}
+.cr-season.champ{border-color:var(--gold);box-shadow:0 0 30px rgba(245,184,61,.18)}
+.cr-season-top{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center}
+.cr-season-top .over-line{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--ink-3)}
+.cr-season-crest{height:60px;width:60px;object-fit:contain}
+.cr-finish{font-family:var(--display);font-size:clamp(26px,4vw,36px);line-height:1.1}
+.cr-card{text-align:center;border:2px solid var(--line-strong);border-radius:14px;padding:6px 14px;min-width:84px}
+.cr-card b{display:block;font-family:var(--display);font-size:48px;line-height:1;font-weight:400}
+.cr-card span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.cr-card.elite{border-color:var(--gold);color:var(--gold-2)}
+.cr-badges{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 4px}
+.cr-badge{font-family:var(--mono);font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong)}
+.cr-badge.gold{background:var(--gold);color:#1a1204;border-color:var(--gold)}
+.cr-badge.orange{background:var(--cap-orange);color:#1a0d02;border-color:var(--cap-orange)}
+.cr-badge.purple{background:var(--cap-purple);color:#120624;border-color:var(--cap-purple)}
+.cr-badge.dim{color:var(--ink-3)}
+.cr-lines{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:14px}
+.cr-lines > div{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.cr-lines b{font-family:var(--mono);font-size:22px;color:var(--mint);font-variant-numeric:tabular-nums}
+.cr-lines span{display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:2px}
+.cr-hl{margin-top:16px}
+.cr-hl > div:not(.cr-label){display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:14.5px}
+.cr-hl span{color:var(--ink-3);font-family:var(--mono);font-size:12px}
+.cr-final{text-align:center}
+.cr-final .over-line{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--gold)}
+.cr-final-name{font-family:var(--display);font-size:clamp(40px,7vw,64px);font-weight:400;margin:4px 0}
+.cr-final-sub{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+.cr-final-crests{display:flex;justify-content:center;gap:10px;margin:16px 0 6px;flex-wrap:wrap}
+.cr-final-crest{height:46px;width:46px;object-fit:contain}
+.cr-rank{font-family:var(--mono);font-size:14px;color:var(--ink-2);margin-top:4px}
+.cr-rank b{color:var(--gold-2);font-size:20px}
+.cr-final .cr-lines{text-align:left}
+@media (max-width:560px){
+  .cr-row,.cr-spin{grid-template-columns:1fr}
+  .cr-offers{grid-template-columns:1fr 1fr}
+  .cr-offer-crest{height:48px;width:48px}
+  .cr-season-top{grid-template-columns:auto 1fr}
+  .cr-card{grid-column:1/-1;display:flex;align-items:baseline;gap:10px;justify-content:center}
+  .cr-card b{font-size:40px}
+}

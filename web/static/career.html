@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build a Career · The Legends Almanack</title>
+<meta name="description" content="Build an IPL career: one player, real seasons with the real teams of each year, from debut to retirement.">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=658f8f5eb0">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png?v=6734ff71dc">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png?v=7cf719835b">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Almanack">
+<meta property="og:title" content="The Legends Almanack">
+<meta property="og:description" content="One player, real IPL seasons, debut to retirement.">
+<meta property="og:image" content="/static/og-image.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/static/og-image.png">
+<link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
+<link rel="stylesheet" href="/static/style.css?v=83d798f8b2">
+<link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
+</head>
+<body>
+<!-- shell:nav -->
+<nav class="topnav" aria-label="Main">
+  <div class="topnav-in">
+    <a class="brand" href="/" data-home>
+      <img src="/static/logo-emblem.webp" alt="" width="34" height="36">
+      <span>Legends <b>Almanack</b></span>
+    </a>
+    <div class="topnav-links">
+      <a href="/draft" data-match="/draft /season">Draft</a>
+      <a href="/auction" data-match="/auction">Auction</a>
+      <a href="/rooms" data-match="/rooms">Rooms</a>
+      <a href="/daily" data-match="/daily">Daily</a>
+      <a href="/puzzles" data-match="/puzzles /bingo /guess /common /xi /trio /flashback">Puzzles</a>
+      <a href="/records" data-match="/records">Records</a>
+    </div>
+    <div class="topnav-r">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add the Almanack to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
+  </div>
+</nav>
+<!-- /shell:nav -->
+<div class="sheet">
+
+  <!-- ============ BUILD A CAREER ============ -->
+  <section id="career" class="prose-page cr">
+    <div class="report">
+      <div class="over-line">THE LEGENDS ALMANACK</div>
+      <div class="call">Build a Career</div>
+    </div>
+
+    <!-- create -->
+    <div id="crCreate" class="cr-panel hide">
+      <p class="qz-lede">One player, real IPL seasons. Two spins decide how good you start and how
+        good you can become; after that it is your choices and your form. Play badly two
+        seasons running and nobody signs you.</p>
+      <label class="cr-label" for="crName">Your name</label>
+      <input id="crName" class="room-input" maxlength="30" autocomplete="off" placeholder="Name on the back of the shirt">
+      <div class="cr-label">Your role</div>
+      <div class="room-choices" id="crRoles"></div>
+      <div class="cr-row">
+        <div>
+          <label class="cr-label" for="crDebut">Debut season</label>
+          <select id="crDebut" class="room-input cr-select"></select>
+        </div>
+        <div>
+          <div class="cr-label">Passport</div>
+          <div class="room-choices" id="crPassport">
+            <button class="room-choice sel" data-v="0" onclick="crPick('crPassport', this)">Indian</button>
+            <button class="room-choice" data-v="1" onclick="crPick('crPassport', this)">Overseas</button>
+          </div>
+        </div>
+      </div>
+      <div class="foot-actions" style="justify-content:flex-start;padding-left:0">
+        <button class="act lead" id="crGo" onclick="crStart(this)">Spin your talent</button>
+      </div>
+    </div>
+
+    <!-- the career so far -->
+    <div id="crMain" class="hide">
+      <div class="cr-head" id="crHead"></div>
+      <div class="cr-timeline" id="crTimeline"></div>
+      <div class="cr-stage" id="crStage"></div>
+    </div>
+  </section>
+
+  <!-- shell:auth -->
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
+  </div>
+<!-- /shell:auth -->
+  <!-- shell:footer -->
+<footer class="imprint">
+  <div class="imprint-links">
+    <a href="/about">About</a><a href="/faq">FAQ</a><a href="/records">Records</a>
+    <a href="/puzzles">Puzzles</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
+  </div>
+  <div id="footStats"></div>
+  <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the
+    BCCI, the IPL or any franchise. Team names and logos belong to their owners and appear
+    only to identify the teams. Ball-by-ball data from
+    <a href="https://cricsheet.org/" rel="noopener">Cricsheet</a> (ODbL).</p>
+</footer>
+<!-- /shell:footer -->
+</div>
+
+<script src="/static/common.js?v=2875dd81ec"></script>
+<script src="/static/auth.js?v=cf87aaad5a"></script>
+<script src="/static/puzzle.js?v=2f9224f51f"></script>
+<script src="/static/career.js?v=d32dee2186"></script>
+</body>
+</html>

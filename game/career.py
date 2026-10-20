@@ -181,6 +181,10 @@ EVENTS: tuple[Event, ...] = (
 )
 
 
+# Cards that make no sense for a man who has lost his place: in a squad season they become
+# a quiet pre-season (A199). Found in the page: "Captain" beside "Squad player, 5 matches".
+NOT_IN_A_SQUAD_SEASON = frozenset({"captain"})
+
 # How often a card may come up in one career. Unlisted: no limit beyond no-repeats.
 EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 3}
 
@@ -761,8 +765,9 @@ def _highlights(results: list[Result], yours: Side) -> list[Highlight]:
                             f"{w.wickets}/{w.runs} in {w.overs} overs")))
         if r.stage == "Final":
             won = r.winner is yours
+            # `margin` names the winner ("RCB 2015 by 9 wickets"), so it reads as an aside.
             out.append((1000 if won else 500, Highlight(r.stage, opp.short,
-                        f"{'Won' if won else 'Lost'} the final{', ' + r.margin if r.margin else ''}")))
+                        f"{'Won' if won else 'Lost'} the final{f' ({r.margin})' if r.margin else ''}")))
     return [h for _, h in sorted(out, key=lambda x: -x[0])[:4]]
 
 
@@ -961,6 +966,7 @@ class Career:
     retired: bool = False
     released: bool = False             # two poor seasons running: nobody signed you
     summary: Summary | None = None
+    checkpoint: "Checkpoint | None" = None
 
     @property
     def complete(self) -> bool:
@@ -1025,66 +1031,106 @@ def form_after(squad: bool, percentile: float, bar: float | None = None) -> tupl
     return poor, poor and squad
 
 
+@dataclass
+class Checkpoint:
+    """Everything the career loop carries from one season to the next, so a career can be
+    resumed after its last completed season without replaying the seasons before it (A199).
+    A season takes up to ~2 s on a cold production server, so a career of nineteen replayed
+    per request would be unplayable; resuming is exactly equivalent, which a test pins."""
+
+    k: int = 0
+    permanent: float = 0.0
+    current: str | None = None            # canonical franchise
+    last_display: int | None = None
+    squad: bool = False
+    seasons: list[SeasonRecord] = field(default_factory=list)
+    # How the career ended, or None while it goes on. Without it a finished career's
+    # checkpoint resumes into another season, which the API test caught.
+    ended: str | None = None              # "retired" | "released"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Checkpoint":
+        seasons = []
+        for r in d["seasons"]:
+            r = dict(r)
+            r["best"] = tuple(r["best"])
+            r["highlights"] = [Highlight(**h) for h in r["highlights"]]
+            seasons.append(SeasonRecord(**r))
+        return cls(k=d["k"], permanent=d["permanent"], current=d["current"],
+                   last_display=d["last_display"], squad=d["squad"], seasons=seasons,
+                   ended=d.get("ended"))
+
+
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
-                facts=None) -> Career:
+                facts=None, resume: Checkpoint | None = None) -> Career:
     """Replay a career from its setup and moves, stopping at the first decision with no
     recorded answer. Moves, in order: `o{i}` takes offer i (or `r` to retire, from the
-    second season on), then `e{i}` answers the season's event when it has a choice."""
+    second season on), then `e{i}` answers the season's event when it has a choice.
+
+    With `resume`, start from that checkpoint instead of the debut: `moves` are then only
+    the moves made since it. `career.checkpoint` is always where the loop stood when it
+    stopped, ready to be resumed from."""
     setup.check()
     start, ceiling = spin(deck, seed, setup.role)
-    career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling)
+    cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
+    career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
+                    seasons=cp.seasons)
     it = iter(moves)
-    permanent = 0.0
-    current: str | None = None
-    last_display: int | None = None
-    squad = False
-    k = 0
-    while k < MAX_SEASONS and setup.debut + k <= LAST_YEAR:
+    career.retired, career.released = cp.ended == "retired", cp.ended == "released"
+    while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
+        k = cp.k
         year = setup.debut + k
-        offers = offers_for(deck, seed, k, year, current, last_display)
+        career.checkpoint = copy.deepcopy(cp)
+        offers = offers_for(deck, seed, k, year, cp.current, cp.last_display)
         move = next(it, None)
         if move is None:
-            career.pending = Pending("offer", year, k, offers=offers, squad=squad)
+            career.pending = Pending("offer", year, k, offers=offers, squad=cp.squad)
             return career
         if move == "r":
             if k == 0:
                 raise CareerError("a career has to start before it can end")
-            career.retired = True
+            career.retired, cp.ended = True, "retired"
             break
         offer = offers[_index(move, "o", len(offers))]
         event = draw_event(seed, k)
+        if cp.squad and event.key in NOT_IN_A_SQUAD_SEASON:
+            event = EVENTS[0]              # nobody asks a squad player to captain the side
         if len(event.options) == 1:
             option = event.options[0]
         else:
             move = next(it, None)
             if move is None:
                 career.pending = Pending("event", year, k, offers=[offer], event=event,
-                                         squad=squad)
+                                         squad=cp.squad)
                 return career
             option = event.options[_index(move, "e", len(event.options))]
-        permanent += option.permanent
-        t = arc_point(k, permanent, option.season)
+        cp.permanent += option.permanent
+        t = arc_point(k, cp.permanent, option.season)
         you = ability(start, ceiling, t, setup=setup, fs_id=offer.fs_id, year=year,
                       franchise=offer.franchise)
         record = SeasonRecord(k=k, year=year, franchise=offer.franchise, short=offer.short,
                               price=offer.price, stayed=offer.stay, event=event.key,
                               choice=option.label, captain=option.captain, ability=t,
-                              teams=0, squad=squad)
+                              teams=0, squad=cp.squad)
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         played = _cached_season(deck, model, seed, k, you, record,
-                                (setup, start, ceiling, offer, option, t, squad))
+                                (setup, start, ceiling, offer, option, t, cp.squad))
         played.form = played.display
-        played.display = reputation_floor([r.display for r in career.seasons], played.display)
-        career.seasons.append(played)
-        current, last_display = canonical(offer.franchise), played.display
-        k += 1
-        squad, released = form_after(squad, played.percentile, poor_bar(setup.role))
+        played.display = reputation_floor([r.display for r in cp.seasons], played.display)
+        cp.seasons.append(played)
+        cp.current, cp.last_display = canonical(offer.franchise), played.display
+        cp.k += 1
+        cp.squad, released = form_after(cp.squad, played.percentile, poor_bar(setup.role))
         if released:
-            career.released = True
+            career.released, cp.ended = True, "released"
             break
     if next(it, None) is not None:
         raise CareerError("moves left over after the career ended")
+    career.checkpoint = copy.deepcopy(cp)
     career.pending = None
     real_runs = [p.runs for p in facts] if facts is not None else None
     real_wkts = [p.wickets for p in facts] if facts is not None else None

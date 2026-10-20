@@ -40,7 +40,7 @@ from web import auction_session
 from web import room_auction
 from web import auth
 from web import bingo_routes
-from web import ground_routes, puzzle_routes, trio_routes
+from web import career_routes, ground_routes, puzzle_routes, trio_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -159,6 +159,7 @@ app.include_router(puzzle_routes.router)
 app.include_router(guess_routes.router)
 app.include_router(xi_routes.router)
 app.include_router(trio_routes.router)
+app.include_router(career_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -367,6 +368,11 @@ def common_page() -> FileResponse:
 @app.get("/trio", include_in_schema=False)
 def trio_page() -> FileResponse:
     return FileResponse(STATIC / "trio.html")
+
+
+@app.get("/career", include_in_schema=False)
+def career_page() -> FileResponse:
+    return FileResponse(STATIC / "career.html")
 
 
 @app.get("/chain", include_in_schema=False)

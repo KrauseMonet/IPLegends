@@ -1,4 +1,4 @@
-"""The site's navigation (A186): the two-hero home page, the Puzzles hub and the puzzle bar.
+"""The site's navigation (A186, A199): the three-hero home page, the Puzzles hub and the puzzle bar.
 
 Navigation is where a silent mistake is cheapest to make and slowest to notice: a link to a page
 that does not exist, a puzzle that the bar forgot, a hub card that reads the wrong saved key and
@@ -78,10 +78,11 @@ def test_the_puzzle_bar_lists_every_puzzle_once():
     assert sorted(urls) == sorted(PUZZLE_PAGES.values())
 
 
-def test_the_home_page_has_two_heroes_and_one_quiet_puzzle_strip():
+def test_the_home_page_has_three_heroes_and_one_quiet_puzzle_strip():
+    """Draft and Auction lead (A186); Build a Career is the third hero (A199)."""
     html = (STATIC / "index.html").read_text()
     heroes = re.findall(r'<a class="mode big" href="([^"]+)"', html)
-    assert heroes == ["#", "/auction"]                                       # Draft, then Auction
+    assert heroes == ["#", "/auction", "/career"]                            # Draft, Auction, Career
     assert 'onclick="newDraft(null)' in html.split('class="modes more"')[0]
     second = html.split('class="modes more"')[1].split("puzzle-strip")[0]
     assert sorted(re.findall(r'<a class="mode" href="([^"]+)"', second)) == ["/daily", "/rooms"]

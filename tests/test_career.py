@@ -108,10 +108,11 @@ def test_the_ceiling_is_better_at_the_roles_job_and_the_spin_is_fixed_by_the_see
     for role in C.ROLES:
         for seed in range(25):
             start, ceiling = C.spin(deck, seed, role)
-            assert C.main_rating(ceiling) > C.main_rating(start)
+            assert C.main_rating(ceiling, role) > C.main_rating(start, role)
             assert C._fits(start, role) and C._fits(ceiling, role)
-            assert C.START_DISPLAY[0] <= start.display <= C.START_DISPLAY[1]
-            assert ceiling.display >= C.CEILING_MIN_DISPLAY
+            if not C.ROLES[role].get("batting_only"):
+                assert C.START_DISPLAY[0] <= start.display <= C.START_DISPLAY[1]
+                assert ceiling.display >= C.CEILING_MIN_DISPLAY
             assert C.spin(deck, seed, role) == (start, ceiling)
 
 
@@ -160,8 +161,8 @@ def one_season(deck, model):
     c0 = deck.cards_by_fs[fs][0]
     you = C.ability(start, ceiling, 0.6, setup=_setup("pace"), fs_id=fs, year=2014,
                     franchise=c0.franchise)
-    season, yours, results = C.simulate_year(deck, model, 3, 2, you)
-    return season, yours, results, C.season_lines(results)
+    year = C.simulate_year(deck, model, 3, 2, you)
+    return year.season, year.yours, year.results, C.season_lines(year.results, year.roster)
 
 
 def test_every_runs_and_wickets_line_adds_up_to_the_scorecards(one_season):
@@ -195,8 +196,9 @@ def test_the_caps_agree_with_the_tournaments_own_leaders(one_season):
 
 
 def _line(role, runs=0, balls=0, outs=0, wickets=0, bowl_balls=0, bowl_runs=0,
-          matches=14, innings=14, pid=None):
-    card = Card(fs_id=1, person_id=pid or f"p{random.random()}", name="x", role=role)
+          matches=14, innings=14, pid=None, band=None):
+    card = Card(fs_id=1, person_id=pid or f"p{random.random()}", name="x", role=role,
+                band=band)
     return C.Line(card=card, side=None, matches=matches, innings=innings, runs=runs,
                   balls=balls, outs=outs, wickets=wickets, bowl_balls=bowl_balls,
                   bowl_runs=bowl_runs)
@@ -370,3 +372,269 @@ def test_a_season_is_a_pure_function_of_its_inputs(deck, model):
     b = C.play_season(deck, model, seed, 1, you, C.SeasonRecord(1, 2013, "X", "X", 0, False,
                                                                 "quiet", "", False, 0.4, 0))
     assert vars(a) == vars(b)
+
+
+# --- availability, the reputation floor, all-rounder peers (A198) --------------------------
+
+
+def _on_card(result, pid):
+    return any(b.player.person_id == pid
+               for inn in (result.home_innings, result.away_innings) if inn
+               for b in inn.batting)
+
+
+@pytest.fixture(scope="module")
+def year_with_absence(deck, model):
+    """A real season in which the drawn block of missed matches is not empty."""
+    start, ceiling = C.spin(deck, 6, "opener")
+    fs = C.year_fs_ids(deck, 2018)[1]
+    c0 = deck.cards_by_fs[fs][0]
+    you = C.ability(start, ceiling, 0.5, setup=_setup(), fs_id=fs, year=2018,
+                    franchise=c0.franchise)
+    k = next(k for k in range(40) if len(C.missed_block(11, k, 14)) >= 2)
+    return C.simulate_year(deck, model, 11, k, you), C.missed_block(11, k, 14)
+
+
+def test_you_miss_exactly_the_drawn_block_and_never_a_playoff(year_with_absence):
+    year, out = year_with_absence
+    mine = [r for r in year.results if year.yours is r.home or year.yours is r.away]
+    league = [r for r in mine if r.stage == "league"]
+    assert len(league) == 14 and year.missed == len(out) >= 2
+    for i, r in enumerate(league):
+        assert _on_card(r, C.YOU_ID) == (i not in out), i
+    assert all(_on_card(r, C.YOU_ID) for r in mine if r.stage != "league")
+    # and the season's line counts only the matches you played
+    lines = C.season_lines(year.results, year.roster)
+    assert lines[(C.YOU_ID, id(year.yours))].matches == len(mine) - len(out)
+    # the side is left holding you at the end, whatever the last league match was
+    assert any(c.person_id == C.YOU_ID for c in year.yours.xi)
+
+
+def test_a_missed_match_is_still_counted_for_the_side_that_played_it(year_with_absence):
+    """Without the roster, the man who stood in for you would vanish from the season."""
+    year, out = year_with_absence
+    lines = C.season_lines(year.results, year.roster)
+    runs = sum(l.runs for l in lines.values() if l.side is year.yours)
+    total = sum(inn.runs - inn.extras for r in year.results
+                for s, inn in ((r.home, r.home_innings), (r.away, r.away_innings))
+                if s is year.yours)
+    assert runs == total
+
+
+def test_the_missed_block_comes_from_the_real_shares():
+    lengths = Counter()
+    for seed in range(2000):
+        block = C.missed_block(seed, 0, 14)
+        assert 0 <= block.start and block.stop <= 14
+        lengths[len(block)] += 1
+    allowed = {round((1 - s) * 14) for s in C.AVAILABILITY_SHARES}
+    assert set(lengths) <= allowed
+    full = sum(s == 1.0 for s in C.AVAILABILITY_SHARES) / len(C.AVAILABILITY_SHARES)
+    assert abs(lengths[0] / 2000 - full) < 0.04
+    assert sum(C.AVAILABILITY_SHARES) / len(C.AVAILABILITY_SHARES) == pytest.approx(0.86, abs=0.01)
+
+
+@pytest.mark.parametrize("previous, form, want", [
+    ([], 72, 72),               # a first season stands as it is
+    ([90, 90], 70, 80),         # halfway back toward the career
+    ([90, 90], 95, 95),         # a good season is never pulled down
+    ([80], 60, 70),
+    ([80, 70], 60, 68),         # the career is the mean of every season so far
+    ([72, 74], 85, 85),
+])
+def test_the_reputation_floor_lifts_a_season_halfway_toward_the_career(previous, form, want):
+    assert C.reputation_floor(previous, form) == want
+
+
+def test_an_all_rounder_is_ranked_against_everybody_who_did_both():
+    """Five listed all-rounders and twelve batters who bowl: the best of the five is not the
+    season's best all-rounder if the batters who bowled did both better."""
+    ars = {(f"a{i}", 0): _line("allrounder", runs=150 + i, balls=130, outs=8, wickets=6,
+                               bowl_balls=150, bowl_runs=220) for i in range(5)}
+    batters = {(f"b{i}", 0): _line("batter", runs=420 + i, balls=300, outs=8, wickets=12,
+                                   bowl_balls=200, bowl_runs=240) for i in range(12)}
+    me = {("me", 0): _line("allrounder", runs=200, balls=150, outs=8, wickets=8,
+                           bowl_balls=180, bowl_runs=250)}
+    assert C.season_percentile({**ars, **batters, **me}, ("me", 0)) == pytest.approx(5 / 17)
+
+
+# --- form: squad seasons and release (A198) ------------------------------------------------
+
+
+@pytest.mark.parametrize("squad, percentile, want", [
+    (False, C.POOR_PERCENTILE, (False, False)),          # exactly the bar is not poor
+    (False, C.POOR_PERCENTILE - 0.01, (True, False)),    # a poor season costs your place
+    (True, C.POOR_PERCENTILE - 0.01, (True, True)),      # a second costs your career
+    (True, C.POOR_PERCENTILE + 0.2, (False, False)),     # a good squad season wins it back
+])
+def test_form_decides_your_place(squad, percentile, want):
+    assert C.form_after(squad, percentile) == want
+
+
+def _quiet_seed(n):
+    return next(s for s in range(300) if all(len(C.draw_event(s, k).options) == 1
+                                             for k in range(n)))
+
+
+def test_two_poor_seasons_end_a_career(deck, model, monkeypatch):
+    """Every season poor: a regular season, a squad season, then nobody signs you."""
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
+    seed = _quiet_seed(3)
+    first = C.play_career(deck, model, seed, _setup(), ["o0"])
+    assert first.pending.kind == "offer" and first.pending.squad
+    done = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    assert done.complete and done.released and not done.retired
+    assert [r.squad for r in done.seasons] == [False, True]
+    assert done.summary.regular_seasons == 1
+    with pytest.raises(C.CareerError):
+        C.play_career(deck, model, seed, _setup(), ["o0", "o0", "o0"])
+
+
+def test_good_form_keeps_you_a_regular(deck, model, monkeypatch):
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
+    seed = _quiet_seed(3)
+    c = C.play_career(deck, model, seed, _setup(), ["o0", "o0", "o0"])
+    assert [r.squad for r in c.seasons] == [False, False, False] and not c.released
+
+
+def test_a_squad_season_is_part_of_the_league_and_none_of_the_playoffs(deck, model):
+    start, ceiling = C.spin(deck, 6, "pace")
+    fs = C.year_fs_ids(deck, 2019)[0]
+    c0 = deck.cards_by_fs[fs][0]
+    you = C.ability(start, ceiling, 0.5, setup=_setup("pace"), fs_id=fs, year=2019,
+                    franchise=c0.franchise)
+    k = 3
+    out = C.missed_block(21, k, 14, squad=True)
+    year = C.simulate_year(deck, model, 21, k, you, squad=True)
+    mine = [r for r in year.results if year.yours is r.home or year.yours is r.away]
+    league = [r for r in mine if r.stage == "league"]
+    assert [_on_card(r, C.YOU_ID) for r in league] == [i not in out for i in range(14)]
+    assert not any(_on_card(r, C.YOU_ID) for r in mine if r.stage != "league")
+
+
+def test_a_squad_season_plays_the_real_non_regular_share():
+    lengths = Counter(len(C.missed_block(s, 1, 14, squad=True)) for s in range(2000))
+    assert set(lengths) <= {round((1 - x) * 14) for x in C.SQUAD_SHARES}
+    played = sum((14 - n) * c for n, c in lengths.items()) / 2000 / 14
+    assert played == pytest.approx(sum(C.SQUAD_SHARES) / len(C.SQUAD_SHARES), abs=0.02)
+
+
+def test_a_finisher_is_ranked_among_finishers_not_openers():
+    """A163 compares a card within its role: the best finisher of the year is the best
+    finisher, however many more runs the openers made."""
+    openers = {(f"o{i}", 0): _line("batter", runs=450 + 10 * i, balls=330, outs=11,
+                                   band="opener") for i in range(16)}
+    finishers = {(f"f{i}", 0): _line("batter", runs=150 + 5 * i, balls=110, outs=7,
+                                     band="finisher") for i in range(10)}
+    me = {("me", 0): _line("batter", runs=260, balls=160, outs=6, band="finisher")}
+    assert C.season_percentile({**openers, **finishers, **me}, ("me", 0)) == 1.0
+
+
+def test_too_few_of_your_band_ranks_you_among_every_batter():
+    openers = {(f"o{i}", 0): _line("batter", runs=450 + 10 * i, balls=330, outs=11,
+                                   band="opener") for i in range(16)}
+    finishers = {(f"f{i}", 0): _line("batter", runs=100, balls=100, outs=8,
+                                     band="finisher") for i in range(C.MIN_BAND_PEERS - 1)}
+    # bowlers who batted: in the season, never among the batters you are ranked against
+    tail = {(f"t{i}", 0): _line("bowler", runs=40, balls=50, outs=7, band="tail")
+            for i in range(10)}
+    # better than every finisher and every bowler, worse than every opener on all three
+    me = {("me", 0): _line("batter", runs=200, balls=150, outs=8, band="finisher")}
+    p = C.season_percentile({**openers, **finishers, **tail, **me}, ("me", 0))
+    assert p == pytest.approx((C.MIN_BAND_PEERS - 1) / (16 + C.MIN_BAND_PEERS - 1))
+
+
+def test_the_finisher_band_counts_its_all_rounders_and_not_its_bowlers():
+    """Three batters in the band is too few on their own; the all-rounders who bat there
+    make it a peer group. The bowlers who bat at six or seven do not count: against them
+    this finisher would be the best of the band, against the all-rounders he is not."""
+    openers = {(f"o{i}", 0): _line("batter", runs=500, balls=330, outs=11, band="opener")
+               for i in range(16)}
+    finishers = {(f"f{i}", 0): _line("batter", runs=150, balls=110, outs=7, band="finisher")
+                 for i in range(3)}
+    ars = {(f"a{i}", 0): _line("allrounder", runs=300, balls=180, outs=6, band="finisher")
+           for i in range(6)}
+    lower = {(f"b{i}", 0): _line("bowler", runs=60, balls=55, outs=6, band="finisher")
+             for i in range(8)}
+    me = {("me", 0): _line("batter", runs=240, balls=150, outs=6, band="finisher")}
+    assert C.season_percentile({**openers, **finishers, **ars, **lower, **me},
+                               ("me", 0)) == pytest.approx(3 / 9)
+
+
+def test_an_all_rounder_bowls_in_his_share_of_matches_and_never_leaves_four(deck, model):
+    start, ceiling = C.spin(deck, 2, "allrounder")
+    shares, rested_possible = [], 0
+    for fs in C.year_fs_ids(deck, 2015)[:4]:
+        c0 = deck.cards_by_fs[fs][0]
+        you = C.ability(start, ceiling, 0.6, setup=_setup("allrounder"), fs_id=fs,
+                        year=2015, franchise=c0.franchise)
+        year = C.simulate_year(deck, model, 31, 4, you)
+        mine = [r for r in year.results if year.yours is r.home or year.yours is r.away]
+        bowled = 0
+        for r in mine:
+            inn = r.away_innings if year.yours is r.home else r.home_innings
+            attack = [w for w in inn.bowling if w.balls]
+            assert len({w.player.person_id for w in inn.bowling}) >= 5
+            bowled += any(w.player.person_id == C.YOU_ID for w in attack)
+        played = sum(_on_card(r, C.YOU_ID) for r in mine)
+        rested = C._rested_lineup(year.yours, next(c for c in year.yours.xi
+                                                   if c.person_id == C.YOU_ID))
+        if rested is None:
+            assert bowled == played          # no five others to rest behind: always bowls
+        else:
+            rested_possible += 1
+            shares.append(bowled / played)
+    assert rested_possible and all(0.2 < s < 0.95 for s in shares)
+
+
+def test_a_finisher_bats_like_his_templates_and_never_bowls(deck):
+    starts, ceilings = C.template_pools(deck, "finisher")
+    assert any(c.role == "allrounder" for c in ceilings)     # real finishers are, mostly
+    for seed in range(30):
+        start, ceiling = C.spin(deck, seed, "finisher")
+        you = C.ability(start, ceiling, 0.5, setup=_setup("finisher"), fs_id=1, year=2015,
+                        franchise="X")
+        assert you.role == "batter" and not you.has_bowl and you.bowl_scoring is None
+        assert you.bat_scoring == pytest.approx(
+            start.bat_scoring + (ceiling.bat_scoring - start.bat_scoring) * 0.5)
+        assert not C.bowls_for_you(you)
+
+
+def test_a_batting_only_roles_spins_are_drawn_on_batting(deck):
+    """Middle third of the band's batting to start, top third as a ceiling."""
+    starts, ceilings = C.template_pools(deck, "finisher")
+    assert min(c.bat for c in ceilings) >= max(c.bat for c in starts)
+    everyone = [c for cs in deck.cards_by_fs.values() for c in cs if C._fits(c, "finisher")]
+    assert len(starts) + len(ceilings) == len(everyone) - len(everyone) // 3
+
+
+def test_an_all_rounder_is_only_rested_when_five_others_can_bowl():
+    """Resting him from a four-bowler eleven would leave the attack short of five, which
+    cannot get through twenty overs (A133)."""
+    from game.season import Side
+
+    def card(i, bowl):
+        return Card(fs_id=1, person_id=f"c{i}", name=f"c{i}", role="bowler" if bowl else "batter",
+                    bowl=0.0 if bowl else None, bat=0.0)
+
+    me = Card(fs_id=1, person_id=C.YOU_ID, name="me", role="allrounder", bat=0.1, bowl=0.1)
+    four = Side(name="a", short="A", xi=[me] + [card(i, i < 4) for i in range(10)])
+    five = Side(name="b", short="B", xi=[me] + [card(i, i < 5) for i in range(10)])
+    assert C._rested_lineup(four, me) is None
+    rested, _ = C._rested_lineup(five, me)
+    assert sum(c.has_bowl and c.bowl > C._RESTED_BOWL for c in rested) == 5
+    batter = Card(fs_id=1, person_id=C.YOU_ID, name="me", role="batter", bat=0.1, bowl=0.1)
+    assert C._rested_lineup(Side(name="c", short="C", xi=[batter] + five.xi[1:]), batter) is None
+
+
+def test_a_finisher_keeps_his_place_down_to_his_own_bar(deck, model, monkeypatch):
+    """The finisher's declared bar, not the general one, decides his place -- checked in a
+    real career by setting the general bar so high that only the exception can save him."""
+    assert C.poor_bar("finisher") < C.POOR_PERCENTILE == C.poor_bar("opener")
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
+    monkeypatch.setitem(C.ROLES["finisher"], "poor_percentile", 0.0)
+    seed = _quiet_seed(3)
+    c = C.play_career(deck, model, seed, _setup("finisher"), ["o0", "o0", "o0"])
+    assert [r.squad for r in c.seasons] == [False, False, False] and not c.released
+    opener = C.play_career(deck, model, seed, _setup("opener"), ["o0", "o0"])
+    assert opener.released

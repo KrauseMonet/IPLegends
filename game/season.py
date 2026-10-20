@@ -1140,15 +1140,22 @@ def _play_fixture(model: Model, a: Side, b: Side, rng: random.Random, stage: str
 
 def run_league(model: Model, sides: list[Side], rng: random.Random,
                track: Side | None = None, stats: JourneyAccumulator | None = None,
-               moves=None, double_at: tuple[int, ...] = DOUBLE_AT) -> Season:
+               moves=None, double_at: tuple[int, ...] = DOUBLE_AT,
+               before_match=None) -> Season:
     """`double_at` is `fixtures`' own: which circular distances meet twice. A career
-    season (A197) plays a real year's eight or nine teams, where every pair meets twice."""
+    season (A197) plays a real year's eight or nine teams, where every pair meets twice.
+
+    `before_match(a, b)`, if given, runs before each fixture and may change either side's
+    eleven for that match -- how a career's player misses matches (A198). None changes
+    nothing."""
     season = Season(sides=sides)
     standings = {s.name: Standing(side=s) for s in sides}
     human_match_no = 0
 
     for i, j in fixtures(len(sides), double_at):
         is_human_fixture = track is not None and (track is sides[i] or track is sides[j])
+        if before_match is not None:
+            before_match(sides[i], sides[j])
         r = _play_fixture(model, sides[i], sides[j], rng, "league", human_match_no,
                            track, moves, stats, season)
         if is_human_fixture:
@@ -1177,8 +1184,9 @@ def run_league(model: Model, sides: list[Side], rng: random.Random,
 
 def run_playoffs(model: Model, season: Season, rng: random.Random,
                   track: Side | None = None, stats: JourneyAccumulator | None = None,
-                  moves=None) -> Season:
+                  moves=None, before_match=None) -> Season:
     """The IPL's own four-team finish, which is not a straight semi-final bracket.
+    `before_match` as in `run_league`.
 
     Finishing first or second is worth a second life: Qualifier 1's loser drops into
     Qualifier 2 rather than out. Reproducing that matters because it is most of what the
@@ -1194,6 +1202,8 @@ def run_playoffs(model: Model, season: Season, rng: random.Random,
     def _play(a: Side, b: Side, stage: str) -> Result:
         nonlocal human_match_no
         is_human_fixture = track is not None and (track is a or track is b)
+        if before_match is not None:
+            before_match(a, b)
         r = _play_fixture(model, a, b, rng, stage, human_match_no, track, moves,
                            stats, season)
         if is_human_fixture:

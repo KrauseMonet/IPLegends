@@ -46,7 +46,7 @@ from etl.franchise_map import canonical
 from game.analysis import batting_rank, bowling_rank
 from game.auction import value_curve
 from game.season import (
-    DOUBLE_AT, Result, Side, _abbrev, run_league, run_playoffs,
+    DOUBLE_AT, Result, Side, _abbrev, fixtures, run_league, run_playoffs,
 )
 from game.simulator import Model
 
@@ -56,7 +56,7 @@ YOU_ID = "career-you"                # your person_id; no real person id has a h
 FIRST_DEBUT = 2008
 LAST_DEBUT = 2017                    # so every career can run at least ten seasons
 LAST_YEAR = 2026
-MAX_SEASONS = 12
+MAX_SEASONS = 19                     # a 2008 debut can run to 2026, as Kohli and Rohit did (A198)
 
 # What each creation choice means, as a filter on real cards. The role and band are the
 # archive's own (A26, A76); a template carries his band, batting positions and bowling style
@@ -65,7 +65,16 @@ ROLES: dict[str, dict] = {
     "opener":     {"label": "Opening batter", "role": ("batter",), "band": ("opener",)},
     "middle":     {"label": "Middle-order batter", "role": ("batter",),
                    "band": ("top_order", "middle")},
-    "finisher":   {"label": "Finisher", "role": ("batter",), "band": ("finisher",)},
+    # A finisher's templates are anybody who batted regularly in the finisher band, his
+    # BATTING only (A198): only 22 real cards in nineteen years are batters there, too few
+    # to spin from, and real finishers are mostly all-rounders. Your finisher still does not
+    # bowl -- `ability` drops the bowling of a batting-only role.
+    # [A198] A finisher only loses his place in the bottom 15% of his band, not 30%: ratified
+    # by the user as a declared exception, because at the general bar 88-94% of finisher
+    # careers ended in release -- realistic (real batting-only finishers rarely held a
+    # place), but it made the role unplayable.
+    "finisher":   {"label": "Finisher", "role": ("batter", "keeper", "allrounder"),
+                   "band": ("finisher",), "batting_only": True, "poor_percentile": 0.15},
     "keeper":     {"label": "Wicketkeeper-batter", "role": ("keeper",)},
     "pace":       {"label": "Fast bowler", "role": ("bowler",), "style": "pace"},
     "spin":       {"label": "Spinner", "role": ("bowler",), "style": "spin"},
@@ -87,10 +96,42 @@ CEILING_REDRAWS = 50
 
 # The share of the way from START to CEILING, by career season. Declared game design (see
 # the module docstring for why it is not measured): rise for five seasons, a peak, then a
-# decline that, by season twelve, has given back most of the gain.
-ARC = (0.0, 0.3, 0.55, 0.75, 0.9, 1.0, 1.0, 0.95, 0.85, 0.7, 0.5, 0.3)
+# decline that keeps going. There is no cap on a career but 2026 [A198]: every real batter
+# in the all-time top five played 13 to 19 seasons, so a twelve-season cap made a batting
+# legend impossible. Past season twelve ability falls below where you started, and form
+# (POOR_PERCENTILE) ends the career, as it ends real ones.
+ARC = (0.0, 0.3, 0.55, 0.75, 0.9, 1.0, 1.0, 0.95, 0.85, 0.7, 0.5, 0.3,
+       0.1, -0.1, -0.3, -0.5, -0.5, -0.5, -0.5)
 ABILITY_FLOOR = -0.5                 # an injury can drop you below where you started
 ABILITY_CAP = 1.0                    # nothing lifts you above your ceiling
+
+# [A198] How much of the team's season you play, drawn per season from the real
+# distribution: the share of their team's matches that players with ten or more seasons
+# played in seasons they were REGULARS (A33's floors), 838 seasons, 20 quantiles (5%, 10%,
+# ... 100%). Real regulars play every match in 42% of seasons and 86% of matches on average.
+# Regular seasons, not all seasons, because your player is always selected: a real long
+# career's fringe years come from not being good enough, which the ability curve decides,
+# not this. The missed matches are one block of the league (an injury), never the playoffs.
+AVAILABILITY_SHARES = (0.25, 0.571, 0.643, 0.706, 0.75, 0.786, 0.812, 0.857, 0.875, 0.929,
+                       0.933, 0.938, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+
+# [A198] Form decides whether you keep your place, ratified by the user: real careers are
+# rare because players lose it (real bowlers with ten or more seasons were regulars in a
+# median 8 of 12), and a player who is a regular every year is, realistically, near the top
+# of the all-time lists -- every real bowler who was a regular for twelve seasons is in the
+# all-time top five for wickets. A season in the bottom POOR_PERCENTILE of your kind of
+# player that season makes the next a SQUAD season; a second in a row and nobody signs you.
+# Relative rather than a card number, because card levels differ by role: one threshold
+# released 71% of middle-order batters and 33% of all-rounders. POOR_PERCENTILE is set by
+# the calibration (tools/career_calibration.py) so careers last as long as real careers
+# that began as regulars.
+POOR_PERCENTILE = 0.30
+
+# How much of the season a squad player plays: the share of their team's matches that
+# players with ten or more seasons played in seasons they were NOT regulars (277 seasons,
+# 20 quantiles). A squad player sits out the playoffs.
+SQUAD_SHARES = (0.053, 0.062, 0.071, 0.111, 0.133, 0.176, 0.188, 0.214, 0.222, 0.25, 0.286,
+                0.316, 0.357, 0.375, 0.429, 0.429, 0.5, 0.533, 0.615, 0.714)
 
 # --- the market ------------------------------------------------------------------------
 
@@ -184,15 +225,18 @@ def _fits(c: Card, role: str) -> bool:
         return False
     if "style" in spec and c.bowling_style != spec["style"]:
         return False
+    if spec.get("batting_only"):
+        return c.bat_scoring is not None and (c.bat_balls or 0) >= BAT_REGULAR_BALLS
     if c.role == "allrounder" and (c.bat_scoring is None or c.bowl_scoring is None):
         return False
     return _regular(c)
 
 
-def main_rating(c: Card) -> float:
+def main_rating(c: Card, role: str | None = None) -> float:
     """What "better" means for a template of this role: the card's own per-ball rating in
-    the discipline the role is for, both summed for an all-rounder."""
-    if c.role in ("batter", "keeper"):
+    the discipline the role is for, both summed for an all-rounder. A batting-only role
+    (`role`, the creation choice) compares batting alone, whoever the template was."""
+    if c.role in ("batter", "keeper") or (role and ROLES[role].get("batting_only")):
         return c.bat if c.bat is not None else -9.9
     if c.role == "bowler":
         return c.bowl if c.bowl is not None else -9.9
@@ -203,6 +247,13 @@ def template_pools(deck: Deck, role: str) -> tuple[list[Card], list[Card]]:
     """(starts, ceilings) for a role, in a fixed order so a seed always draws the same."""
     cards = sorted((c for cs in deck.cards_by_fs.values() for c in cs if _fits(c, role)),
                    key=lambda c: (c.season_year, c.fs_id, c.person_id))
+    if ROLES[role].get("batting_only"):
+        # A card's rating includes the bowling a batting-only role leaves behind, so the
+        # spins are drawn on batting alone: a start from the middle third of the band's
+        # batting, a ceiling from the top third (A198).
+        by_bat = sorted(cards, key=lambda c: c.bat if c.bat is not None else -9.9)
+        n = len(by_bat)
+        return by_bat[n // 3:2 * n // 3], by_bat[2 * n // 3:]
     starts = [c for c in cards if START_DISPLAY[0] <= c.display <= START_DISPLAY[1]]
     ceilings = [c for c in cards if c.display >= CEILING_MIN_DISPLAY]
     return starts, ceilings
@@ -219,9 +270,9 @@ def spin(deck: Deck, seed: int, role: str) -> tuple[Card, Card]:
     start = rng.choice(starts)
     for _ in range(CEILING_REDRAWS):
         ceiling = rng.choice(ceilings)
-        if main_rating(ceiling) > main_rating(start):
+        if main_rating(ceiling, role) > main_rating(start, role):
             return start, ceiling
-    return start, max(ceilings, key=main_rating)
+    return start, max(ceilings, key=lambda c: main_rating(c, role))
 
 
 # --- ability ---------------------------------------------------------------------------
@@ -245,7 +296,10 @@ def ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
     """Your player for one season: the start template moved `t` of the way to the ceiling.
     `t = 0` is the start's engine numbers exactly and `t = 1` the ceiling's. The start
     decides which disciplines you have and where you bat; the ceiling only moves numbers
-    you already have."""
+    you already have. A batting-only role keeps the batting and drops the rest."""
+    if ROLES[setup.role].get("batting_only"):
+        start = dataclasses.replace(start, role="batter", bowl=None, bowl_scoring=None,
+                                    bowl_dismissal=None)
     return Card(
         fs_id=fs_id, person_id=YOU_ID, name=setup.name,
         bat=_lin(start.bat, ceiling.bat, t), bowl=_lin(start.bowl, ceiling.bowl, t),
@@ -383,12 +437,22 @@ class Line:
     best: tuple[int, int] = (0, 0)       # (wickets, runs) in one innings
 
 
-def season_lines(results: list[Result]) -> dict[tuple[str, int], Line]:
+def season_lines(results: list[Result],
+                 roster: dict[int, dict[str, Card]] | None = None) -> dict[tuple[str, int], Line]:
     """Every player's season from the full scorecards. A match counts as played if he is on
     either card of either innings: an Impact Player swapped out at the break has already
     batted or bowled (A78), so he played. Bowling figures belong to the FIELDING side
-    (A101)."""
+    (A101).
+
+    `roster[id(side)]` maps a person to his card for every man the side may field. It is
+    needed whenever a side's eleven changed during the season (a career's missed matches,
+    A198): the side's eleven at the END of the season is then not everybody who played."""
     lines: dict[tuple[str, int], Line] = {}
+
+    def cards_of(side: Side) -> dict[str, Card]:
+        if roster is not None and id(side) in roster:
+            return roster[id(side)]
+        return {c.person_id: c for c in side.xi + ([side.impact] if side.impact else [])}
 
     def line(card: Card, side: Side) -> Line:
         key = (card.person_id, id(side))
@@ -402,8 +466,7 @@ def season_lines(results: list[Result]) -> dict[tuple[str, int], Line]:
                                         (r.away, r.home, r.away_innings)):
             if inn is None:
                 continue
-            cards = {c.person_id: c for c in batting.xi + ([batting.impact] if batting.impact else [])}
-            fcards = {c.person_id: c for c in fielding.xi + ([fielding.impact] if fielding.impact else [])}
+            cards, fcards = cards_of(batting), cards_of(fielding)
             for b in inn.batting:
                 card = cards.get(b.player.person_id)
                 if card is None:
@@ -445,7 +508,9 @@ SHRINK_OUTS = 5
 PEER_MIN_INNINGS = 5
 PEER_MIN_BOWL_BALLS = 60
 MIN_REAL_CARDS = 8           # fewer real regulars of a role in a year: use every year
-ALLROUNDER_MIN_PEERS = 4     # fewer all-rounders to rank among: rank among all who did both
+BAND_GROUP = {"opener": "top", "top_order": "top", "middle": "middle",
+              "finisher": "finisher", "tail": "finisher"}
+MIN_BAND_PEERS = 6           # fewer batters of your band in a season: rank among all batters
 
 
 def _kind(card: Card) -> str:
@@ -485,10 +550,9 @@ def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) 
     """Your place among the season's regulars of your kind, 0 (worst) to 1 (best), by the
     card's statistics score. You are always in the pool, whatever your volume.
 
-    A batter is ranked among batters and keepers, a bowler among bowlers, both scored
+    A batter is ranked among batters and keepers of his band, a bowler among bowlers, scored
     against everybody who batted (or bowled) enough. An all-rounder scores both halves and
-    is ranked among the season's all-rounders, or, in a season with too few of them, among
-    everybody who did enough of both."""
+    is ranked among everybody who did enough of both."""
     me = lines[you]
     kind = _kind(me.card)
     bat = [l for k, l in lines.items()
@@ -500,16 +564,33 @@ def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) 
     bowl_score = {id(l): s for l, s in zip(bowl, _bowl_scores(bowl))}
     if kind == "batter":
         score = bat_score
-        peers = [l for l in bat if _kind(l.card) == "batter"]
+        # Among batters of your own band, as real cards are compared within role (A163): a
+        # finisher's twenty off twelve is not an opener's failure (A198).
+        # Everybody who BATS in your band counts -- the finisher band is mostly all-rounders,
+        # so batters alone were too few to rank among -- but not bowlers: ranked against
+        # tail-enders' batting, every finisher became the season's best (A198, measured).
+        band = [l for k, l in lines.items() if k == you or (
+            l.innings >= PEER_MIN_INNINGS and l.card.role != "bowler"
+            and BAND_GROUP.get(l.card.band) == BAND_GROUP.get(me.card.band))]
+        if len(band) - 1 >= MIN_BAND_PEERS:
+            score = {id(l): s for l, s in zip(band, _bat_scores(band))}
+            peers = band
+        else:
+            peers = [l for l in bat if _kind(l.card) == "batter"]
     elif kind == "bowler":
         score = bowl_score
         peers = [l for l in bowl if _kind(l.card) == "bowler"]
     else:
-        both = [l for l in bat if id(l) in bowl_score]
-        score = {id(l): bat_score[id(l)] + bowl_score[id(l)] for l in both}
-        peers = [l for l in both if _kind(l.card) == "allrounder"]
-        if len(peers) < ALLROUNDER_MIN_PEERS + 1:
-            peers = both
+        # Everybody who did enough of BOTH, whatever the archive calls him: ranked among
+        # the season's handful of listed all-rounders, the best of five read as a 99 (A198).
+        bat_any = [l for k, l in lines.items() if k == you or l.innings >= PEER_MIN_INNINGS]
+        bowl_any = [l for k, l in lines.items() if k == you or l.bowl_balls >= PEER_MIN_BOWL_BALLS]
+        in_bowl = {id(l) for l in bowl_any}
+        both = [l for l in bat_any if id(l) in in_bowl]
+        b1 = {id(l): s for l, s in zip(bat_any, _bat_scores(bat_any))}
+        b2 = {id(l): s for l, s in zip(bowl_any, _bowl_scores(bowl_any))}
+        score = {id(l): b1[id(l)] + b2[id(l)] for l in both}
+        peers = both
     others = [score[id(l)] for l in peers if l is not me]
     if not others:
         return 0.5
@@ -520,7 +601,10 @@ def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) 
 
 def real_displays(deck: Deck, year: int, kind: str) -> list[int]:
     """The real regulars' card ratings of `year` for your kind, sorted; every year's if the
-    year has too few to read a distribution from."""
+    year has too few to read a distribution from. Read for the whole kind, not per batting
+    band (A198, measured): only 22 real cards in nineteen years are batters in the finisher
+    band, best 85, which is too few to be a scale -- reading finishers off it capped every
+    finisher's career at 85."""
     def ok(c: Card) -> bool:
         return c.display is not None and _kind(c) == kind and _regular(c)
 
@@ -644,7 +728,10 @@ class SeasonRecord:
     bowl_runs: int = 0
     four_fors: int = 0
     best: tuple[int, int] = (0, 0)
+    squad: bool = False                # a squad season: a poor one went before (A198)
+    missed: int = 0                    # league matches missed (A198)
     percentile: float = 0.0
+    form: int = 70                     # the season's own card, before the reputation floor
     display: int = 70
     position: int = 0
     playoffs: bool = False
@@ -697,15 +784,94 @@ def _cached_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
     return copy.deepcopy(hit)
 
 
-def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card):
-    """The year itself: (season, your side, every result). Separate from the scoring so a
-    test can hold the season's own leaders against `tournament_leaders`."""
+@dataclass
+class Year:
+    season: object
+    yours: Side
+    results: list[Result]
+    roster: dict[int, dict[str, Card]]
+    missed: int                        # league matches you missed
+
+
+def missed_block(seed: int, k: int, league_matches: int, squad: bool = False) -> range:
+    """Which of your league matches you miss: one block, its length from the real share of
+    matches a regular (or, in a squad season, a non-regular) plays. Its own random stream,
+    so missing matches never changes how the matches themselves are drawn."""
+    rng = random.Random(f"{seed}:avail:{k}")
+    shares = SQUAD_SHARES if squad else AVAILABILITY_SHARES
+    missed = round((1 - rng.choice(shares)) * league_matches)
+    start = rng.randrange(league_matches - missed + 1)
+    return range(start, start + missed)
+
+
+# [A198] Real all-rounders in regular seasons bowl 14.4 balls a match (195 seasons); a
+# bowler gets all four overs or none in this engine, so an all-rounder bowls in 14.4 / 24
+# of his matches instead of four overs in every one -- which had sent 21-38% of all-rounder
+# careers into the all-time top five. Bowlers keep four overs every match: real regulars
+# bowl 21.3 balls a match, close enough that sitting a specialist out of the attack would
+# be stranger than the 13% it corrects.
+ALLROUNDER_BOWL_SHARE = 0.60
+_RESTED_BOWL = -9.9                  # below anybody: out of the five, as `bat_delta`'s sentinel
+
+
+def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | None:
+    """Your side with you NOT among its five bowlers this match, or None when that is not
+    possible (you are not an all-rounder, or the eleven has no five other bowling options:
+    an attack short of five cannot get through twenty overs, A133)."""
+    from game.__main__ import BOWLERS_IN_TWELVE
+
+    if me.role != "allrounder" or not me.has_bowl:
+        return None
+    if sum(c.has_bowl for c in side.xi if c is not me) < BOWLERS_IN_TWELVE:
+        return None
+    resting = dataclasses.replace(me, bowl=_RESTED_BOWL)
+    return [resting if c is me else c for c in side.xi], side.impact
+
+
+def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
+                  squad: bool = False) -> Year:
+    """The year itself. Separate from the scoring so a test can hold the season's own
+    leaders against `tournament_leaders`."""
+    from game.__main__ import opposition_twelve
+
     sides, yours = year_sides(deck, you.season_year, you)
     rng = random.Random(f"{seed}:season:{k}")
     rng.shuffle(sides)                  # who meets twice in a ten-team year is the draw's
-    season = run_league(model, sides, rng, double_at=double_at_for(len(sides)))
-    season = run_playoffs(model, season, rng)
-    return season, yours, season.results + season.playoffs
+    double = double_at_for(len(sides))
+    with_you = (yours.xi, yours.impact)
+    without = opposition_twelve(list(deck.cards_by_fs[you.fs_id]))
+    me = next(c for c in yours.xi if c.person_id == YOU_ID)
+    roster = {id(s): {c.person_id: c for c in deck.cards_by_fs[
+        next(fs for fs in year_fs_ids(deck, you.season_year)
+             if deck.cards_by_fs[fs][0].franchise == s.franchise)]} for s in sides}
+    roster[id(yours)][YOU_ID] = me
+    yours_index = sides.index(yours)
+    league_matches = sum(yours_index in pair for pair in fixtures(len(sides), double))
+    out = missed_block(seed, k, league_matches, squad)
+    played = 0
+    rested = _rested_lineup(yours, me)
+    bowl_rng = random.Random(f"{seed}:bowls:{k}")
+
+    def lineup() -> tuple[list[Card], Card | None]:
+        """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays."""
+        if rested is None or bowl_rng.random() < ALLROUNDER_BOWL_SHARE:
+            return with_you
+        return rested
+
+    def league_hook(a: Side, b: Side) -> None:
+        nonlocal played
+        if yours is a or yours is b:
+            yours.xi, yours.impact = without if played in out else lineup()
+            played += 1
+
+    def playoff_hook(a: Side, b: Side) -> None:
+        if yours is a or yours is b:
+            yours.xi, yours.impact = without if squad else lineup()
+
+    season = run_league(model, sides, rng, double_at=double, before_match=league_hook)
+    season = run_playoffs(model, season, rng, before_match=playoff_hook)
+    yours.xi, yours.impact = with_you
+    return Year(season, yours, season.results + season.playoffs, roster, len(out))
 
 
 def season_caps(lines: dict[tuple[str, int], Line]) -> tuple[Line, Line | None]:
@@ -720,8 +886,10 @@ def season_caps(lines: dict[tuple[str, int], Line]) -> tuple[Line, Line | None]:
 
 def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
                 record: SeasonRecord) -> SeasonRecord:
-    season, yours, results = simulate_year(deck, model, seed, k, you)
-    lines = season_lines(results)
+    year = simulate_year(deck, model, seed, k, you, record.squad)
+    season, yours, results = year.season, year.yours, year.results
+    lines = season_lines(results, year.roster)
+    record.missed = year.missed
     key = (YOU_ID, id(yours))
     me = lines.get(key) or Line(card=you, side=yours)
     lines[key] = me
@@ -748,6 +916,7 @@ class Pending:
     kind: str                          # "offer" | "event"
     year: int
     k: int
+    squad: bool = False                # the season ahead is a squad season
     offers: list[Offer] = field(default_factory=list)
     event: Event | None = None
 
@@ -772,6 +941,7 @@ class Summary:
     orange_caps: int
     purple_caps: int
     captaincies: int
+    regular_seasons: int
     franchises: list[str]
     earnings: int                      # lakh
     peak_display: int
@@ -789,6 +959,7 @@ class Career:
     seasons: list[SeasonRecord] = field(default_factory=list)
     pending: Pending | None = None
     retired: bool = False
+    released: bool = False             # two poor seasons running: nobody signed you
     summary: Summary | None = None
 
     @property
@@ -813,13 +984,45 @@ def summarise(career: Career, real_runs: list[int] | None = None,
         four_fors=sum(r.four_fors for r in s), titles=sum(r.champion for r in s),
         finals=sum(r.finalist for r in s), playoffs=sum(r.playoffs for r in s),
         orange_caps=sum(r.orange_cap for r in s), purple_caps=sum(r.purple_cap for r in s),
-        captaincies=sum(r.captain for r in s), franchises=franchises,
+        captaincies=sum(r.captain for r in s), regular_seasons=sum(not r.squad for r in s),
+        franchises=franchises,
         earnings=sum(r.price for r in s), peak_display=peak.display, peak_year=peak.year)
     if real_runs is not None:
         total.runs_rank = 1 + sum(x > total.runs for x in real_runs)
     if real_wickets is not None:
         total.wickets_rank = 1 + sum(x > total.wickets for x in real_wickets)
     return total
+
+
+# [A198] Real cards carry a reputation floor (A159): a season below the player's own career
+# is lifted halfway back toward it. The career card applies the same rule, so a 91 here
+# still sits among real 91s -- with the career so far as the reference, since a career in
+# progress has no future seasons to look at. Real cards apply it to merit in runs; this
+# applies it to the 70-99 card, the scale the career has. A161's cap ("never above the
+# career") has nothing to do here: the floor is only taken when it beats the season's own
+# card, and halfway between a career and a LOWER season is always below the career.
+REPUTATION_WEIGHT = 0.5
+
+
+def reputation_floor(previous: list[int], form: int) -> int:
+    if not previous:
+        return form
+    career = statistics.fmean(previous)
+    return max(form, round(REPUTATION_WEIGHT * career + (1 - REPUTATION_WEIGHT) * form))
+
+
+def poor_bar(role: str) -> float:
+    """Below this place among your kind, a season is poor: `POOR_PERCENTILE`, unless the
+    role declares its own."""
+    return ROLES[role].get("poor_percentile", POOR_PERCENTILE)
+
+
+def form_after(squad: bool, percentile: float, bar: float | None = None) -> tuple[bool, bool]:
+    """(next season is a squad season, released) after a season at this place among your
+    kind of player. A poor season costs you your place; a second in a row costs you your
+    career (A198)."""
+    poor = percentile < (POOR_PERCENTILE if bar is None else bar)
+    return poor, poor and squad
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -834,13 +1037,14 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     permanent = 0.0
     current: str | None = None
     last_display: int | None = None
+    squad = False
     k = 0
     while k < MAX_SEASONS and setup.debut + k <= LAST_YEAR:
         year = setup.debut + k
         offers = offers_for(deck, seed, k, year, current, last_display)
         move = next(it, None)
         if move is None:
-            career.pending = Pending("offer", year, k, offers=offers)
+            career.pending = Pending("offer", year, k, offers=offers, squad=squad)
             return career
         if move == "r":
             if k == 0:
@@ -854,7 +1058,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         else:
             move = next(it, None)
             if move is None:
-                career.pending = Pending("event", year, k, offers=[offer], event=event)
+                career.pending = Pending("event", year, k, offers=[offer], event=event,
+                                         squad=squad)
                 return career
             option = event.options[_index(move, "e", len(event.options))]
         permanent += option.permanent
@@ -864,14 +1069,20 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         record = SeasonRecord(k=k, year=year, franchise=offer.franchise, short=offer.short,
                               price=offer.price, stayed=offer.stay, event=event.key,
                               choice=option.label, captain=option.captain, ability=t,
-                              teams=0)
+                              teams=0, squad=squad)
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         played = _cached_season(deck, model, seed, k, you, record,
-                                (setup, start, ceiling, offer, option, t))
+                                (setup, start, ceiling, offer, option, t, squad))
+        played.form = played.display
+        played.display = reputation_floor([r.display for r in career.seasons], played.display)
         career.seasons.append(played)
         current, last_display = canonical(offer.franchise), played.display
         k += 1
+        squad, released = form_after(squad, played.percentile, poor_bar(setup.role))
+        if released:
+            career.released = True
+            break
     if next(it, None) is not None:
         raise CareerError("moves left over after the career ended")
     career.pending = None

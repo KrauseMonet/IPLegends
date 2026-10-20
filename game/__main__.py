@@ -165,7 +165,13 @@ def opposition_twelve(squad: list[Card]) -> tuple[list[Card], Card | None]:
     known-non-overseas candidates once the XI is already at the limit, the same
     known-domestic-only repair `enforce_overseas` already applies to swaps.
     """
-    xi = opposition_xi(squad)
+    return twelve_from_xi(opposition_xi(squad), squad)
+
+
+def twelve_from_xi(xi: list[Card], squad: list[Card]) -> tuple[list[Card], Card | None]:
+    """An already-chosen eleven, ordered, plus the Impact Player `opposition_twelve`
+    would pick for it. Split out so a career (A197) can pin its own player into the eleven
+    and still take the bench by exactly the same rule."""
     xi_overseas = sum(c.overseas is True for c in xi)
     bench = [c for c in squad if c not in xi and c.has_bowl]
     if xi_overseas >= OVERSEAS_LIMIT:

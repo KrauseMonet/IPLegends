@@ -1140,12 +1140,14 @@ def _play_fixture(model: Model, a: Side, b: Side, rng: random.Random, stage: str
 
 def run_league(model: Model, sides: list[Side], rng: random.Random,
                track: Side | None = None, stats: JourneyAccumulator | None = None,
-               moves=None) -> Season:
+               moves=None, double_at: tuple[int, ...] = DOUBLE_AT) -> Season:
+    """`double_at` is `fixtures`' own: which circular distances meet twice. A career
+    season (A197) plays a real year's eight or nine teams, where every pair meets twice."""
     season = Season(sides=sides)
     standings = {s.name: Standing(side=s) for s in sides}
     human_match_no = 0
 
-    for i, j in fixtures(len(sides)):
+    for i, j in fixtures(len(sides), double_at):
         is_human_fixture = track is not None and (track is sides[i] or track is sides[j])
         r = _play_fixture(model, sides[i], sides[j], rng, "league", human_match_no,
                            track, moves, stats, season)

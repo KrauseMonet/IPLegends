@@ -227,3 +227,22 @@ def test_an_event_card_reaches_the_page_with_its_real_name(client, deck):
     assert e["key"] == "mentor" and "{name}" not in e["text"] and "senior player" not in e["text"]
     names = {c.name for fs in C.year_fs_ids(deck, 2014) for c in deck.cards_by_fs[fs]}
     assert any(n in e["text"] for n in names)
+
+
+def test_the_move_that_plays_a_season_carries_it_as_it_happened(client):
+    """And only that move: a reload (view) and an offer that leads to an event carry none."""
+    seed = next(s for s in range(1, 2000) if len(C.draw_event(s, 0).options) > 1)
+    d = _token(client, seed=seed)
+    assert d["season_play"] is None
+    d = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
+    assert d["pending"]["kind"] == "event" and d["season_play"] is None
+    d = client.post("/api/career/move", json={"token": d["token"], "move": "e0"}).json()
+    sp = d["season_play"]
+    s = d["seasons"][-1]
+    assert sp and len(sp["feed"]) >= 14 and sp["table"]
+    assert sum(l["runs"] for l in sp["feed"]) == s["runs"]
+    assert sum(1 for l in sp["feed"] if l["stage"] != "league") == len(sp["watch"])
+    for w in sp["watch"]:
+        assert w["home_innings"]["over_log"] and w["yours"]
+    v = client.post("/api/career/view", json={"token": d["token"]}).json()
+    assert v["season_play"] is None and v["seasons"] == d["seasons"]

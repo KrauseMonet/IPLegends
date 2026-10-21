@@ -194,6 +194,59 @@ class SummaryOut(BaseModel):
     ending: str                   # "retired" | "released" | "the end of the archive"
 
 
+class MatchLineOut(BaseModel):
+    stage: str
+    opponent: str
+    opp_short: str
+    opp_crest: str | None
+    result: str                   # "W" | "L" | "T"
+    score_for: str
+    score_against: str
+    margin: str
+    played: bool
+    batted: bool
+    runs: int
+    balls: int
+    out: bool
+    wickets: int
+    bowl_runs: int
+    bowl_balls: int
+    wins: int
+    losses: int
+    position: int | None
+    season_runs: int
+    season_wickets: int
+    orange: str                   # leader's name
+    orange_n: int
+    orange_you: bool
+    purple: str
+    purple_n: int
+    purple_you: bool
+    watch: int | None             # index into `watch`
+
+
+class TableRowOut(BaseModel):
+    short: str
+    name: str
+    crest: str | None
+    played: int
+    won: int
+    lost: int
+    points: int
+    nrr: float
+    you: bool
+
+
+class SeasonPlayOut(BaseModel):
+    """The season just played, as it happened (A202). Only in the response that played it."""
+    feed: list[MatchLineOut]
+    table: list[TableRowOut]
+    watch: list[dict]             # ResultOut, the solo season's own match shape, for reveal.js
+    your_short: str
+    your_name: str
+    your_crest: str | None
+
+
 class CareerOut(BaseModel):
     token: str
     name: str
@@ -207,6 +260,7 @@ class CareerOut(BaseModel):
     pending: PendingOut | None
     summary: SummaryOut | None
     share: str | None
+    season_play: SeasonPlayOut | None = None
 
 
 def _template(c) -> TemplateOut:
@@ -289,6 +343,30 @@ def _summary(c: C.Career) -> SummaryOut:
         runs_rank=s.runs_rank, wickets_rank=s.wickets_rank, ending=ending)
 
 
+def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
+    from web.app import _result_out      # the solo season's own match shape
+
+    yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
+    you_row = next(t for t in detail.table if t.you)
+    feed = [MatchLineOut(
+        stage=l.stage, opponent=l.opponent, opp_short=l.opp_short,
+        opp_crest=crests.crest_url(l.opp_franchise, l.opp_year), result=l.result,
+        score_for=l.score_for, score_against=l.score_against, margin=l.margin, played=l.played,
+        batted=l.batted, runs=l.runs, balls=l.balls, out=l.out, wickets=l.wickets,
+        bowl_runs=l.bowl_runs, bowl_balls=l.bowl_balls, wins=l.wins, losses=l.losses,
+        position=l.position, season_runs=l.season_runs, season_wickets=l.season_wickets,
+        orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
+        purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch)
+        for l in detail.feed]
+    table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
+                         played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,
+                         you=t.you) for t in detail.table]
+    watch = [_result_out(r, yours).model_dump() for r in detail.watch]
+    return SeasonPlayOut(feed=feed, table=table, watch=watch, your_short=you_row.short,
+                         your_name=you_row.name,
+                         your_crest=next(x.crest for x in table if x.you))
+
+
 def share_text(c: C.Career) -> str:
     """One line per career, no player names: what happened, not who it was built from
     (the spin is the surprise for whoever plays next, as A129 keeps a daily's answer back)."""
@@ -318,7 +396,8 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         pending=(_pending(career.pending).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
-        share=share_text(career) if career.summary else None)
+        share=share_text(career) if career.summary else None,
+        season_play=_season_play(career.detail) if career.detail else None)
 
 
 def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:

@@ -642,21 +642,9 @@ def _balanced_order(entries: list[RoomResultEntry]) -> list[RoomResultEntry]:
     larger of the two counts, then the sum, then simulation order), so every side's
     count stays within one of every other's all the way through. Display only, like
     `_reveal_order`: a permutation of finished results, never a re-simulation."""
-    remaining = list(enumerate(entries))
-    shown: dict[str, int] = {}
-    out = []
-    while remaining:
-        def cost(item):
-            k, e = item
-            a, b = shown.get(e.home_pid, 0), shown.get(e.away_pid, 0)
-            return (max(a, b), a + b, k)
-        pick = min(remaining, key=cost)
-        remaining.remove(pick)
-        e = pick[1]
-        shown[e.home_pid] = shown.get(e.home_pid, 0) + 1
-        shown[e.away_pid] = shown.get(e.away_pid, 0) + 1
-        out.append(e)
-    return out
+    from game.season import balanced_order
+
+    return balanced_order(entries, lambda e: (e.home_pid, e.away_pid))
 
 
 def _reveal_order(entries: list[RoomResultEntry], n_teams: int) -> list[RoomResultEntry]:

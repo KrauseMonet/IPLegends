@@ -840,3 +840,113 @@ def test_a_finals_line_names_its_real_top_scorer_you_included(deck, model):
                 assert f"{top.player.name} {top.runs}" in line and "you top-scored" not in line
             finals += 1
     assert finals >= 3
+
+
+# --- the season as it happened (A202) -------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def detailed(deck, model):
+    """A real season with you in it, and its record and detail."""
+    start, ceiling = C.spin(deck, 3, "allrounder")
+    fs = C.year_fs_ids(deck, 2019)[3]
+    c0 = deck.cards_by_fs[fs][0]
+    you = C.ability(start, ceiling, 0.8, setup=_setup("allrounder"), fs_id=fs, year=2019,
+                    franchise=c0.franchise)
+    record = C.SeasonRecord(0, 2019, c0.franchise, "X", 20, False, "quiet", "", False, 0.8, 0)
+    year = C.simulate_year(deck, model, 23, 4, you)
+    rec, detail = C.play_season_detail(deck, model, 23, 4, you, record)
+    return year, rec, detail
+
+
+def _told(year):
+    league = [r for r in year.results if r.stage == "league"]
+    return C.balanced_order(league, lambda r: (id(r.home), id(r.away))) + [
+        r for r in year.results if r.stage != "league"]
+
+
+def test_the_feed_is_every_match_of_your_side_in_matchday_order(detailed):
+    year, rec, detail = detailed
+    mine = [r for r in _told(year) if year.yours is r.home or year.yours is r.away]
+    assert len(mine) == sum(year.yours is r.home or year.yours is r.away for r in year.results)
+    assert [l.stage for l in detail.feed] == [r.stage for r in mine]
+    assert [l.result for l in detail.feed] == [
+        "T" if r.winner is None else "W" if r.winner is year.yours else "L" for r in mine]
+    assert detail.feed[-1].wins == sum(r.winner is year.yours for r in mine)
+
+
+def test_matchday_order_keeps_every_side_within_a_game_of_the_rest(detailed):
+    year, _, _ = detailed
+    played = {id(s): 0 for s in year.season.sides}
+    for r in [r for r in _told(year) if r.stage == "league"]:
+        played[id(r.home)] += 1
+        played[id(r.away)] += 1
+        assert max(played.values()) - min(played.values()) <= 2
+
+
+def test_the_running_table_ends_where_the_season_did(detailed):
+    """The position on each line is the table at that moment -- after your last league
+    match other sides still play, so the FINAL table is the one to compare."""
+    year, rec, detail = detailed
+    assert next(i for i, r in enumerate(detail.table, 1) if r.you) == rec.position
+    assert [r.name for r in detail.table] == [s.side.name for s in year.season.table]
+    assert [r.points for r in detail.table] == [s.points for s in year.season.table]
+
+
+def test_your_matches_add_up_to_your_season(detailed):
+    _, rec, detail = detailed
+    assert sum(l.runs for l in detail.feed) == rec.runs == detail.feed[-1].season_runs
+    assert sum(l.wickets for l in detail.feed) == rec.wickets == detail.feed[-1].season_wickets
+    assert sum(l.played for l in detail.feed) == rec.matches
+
+
+def test_the_cap_race_is_the_tournaments_own_leaders_after_every_match(detailed):
+    """After each of your matches, compared with `tournament_leaders` over the matches told
+    so far -- every line, not just the last, so a wrong ordering has many chances to show."""
+    year, rec, detail = detailed
+    told = _told(year)
+    mine = [i for i, r in enumerate(told) if year.yours is r.home or year.yours is r.away]
+    differed = 0
+    for line, i in zip(detail.feed, mine):
+        then = tournament_leaders(told[:i + 1])
+        assert line.orange[:2] == then.top_scorer
+        assert line.purple[:2] == then.top_wicket_taker
+        differed += line.orange[0] != detail.feed[-1].orange[0]
+    assert differed            # the lead changed hands at least once, so this is a real check
+
+
+def test_the_matches_to_watch_are_your_playoffs_final_last(detailed):
+    year, rec, detail = detailed
+    po = [r for r in year.season.playoffs if year.yours is r.home or year.yours is r.away]
+    assert [r.stage for r in detail.watch] == [r.stage for r in po]
+    assert all(l.watch is not None for l in detail.feed if l.stage != "league")
+    assert all(l.watch is None for l in detail.feed if l.stage == "league")
+    if rec.finalist:
+        assert detail.watch[-1].stage == "Final"
+
+
+def test_a_season_played_in_a_call_carries_its_detail_and_a_resume_does_not(deck, model):
+    seed = _seed_quiet(2)
+    played = C.play_career(deck, model, seed, _setup(), ["o0"])
+    assert played.detail is not None and played.detail.feed
+    resumed = C.play_career(deck, model, seed, _setup(), [], resume=played.checkpoint)
+    assert resumed.detail is None
+
+
+def test_each_lines_position_is_the_table_at_that_moment(detailed):
+    """Recomputed independently from the results up to that match, by points and wins."""
+    year, rec, detail = detailed
+    league = [r for r in _told(year) if r.stage == "league"]
+    mine = [i for i, r in enumerate(league) if year.yours is r.home or year.yours is r.away]
+    lines = [l for l in detail.feed if l.stage == "league"]
+    for line, upto in zip(lines, mine):
+        pts = {s.name: 0 for s in year.season.sides}           # a side yet to play is on 0
+        for r in league[:upto + 1]:
+            if r.winner is None:
+                pts[r.home.name] += 1; pts[r.away.name] += 1
+            else:
+                pts[r.winner.name] += 2
+        mine_pts = pts[year.yours.name]
+        above = sum(p > mine_pts for p in pts.values())
+        level = sum(p == mine_pts for p in pts.values())
+        assert above + 1 <= line.position <= above + level        # NRR decides within a level

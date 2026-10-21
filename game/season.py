@@ -1161,25 +1161,59 @@ def run_league(model: Model, sides: list[Side], rng: random.Random,
         if is_human_fixture:
             human_match_no += 1
         season.results.append(r)
-        h, a = standings[r.home.name], standings[r.away.name]
-        h.played += 1
-        a.played += 1
-        _credit(h, r.home_runs, r.home_balls, r.home_wickets,
-                r.away_runs, r.away_balls, r.away_wickets)
-        _credit(a, r.away_runs, r.away_balls, r.away_wickets,
-                r.home_runs, r.home_balls, r.home_wickets)
-        if r.winner is None:
-            h.tied += 1
-            a.tied += 1
-        elif r.winner is r.home:
-            h.won += 1
-            a.lost += 1
-        else:
-            a.won += 1
-            h.lost += 1
+        credit_result(standings, r)
 
-    season.table = sorted(standings.values(), key=lambda s: (-s.points, -s.nrr, s.side.name))
+    season.table = rank_table(standings)
     return season
+
+
+def credit_result(standings: dict[str, Standing], r: Result) -> None:
+    """One league result into the table: played, won/lost/tied, and the runs and balls
+    net run rate is built from. Shared with a career's running table (A202), so the two
+    can never rank a season differently."""
+    h, a = standings[r.home.name], standings[r.away.name]
+    h.played += 1
+    a.played += 1
+    _credit(h, r.home_runs, r.home_balls, r.home_wickets,
+            r.away_runs, r.away_balls, r.away_wickets)
+    _credit(a, r.away_runs, r.away_balls, r.away_wickets,
+            r.home_runs, r.home_balls, r.home_wickets)
+    if r.winner is None:
+        h.tied += 1
+        a.tied += 1
+    elif r.winner is r.home:
+        h.won += 1
+        a.lost += 1
+    else:
+        a.won += 1
+        h.lost += 1
+
+
+def balanced_order(items: list, pair) -> list:
+    """Finished league fixtures in matchday order, for telling a season rather than playing
+    it: each next fixture is the one whose two sides have been shown the FEWEST games (the
+    larger count, then the sum, then the original order), so no side runs ahead of the rest.
+    `pair(item)` names its two sides. A176's rule, shared by a room's reveal and a career's
+    season feed (A202). A permutation only -- never a re-simulation."""
+    remaining = list(enumerate(items))
+    shown: dict = {}
+    out = []
+    while remaining:
+        def cost(entry):
+            k, item = entry
+            a, b = (shown.get(x, 0) for x in pair(item))
+            return (max(a, b), a + b, k)
+        pick = min(remaining, key=cost)
+        remaining.remove(pick)
+        for x in pair(pick[1]):
+            shown[x] = shown.get(x, 0) + 1
+        out.append(pick[1])
+    return out
+
+
+def rank_table(standings: dict[str, Standing]) -> list[Standing]:
+    """Points, then net run rate, then name -- the league's one ordering."""
+    return sorted(standings.values(), key=lambda s: (-s.points, -s.nrr, s.side.name))
 
 
 def run_playoffs(model: Model, season: Season, rng: random.Random,

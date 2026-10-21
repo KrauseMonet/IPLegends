@@ -46,7 +46,7 @@ from etl.franchise_map import canonical
 from game.analysis import batting_rank, bowling_rank
 from game.auction import value_curve
 from game.season import (
-    DOUBLE_AT, Result, Side, _abbrev, fixtures, run_league, run_playoffs,
+    DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game.simulator import Model
 
@@ -903,19 +903,21 @@ def _highlights(results: list[Result], yours: Side) -> list[Highlight]:
 # A season is a pure function of its inputs, so a warm process keeps the ones it has
 # played: a replay (every request, and every step of `auto_career`) then costs nothing for
 # the seasons already behind it. Cleared when full rather than managed, like A181's cache.
-_SEASON_CACHE: dict[tuple, SeasonRecord] = {}
+_SEASON_CACHE: dict[tuple, tuple] = {}
 SEASON_CACHE_MAX = 4000
 
 
 def _cached_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                   record: SeasonRecord, key: tuple) -> SeasonRecord:
+                   record: SeasonRecord, key: tuple) -> tuple[SeasonRecord, "SeasonDetail"]:
+    """The record is copied (the career goes on to change it); the detail is shared, since
+    nothing changes it after it is built."""
     full = (id(deck), id(model), seed, k, key)
     hit = _SEASON_CACHE.get(full)
     if hit is None:
         if len(_SEASON_CACHE) >= SEASON_CACHE_MAX:
             _SEASON_CACHE.clear()
-        hit = _SEASON_CACHE[full] = play_season(deck, model, seed, k, you, record)
-    return copy.deepcopy(hit)
+        hit = _SEASON_CACHE[full] = play_season_detail(deck, model, seed, k, you, record)
+    return copy.deepcopy(hit[0]), hit[1]
 
 
 @dataclass
@@ -1019,8 +1021,163 @@ def season_caps(lines: dict[tuple[str, int], Line]) -> tuple[Line, Line | None]:
     return top_bat, top_bowl
 
 
+# --- the season as it happened (A202) -----------------------------------------------------
+# What the page shows while a season unfolds: each of your matches in order, the table as it
+# stood after each, the Orange and Purple Cap race, and the full scorecards of the matches
+# worth watching ball by ball. Returned once, with the season just played, and never kept in
+# the checkpoint: it is presentation, and the token would grow by every season's matches.
+
+
+@dataclass
+class MatchLine:
+    stage: str
+    opponent: str                       # "Kolkata Knight Riders 2016"
+    opp_short: str
+    opp_franchise: str | None
+    opp_year: int | None
+    result: str                         # "W" | "L" | "T"
+    score_for: str                      # "185/6"
+    score_against: str
+    margin: str
+    played: bool                        # were you in the side
+    batted: bool = False
+    runs: int = 0
+    balls: int = 0
+    out: bool = False
+    wickets: int = 0
+    bowl_runs: int = 0
+    bowl_balls: int = 0
+    wins: int = 0                       # your side's record so far, playoffs included
+    losses: int = 0
+    position: int | None = None         # in the league table after it; None in the playoffs
+    season_runs: int = 0                # yours so far
+    season_wickets: int = 0
+    orange: tuple[str, int, bool] = ("", 0, False)   # (leader, runs, is it you) after it
+    purple: tuple[str, int, bool] = ("", 0, False)
+    watch: int | None = None            # index into SeasonDetail.watch
+
+
+@dataclass
+class TableRow:
+    short: str
+    name: str
+    franchise: str | None
+    year: int | None
+    played: int
+    won: int
+    lost: int
+    tied: int
+    points: int
+    nrr: float
+    you: bool
+
+
+@dataclass
+class SeasonDetail:
+    feed: list[MatchLine]
+    table: list[TableRow]               # the league as it finished
+    watch: list[Result]                 # your playoff matches, the final last
+
+
+def _score(runs: int, wickets: int) -> str:
+    return f"{runs}" if wickets >= 10 else f"{runs}/{wickets}"
+
+
+def season_detail(year: "Year") -> SeasonDetail:
+    """Walk the season match by match and record, after each of your matches, where things
+    stood. The league is told in matchday order (`balanced_order`): the engine plays one
+    side's fixtures before the next side's, so in simulation order your fourth match came
+    after another side's fourteenth and the cap race read 399 runs. The table uses the league's own crediting and ranking
+    (`credit_result`, `rank_table`), the caps A175's ordering, so the last line of each
+    agrees with the season's own table and leaders by construction."""
+    from game.season import Standing, balanced_order, credit_result, rank_table
+
+    season, yours = year.season, year.yours
+    standings = {s.name: Standing(side=s) for s in season.sides}
+    totals: dict[tuple[str, int], list] = {}       # (person, side) -> [name, runs, balls, w, br, bb]
+    feed: list[MatchLine] = []
+    watch: list[Result] = []
+    wins = losses = 0
+
+    def leader(batting: bool) -> tuple[str, int, bool]:
+        if batting:
+            key = min(totals, key=lambda k: batting_rank(totals[k][1], totals[k][2], totals[k][0]))
+            return totals[key][0], totals[key][1], key[0] == YOU_ID
+        bowled = [k for k in totals if totals[k][5]]
+        if not bowled:
+            return "", 0, False
+        key = min(bowled, key=lambda k: bowling_rank(totals[k][3], totals[k][4], totals[k][5],
+                                                     totals[k][0]))
+        return totals[key][0], totals[key][3], key[0] == YOU_ID
+
+    league = [r for r in year.results if r.stage == "league"]
+    told = balanced_order(league, lambda r: (id(r.home), id(r.away))) + [
+        r for r in year.results if r.stage != "league"]
+    for r in told:
+        for side, inn, other in ((r.home, r.home_innings, r.away_innings),
+                                 (r.away, r.away_innings, r.home_innings)):
+            for b in (inn.batting if inn else []):
+                t = totals.setdefault((b.player.person_id, id(side)), [b.player.name, 0, 0, 0, 0, 0])
+                t[1] += b.runs
+                t[2] += b.balls
+            for w in (other.bowling if other else []):
+                t = totals.setdefault((w.player.person_id, id(side)), [w.player.name, 0, 0, 0, 0, 0])
+                t[3] += w.wickets
+                t[4] += w.runs
+                t[5] += w.balls
+        if r.stage == "league":
+            credit_result(standings, r)
+        if yours is not r.home and yours is not r.away:
+            continue
+        home = yours is r.home
+        opp = r.away if home else r.home
+        mine = r.home_innings if home else r.away_innings
+        theirs = r.away_innings if home else r.home_innings
+        result = "T" if r.winner is None else "W" if r.winner is yours else "L"
+        wins += result == "W"
+        losses += result == "L"
+        line = MatchLine(
+            stage=r.stage, opponent=opp.name, opp_short=opp.short, opp_franchise=opp.franchise,
+            opp_year=opp.year, result=result,
+            score_for=_score(r.home_runs if home else r.away_runs,
+                             r.home_wickets if home else r.away_wickets),
+            score_against=_score(r.away_runs if home else r.home_runs,
+                                 r.away_wickets if home else r.home_wickets),
+            margin=r.margin, played=False, wins=wins, losses=losses)
+        for b in (mine.batting if mine else []):
+            if b.player.person_id == YOU_ID:
+                line.played = True
+                line.batted = b.faced_any or b.out
+                line.runs, line.balls, line.out = b.runs, b.balls, b.out
+        for w in (theirs.bowling if theirs else []):
+            if w.player.person_id == YOU_ID and w.balls:
+                line.played = True
+                line.wickets, line.bowl_runs, line.bowl_balls = w.wickets, w.runs, w.balls
+        me = totals.get((YOU_ID, id(yours)))
+        line.season_runs, line.season_wickets = (me[1], me[3]) if me else (0, 0)
+        if r.stage == "league":
+            line.position = next(i for i, s in enumerate(rank_table(standings), 1)
+                                 if s.side is yours)
+        else:
+            line.watch = len(watch)
+            watch.append(r)
+        line.orange, line.purple = leader(True), leader(False)
+        feed.append(line)
+
+    table = [TableRow(short=s.side.short, name=s.side.name, franchise=s.side.franchise,
+                      year=s.side.year, played=s.played, won=s.won, lost=s.lost, tied=s.tied,
+                      points=s.points, nrr=round(s.nrr, 3), you=s.side is yours)
+             for s in rank_table(standings)]
+    return SeasonDetail(feed, table, watch)
+
+
 def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
                 record: SeasonRecord) -> SeasonRecord:
+    return play_season_detail(deck, model, seed, k, you, record)[0]
+
+
+def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
+                       record: SeasonRecord) -> tuple[SeasonRecord, SeasonDetail]:
     year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
@@ -1043,7 +1200,7 @@ def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.orange_cap = top_bat is me and me.runs > 0
     record.purple_cap = top_bowl is me and me.wickets > 0
     record.highlights = _highlights(results, yours)
-    return record
+    return record, season_detail(year)
 
 
 @dataclass
@@ -1098,6 +1255,8 @@ class Career:
     released: bool = False             # two poor seasons running: nobody signed you
     summary: Summary | None = None
     checkpoint: "Checkpoint | None" = None
+    # The season played in THIS call, as it happened (A202); None when no season was played.
+    detail: "SeasonDetail | None" = None
 
     @property
     def complete(self) -> bool:
@@ -1286,8 +1445,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                              if cp.contract else 0))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
-        played = _cached_season(deck, model, seed, k, you, record,
-                                (setup, start, ceiling, offer, option, t, cp.squad))
+        played, career.detail = _cached_season(deck, model, seed, k, you, record,
+                                               (setup, start, ceiling, offer, option, t,
+                                                cp.squad))
         played.form = played.display
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
         cp.seasons.append(played)

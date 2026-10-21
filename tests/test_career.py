@@ -1339,7 +1339,7 @@ def _single_rank(year, k: int) -> float:
 def test_failing_a_make_or_break_drops_you_for_the_next_two_matches(deck, model):
     year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
     (k, verdict), = year.verdicts.items()
-    assert verdict == "dropped" and _single_rank(year, k) < C.FORM_POOR
+    assert verdict == "dropped" and _single_rank(year, k) < C.FORM_FAIL
     mine = _your_league(year)
     assert _in_xi(year, mine[k - 1])
     assert not any(_in_xi(year, r) for r in mine[k:k + C.DROP_MATCHES])
@@ -1349,7 +1349,7 @@ def test_failing_a_make_or_break_drops_you_for_the_next_two_matches(deck, model)
 def test_coming_through_a_make_or_break_keeps_your_place(deck, model):
     year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
     (k, verdict), = year.verdicts.items()
-    assert verdict == "kept" and _single_rank(year, k) >= C.FORM_POOR
+    assert verdict == "kept" and _single_rank(year, k) >= C.FORM_FAIL
     assert _in_xi(year, _your_league(year)[k]) and year.dropped == []
 
 
@@ -1457,3 +1457,15 @@ def test_a_batter_bowls_only_when_his_side_lacks_five_real_bowlers(deck, model):
         if acted >= 2:
             break
     assert acted >= 2, "the rule must have had to act"
+
+
+def test_a_make_or_break_is_failed_only_in_the_worst_sixth(deck, model):
+    """A207: the fail bar is the worst sixth of your kind's matches, not the worst third
+    that marks you out of form. Chennai 2019 seed 33, found by search, has its make-or-break
+    match between the two bars: kept now, dropped under the old bar."""
+    year = C.simulate_year(deck, model, 33, 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
+    (k, verdict), = year.verdicts.items()
+    rank = _single_rank(year, k)
+    assert C.FORM_FAIL <= rank < C.FORM_POOR, "the fixture must sit between the two bars"
+    assert verdict == "kept" and year.dropped == []
+    assert _in_xi(year, _your_league(year)[k])

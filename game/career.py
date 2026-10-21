@@ -229,6 +229,11 @@ FORM_WICKET_RUNS = 20                # a wicket in a form score, in runs
 FORM_PAR_PER_BALL = 1.3              # runs a ball conceded at par
 FORM_POOR = 1 / 3                    # the worst third of your kind is out of form
 FORM_GOOD = 2 / 3                    # the best third is in form
+# A make-or-break is failed when that match alone sits in the worst sixth of your kind's
+# matches (A207, swept against the real drop rates of FORM_DROP_RATE): at the worst third
+# careers were dropped 0.243 / 0.252 times a regular season (batting / bowling), at the
+# worst sixth 0.140 / 0.126 against a real 0.113 / 0.153 -- 0.136 against 0.131 weighted.
+FORM_FAIL = 1 / 6
 FORM_SHOWN = 5                       # matches on the live form line
 DROP_MATCHES = 2                     # matches a failed make-or-break costs you
 # Real form drops a regular season, as two-match drops: worst-third readings a season (3.03
@@ -1326,7 +1331,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             idx = played
             if pending_break is not None:
                 # the make-or-break was your last match: did you fail again?
-                failed = book.last_match_rank(you_key) < FORM_POOR
+                failed = book.last_match_rank(you_key) < FORM_FAIL
                 verdicts[pending_break] = "dropped" if failed else "kept"
                 if failed:
                     drop_from(idx)

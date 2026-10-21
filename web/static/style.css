@@ -2132,6 +2132,9 @@ body{
 .home-lede{font-size:18px;line-height:1.6;color:var(--ink-2);max-width:520px;margin:0 0 28px}
 .home-lede b{color:var(--ink)}
 .home-cta{display:flex;gap:12px;flex-wrap:wrap}
+/* [A201] Three heroes, three buttons: a little less side padding keeps them on one line at
+   1024 px (they needed 456 px of a 452 px column); narrower screens still wrap. */
+.home-cta .btn{padding-left:18px;padding-right:18px}
 .home-mode{display:flex;align-items:center;gap:12px;margin-top:18px}
 .home-mode-label{font:600 10.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
 .home-mode .room-choices{margin:0}

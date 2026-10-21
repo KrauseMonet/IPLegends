@@ -60,8 +60,9 @@ def test_every_puzzle_page_is_served_by_the_app_and_by_vercel():
 def test_the_top_bar_keeps_draft_and_auction_first_and_does_not_grow():
     links = re.findall(r'<a href="([^"]+)" data-match="([^"]+)">([^<]+)</a>',
                        (PARTIALS / "nav.html").read_text())
-    assert [text for _, _, text in links][:2] == ["Draft", "Auction"]       # the two heroes lead
+    assert [text for _, _, text in links][:3] == ["Draft", "Auction", "Career"]   # the heroes lead
     assert len(links) <= 6
+    assert "Records" not in [text for _, _, text in links]                 # in the footer (A201)
     assert "Flashback" not in [text for _, _, text in links]               # it lives under Puzzles
     puzzles = [m for url, m, text in links if text == "Puzzles"]
     assert puzzles and all(p in puzzles[0].split() for p in PUZZLE_PAGES.values())
@@ -150,3 +151,14 @@ def test_exactly_one_item_of_the_puzzle_bar_is_lit_on_each_puzzle_page():
 def test_a_path_that_merely_starts_with_a_pages_name_does_not_light_it():
     assert nav_matches("/xi", "/xi") and nav_matches("/xi", "/xi/anything")
     assert not nav_matches("/xi", "/xiaomi") and not nav_matches("/guess", "/guessing")
+
+
+def test_every_hero_is_one_click_from_the_top_of_the_home_page():
+    """A hero lower down the page is not enough on its own (A201): the user could not find
+    Build a Career from the top of the home page. Each hero has a button in the top section."""
+    html = (STATIC / "index.html").read_text()
+    cta = html.split('<div class="home-cta">', 1)[1].split("</div>", 1)[0]
+    assert 'onclick="newDraft(this)"' in cta
+    assert 'href="/auction"' in cta and 'href="/career"' in cta
+    footer = (PARTIALS / "footer.html").read_text()
+    assert 'href="/records"' in footer                                       # still reachable

@@ -995,16 +995,22 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
     assert C.approach_card(batter, 2).bowl_scoring is None
 
 
-# Kings XI Punjab 2019, seed 29: found by search because it exercises every moment rule at
+# Delhi Capitals 2019, seed 29: found by search because it exercises every moment rule at
 # once -- two league matches that would be must-win without MUST_WIN_MAX, playoff matches,
 # and a called league match that is the SECOND meeting with its opponent. The first fixture
 # these tests used (the first franchise that paused) had no league moment and no repeat
-# meeting, so three rules could be broken without any test failing.
-MOMENT_FS = 123
+# meeting, so three rules could be broken without any test failing. These seasons are
+# pinned to the engine, so an engine change can move them (A208 moved every one of them,
+# Kings XI 2019 before this); re-find them by search rather than loosening a guard.
+MOMENT_FS = 50
+MOMENT_SEED = 29
+EDGE = (26, 29)   # Chennai 2019: see test_every_league_stop_and_only_those_is_a_close_race
 
 
-def _moment_year(deck, model, role="opener", seed=29, fs_only=MOMENT_FS):
+def _moment_year(deck, model, role="opener", seed=None, fs_only=None):
     """A real season with you in it, played with moments, pausing at the first."""
+    seed = MOMENT_SEED if seed is None else seed
+    fs_only = MOMENT_FS if fs_only is None else fs_only
     start, ceiling = C.spin(deck, 3, role)
     for fs in [fs_only] if fs_only is not None else C.year_fs_ids(deck, 2019):
         c0 = deck.cards_by_fs[fs][0]
@@ -1025,7 +1031,7 @@ def test_a_season_stops_only_where_something_is_at_stake(deck, model):
     answers, kinds = (), []
     while True:
         try:
-            C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment as need:
             m, season = need.moment, need.season
@@ -1061,7 +1067,7 @@ def test_your_call_is_played_in_that_match_and_only_that_one(deck, model):
     answers = ()
     while True:
         try:
-            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            year = C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (2,)
@@ -1087,7 +1093,7 @@ def test_the_feed_tags_the_match_you_called_not_an_earlier_meeting(deck, model):
     answers = ()
     while True:
         try:
-            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            year = C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (2,)
@@ -1109,15 +1115,15 @@ def test_every_league_stop_and_only_those_is_a_close_race(deck, model, monkeypat
     """With the cap lifted, the league stops at exactly the matches you play with few left and
     your side within MUST_WIN_EDGE points of the line, recomputed from an independent points
     table. Checked over EVERY league match, so a match the rule should have passed over counts
-    as much as one it should have stopped at. Mumbai 2019 (fs 101), found by search: its last
-    three hold two close matches and one that is not. Kings XI 2019 (MOMENT_FS) is a close
-    race in all three, so the edge never refuses anything there."""
-    you, need = _moment_year(deck, model, fs_only=101)
+    as much as one it should have stopped at. EDGE, found by search, reaches the window with
+    a match outside the edge as well as a close one; a season that is a close race in all of
+    its last three would let the edge be deleted unnoticed."""
+    you, need = _moment_year(deck, model, fs_only=EDGE[0], seed=EDGE[1])
     monkeypatch.setattr(C, "MUST_WIN_MAX", 99)
     answers = ()
     while True:
         try:
-            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            year = C.simulate_year(deck, model, EDGE[1], 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (1,)                       # Balanced: no result changes
@@ -1152,7 +1158,7 @@ def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monke
     answers = ()
     while True:
         try:
-            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            year = C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (1,)
@@ -1163,7 +1169,7 @@ def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monke
     answers = ()
     while True:
         try:
-            uncapped = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            uncapped = C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (1,)
@@ -1181,12 +1187,12 @@ def test_an_answer_too_many_is_refused(deck, model):
     answers = ()
     while True:
         try:
-            C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (1,)
     with pytest.raises(C.CareerError):
-        C.simulate_year(deck, model, 29, 2, you, answers=answers + (1,))
+        C.simulate_year(deck, model, MOMENT_SEED, 2, you, answers=answers + (1,))
 
 
 # --- form, make-or-break and drops (A205) ---------------------------------------------
@@ -1269,7 +1275,9 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
     assert book.games[("a_bowl", id(away))] == [(4, 2, 25, 24, True)]
 
 
-MOB_FS = {"dropped": 50, "kept": 26}   # 2019: Delhi, Chennai (found by search)
+MOB_FS = {"dropped": 140, "kept": 50}   # 2019: Rajasthan, Delhi (found by search)
+MOB_SEED = {"dropped": 31, "kept": 1}
+SIXTH = (77, 33)   # Kolkata 2019: see test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
 
 def _mob_you(deck, fs, role="opener"):
@@ -1309,10 +1317,10 @@ def _poor_points(year, late: bool = False) -> list[int]:
 
 @pytest.mark.parametrize("fixture", ["dropped", "kept"])
 def test_a_make_or_break_comes_the_first_time_your_form_turns_poor(deck, model, fixture):
-    """Form as it stood straight after your own last match. Chennai ("kept") is where it
-    matters, found by search: reading it later, after other sides' matches, moves the first
-    poor reading from match 5 to match 12."""
-    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS[fixture]), answers=None)
+    """Form as it stood straight after your own last match. "kept" is where it matters,
+    found by search: reading it later, after other sides' matches, moves the first poor
+    reading from match 11 to match 10."""
+    year = C.simulate_year(deck, model, MOB_SEED[fixture], 2, _mob_you(deck, MOB_FS[fixture]), answers=None)
     poor = _poor_points(year)
     assert poor, "the fixture must reach poor form"
     assert list(year.verdicts) == [poor[0]]
@@ -1322,9 +1330,9 @@ def test_a_make_or_break_comes_the_first_time_your_form_turns_poor(deck, model, 
 
 def test_one_make_or_break_a_season(deck, model, monkeypatch):
     you = _mob_you(deck, MOB_FS["dropped"])
-    assert len(C.simulate_year(deck, model, 31, 2, you, answers=None).verdicts) == C.MAKE_OR_BREAK_MAX
+    assert len(C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=None).verdicts) == C.MAKE_OR_BREAK_MAX
     monkeypatch.setattr(C, "MAKE_OR_BREAK_MAX", 99)
-    assert len(C.simulate_year(deck, model, 31, 2, you, answers=None).verdicts) > 1   # it binds
+    assert len(C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=None).verdicts) > 1   # it binds
 
 
 def _single_rank(year, k: int) -> float:
@@ -1337,7 +1345,7 @@ def _single_rank(year, k: int) -> float:
 
 
 def test_failing_a_make_or_break_drops_you_for_the_next_two_matches(deck, model):
-    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
+    year = C.simulate_year(deck, model, MOB_SEED["dropped"], 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
     (k, verdict), = year.verdicts.items()
     assert verdict == "dropped" and _single_rank(year, k) < C.FORM_FAIL
     mine = _your_league(year)
@@ -1347,7 +1355,7 @@ def test_failing_a_make_or_break_drops_you_for_the_next_two_matches(deck, model)
 
 
 def test_coming_through_a_make_or_break_keeps_your_place(deck, model):
-    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
+    year = C.simulate_year(deck, model, MOB_SEED["kept"], 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
     (k, verdict), = year.verdicts.items()
     assert verdict == "kept" and _single_rank(year, k) >= C.FORM_FAIL
     assert _in_xi(year, _your_league(year)[k]) and year.dropped == []
@@ -1375,31 +1383,31 @@ def test_the_missed_block_leaves_room_for_real_form_drops():
 
 def test_a_drop_adds_to_the_season_block(deck, model):
     """Dropped matches are added to the drawn block; nothing is given back."""
-    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
+    year = C.simulate_year(deck, model, MOB_SEED["dropped"], 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
     mine = _your_league(year)
-    block = C.missed_block(31, 2, len(mine), form_drop=C.FORM_DROP_RATE["batter"])
+    block = C.missed_block(MOB_SEED["dropped"], 2, len(mine), form_drop=C.FORM_DROP_RATE["batter"])
     assert block and year.dropped, "the fixture must hold both a block and a drop"
     assert year.missed == len(block) + len(year.dropped) == len(set(block) | {n - 1 for n in year.dropped})
     assert not any(_in_xi(year, mine[i]) for i in block)
 
 
 def test_squad_seasons_and_allrounders_never_get_a_make_or_break(deck, model):
-    squad = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), squad=True,
+    squad = C.simulate_year(deck, model, MOB_SEED["dropped"], 2, _mob_you(deck, MOB_FS["dropped"]), squad=True,
                             answers=None)
     assert _poor_points(squad), "the fixture must reach poor form"
     assert squad.verdicts == {}
-    ar = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
+    ar = C.simulate_year(deck, model, MOB_SEED["dropped"], 2, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
                          answers=None)
     assert _poor_points(ar), "the fixture must reach poor form"
     assert ar.verdicts == {}
     # nor is an all-rounder's block drawn short for drops he cannot have: a season where the
     # shortening would fire
     q = C.FORM_DROP_RATE["batter"]
-    k = next(k for k in range(60) if len(C.missed_block(31, k, 14, form_drop=q))
-             != len(C.missed_block(31, k, 14)))
-    ar = C.simulate_year(deck, model, 31, k, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
+    k = next(k for k in range(60) if len(C.missed_block(MOB_SEED["dropped"], k, 14, form_drop=q))
+             != len(C.missed_block(MOB_SEED["dropped"], k, 14)))
+    ar = C.simulate_year(deck, model, MOB_SEED["dropped"], k, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
                          answers=None)
-    assert ar.missed == len(C.missed_block(31, k, 14))
+    assert ar.missed == len(C.missed_block(MOB_SEED["dropped"], k, 14))
 
 
 def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
@@ -1407,7 +1415,7 @@ def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
     answers = ()
     while True:
         try:
-            year = C.simulate_year(deck, model, 31, 2, you, answers=answers)
+            year = C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=answers)
             break
         except C._NeedMoment:
             answers = answers + (1,)
@@ -1461,9 +1469,9 @@ def test_a_batter_bowls_only_when_his_side_lacks_five_real_bowlers(deck, model):
 
 def test_a_make_or_break_is_failed_only_in_the_worst_sixth(deck, model):
     """A207: the fail bar is the worst sixth of your kind's matches, not the worst third
-    that marks you out of form. Chennai 2019 seed 33, found by search, has its make-or-break
-    match between the two bars: kept now, dropped under the old bar."""
-    year = C.simulate_year(deck, model, 33, 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
+    that marks you out of form. SIXTH, found by search, has its make-or-break match between
+    the two bars (ranked 0.299): kept now, dropped under the old bar."""
+    year = C.simulate_year(deck, model, SIXTH[1], 2, _mob_you(deck, SIXTH[0]), answers=None)
     (k, verdict), = year.verdicts.items()
     rank = _single_rank(year, k)
     assert C.FORM_FAIL <= rank < C.FORM_POOR, "the fixture must sit between the two bars"

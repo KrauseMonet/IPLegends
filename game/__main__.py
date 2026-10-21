@@ -144,6 +144,43 @@ def old_bowling_order(on: bool = True):
         _OLD_ORDER.reset(token)
 
 
+# [A208] Who bats, and where. The five batters an opposition eleven picks were chosen by
+# `Card.bat`, a per-ball rating, and A65 rates every season that faced a ball, so a bowler
+# who faced three balls outranked a real batter: Mumbai 2024 left out Rohit Sharma, Tilak
+# Varma and Tim David for L Wood and SZ Mulani, and 350 batters with 100+ balls faced sat
+# out across 156 of 166 sides. So a batter with real volume that season is picked first --
+# BAT_MIN_BALLS is A33's batting floor, not a new number -- exactly as A203 does for
+# bowlers. And the order read `Card.band`, the per-season squad band (A6), which a few
+# innings can move: Zaheer Khan 2011 is `top_order`, Harshal Patel 2018 `middle`. A76 built
+# a cleaner answer for the drafter (`positions`, season then career) and the opposition
+# never used it; it now bats in that role's order. Measured on all 166 sides: tail-enders
+# in the top six 110 -> 14, batters left out 350 -> 67, every eleven still legal.
+BAT_MIN_BALLS = 100
+
+# Same reason as `_OLD_ORDER`, for the daily's days scored before A208.
+_OLD_BATTING = contextvars.ContextVar("old_batting_order", default=False)
+
+
+@contextlib.contextmanager
+def old_batting_order(on: bool = True):
+    token = _OLD_BATTING.set(on)
+    try:
+        yield
+    finally:
+        _OLD_BATTING.reset(token)
+
+
+def batting_choice(c: Card) -> tuple:
+    """Sort key, lowest first, for choosing who bats: real volume that season, then rating.
+    A card with no recorded volume (a career's own player, a hand-built side) is not known
+    to be thin."""
+    rating = -(c.bat if c.has_bat else -9.9)
+    if _OLD_BATTING.get():
+        return (False, rating)                 # before A208: rating alone
+    thin = c.bat_balls is not None and c.bat_balls < BAT_MIN_BALLS
+    return (thin, rating)
+
+
 def bowling_order(c: Card) -> tuple:
     """Sort key, lowest first, for choosing who bowls: real volume that season, then rating."""
     if _OLD_ORDER.get():
@@ -188,7 +225,7 @@ def opposition_xi(squad: list[Card]) -> list[Card]:
     bowlers = sorted((c for c in rest if c.has_bowl),
                       key=bowling_order)[:BOWLERS_IN_TWELVE]
     remaining = [c for c in rest if c not in bowlers]
-    batters = sorted(remaining, key=lambda c: -(c.bat if c.has_bat else -9.9))
+    batters = sorted(remaining, key=batting_choice)
 
     xi = [keeper] + bowlers + batters[:11 - 1 - len(bowlers)]
     return enforce_overseas(xi, squad)
@@ -253,13 +290,13 @@ def enforce_overseas(xi: list[Card], squad: list[Card]) -> list[Card]:
 
 
 def opposition_order(xi: list[Card]) -> list[Card]:
-    """Bands first, rating within a band, unbanded last -- the algorithmic order for a
-    historical opposition side, which has no human drafter to arrange it by hand."""
-    return sorted(
-        xi,
-        key=lambda c: (BAND_ORDER.get(c.band, len(BAND_ORDER)),
-                       -(c.bat if c.has_bat else -9.9)),
-    )
+    """The algorithmic order for a historical opposition side, which has no human drafter
+    to arrange it: by batting role (A76's `positions`, highest place first), then real
+    volume, then rating. A card with no positions (only a hand-built one) bats last."""
+    if _OLD_BATTING.get():
+        return sorted(xi, key=lambda c: (BAND_ORDER.get(c.band, len(BAND_ORDER)),
+                                         -(c.bat if c.has_bat else -9.9)))
+    return sorted(xi, key=lambda c: (min(c.positions, default=12),) + batting_choice(c))
 
 
 def lineup(order: list[Card], model: Model, impact: Card | None = None) -> list[Player]:

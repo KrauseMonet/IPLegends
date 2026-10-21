@@ -83,6 +83,7 @@ function crShow(d, moment){
   crTimeline(d);
   if (moment === 'spin') return crSpin(d);
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
+  if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
   if (!d.pending) return crEnd(d);
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
 }
@@ -233,7 +234,7 @@ function crFeedRow(l, n){
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-res">${l.result}</span>
     <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
-    <span class="cr-fr-you">${crFigures(l)}</span>
+    <span class="cr-fr-you">${l.approach ? `<em class="cr-call">${esc(l.approach)}</em> ` : ''}${crFigures(l)}</span>
   </li>`;
 }
 
@@ -249,20 +250,31 @@ function crFeedPanel(l){
     ${cap('Purple Cap', l.purple, l.purple_n, l.purple_you, 'wkts')}`;
 }
 
+// The feed survives between requests [A204]: a season can pause at a key moment, and the
+// response to your call carries the season so far again. Only rows not yet shown are added.
+function crSeasonYear(d){
+  return d.season_play.complete ? d.seasons[d.seasons.length - 1].year : d.pending.year;
+}
+
 function crFeed(d){
-  const sp = d.season_play, r = d.seasons[d.seasons.length - 1];
+  const sp = d.season_play, year = crSeasonYear(d);
   crFeedStop();
-  CR.feed = {d, sp, i: 0, timer: null, n: 0};
-  $('#crStage').innerHTML = `
-    <div class="cr-step cr-feed">
-      <div class="over-line">${r.year} · ${esc(r.franchise).toUpperCase()}${r.squad ? ' · SQUAD PLAYER' : ''}</div>
-      <div class="cr-feed-panel" id="crFeedPanel"></div>
-      <ol class="cr-feed-list" id="crFeedList"></ol>
-      <div class="foot-actions" id="crFeedAction" style="justify-content:center">
-        <button class="act" onclick="crFeedSkip()">Skip to the end of the season</button>
-      </div>
-    </div>`;
-  crFeedStep();
+  const same = CR.feed && CR.feed.year === year && document.getElementById('crFeedList');
+  if (same){
+    Object.assign(CR.feed, {d, sp});
+  } else {
+    const club = d.season_play.complete ? d.seasons[d.seasons.length - 1].franchise
+                                        : d.pending.offers[0].franchise;
+    CR.feed = {d, sp, year, i: 0, timer: null, n: 0, watched: new Set()};
+    $('#crStage').innerHTML = `
+      <div class="cr-step cr-feed">
+        <div class="over-line">${year} · ${esc(club).toUpperCase()}${d.pending && d.pending.squad ? ' · SQUAD PLAYER' : ''}</div>
+        <div class="cr-feed-panel" id="crFeedPanel"></div>
+        <ol class="cr-feed-list" id="crFeedList"></ol>
+        <div class="foot-actions" id="crFeedAction" style="justify-content:center"></div>
+      </div>`;
+  }
+  crFeedResume();
 }
 
 function crFeedStop(){
@@ -280,11 +292,13 @@ function crFeedAppend(){
 function crFeedStep(){
   const f = CR.feed;
   if (!f) return;
-  if (f.i >= f.sp.feed.length) return crFeedEnd();
+  if (f.i >= f.sp.feed.length) return f.sp.complete ? crFeedEnd() : crMomentCard();
   const l = crFeedAppend();
-  const list = $('#crFeedList');
-  list.lastElementChild.scrollIntoView({block: 'nearest'});
-  if (l.watch != null){
+  $('#crFeedList').lastElementChild.scrollIntoView({block: 'nearest'});
+  if (l.watch != null && !f.watched.has(l.watch)){
+    f.watched.add(l.watch);
+    // Your own call: play it straight away. A playoff you sat out: offer it.
+    if (l.approach) return crWatch(l.watch);
     $('#crFeedAction').innerHTML = `
       <button class="act lead" onclick="crWatch(${l.watch})">Watch the ${esc(l.stage)} v ${esc(l.opp_short)}</button>
       <button class="act" onclick="crFeedResume()">Skip it</button>`;
@@ -294,7 +308,7 @@ function crFeedStep(){
 }
 
 function crFeedResume(){
-  $('#crFeedAction').innerHTML = `<button class="act" onclick="crFeedSkip()">Skip to the end of the season</button>`;
+  $('#crFeedAction').innerHTML = `<button class="act" onclick="crFeedSkip()">Skip to the next decision</button>`;
   crFeedStep();
 }
 
@@ -302,8 +316,45 @@ function crFeedSkip(){
   const f = CR.feed;
   if (!f) return;
   crFeedStop();
-  while (f.i < f.sp.feed.length) crFeedAppend();
-  crFeedEnd();
+  while (f.i < f.sp.feed.length){
+    const l = crFeedAppend();
+    if (l.watch != null) f.watched.add(l.watch);
+  }
+  return f.sp.complete ? crFeedEnd() : crMomentCard();
+}
+
+// A key moment [A204]: the season has stopped, and this match is yours to call.
+function crMomentCard(){
+  const m = CR.feed.d.pending.moment;
+  $('#crFeedAction').innerHTML = `
+    <div class="cr-moment">
+      <div class="cr-moment-top">${crestImg(m.opp_crest, 'cr-moment-crest')}
+        <div><div class="over-line">KEY MOMENT · ${esc(m.stage === 'league' ? 'League' : m.stage).toUpperCase()}</div>
+          <b>v ${esc(m.opponent)}</b></div></div>
+      <p class="cr-moment-stakes">${esc(m.stakes)}</p>
+      <div class="cr-moment-label">How do you play it?</div>
+      <div class="cr-moment-opts">${m.options.map((o, i) => `
+        <button class="cr-moment-opt${i === 1 ? ' mid' : ''}" onclick="crCall(${i})">
+          <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
+    </div>`;
+  $('#crFeedAction').scrollIntoView({block: 'nearest', behavior: 'smooth'});
+}
+
+async function crCall(i){
+  if (CR.busy) return;
+  CR.busy = true;
+  $('#crFeedAction').innerHTML = `<div class="cr-loading small"><div class="cr-ball"></div><b>Playing it…</b></div>`;
+  try {
+    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move: `m${i}`})});
+    crSave({token: d.token});
+    CR.data = d;
+    crHead(d);
+    crTimeline(d);
+    crFeed(d);
+  } catch(e){
+    slip(e.message || 'That did not go through. Try again.');
+    crMomentCard();
+  } finally { CR.busy = false; }
 }
 
 function crFeedEnd(){

@@ -155,8 +155,24 @@ class EventOut(BaseModel):
     options: list[EventOptionOut]
 
 
+class MomentOptionOut(BaseModel):
+    label: str
+    hint: str
+
+
+class MomentOut(BaseModel):
+    """A key moment the season is paused at (A204): who, what is at stake, and the three
+    approaches with what each does to your game."""
+    stage: str
+    opponent: str
+    opp_short: str
+    opp_crest: str | None
+    stakes: str
+    options: list[MomentOptionOut]
+
+
 class PendingOut(BaseModel):
-    kind: str                     # "offer" | "event"
+    kind: str                     # "offer" | "event" | "moment"
     year: int
     season_no: int                # 1-based
     squad: bool
@@ -166,6 +182,7 @@ class PendingOut(BaseModel):
     # Your last club, when it has no team this year (Chennai and Rajasthan in 2016-17, Deccan
     # after 2012): why there is no offer to stay.
     club_gone: str | None = None
+    moment: MomentOut | None = None
 
 
 class SummaryOut(BaseModel):
@@ -223,6 +240,7 @@ class MatchLineOut(BaseModel):
     purple_n: int
     purple_you: bool
     watch: int | None             # index into `watch`
+    approach: str | None = None   # your call, when this was a key moment (A204)
 
 
 class TableRowOut(BaseModel):
@@ -238,13 +256,15 @@ class TableRowOut(BaseModel):
 
 
 class SeasonPlayOut(BaseModel):
-    """The season just played, as it happened (A202). Only in the response that played it."""
+    """The season just played, as it happened (A202). Only in the response that played it --
+    or, when it is paused at a key moment (A204), the season so far (`complete` false)."""
     feed: list[MatchLineOut]
     table: list[TableRowOut]
     watch: list[dict]             # ResultOut, the solo season's own match shape, for reveal.js
     your_short: str
     your_name: str
     your_crest: str | None
+    complete: bool = True
 
 
 class CareerOut(BaseModel):
@@ -311,7 +331,20 @@ def _club_gone(career: C.Career) -> str | None:
     return last if canonical(last) not in playing else None
 
 
-def _pending(p: C.Pending) -> PendingOut:
+APPROACH_HINTS = ("Fewer runs, safer: out less often", "Your usual game",
+                  "More runs, riskier: out more often")
+BOWLING_HINTS = ("Cheaper overs, fewer wickets", "Your usual game",
+                 "More wickets, more runs conceded")
+
+
+def _moment(m: C.Moment, role: str) -> MomentOut:
+    hints = BOWLING_HINTS if role in ("pace", "spin") else APPROACH_HINTS
+    return MomentOut(stage=m.stage, opponent=m.opponent, opp_short=m.opp_short,
+                     opp_crest=crests.crest_url(m.opp_franchise, m.opp_year), stakes=m.stakes,
+                     options=[MomentOptionOut(label=l, hint=h) for l, h in zip(m.labels, hints)])
+
+
+def _pending(p: C.Pending, role: str = "") -> PendingOut:
     event = None
     if p.kind == "event":
         event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
@@ -325,7 +358,8 @@ def _pending(p: C.Pending) -> PendingOut:
                                  else None),
                          contract_year=o.contract_year, strength=o.strength, stay=o.stay,
                          position=o.position, attack_rank=o.attack_rank) for o in p.offers],
-        event=event, can_retire=p.kind == "offer" and p.k > 0)
+        event=event, can_retire=p.kind == "offer" and p.k > 0,
+        moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None)
 
 
 def _summary(c: C.Career) -> SummaryOut:
@@ -356,7 +390,8 @@ def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
         bowl_runs=l.bowl_runs, bowl_balls=l.bowl_balls, wins=l.wins, losses=l.losses,
         position=l.position, season_runs=l.season_runs, season_wickets=l.season_wickets,
         orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
-        purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch)
+        purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
+        approach=l.approach)
         for l in detail.feed]
     table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
                          played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,
@@ -364,7 +399,8 @@ def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
     watch = [_result_out(r, yours).model_dump() for r in detail.watch]
     return SeasonPlayOut(feed=feed, table=table, watch=watch, your_short=you_row.short,
                          your_name=you_row.name,
-                         your_crest=next(x.crest for x in table if x.you))
+                         your_crest=next(x.crest for x in table if x.you),
+                         complete=detail.complete)
 
 
 def share_text(c: C.Career) -> str:
@@ -393,7 +429,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         start=_template(career.start), ceiling=_template(career.ceiling),
         seasons=[_season(r) for r in career.seasons],
-        pending=(_pending(career.pending).model_copy(update={"club_gone": _club_gone(career)})
+        pending=(_pending(career.pending, st.role).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
@@ -402,8 +438,10 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
 
 def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     """The moves to keep beside the checkpoint: those that answered the season now pending
-    (an offer awaiting its event), none once a season is played or the career is over."""
-    return moves if career.pending is not None and career.pending.kind == "event" else []
+    (an offer awaiting its event, a season paused at a key moment), none once a season is
+    played or the career is over."""
+    return (moves if career.pending is not None and career.pending.kind in ("event", "moment")
+            else [])
 
 
 # --- routes -----------------------------------------------------------------------------------

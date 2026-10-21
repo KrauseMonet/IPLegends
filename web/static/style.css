@@ -3877,10 +3877,31 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 @media (max-width:560px){
   /* two columns, your own line across both: three squeezed "11 runs · …" and the cap
      leaders' names into ellipses */
-  .cr-feed-panel{grid-template-columns:1fr 1fr;top:60px}
+  .cr-feed-panel{grid-template-columns:1fr 1fr;position:static}
   .cr-feed-panel > div:nth-child(3){grid-column:1/-1}
   .cr-fr{grid-template-columns:auto 1fr auto;grid-template-areas:"n opp res" "score score you"}
   .cr-fr-n{grid-area:n}.cr-fr-opp{grid-area:opp}
   .cr-fr-res{grid-area:res;justify-self:end;min-width:26px;padding:1px 6px}
   .cr-fr-score{grid-area:score}.cr-fr-you{grid-area:you}
 }
+
+/* a key moment [A204] */
+.cr-moment{width:100%;background:linear-gradient(170deg,#2a2208,var(--panel) 70%);border:1px solid var(--gold);
+  border-radius:18px;padding:20px;margin-top:6px}
+.cr-moment-top{display:flex;gap:14px;align-items:center}
+.cr-moment-top .over-line{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--gold)}
+.cr-moment-top b{font-family:var(--display);font-size:clamp(22px,4vw,30px);font-weight:400}
+.cr-moment-crest{height:52px;width:52px;object-fit:contain}
+.cr-moment-stakes{font-size:16px;color:var(--ink);margin:12px 0 14px}
+.cr-moment-label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.cr-moment-opts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.cr-moment-opt{font:inherit;color:var(--ink);background:var(--panel-2);border:1px solid var(--line-strong);
+  border-radius:14px;padding:14px 10px;cursor:pointer;display:flex;flex-direction:column;gap:4px;text-align:center}
+.cr-moment-opt:hover,.cr-moment-opt:focus-visible{border-color:var(--gold);transform:translateY(-1px)}
+.cr-moment-opt b{font-size:16px}
+.cr-moment-opt span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.cr-call{font-style:normal;font-family:var(--mono);font-size:10.5px;color:#1a1204;background:var(--gold);
+  border-radius:5px;padding:1px 5px;margin-right:4px}
+.cr-loading.small{padding:14px 0}
+.cr-loading.small b{font-size:22px}
+@media (max-width:560px){ .cr-moment-opts{grid-template-columns:1fr} }

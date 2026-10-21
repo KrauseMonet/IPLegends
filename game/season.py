@@ -1143,21 +1143,23 @@ def _play_fixture(model: Model, a: Side, b: Side, rng: random.Random, stage: str
 def run_league(model: Model, sides: list[Side], rng: random.Random,
                track: Side | None = None, stats: JourneyAccumulator | None = None,
                moves=None, double_at: tuple[int, ...] = DOUBLE_AT,
-               before_match=None) -> Season:
+               before_match=None, schedule: list[tuple[int, int]] | None = None) -> Season:
     """`double_at` is `fixtures`' own: which circular distances meet twice. A career
     season (A197) plays a real year's eight or nine teams, where every pair meets twice.
 
-    `before_match(a, b)`, if given, runs before each fixture and may change either side's
-    eleven for that match -- how a career's player misses matches (A198). None changes
-    nothing."""
+    `before_match(a, b, season, stage)`, if given, runs before each fixture with the season
+    so far and may change either side's eleven for that match -- how a career's player
+    misses matches (A198) -- or raise to pause the season (A204). `schedule` replaces the
+    fixture order: a career plays its league matchday by matchday, so a pause sees a real
+    table (A204). None changes nothing."""
     season = Season(sides=sides)
     standings = {s.name: Standing(side=s) for s in sides}
     human_match_no = 0
 
-    for i, j in fixtures(len(sides), double_at):
+    for i, j in (schedule if schedule is not None else fixtures(len(sides), double_at)):
         is_human_fixture = track is not None and (track is sides[i] or track is sides[j])
         if before_match is not None:
-            before_match(sides[i], sides[j])
+            before_match(sides[i], sides[j], season, "league")
         r = _play_fixture(model, sides[i], sides[j], rng, "league", human_match_no,
                            track, moves, stats, season)
         if is_human_fixture:
@@ -1235,15 +1237,18 @@ def run_playoffs(model: Model, season: Season, rng: random.Random,
     # from here, never restarting it.
     human_match_no = MATCHES_EACH
 
+    season.playoffs = []              # filled as played, so a pause can see the earlier ones
+
     def _play(a: Side, b: Side, stage: str) -> Result:
         nonlocal human_match_no
         is_human_fixture = track is not None and (track is a or track is b)
         if before_match is not None:
-            before_match(a, b)
+            before_match(a, b, season, stage)
         r = _play_fixture(model, a, b, rng, stage, human_match_no, track, moves,
                            stats, season)
         if is_human_fixture:
             human_match_no += 1
+        season.playoffs.append(r)
         return r
 
     q1 = _play(first, second, "Qualifier 1")
@@ -1256,7 +1261,7 @@ def run_playoffs(model: Model, season: Season, rng: random.Random,
     other = q2.winner or q1_loser
     final = _play(finalist, other, "Final")
 
-    season.playoffs = [q1, elim, q2, final]
+    assert season.playoffs == [q1, elim, q2, final]
     season.champion = final.winner or finalist
     return season
 

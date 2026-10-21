@@ -72,6 +72,15 @@ def test_resuming_from_a_checkpoint_is_the_same_career_as_a_replay(deck, model):
         assert vars(resumed.checkpoint) == vars(full.checkpoint)
 
 
+def _through_moments(client, d, answer="m1"):
+    """Answer key moments (A204) until the season they paused finishes."""
+    while d["pending"] and d["pending"]["kind"] == "moment":
+        r = client.post("/api/career/move", json={"token": d["token"], "move": answer})
+        assert r.status_code == 200, r.text
+        d = r.json()
+    return d
+
+
 def _token(client, **kw):
     body = {"name": "Tester", "role": "opener", "debut": 2014, "seed": 77, **kw}
     r = client.post("/api/career/start", json=body)
@@ -98,7 +107,7 @@ def test_a_season_is_played_one_move_at_a_time(client, monkeypatch):
     while seasons < 2:
         p = d["pending"]
         asked |= p["kind"] == "event"
-        move = "o0" if p["kind"] == "offer" else "e0"
+        move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
         r = client.post("/api/career/move", json={"token": d["token"], "move": move})
         assert r.status_code == 200, r.text
         d = r.json()
@@ -113,7 +122,7 @@ def test_a_career_ends_with_a_summary_and_a_line_with_no_player_in_it(client):
     d = _token(client)
     while not d["seasons"]:
         p = d["pending"]
-        move = "o0" if p["kind"] == "offer" else "e0"
+        move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
         d = client.post("/api/career/move", json={"token": d["token"], "move": move}).json()
     if d["pending"]:
         d = client.post("/api/career/move", json={"token": d["token"], "move": "r"}).json()
@@ -189,7 +198,7 @@ def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
     while not d["seasons"]:
         p = d["pending"]
         move = (f"o{next(n for n, o in enumerate(p['offers']) if 'Chennai' in o['franchise'])}"
-                if p["kind"] == "offer" else "e0")
+                if p["kind"] == "offer" else "e0" if p["kind"] == "event" else "m1")
         d = client.post("/api/career/move", json={"token": d["token"], "move": move}).json()
     assert d["seasons"][0]["franchise"] == "Chennai Super Kings"
     assert d["pending"]["club_gone"] == "Chennai Super Kings"
@@ -214,6 +223,7 @@ def test_a_three_year_deal_through_the_api(client, deck):
     i = next(n for n, o in enumerate(d["pending"]["offers"]) if C.canonical(o["franchise"]) in clubs_2018)
     assert d["pending"]["offers"][i]["price3"]
     d = client.post("/api/career/move", json={"token": d["token"], "move": f"c{i}"}).json()
+    d = _through_moments(client, d)
     assert d["seasons"][0]["contract_year"] == 1
     o = d["pending"]["offers"]
     assert len(o) == 1 and o[0]["contract_year"] == 2 and o[0]["price3"] is None
@@ -239,11 +249,17 @@ def test_the_move_that_plays_a_season_carries_it_as_it_happened(client):
     d = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
     assert d["pending"]["kind"] == "event" and d["season_play"] is None
     d = client.post("/api/career/move", json={"token": d["token"], "move": "e0"}).json()
+    if d["pending"] and d["pending"]["kind"] == "moment":
+        # paused at a key moment: the season so far, marked incomplete, and no new season yet
+        assert d["season_play"] and d["season_play"]["complete"] is False and not d["seasons"]
+        assert d["pending"]["moment"]["stakes"] and len(d["pending"]["moment"]["options"]) == 3
+    d = _through_moments(client, d)
     sp = d["season_play"]
     s = d["seasons"][-1]
-    assert sp and len(sp["feed"]) >= 14 and sp["table"]
+    assert sp and sp["complete"] and len(sp["feed"]) >= 14 and sp["table"]
     assert sum(l["runs"] for l in sp["feed"]) == s["runs"]
-    assert sum(1 for l in sp["feed"] if l["stage"] != "league") == len(sp["watch"])
+    assert sum(1 for l in sp["feed"] if l["watch"] is not None) == len(sp["watch"])
+    assert all(l["watch"] is not None for l in sp["feed"] if l["stage"] != "league")
     for w in sp["watch"]:
         assert w["home_innings"]["over_log"] and w["yours"]
     v = client.post("/api/career/view", json={"token": d["token"]}).json()

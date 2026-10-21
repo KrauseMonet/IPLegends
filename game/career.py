@@ -133,6 +133,102 @@ POOR_PERCENTILE = 0.30
 SQUAD_SHARES = (0.053, 0.062, 0.071, 0.111, 0.133, 0.176, 0.188, 0.214, 0.222, 0.25, 0.286,
                 0.316, 0.357, 0.375, 0.429, 0.429, 0.5, 0.533, 0.615, 0.714)
 
+# --- key moments (A204) ----------------------------------------------------------------
+# A few matches a season stop and ask how you will play them. The approach moves your two
+# engine numbers for that match only, in opposite directions, at an exchange rate MEASURED
+# in the engine's own state model: at the same wickets down, going from middle overs to
+# death overs -- a side deciding to attack -- costs +0.96 to +1.41 in log dismissal rate per
+# extra run a ball (about 1.2 where most balls are faced). Season-to-season comparisons
+# could not price it: within a player, better seasons score faster AND get out less, which
+# is form, not intent. ATTACK_SHIFT is declared game design (about one and a half times the
+# within-player season spread in scoring).
+
+ATTACK_SHIFT = 0.15                  # runs a ball, about 15 on a strike rate
+TRADE_SLOPE = 1.25                   # d ln(dismissal) per run a ball, measured
+MUST_WIN_WINDOW = 3                  # league matches left, this one included
+MUST_WIN_EDGE = 2                    # points either side of the qualification line
+MUST_WIN_MAX = 1                     # league moments a season; every playoff is one
+
+APPROACH_LABELS = {
+    "batter": ("Anchor", "Balanced", "Attack"),
+    "bowler": ("Contain", "Balanced", "Attack the stumps"),
+    "allrounder": ("Play it safe", "Balanced", "All out"),
+}
+
+
+def approach_card(me: Card, choice: int) -> Card:
+    """Your card for one match, played anchored (0), balanced (1) or attacking (2): scoring
+    up and dismissals up together, by TRADE_SLOPE. A bowler who attacks takes more wickets
+    and concedes more runs -- his runs SAVED fall."""
+    d = (choice - 1) * ATTACK_SHIFT
+    if d == 0:
+        return me
+    mult = math.exp(TRADE_SLOPE * d)
+    return dataclasses.replace(
+        me,
+        bat_scoring=None if me.bat_scoring is None else me.bat_scoring + d,
+        bat_dismissal=None if me.bat_dismissal is None else me.bat_dismissal * mult,
+        bowl_scoring=None if me.bowl_scoring is None else me.bowl_scoring - d,
+        bowl_dismissal=None if me.bowl_dismissal is None else me.bowl_dismissal * mult)
+
+
+PLAYOFF_STAKES = {
+    "Qualifier 1": "Win and you are in the final. Lose and you get a second chance in Qualifier 2.",
+    "Eliminator": "Lose and your season is over.",
+    "Qualifier 2": "Win and you are in the final. Lose and your season is over.",
+    "Final": "The final.",
+}
+
+
+def league_stakes(season, yours: Side, left: int) -> str | None:
+    """Why a league match matters, or None. A must-win: few matches left and your side
+    within MUST_WIN_EDGE points of the qualification line, read from the table as it stands
+    before the match (a career plays its league matchday by matchday, so it is a real one)."""
+    from game.season import Standing, credit_result, rank_table
+
+    if left > MUST_WIN_WINDOW:
+        return None
+    standings = {s.name: Standing(side=s) for s in season.sides}
+    for r in season.results:
+        credit_result(standings, r)
+    table = rank_table(standings)
+    pos = next(i for i, s in enumerate(table, 1) if s.side is yours)
+    mine = table[pos - 1].points
+    line = table[4].points if pos <= 4 else table[3].points
+    if abs(mine - line) > MUST_WIN_EDGE:
+        return None
+    games = f"{left} match{'es' if left != 1 else ''} to play"
+    if pos <= 4:
+        gap = "level with fifth" if mine == line else f"{mine - line} clear of fifth"
+        return (f"You are {_ordinal(pos)} on {mine} points, {gap}, with {games}. Win and the "
+                f"top four is close; lose and it is out of your hands.")
+    gap = "level with fourth" if mine == line else f"{line - mine} behind fourth"
+    return (f"You are {_ordinal(pos)} on {mine} points, {gap}, with {games}. "
+            f"This one is must-win.")
+
+
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+@dataclass
+class Moment:
+    """A key moment the season stopped at: what is at stake and against whom."""
+    stage: str
+    opponent: str
+    opp_short: str
+    opp_franchise: str | None
+    opp_year: int | None
+    stakes: str
+    labels: tuple[str, str, str]
+
+
+class _NeedMoment(Exception):
+    def __init__(self, moment: Moment, season, yours: Side, approaches: list):
+        self.moment, self.season, self.yours = moment, season, yours
+        self.approaches = approaches
+
+
 # --- the market ------------------------------------------------------------------------
 
 OFFERS = 3                           # franchises bidding each season, besides your own
@@ -916,15 +1012,18 @@ SEASON_CACHE_MAX = 4000
 
 
 def _cached_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                   record: SeasonRecord, key: tuple) -> tuple[SeasonRecord, "SeasonDetail"]:
+                   record: SeasonRecord, key: tuple,
+                   answers: tuple[int, ...] | None = None) -> tuple[SeasonRecord, "SeasonDetail"]:
     """The record is copied (the career goes on to change it); the detail is shared, since
-    nothing changes it after it is built."""
-    full = (id(deck), id(model), seed, k, key)
+    nothing changes it after it is built. Your answers are part of the key: a different call
+    at a key moment is a different season. A season that pauses raises and is not cached."""
+    full = (id(deck), id(model), seed, k, key, answers)
     hit = _SEASON_CACHE.get(full)
     if hit is None:
         if len(_SEASON_CACHE) >= SEASON_CACHE_MAX:
             _SEASON_CACHE.clear()
-        hit = _SEASON_CACHE[full] = play_season_detail(deck, model, seed, k, you, record)
+        hit = _SEASON_CACHE[full] = play_season_detail(deck, model, seed, k, you, record,
+                                                       answers)
     return copy.deepcopy(hit[0]), hit[1]
 
 
@@ -935,6 +1034,7 @@ class Year:
     results: list[Result]
     roster: dict[int, dict[str, Card]]
     missed: int                        # league matches you missed
+    approaches: list = field(default_factory=list)   # your key moments (A204)
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
@@ -974,9 +1074,14 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
 
 
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                  squad: bool = False, extra_missed: int = 0) -> Year:
+                  squad: bool = False, extra_missed: int = 0,
+                  answers: tuple[int, ...] | None = None) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
-    leaders against `tournament_leaders`."""
+    leaders against `tournament_leaders`.
+
+    `answers` are your approaches at the season's key moments (A204), in order. None plays
+    the season with no moments at all (every match balanced); a tuple plays it with moments,
+    and when one comes up with no answer left the season pauses (`_NeedMoment`)."""
     from game.__main__ import opposition_twelve
 
     sides, yours = year_sides(deck, you.season_year, you)
@@ -991,11 +1096,44 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
              if deck.cards_by_fs[fs][0].franchise == s.franchise)]} for s in sides}
     roster[id(yours)][YOU_ID] = me
     yours_index = sides.index(yours)
-    league_matches = sum(yours_index in pair for pair in fixtures(len(sides), double))
+    schedule = balanced_order(fixtures(len(sides), double), lambda pair: pair)
+    league_matches = sum(yours_index in pair for pair in schedule)
     out = missed_block(seed, k, league_matches, squad, extra_missed)
     played = 0
     rested = _rested_lineup(yours, me)
     bowl_rng = random.Random(f"{seed}:bowls:{k}")
+    labels = APPROACH_LABELS[_kind(me)]
+    used = 0                                       # answers consumed
+    must_wins = 0
+    seen = 0                                       # your side's matches so far, this included
+    # (your match number, stage, opponent, approach). The NUMBER identifies the match: a
+    # league meets every side twice, and keying on the opponent tagged the wrong meeting.
+    approaches: list[tuple[int, str, str, str]] = []
+
+    def moment(a: Side, b: Side, season, stage: str, left: int) -> None:
+        """Stop for a key moment, or apply its answer to your card for this match."""
+        nonlocal used, must_wins
+        if answers is None or not any(c.person_id == YOU_ID for c in yours.xi):
+            return
+        if stage == "league":
+            if must_wins >= MUST_WIN_MAX:
+                return
+            stakes = league_stakes(season, yours, left)
+            if stakes is None:
+                return
+        else:
+            stakes = PLAYOFF_STAKES.get(stage, stage)
+        opp = b if a is yours else a
+        if used >= len(answers):
+            raise _NeedMoment(Moment(stage, opp.name, opp.short, opp.franchise, opp.year,
+                                     stakes, labels), season, yours, list(approaches))
+        choice = answers[used]
+        used += 1
+        if stage == "league":
+            must_wins += 1
+        approaches.append((seen, stage, opp.short, labels[choice]))
+        yours.xi = [approach_card(c, choice) if c.person_id == YOU_ID else c
+                    for c in yours.xi]
 
     def lineup() -> tuple[list[Card], Card | None]:
         """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays."""
@@ -1003,20 +1141,32 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             return with_you
         return rested
 
-    def league_hook(a: Side, b: Side) -> None:
-        nonlocal played
+    def league_hook(a: Side, b: Side, season, stage: str) -> None:
+        nonlocal played, seen
         if yours is a or yours is b:
             yours.xi, yours.impact = without if played in out else lineup()
             played += 1
+            seen += 1
+            moment(a, b, season, stage, league_matches - played + 1)
 
-    def playoff_hook(a: Side, b: Side) -> None:
+    def playoff_hook(a: Side, b: Side, season, stage: str) -> None:
+        nonlocal seen
         if yours is a or yours is b:
             yours.xi, yours.impact = without if squad else lineup()
+            seen += 1
+            moment(a, b, season, stage, 0)
 
-    season = run_league(model, sides, rng, double_at=double, before_match=league_hook)
-    season = run_playoffs(model, season, rng, before_match=playoff_hook)
-    yours.xi, yours.impact = with_you
-    return Year(season, yours, season.results + season.playoffs, roster, len(out))
+    try:
+        season = run_league(model, sides, rng, double_at=double, before_match=league_hook,
+                            schedule=schedule)
+        season = run_playoffs(model, season, rng, before_match=playoff_hook)
+    finally:
+        yours.xi, yours.impact = with_you
+    if answers is not None and used < len(answers):
+        raise CareerError("more answers than the season had moments")
+    year = Year(season, yours, season.results + season.playoffs, roster, len(out))
+    year.approaches = approaches
+    return year
 
 
 def season_caps(lines: dict[tuple[str, int], Line]) -> tuple[Line, Line | None]:
@@ -1063,6 +1213,7 @@ class MatchLine:
     orange: tuple[str, int, bool] = ("", 0, False)   # (leader, runs, is it you) after it
     purple: tuple[str, int, bool] = ("", 0, False)
     watch: int | None = None            # index into SeasonDetail.watch
+    approach: str | None = None         # your call, when this was a key moment (A204)
 
 
 @dataclass
@@ -1083,19 +1234,21 @@ class TableRow:
 @dataclass
 class SeasonDetail:
     feed: list[MatchLine]
-    table: list[TableRow]               # the league as it finished
-    watch: list[Result]                 # your playoff matches, the final last
+    table: list[TableRow]               # the league as it finished (or stands, if paused)
+    watch: list[Result]                 # your key moments and playoff matches, in order
+    complete: bool = True               # False: the season is paused at a key moment
 
 
 def _score(runs: int, wickets: int) -> str:
     return f"{runs}" if wickets >= 10 else f"{runs}/{wickets}"
 
 
-def season_detail(year: "Year") -> SeasonDetail:
+def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
     """Walk the season match by match and record, after each of your matches, where things
-    stood. The league is told in matchday order (`balanced_order`): the engine plays one
-    side's fixtures before the next side's, so in simulation order your fourth match came
-    after another side's fourteenth and the cap race read 399 runs. The table uses the league's own crediting and ranking
+    stood. A career's league is PLAYED in matchday order (`balanced_order`, A204), so the
+    results arrive in the order to tell them: in the engine's own fixture order your fourth
+    match came after another side's fourteenth and the cap race read 399 runs (A202). A
+    paused season (`complete=False`) is told up to the pause. The table uses the league's own crediting and ranking
     (`credit_result`, `rank_table`), the caps A175's ordering, so the last line of each
     agrees with the season's own table and leaders by construction."""
     from game.season import Standing, balanced_order, credit_result, rank_table
@@ -1118,10 +1271,9 @@ def season_detail(year: "Year") -> SeasonDetail:
                                                      totals[k][0]))
         return totals[key][0], totals[key][3], key[0] == YOU_ID
 
-    league = [r for r in year.results if r.stage == "league"]
-    told = balanced_order(league, lambda r: (id(r.home), id(r.away))) + [
-        r for r in year.results if r.stage != "league"]
-    for r in told:
+    moments = list(year.approaches)
+    n = 0                                          # your side's match number
+    for r in year.results:
         for side, inn, other in ((r.home, r.home_innings, r.away_innings),
                                  (r.away, r.away_innings, r.home_innings)):
             for b in (inn.batting if inn else []):
@@ -1139,6 +1291,7 @@ def season_detail(year: "Year") -> SeasonDetail:
             continue
         home = yours is r.home
         opp = r.away if home else r.home
+        n += 1
         mine = r.home_innings if home else r.away_innings
         theirs = r.away_innings if home else r.home_innings
         result = "T" if r.winner is None else "W" if r.winner is yours else "L"
@@ -1163,10 +1316,12 @@ def season_detail(year: "Year") -> SeasonDetail:
                 line.wickets, line.bowl_runs, line.bowl_balls = w.wickets, w.runs, w.balls
         me = totals.get((YOU_ID, id(yours)))
         line.season_runs, line.season_wickets = (me[1], me[3]) if me else (0, 0)
+        if moments and moments[0][0] == n:
+            line.approach = moments.pop(0)[3]
         if r.stage == "league":
             line.position = next(i for i, s in enumerate(rank_table(standings), 1)
                                  if s.side is yours)
-        else:
+        if r.stage != "league" or line.approach:
             line.watch = len(watch)
             watch.append(r)
         line.orange, line.purple = leader(True), leader(False)
@@ -1176,17 +1331,18 @@ def season_detail(year: "Year") -> SeasonDetail:
                       year=s.side.year, played=s.played, won=s.won, lost=s.lost, tied=s.tied,
                       points=s.points, nrr=round(s.nrr, 3), you=s.side is yours)
              for s in rank_table(standings)]
-    return SeasonDetail(feed, table, watch)
+    return SeasonDetail(feed, table, watch, complete)
 
 
 def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                record: SeasonRecord) -> SeasonRecord:
-    return play_season_detail(deck, model, seed, k, you, record)[0]
+                record: SeasonRecord, answers: tuple[int, ...] | None = None) -> SeasonRecord:
+    return play_season_detail(deck, model, seed, k, you, record, answers)[0]
 
 
 def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                       record: SeasonRecord) -> tuple[SeasonRecord, SeasonDetail]:
-    year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed)
+                       record: SeasonRecord, answers: tuple[int, ...] | None = None
+                       ) -> tuple[SeasonRecord, SeasonDetail]:
+    year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -1218,6 +1374,7 @@ class Pending:
     k: int
     squad: bool = False                # the season ahead is a squad season
     event_text: str | None = None      # the card's text, with any real name filled in
+    moment: "Moment | None" = None     # a key moment the season is paused at (A204)
     offers: list[Offer] = field(default_factory=list)
     event: Event | None = None
 
@@ -1385,7 +1542,19 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
     career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
                     seasons=cp.seasons)
-    it = iter(moves)
+    queue = list(moves)
+
+    def nxt() -> str | None:
+        return queue.pop(0) if queue else None
+
+    def take_answers() -> tuple[int, ...]:
+        """This season's answers at its key moments: the `m{i}` moves that follow its offer
+        and event (A204)."""
+        out = []
+        while queue and isinstance(queue[0], str) and queue[0].startswith("m"):
+            out.append(_index(queue.pop(0), "m", 3))
+        return tuple(out)
+
     career.retired, career.released = cp.ended == "retired", cp.ended == "released"
     while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
         k = cp.k
@@ -1394,7 +1563,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
             cp.contract = None                 # the club has no team this year: deal void
         career.checkpoint = copy.deepcopy(cp)
-        move = next(it, None)
+        move = nxt()
         if move is None:
             here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
                            fs_id=offers[0].fs_id, year=year, franchise=offers[0].franchise)
@@ -1426,7 +1595,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if len(event.options) == 1:
             option = event.options[0]
         else:
-            move = next(it, None)
+            move = nxt()
             if move is None:
                 text = event.text
                 if event.who:
@@ -1453,9 +1622,20 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                              if cp.contract else 0))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
-        played, career.detail = _cached_season(deck, model, seed, k, you, record,
-                                               (setup, start, ceiling, offer, option, t,
-                                                cp.squad))
+        answers = take_answers()
+        try:
+            played, career.detail = _cached_season(deck, model, seed, k, you, record,
+                                                   (setup, start, ceiling, offer, option, t,
+                                                    cp.squad), answers)
+        except _NeedMoment as need:
+            # The season stops at a key moment: told up to here, waiting for your call.
+            so_far = Year(need.season, need.yours,
+                          list(need.season.results) + list(need.season.playoffs or []),
+                          {}, 0, need.approaches)
+            career.detail = season_detail(so_far, complete=False)
+            career.pending = Pending("moment", year, k, squad=cp.squad, offers=[offer],
+                                     moment=need.moment)
+            return career
         played.form = played.display
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
         cp.seasons.append(played)
@@ -1471,7 +1651,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if released:
             career.released, cp.ended = True, "released"
             break
-    if next(it, None) is not None:
+    if nxt() is not None:
         raise CareerError("moves left over after the career ended")
     career.checkpoint = copy.deepcopy(cp)
     career.pending = None
@@ -1495,6 +1675,8 @@ def _index(move: str, kind: str, n: int) -> int:
 
 def policy_move(career: Career, policy: str, rng: random.Random) -> str:
     p = career.pending
+    if p.kind == "moment":
+        return f"m{rng.randrange(3) if policy == 'random' else 1}"
     if p.kind == "event":
         return f"e{rng.randrange(len(p.event.options)) if policy == 'random' else 0}"
     if policy == "money":

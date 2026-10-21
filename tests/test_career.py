@@ -35,6 +35,21 @@ def model():
     return model_from(DOC)
 
 
+
+def _play(deck, model, seed, setup, moves, **kw):
+    """`play_career` with every key moment answered "Balanced" (A204), so a test written
+    for offers and events keeps testing them. The given moves are fed one at a time."""
+    moves, made = list(moves), []
+    while True:
+        c = C.play_career(deck, model, seed, setup, made, **kw)
+        if c.pending is not None and c.pending.kind == "moment":
+            made.append("m1")
+            continue
+        if not moves:
+            return c
+        made.append(moves.pop(0))
+
+
 # --- the schedule and the real years ------------------------------------------------------
 
 # Franchises per year, written out from CLAUDE.md's franchise table rather than read from the
@@ -305,32 +320,32 @@ def _event_seed(want_choice: bool) -> int:
 
 
 def test_a_fresh_career_asks_for_a_franchise_first(deck, model):
-    c = C.play_career(deck, model, 5, _setup(), [])
+    c = _play(deck, model, 5, _setup(), [])
     assert c.pending.kind == "offer" and c.pending.k == 0 and not c.seasons
 
 
 def test_an_event_with_a_choice_waits_for_the_answer(deck, model):
     seed = _event_seed(True)
-    c = C.play_career(deck, model, seed, _setup(), ["o0"])
+    c = _play(deck, model, seed, _setup(), ["o0"])
     assert c.pending.kind == "event" and not c.seasons
     with pytest.raises(C.CareerError):
-        C.play_career(deck, model, seed, _setup(), ["o0", "o1"])
+        _play(deck, model, seed, _setup(), ["o0", "o1"])
 
 
 @pytest.mark.parametrize("moves", [["r"], ["x1"], ["o9"], ["e0"], ["o-1"]])
 def test_moves_that_do_not_fit_are_refused(deck, model, moves):
     with pytest.raises(C.CareerError):
-        C.play_career(deck, model, _event_seed(False), _setup(), moves)
+        _play(deck, model, _event_seed(False), _setup(), moves)
 
 
 def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
     seed = next(s for s in range(100) if all(len(C.draw_event(s, k).options) == 1
                                              for k in range(2)))
-    done = C.play_career(deck, model, seed, _setup(), ["o0", "r"])
+    done = _play(deck, model, seed, _setup(), ["o0", "r"])
     assert done.complete and done.retired and len(done.seasons) == 1
     assert done.summary.runs == done.seasons[0].runs
     with pytest.raises(C.CareerError):
-        C.play_career(deck, model, seed, _setup(), ["o0", "r", "o0"])
+        _play(deck, model, seed, _setup(), ["o0", "r", "o0"])
 
 
 def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
@@ -340,8 +355,8 @@ def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
                                              for k in range(3)))
     moves = ["o1", "o2"]
     C._SEASON_CACHE.clear()
-    cold = C.play_career(deck, model, seed, _setup(), moves)
-    warm = C.play_career(deck, model, seed, _setup(), moves)
+    cold = _play(deck, model, seed, _setup(), moves)
+    warm = _play(deck, model, seed, _setup(), moves)
     assert len(cold.seasons) == 2
     assert [vars(s) for s in cold.seasons] == [vars(s) for s in warm.seasons]
     assert cold.pending.offers == warm.pending.offers
@@ -480,20 +495,20 @@ def test_two_poor_seasons_end_a_career(deck, model, monkeypatch):
     """Every season poor: a regular season, a squad season, then nobody signs you."""
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = _quiet_seed(3)
-    first = C.play_career(deck, model, seed, _setup(), ["o0"])
+    first = _play(deck, model, seed, _setup(), ["o0"])
     assert first.pending.kind == "offer" and first.pending.squad
-    done = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    done = _play(deck, model, seed, _setup(), ["o0", "o0"])
     assert done.complete and done.released and not done.retired
     assert [r.squad for r in done.seasons] == [False, True]
     assert done.summary.regular_seasons == 1
     with pytest.raises(C.CareerError):
-        C.play_career(deck, model, seed, _setup(), ["o0", "o0", "o0"])
+        _play(deck, model, seed, _setup(), ["o0", "o0", "o0"])
 
 
 def test_good_form_keeps_you_a_regular(deck, model, monkeypatch):
     monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
     seed = _quiet_seed(3)
-    c = C.play_career(deck, model, seed, _setup(), ["o0", "o0", "o0"])
+    c = _play(deck, model, seed, _setup(), ["o0", "o0", "o0"])
     assert [r.squad for r in c.seasons] == [False, False, False] and not c.released
 
 
@@ -634,9 +649,9 @@ def test_a_finisher_keeps_his_place_down_to_his_own_bar(deck, model, monkeypatch
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     monkeypatch.setitem(C.ROLES["finisher"], "poor_percentile", 0.0)
     seed = _quiet_seed(3)
-    c = C.play_career(deck, model, seed, _setup("finisher"), ["o0", "o0", "o0"])
+    c = _play(deck, model, seed, _setup("finisher"), ["o0", "o0", "o0"])
     assert [r.squad for r in c.seasons] == [False, False, False] and not c.released
-    opener = C.play_career(deck, model, seed, _setup("opener"), ["o0", "o0"])
+    opener = _play(deck, model, seed, _setup("opener"), ["o0", "o0"])
     assert opener.released
 
 
@@ -646,7 +661,7 @@ def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = next(s for s in range(500) if C.draw_event(s, 1).key == "captain"
                 and len(C.draw_event(s, 0).options) == 1)
-    first = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    first = _play(deck, model, seed, _setup(), ["o0", "o0"])
     assert first.seasons[0].squad is False and first.complete      # released after two
     second = first.seasons[1]
     assert second.squad and not second.captain and second.event == "quiet"
@@ -662,7 +677,7 @@ def _seed_quiet(n, overseas=False):
 
 def _lasting_offer(deck, model, seed, setup, years=3):
     """An offer from a club with a team in each of the next `years` seasons."""
-    offers = C.play_career(deck, model, seed, setup, []).pending.offers
+    offers = _play(deck, model, seed, setup, []).pending.offers
     clubs = [{C.canonical(deck.cards_by_fs[fs][0].franchise)
               for fs in C.year_fs_ids(deck, setup.debut + y)} for y in range(years)]
     return next(i for i, o in enumerate(offers)
@@ -672,13 +687,13 @@ def _lasting_offer(deck, model, seed, setup, years=3):
 def test_a_three_year_deal_is_three_seasons_at_one_price_then_the_market(deck, model):
     seed = _seed_quiet(4)
     i = _lasting_offer(deck, model, seed, _setup())
-    c = C.play_career(deck, model, seed, _setup(), [f"c{i}"])
-    assert C.play_career(deck, model, seed, _setup(), []).pending.offers[i].price3 == C.DEBUT_PRICE
+    c = _play(deck, model, seed, _setup(), [f"c{i}"])
+    assert _play(deck, model, seed, _setup(), []).pending.offers[i].price3 == C.DEBUT_PRICE
     for year in (2, 3):
         o = c.pending.offers
         assert len(o) == 1 and o[0].stay and o[0].contract_year == year
         assert o[0].franchise == c.seasons[0].franchise and o[0].price == c.seasons[0].price
-        c = C.play_career(deck, model, seed, _setup(), [f"c{i}"] + ["o0"] * (year - 1))
+        c = _play(deck, model, seed, _setup(), [f"c{i}"] + ["o0"] * (year - 1))
     assert [r.contract_year for r in c.seasons] == [1, 2, 3]
     assert len(c.pending.offers) > 1 and not any(o.contract_year for o in c.pending.offers)
 
@@ -686,7 +701,7 @@ def test_a_three_year_deal_is_three_seasons_at_one_price_then_the_market(deck, m
 def test_a_signed_year_cannot_be_signed_again(deck, model):
     seed = _seed_quiet(2)
     with pytest.raises(C.CareerError):
-        C.play_career(deck, model, seed, _setup(), ["c1", "c0"])
+        _play(deck, model, seed, _setup(), ["c1", "c0"])
 
 
 def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, monkeypatch):
@@ -694,10 +709,10 @@ def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, mon
     out his deal and goes after it ends."""
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = _seed_quiet(4)
-    one = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    one = _play(deck, model, seed, _setup(), ["o0", "o0"])
     assert one.released and len(one.seasons) == 2
     i = _lasting_offer(deck, model, seed, _setup())
-    three = C.play_career(deck, model, seed, _setup(), [f"c{i}", "o0", "o0"])
+    three = _play(deck, model, seed, _setup(), [f"c{i}", "o0", "o0"])
     assert three.released and len(three.seasons) == 3
     assert [r.squad for r in three.seasons] == [False, True, True]
 
@@ -707,9 +722,9 @@ def test_a_contract_lapses_when_the_club_has_no_team(deck, model):
     setup = C.Setup("Tester", "opener", 2015)
     seed = next(s for s in range(2000) if len(C.draw_event(s, 0).options) == 1 and any(
         "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None)))
-    i = next(n for n, o in enumerate(C.play_career(deck, model, seed, setup, []).pending.offers)
+    i = next(n for n, o in enumerate(_play(deck, model, seed, setup, []).pending.offers)
              if "Chennai" in o.franchise)
-    c = C.play_career(deck, model, seed, setup, [f"c{i}"])
+    c = _play(deck, model, seed, setup, [f"c{i}"])
     assert len(c.pending.offers) > 1 and not any(o.contract_year for o in c.pending.offers)
     assert c.checkpoint.contract is None
 
@@ -719,7 +734,7 @@ def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
     bowler alike (no event, so the season's ability is the offer's)."""
     for role in ("opener", "pace"):
         seed = _seed_quiet(1)
-        c = C.play_career(deck, model, seed, _setup(role), [])
+        c = _play(deck, model, seed, _setup(role), [])
         for o in c.pending.offers:
             assert 1 <= o.position <= 11
             assert (o.attack_rank is not None) == (role == "pace")
@@ -752,9 +767,9 @@ def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monke
                    if C.draw_event(s, k).key == "one_more"
                    and all(len(C.draw_event(s, j).options) == 1 for j in range(k)))
     moves = ["o0"] * k
-    before = C.play_career(deck, model, seed, setup, moves + ["o0"])
+    before = _play(deck, model, seed, setup, moves + ["o0"])
     assert before.pending.kind == "event" and before.pending.event.key == "one_more"
-    done = C.play_career(deck, model, seed, setup, moves + ["o0", "e1"])
+    done = _play(deck, model, seed, setup, moves + ["o0", "e1"])
     assert done.retired and done.complete and len(done.seasons) == k
 
 
@@ -860,9 +875,9 @@ def detailed(deck, model):
 
 
 def _told(year):
-    league = [r for r in year.results if r.stage == "league"]
-    return C.balanced_order(league, lambda r: (id(r.home), id(r.away))) + [
-        r for r in year.results if r.stage != "league"]
+    """A career's league is PLAYED in matchday order (A204), so its results are the order
+    to tell them in."""
+    return list(year.results)
 
 
 def test_the_feed_is_every_match_of_your_side_in_matchday_order(detailed):
@@ -927,9 +942,9 @@ def test_the_matches_to_watch_are_your_playoffs_final_last(detailed):
 
 def test_a_season_played_in_a_call_carries_its_detail_and_a_resume_does_not(deck, model):
     seed = _seed_quiet(2)
-    played = C.play_career(deck, model, seed, _setup(), ["o0"])
+    played = _play(deck, model, seed, _setup(), ["o0"])
     assert played.detail is not None and played.detail.feed
-    resumed = C.play_career(deck, model, seed, _setup(), [], resume=played.checkpoint)
+    resumed = _play(deck, model, seed, _setup(), [], resume=played.checkpoint)
     assert resumed.detail is None
 
 
@@ -950,3 +965,201 @@ def test_each_lines_position_is_the_table_at_that_moment(detailed):
         above = sum(p > mine_pts for p in pts.values())
         level = sum(p == mine_pts for p in pts.values())
         assert above + 1 <= line.position <= above + level        # NRR decides within a level
+
+
+
+# --- key moments (A204) ----------------------------------------------------------------------
+
+
+def test_an_approach_moves_both_numbers_at_the_measured_rate():
+    me = Card(fs_id=1, person_id=C.YOU_ID, name="me", role="allrounder", bat=0.1, bowl=0.1,
+              bat_scoring=0.02, bat_dismissal=1.0, bowl_scoring=0.01, bowl_dismissal=1.0)
+    assert C.approach_card(me, 1) is me
+    up, down = C.approach_card(me, 2), C.approach_card(me, 0)
+    rate = math.exp(1.25 * 0.15)
+    assert up.bat_scoring == pytest.approx(0.17) and up.bat_dismissal == pytest.approx(rate)
+    assert up.bowl_scoring == pytest.approx(-0.14) and up.bowl_dismissal == pytest.approx(rate)
+    assert down.bat_scoring == pytest.approx(-0.13) and down.bat_dismissal == pytest.approx(1 / rate)
+    assert down.bowl_scoring == pytest.approx(0.16) and down.bowl_dismissal == pytest.approx(1 / rate)
+    batter = Card(fs_id=1, person_id=C.YOU_ID, name="me", role="batter", bat=0.1,
+                  bat_scoring=0.0, bat_dismissal=1.0)
+    assert C.approach_card(batter, 2).bowl_scoring is None
+
+
+# Kings XI Punjab 2019, seed 29: found by search because it exercises every moment rule at
+# once -- two league matches that would be must-win without MUST_WIN_MAX, playoff matches,
+# and a called league match that is the SECOND meeting with its opponent. The first fixture
+# these tests used (the first franchise that paused) had no league moment and no repeat
+# meeting, so three rules could be broken without any test failing.
+MOMENT_FS = 123
+
+
+def _moment_year(deck, model, role="opener", seed=29, fs_only=MOMENT_FS):
+    """A real season with you in it, played with moments, pausing at the first."""
+    start, ceiling = C.spin(deck, 3, role)
+    for fs in [fs_only] if fs_only is not None else C.year_fs_ids(deck, 2019):
+        c0 = deck.cards_by_fs[fs][0]
+        you = C.ability(start, ceiling, 0.9, setup=_setup(role), fs_id=fs, year=2019,
+                        franchise=c0.franchise)
+        try:
+            C.simulate_year(deck, model, seed, 2, you, answers=())
+        except C._NeedMoment as need:
+            return you, need
+    pytest.skip("no franchise reached a key moment")
+
+
+def test_a_season_stops_only_where_something_is_at_stake(deck, model):
+    """Recomputed independently: a league stop has few matches left and your side within two
+    points of the qualification line; anything else is a playoff."""
+    you, need = _moment_year(deck, model)
+    m, season = need.moment, need.season
+    if m.stage == "league":
+        pts = {s.name: 0 for s in season.sides}
+        for r in season.results:
+            if r.winner is None:
+                pts[r.home.name] += 1; pts[r.away.name] += 1
+            else:
+                pts[r.winner.name] += 2
+        mine = pts[need.yours.name]
+        ranked = sorted(pts.values(), reverse=True)
+        assert min(abs(mine - ranked[3]), abs(mine - ranked[4])) <= C.MUST_WIN_EDGE
+        played = sum(need.yours is r.home or need.yours is r.away for r in season.results)
+        each = 16 if len(season.sides) == 9 else 14
+        assert each - played <= C.MUST_WIN_WINDOW
+    else:
+        assert m.stage in C.PLAYOFF_STAKES and m.stakes == C.PLAYOFF_STAKES[m.stage]
+    assert m.labels == C.APPROACH_LABELS["batter"]
+
+
+def test_your_call_is_played_in_that_match_and_only_that_one(deck, model):
+    """Answer every moment "attack": in each moment match the player the engine used for you
+    carries the attacking numbers, and in every other match your usual ones."""
+    you, need = _moment_year(deck, model)
+    answers = ()
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (2,)
+    assert year.approaches and len(year.approaches) == len(answers)
+    numbers = {n for n, *_ in year.approaches}
+    n = 0
+    for r in year.results:
+        if year.yours is not r.home and year.yours is not r.away:
+            continue
+        n += 1
+        mine = r.home_innings if year.yours is r.home else r.away_innings
+        for b in mine.batting:
+            if b.player.person_id != C.YOU_ID:
+                continue
+            want = you.bat_scoring + (C.ATTACK_SHIFT if n in numbers else 0.0)
+            assert b.player.bat_scoring == pytest.approx(want), (n, r.stage)
+
+
+def test_the_feed_tags_the_match_you_called_not_an_earlier_meeting(deck, model):
+    """A league meets every side twice. The call belongs to the meeting it was made for:
+    the feed's tagged line is the one whose match carried the changed numbers."""
+    you, need = _moment_year(deck, model)
+    answers = ()
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (2,)
+    detail = C.season_detail(year)
+    mine = [r for r in year.results if year.yours in (r.home, r.away)]
+    opp = lambda r: (r.away if year.yours is r.home else r.home).short
+    # The fixture must hold a league call on a REPEAT meeting, or this test cannot fail.
+    assert any(st == "league" and any(opp(q) == opp(mine[num - 1]) for q in mine[:num - 1])
+               for num, st, _, _ in year.approaches)
+    for line, r in zip(detail.feed, mine):
+        inn = r.home_innings if year.yours is r.home else r.away_innings
+        shifted = any(b.player.person_id == C.YOU_ID
+                      and b.player.bat_scoring == pytest.approx(you.bat_scoring + C.ATTACK_SHIFT)
+                      for b in inn.batting)
+        assert (line.approach is not None) == shifted, (r.stage, line.opp_short)
+
+
+def test_every_league_stop_and_only_those_is_a_close_race(deck, model, monkeypatch):
+    """With the cap lifted, the league stops at exactly the matches you play with few left and
+    your side within MUST_WIN_EDGE points of the line, recomputed from an independent points
+    table. Checked over EVERY league match, so a match the rule should have passed over counts
+    as much as one it should have stopped at. Mumbai 2019 (fs 101), found by search: its last
+    three hold two close matches and one that is not. Kings XI 2019 (MOMENT_FS) is a close
+    race in all three, so the edge never refuses anything there."""
+    you, need = _moment_year(deck, model, fs_only=101)
+    monkeypatch.setattr(C, "MUST_WIN_MAX", 99)
+    answers = ()
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (1,)                       # Balanced: no result changes
+    pts = {s.name: 0 for s in year.season.sides}
+    mine = [r for r in year.season.results if year.yours in (r.home, r.away)]
+    expected, outside_edge, k = set(), 0, 0
+    for r in year.season.results:
+        if year.yours in (r.home, r.away):
+            k += 1
+            left = len(mine) - k + 1
+            ranked = sorted(pts.values(), reverse=True)
+            m = pts[year.yours.name]
+            gap = m - ranked[4] if m > ranked[4] else ranked[3] - m if m < ranked[3] else 0
+            inn = r.home_innings if year.yours is r.home else r.away_innings
+            played = any(b.player.person_id == C.YOU_ID for b in inn.batting)
+            if played and left <= C.MUST_WIN_WINDOW:
+                if gap <= C.MUST_WIN_EDGE:
+                    expected.add(k)
+                else:
+                    outside_edge += 1
+        if r.winner is None:
+            pts[r.home.name] += 1; pts[r.away.name] += 1
+        else:
+            pts[r.winner.name] += 2
+    assert outside_edge, "the fixture must reach the window outside the edge, or the edge never acts"
+    assert {a[0] for a in year.approaches if a[1] == "league"} == expected
+
+
+def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monkeypatch):
+    you, need = _moment_year(deck, model)
+    answers = ()
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (1,)
+    league = [a for a in year.approaches if a[1] == "league"]
+    assert len(league) <= C.MUST_WIN_MAX
+    # Without the cap this season stops more than once in the league, so the cap is binding.
+    monkeypatch.setattr(C, "MUST_WIN_MAX", 99)
+    answers = ()
+    while True:
+        try:
+            uncapped = C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (1,)
+    assert sum(a[1] == "league" for a in uncapped.approaches) > len(league)
+    played_po = [r.stage for r in year.season.playoffs
+                 if year.yours in (r.home, r.away)
+                 and any(b.player.person_id == C.YOU_ID
+                         for inn in (r.home_innings, r.away_innings) for b in inn.batting)]
+    assert played_po, "the fixture must reach the playoffs or the rule is never asked"
+    assert [a[1] for a in year.approaches if a[1] != "league"] == played_po
+
+
+def test_an_answer_too_many_is_refused(deck, model):
+    you, need = _moment_year(deck, model)
+    answers = ()
+    while True:
+        try:
+            C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (1,)
+    with pytest.raises(C.CareerError):
+        C.simulate_year(deck, model, 29, 2, you, answers=answers + (1,))

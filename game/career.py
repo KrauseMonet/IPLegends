@@ -400,7 +400,10 @@ def bowls_for_you(you: Card) -> bool:
 
 
 def _outbowls(c: Card, you: Card) -> bool:
-    return c.has_bowl and c.person_id != you.person_id and c.bowl > you.bowl
+    """Would the side bowl `c` ahead of you (A203's order: real volume, then rating)?"""
+    from game.__main__ import bowling_order
+
+    return c.has_bowl and c.person_id != you.person_id and bowling_order(c) < bowling_order(you)
 
 
 def _in_the_attack(xi: list[Card], you: Card) -> tuple[list[Card], Card]:
@@ -416,10 +419,13 @@ def _in_the_attack(xi: list[Card], you: Card) -> tuple[list[Card], Card]:
     outbowl a weak spinner, and no legal eleven holds him with four or fewer of them."""
     from game.__main__ import BOWLERS_IN_TWELVE
 
-    others = sorted((c.bowl for c in xi if c is not you and c.has_bowl), reverse=True)
-    if len(others) < BOWLERS_IN_TWELVE or you.bowl > others[BOWLERS_IN_TWELVE - 1]:
+    from game.__main__ import bowling_order
+
+    others = sorted((c for c in xi if c is not you and c.has_bowl), key=bowling_order)
+    if len(others) < BOWLERS_IN_TWELVE or bowling_order(you) < bowling_order(others[BOWLERS_IN_TWELVE - 1]):
         return xi, you
-    ranked = dataclasses.replace(you, bowl=math.nextafter(others[BOWLERS_IN_TWELVE - 1], math.inf))
+    # You have no recorded volume, so you rank with the real bowlers; within them, by rating.
+    ranked = dataclasses.replace(you, bowl=math.nextafter(others[BOWLERS_IN_TWELVE - 1].bowl, math.inf))
     return [ranked if c is you else c for c in xi], ranked
 
 
@@ -736,7 +742,9 @@ def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
     if not bowls_for_you(you):
         return position, None
     me = next(c for c in xi if c.person_id == YOU_ID)
-    attack = sorted((c for c in xi if c.has_bowl), key=lambda c: -c.bowl)
+    from game.__main__ import bowling_order
+
+    attack = sorted((c for c in xi if c.has_bowl), key=bowling_order)
     return position, next(i for i, c in enumerate(attack, 1) if c is me)
 
 
@@ -961,7 +969,7 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
         return None
     if sum(c.has_bowl for c in side.xi if c is not me) < BOWLERS_IN_TWELVE:
         return None
-    resting = dataclasses.replace(me, bowl=_RESTED_BOWL)
+    resting = dataclasses.replace(me, bowl=_RESTED_BOWL, bowl_balls=0)   # thin: never in the five
     return [resting if c is me else c for c in side.xi], side.impact
 
 

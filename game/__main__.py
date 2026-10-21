@@ -20,6 +20,8 @@ not quietly field eleven against the player's twelve.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import os
 import random
 
@@ -112,6 +114,43 @@ def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
 
 OVERSEAS_LIMIT = 4
 
+# [A203] Who bowls. A card's bowling rating is evidence about a SEASON, and a season of an
+# over or two is thin evidence: Adam Gilchrist, a keeper who bowled one over in real 2013,
+# was rated as a frontline bowler, bowled four overs every match for Kings XI and led the
+# Purple Cap with 14 wickets after five matches. So a bowler who bowled at least
+# ATTACK_MIN_BALLS that season ranks ahead of one who did not, and rating orders each group.
+# A card with no recorded volume (a career's own player, a hand-built test side) is not
+# known to be thin and ranks with the real bowlers. 150 is A33's floor -- below it a bowling
+# figure is noise -- so it is not a new number. Measured over 38 simulated seasons: the
+# Purple Cap leaders became real bowlers (Bhatia, Bollinger, Jakati, Pollard in place of
+# Gilchrist and Pietersen), but the median Purple Cap only fell 31 -> 30 against a real 26:
+# the LEVEL is the five-man attack and bowler-credited run-outs (A198), not this.
+ATTACK_MIN_BALLS = 150
+
+
+# A daily challenge stores each player's score and rebuilds the match to show it, so a day
+# played before A203 must keep being played with the order it was scored under, or its page
+# would show a scorecard that disagrees with its own recorded result. `old_bowling_order()`
+# is that switch; only the daily sets it, for days before its cut-off.
+_OLD_ORDER = contextvars.ContextVar("old_bowling_order", default=False)
+
+
+@contextlib.contextmanager
+def old_bowling_order(on: bool = True):
+    token = _OLD_ORDER.set(on)
+    try:
+        yield
+    finally:
+        _OLD_ORDER.reset(token)
+
+
+def bowling_order(c: Card) -> tuple:
+    """Sort key, lowest first, for choosing who bowls: real volume that season, then rating."""
+    if _OLD_ORDER.get():
+        return (False, -c.bowl)                # before A203: rating alone
+    thin = c.bowl_balls is not None and c.bowl_balls < ATTACK_MIN_BALLS
+    return (thin, -c.bowl)
+
 
 def viable(xi: list[Card]) -> bool:
     """An XI has to keep wicket and get through twenty overs.
@@ -147,7 +186,7 @@ def opposition_xi(squad: list[Card]) -> list[Card]:
     rest = [c for c in squad if c is not keeper]
 
     bowlers = sorted((c for c in rest if c.has_bowl),
-                      key=lambda c: -c.bowl)[:BOWLERS_IN_TWELVE]
+                      key=bowling_order)[:BOWLERS_IN_TWELVE]
     remaining = [c for c in rest if c not in bowlers]
     batters = sorted(remaining, key=lambda c: -(c.bat if c.has_bat else -9.9))
 
@@ -176,7 +215,7 @@ def twelve_from_xi(xi: list[Card], squad: list[Card]) -> tuple[list[Card], Card 
     bench = [c for c in squad if c not in xi and c.has_bowl]
     if xi_overseas >= OVERSEAS_LIMIT:
         bench = [c for c in bench if c.overseas is not True]
-    impact = max(bench, key=lambda c: c.bowl) if bench else None
+    impact = min(bench, key=bowling_order) if bench else None
     return opposition_order(xi), impact
 
 
@@ -250,7 +289,7 @@ def attack(xi: list[Card], model: Model, impact: Card | None = None) -> list[Pla
     """
     return [to_player(c, model, is_impact=(impact is not None and c is impact))
             for c in sorted((c for c in xi if c.has_bowl),
-                            key=lambda c: -c.bowl)[:BOWLERS_IN_TWELVE]]
+                            key=bowling_order)[:BOWLERS_IN_TWELVE]]
 
 
 def overseas_status(xi: list[Card]) -> str:

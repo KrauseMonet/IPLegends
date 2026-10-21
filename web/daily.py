@@ -23,6 +23,7 @@ Three things ARE specific to a day and live here:
 
 from __future__ import annotations
 
+import datetime
 import json
 import random
 from dataclasses import dataclass, field, replace
@@ -291,6 +292,13 @@ class DayPlay:
     super_overs: list = field(default_factory=list)
 
 
+# [A203] The first day played with the engine's new bowling order. A day before it was
+# scored under the old order, and its page rebuilds the match to show it -- so it keeps the
+# old order, and its scorecard stays the one its recorded result came from. Today's day
+# (when A203 shipped) stays old too, so one day's leaderboard is never two engines.
+BOWLING_ORDER_FROM = datetime.date(2026, 10, 22)
+
+
 def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
                    state: str) -> DayPlay:
     """Rebuild one player's finished daily from what is stored -- the day, the player and
@@ -299,7 +307,15 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     Nothing about the result is persisted beyond the state and the numbers the leaderboard
     ranks on (A19): the match is a pure function of those three, so a page reload re-derives
     exactly the same innings rather than reading a stored copy that could drift from the
-    scoring beside it."""
+    scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
+    from game.__main__ import old_bowling_order
+
+    with old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM):
+        return _play_and_score(full, model, day, player, state)
+
+
+def _play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
+                    state: str) -> DayPlay:
     seed, moves = decode_own_state(state, day.challenge_date, player)
     # Through `replay_day`, the one place a day's replay rules live, so a finished
     # arrangement is honoured identically when the draft is shown, marked and played.

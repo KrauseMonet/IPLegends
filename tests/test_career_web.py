@@ -86,9 +86,11 @@ def test_a_new_career_is_asked_for_a_franchise_and_names_its_two_spins(client):
     assert d["start"]["name"] and d["ceiling"]["name"] and d["seasons"] == []
 
 
-def test_a_season_is_played_one_move_at_a_time(client):
+def test_a_season_is_played_one_move_at_a_time(client, monkeypatch):
     """The seed is one whose first event asks a question, so the offer has to be carried
-    beside the checkpoint until the answer arrives."""
+    beside the checkpoint until the answer arrives. Nobody is released here (form is not
+    what this test is about, and an engine change once ended this career after two)."""
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
     seed = next(s for s in range(1, 500) if len(C.draw_event(s, 0).options) > 1)
     d = _token(client, seed=seed)
     asked = False

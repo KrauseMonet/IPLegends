@@ -16,7 +16,7 @@ import pytest
 from etl.feasibility import BOWLERS_IN_TWELVE, Card
 from etl.franchise_map import canonical
 from game import career as C
-from game.__main__ import OVERSEAS_LIMIT, attack, viable
+from game.__main__ import OVERSEAS_LIMIT, attack, bowling_order, viable
 from game.auction import value_curve
 from game.season import fixtures, tournament_leaders
 from tools.snapshot_deck import deck_from, model_from, read_document
@@ -143,7 +143,7 @@ def test_you_are_in_every_franchises_eleven_and_a_bowler_always_bowls(deck, mode
             # and with a bowling Impact Player on, replacing the weakest pure batter:
             # still you among the five
             if impact is not None and impact.has_bowl:
-                assert impact.bowl <= me.bowl
+                assert bowling_order(impact) >= bowling_order(me)      # never ahead of you
                 batters = [c for c in xi if not c.has_bowl and c.role != "keeper"]
                 if batters:
                     out = min(batters, key=lambda c: c.bat if c.has_bat else -9.9)

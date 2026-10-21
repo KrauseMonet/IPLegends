@@ -638,7 +638,7 @@ def super_over_bowler(side: Side, number: int = 1) -> Card:
     """The one who bowls it, rotating down the order on a repeat, since a bowler may not
     bowl two super overs in succession.
 
-    `-c.bowl` is `attack()`'s own key, deliberately and not by coincidence: whoever this
+    `bowling_order` is `attack()`'s own key (A203), deliberately: whoever this
     returns for `number = 1` is the same man `attack()` ranks first, so a side's super
     over bowler is the one it would have opened the bowling with. It carries the same
     thin-volume exposure the batting nomination above had to be rescued from -- but here
@@ -653,7 +653,9 @@ def super_over_bowler(side: Side, number: int = 1) -> Card:
     bowls" always has an answer, unlike "what is his style", which is why this may pick a
     man with no bowling rating where A23 would refuse to invent one.
     """
-    pool = sorted((c for c in side.xi if c.has_bowl), key=_bowl_rating, reverse=True)
+    from game.__main__ import bowling_order
+
+    pool = sorted((c for c in side.xi if c.has_bowl), key=bowling_order)
     if not pool:
         pool = list(reversed(side.xi))
     return pool[(number - 1) % len(pool)]

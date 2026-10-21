@@ -7,6 +7,7 @@ only a handful are played; everything that can be checked without one is.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import random
 from collections import Counter
@@ -406,8 +407,12 @@ def year_with_absence(deck, model):
     c0 = deck.cards_by_fs[fs][0]
     you = C.ability(start, ceiling, 0.5, setup=_setup(), fs_id=fs, year=2018,
                     franchise=c0.franchise)
-    k = next(k for k in range(40) if len(C.missed_block(11, k, 14)) >= 2)
-    return C.simulate_year(deck, model, 11, k, you), C.missed_block(11, k, 14)
+    # an opener can be dropped, so his block is drawn with the real drop rate taken off (A205)
+    block = lambda k: C.missed_block(11, k, 14, form_drop=C.FORM_DROP_RATE["batter"])
+    k = next(k for k in range(40) if len(block(k)) >= 2)
+    year = C.simulate_year(deck, model, 11, k, you)
+    assert year.dropped == [], "the fixture must hold no form drop, or it tests two things"
+    return year, block(k)
 
 
 def test_you_miss_exactly_the_drawn_block_and_never_a_playoff(year_with_absence):
@@ -518,7 +523,11 @@ def test_a_squad_season_is_part_of_the_league_and_none_of_the_playoffs(deck, mod
     c0 = deck.cards_by_fs[fs][0]
     you = C.ability(start, ceiling, 0.5, setup=_setup("pace"), fs_id=fs, year=2019,
                     franchise=c0.franchise)
-    k = 3
+    # a season where the form-drop shortening WOULD fire, so a squad block shortened by
+    # mistake shows (a squad player cannot be dropped for form, A205)
+    q = C.FORM_DROP_RATE["bowler"]
+    k = next(k for k in range(60) if len(C.missed_block(21, k, 14, squad=True, form_drop=q))
+             != len(C.missed_block(21, k, 14, squad=True)))
     out = C.missed_block(21, k, 14, squad=True)
     year = C.simulate_year(deck, model, 21, k, you, squad=True)
     mine = [r for r in year.results if year.yours is r.home or year.yours is r.away]
@@ -1260,7 +1269,7 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
     assert book.games[("a_bowl", id(away))] == [(4, 2, 25, 24, True)]
 
 
-MOB_FS = {"dropped": 50, "kept": 26, "behind": 77}   # 2019: Delhi, Chennai, Kolkata (found by search)
+MOB_FS = {"dropped": 50, "kept": 26}   # 2019: Delhi, Chennai (found by search)
 
 
 def _mob_you(deck, fs, role="opener"):
@@ -1344,19 +1353,34 @@ def test_coming_through_a_make_or_break_keeps_your_place(deck, model):
     assert _in_xi(year, _your_league(year)[k]) and year.dropped == []
 
 
-def test_a_drop_comes_off_the_missed_block(deck, model):
-    """The block was measured from real seasons, so it already holds real drops: a drop
-    gives back block matches still to come, and only a block already behind you cannot."""
+def test_the_missed_block_leaves_room_for_real_form_drops():
+    """The block's shares were measured from real seasons, so they already hold real form
+    drops: for a droppable player the block is drawn DROP_MATCHES shorter at their real rate,
+    and is otherwise the same block."""
+    q, shortened, n = C.FORM_DROP_RATE["bowler"], 0, 4000
+    for seed in range(n):
+        plain = C.missed_block(seed, 3, 14)
+        short = C.missed_block(seed, 3, 14, form_drop=q)
+        if len(short) != len(plain):
+            assert len(short) == max(0, len(plain) - C.DROP_MATCHES), seed
+            shortened += 1
+        else:
+            assert short == plain, seed        # its own stream: the block is otherwise the same
+        assert C.missed_block(seed, 3, 14, form_drop=0.0) == plain
+    # a block of nought or one cannot be shortened by two: those seasons dilute the rate
+    room = sum(len(C.missed_block(s, 3, 14)) > 0 for s in range(n)) / n
+    se = (q * (1 - q) / n) ** 0.5
+    assert abs(shortened / n - q * room) < 3 * se + 0.005
+
+
+def test_a_drop_adds_to_the_season_block(deck, model):
+    """Dropped matches are added to the drawn block; nothing is given back."""
     year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
     mine = _your_league(year)
-    block = C.missed_block(31, 2, len(mine))
-    assert min(block) > max(year.dropped) - 1, "the fixture's block must lie after the drop"
-    assert all(_in_xi(year, mine[i]) for i in block)               # given back
-    assert year.missed == C.DROP_MATCHES
-    behind = C.simulate_year(deck, model, 29, 2, _mob_you(deck, MOB_FS["behind"]), answers=None)
-    block = C.missed_block(29, 2, len(_your_league(behind)))
-    assert max(block) + 1 < min(behind.dropped), "the fixture's block must lie before the drop"
-    assert behind.missed == len(block) + C.DROP_MATCHES
+    block = C.missed_block(31, 2, len(mine), form_drop=C.FORM_DROP_RATE["batter"])
+    assert block and year.dropped, "the fixture must hold both a block and a drop"
+    assert year.missed == len(block) + len(year.dropped) == len(set(block) | {n - 1 for n in year.dropped})
+    assert not any(_in_xi(year, mine[i]) for i in block)
 
 
 def test_squad_seasons_and_allrounders_never_get_a_make_or_break(deck, model):
@@ -1368,6 +1392,14 @@ def test_squad_seasons_and_allrounders_never_get_a_make_or_break(deck, model):
                          answers=None)
     assert _poor_points(ar), "the fixture must reach poor form"
     assert ar.verdicts == {}
+    # nor is an all-rounder's block drawn short for drops he cannot have: a season where the
+    # shortening would fire
+    q = C.FORM_DROP_RATE["batter"]
+    k = next(k for k in range(60) if len(C.missed_block(31, k, 14, form_drop=q))
+             != len(C.missed_block(31, k, 14)))
+    ar = C.simulate_year(deck, model, 31, k, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
+                         answers=None)
+    assert ar.missed == len(C.missed_block(31, k, 14))
 
 
 def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
@@ -1391,3 +1423,37 @@ def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
     book.add(year.results)
     assert detail.feed[-1].form == [C.form_figure("batter", g) for g in
                                book.games[(C.YOU_ID, id(year.yours))][-C.FORM_SHOWN:]]
+
+
+def test_a_batter_bowls_only_when_his_side_lacks_five_real_bowlers(deck, model):
+    """A batter's bowling is part-time (A26), so it is marked thin as a real part-timer's
+    is (A203, A205): he never bowls ahead of five bowlers with real volume. The seasons are
+    ones where, unmarked, he would have been ranked into the five."""
+    from game.__main__ import BOWLERS_IN_TWELVE, bowling_order
+
+    acted = 0
+    for seed in range(1, 40):
+        start, ceiling = C.spin(deck, seed, "middle")
+        if start.bowl is None:
+            continue
+        fs = C.year_fs_ids(deck, 2016)[seed % 8]
+        you = C.ability(start, ceiling, 0.5, setup=_setup("middle"), fs_id=fs, year=2016,
+                        franchise=deck.cards_by_fs[fs][0].franchise)
+        assert you.bowl_balls == 0                   # marked part-time
+        year = C.simulate_year(deck, model, seed, 2, you, answers=None)
+        real = [c for c in year.yours.xi if c.person_id != C.YOU_ID and c.has_bowl
+                and not bowling_order(c)[0]]
+        if len(real) < BOWLERS_IN_TWELVE:
+            continue
+        unmarked = dataclasses.replace(you, bowl_balls=None)
+        fifth = sorted(real, key=bowling_order)[BOWLERS_IN_TWELVE - 1]
+        if bowling_order(unmarked) < bowling_order(fifth):
+            acted += 1                               # the old order would have bowled him
+        for r in year.results:
+            if year.yours not in (r.home, r.away):
+                continue
+            theirs = r.away_innings if year.yours is r.home else r.home_innings
+            assert not any(w.player.person_id == C.YOU_ID and w.balls for w in theirs.bowling)
+        if acted >= 2:
+            break
+    assert acted >= 2, "the rule must have had to act"

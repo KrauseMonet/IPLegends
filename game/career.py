@@ -231,6 +231,12 @@ FORM_POOR = 1 / 3                    # the worst third of your kind is out of fo
 FORM_GOOD = 2 / 3                    # the best third is in form
 FORM_SHOWN = 5                       # matches on the live form line
 DROP_MATCHES = 2                     # matches a failed make-or-break costs you
+# Real form drops a regular season, as two-match drops: worst-third readings a season (3.03
+# batting, 2.89 bowling) times how much likelier they make the next two missed than a best
+# third does (+3.7 and +5.3 points). The missed block's shares were measured from real
+# seasons, so they already hold these: a droppable player's block is drawn this much
+# shorter, and his own drops are then added to it (A205).
+FORM_DROP_RATE = {"batter": 0.113, "bowler": 0.153}
 _WORDS = {2: "two", 3: "three", 4: "four"}
 MAKE_OR_BREAK_MAX = 1                # a season
 
@@ -565,6 +571,12 @@ def ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
         bat_dismissal=_geo(start.bat_dismissal, ceiling.bat_dismissal, t),
         bowl_scoring=_lin(start.bowl_scoring, ceiling.bowl_scoring, t),
         bowl_dismissal=_geo(start.bowl_dismissal, ceiling.bowl_dismissal, t),
+        # [A205] A batter's bowling is part-time by definition (A26: under an over a match),
+        # so it is marked thin, as a real part-timer's is (A203): he bowls only where his
+        # side has no five bowlers with real volume. With no volume recorded he ranked with
+        # the real bowlers on a rating made from a few overs, and middle-order careers
+        # bowled four overs in 80 of 143 matches.
+        bowl_balls=0 if start.role in ("batter", "keeper") and start.bowl is not None else None,
     )
 
 
@@ -1165,13 +1177,20 @@ class Year:
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
-                 extra: int = 0) -> range:
+                 extra: int = 0, form_drop: float = 0.0) -> range:
     """Which of your league matches you miss: one block, its length from the real share of
     matches a regular (or, in a squad season, a non-regular) plays. Its own random stream,
-    so missing matches never changes how the matches themselves are drawn."""
+    so missing matches never changes how the matches themselves are drawn.
+
+    `form_drop` is the chance this season's share already held a real two-match form drop
+    (FORM_DROP_RATE): for a player who can be dropped for form in the season itself, that
+    much is taken off the block, on a stream of its own (A205)."""
     rng = random.Random(f"{seed}:avail:{k}")
     shares = SQUAD_SHARES if squad else AVAILABILITY_SHARES
-    missed = min(league_matches, round((1 - rng.choice(shares)) * league_matches) + extra)
+    base = round((1 - rng.choice(shares)) * league_matches)
+    if form_drop and random.Random(f"{seed}:avail-form:{k}").random() < form_drop:
+        base = max(0, base - DROP_MATCHES)
+    missed = min(league_matches, base + extra)
     start = rng.randrange(league_matches - missed + 1)
     return range(start, start + missed)
 
@@ -1211,9 +1230,10 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     comes up with no answer left the season pauses (`_NeedMoment`).
 
     A make-or-break (A205) is a key moment like any other, but its outcome is real whatever
-    the call: fail it and you are dropped for DROP_MATCHES league matches, which come off
-    the season's missed block rather than adding to it (that block was measured from real
-    seasons, so it already holds real drops)."""
+    the call: fail it and you are dropped for DROP_MATCHES league matches. The season's
+    missed block was measured from real seasons, so it already held real form drops; it is
+    drawn shorter by their real rate (`FORM_DROP_RATE`) for anyone who can be dropped, and
+    a drop then adds to it."""
     from game.__main__ import opposition_twelve
 
     sides, yours = year_sides(deck, you.season_year, you)
@@ -1230,7 +1250,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     yours_index = sides.index(yours)
     schedule = balanced_order(fixtures(len(sides), double), lambda pair: pair)
     league_matches = sum(yours_index in pair for pair in schedule)
-    out = set(missed_block(seed, k, league_matches, squad, extra_missed))
+    droppable = not squad and _kind(you) != "allrounder"
+    out = set(missed_block(seed, k, league_matches, squad, extra_missed,
+                           FORM_DROP_RATE[_kind(you)] if droppable else 0.0))
     dropped: set[int] = set()                      # league indices you were dropped for
     dropped_seen: list[int] = []                   # ... as your match numbers, for the feed
     verdicts: dict[int, str] = {}                  # make-or-break match -> "kept" | "dropped"
@@ -1283,14 +1305,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                     for c in yours.xi]
 
     def drop_from(idx: int) -> None:
-        """Dropped for this match and the next: the matches come off the missed block's
-        future end, so a season holds no more absences than the real ones it was drawn
-        from. A block already behind you cannot give any back."""
-        drop = set(range(idx, min(idx + DROP_MATCHES, league_matches)))
-        extra = len(drop - out)
-        for i in sorted((i for i in out if i > max(drop)), reverse=True)[:extra]:
-            out.discard(i)
-        dropped.update(drop)
+        """Dropped for this match and the next. The missed block was already drawn short
+        by the real rate of drops, so a drop adds to it rather than coming off it."""
+        dropped.update(range(idx, min(idx + DROP_MATCHES, league_matches)))
 
     def lineup() -> tuple[list[Card], Card | None]:
         """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays."""
@@ -1321,8 +1338,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             if idx in dropped:
                 dropped_seen.append(seen)
             stakes = None
-            rank = (None if benched or squad or _kind(me) == "allrounder"
-                    else book.form_rank(you_key))
+            rank = None if benched or not droppable else book.form_rank(you_key)
             if (rank is not None and rank < FORM_POOR and breaks < MAKE_OR_BREAK_MAX
                     and idx + 1 < league_matches):
                 last = book.games[you_key][-FORM_MATCHES:]

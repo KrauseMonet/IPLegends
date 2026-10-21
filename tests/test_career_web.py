@@ -66,7 +66,9 @@ def test_resuming_from_a_checkpoint_is_the_same_career_as_a_replay(deck, model):
         cp = C.Checkpoint.from_dict(json.loads(json.dumps(at.checkpoint.to_dict())))
         resumed = C.play_career(deck, model, 41, setup, moves[len(prefix):], resume=cp)
         assert [vars(s) for s in resumed.seasons] == [vars(s) for s in full.seasons]
-        assert resumed.pending.offers == full.pending.offers
+        assert (resumed.pending is None) == (full.pending is None)
+        if full.pending is not None:
+            assert resumed.pending.offers == full.pending.offers
         assert vars(resumed.checkpoint) == vars(full.checkpoint)
 
 
@@ -193,3 +195,35 @@ def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
     # and a club that does play the next year is not named
     later = _token(client, debut=2017, seed=seed)
     assert later["pending"]["club_gone"] is None
+
+
+def test_hints_name_missed_matches_and_an_ending():
+    for e in C.EVENTS:
+        for o in e.options:
+            h = R.option_hint(o).lower()
+            assert (f"miss {o.missed} matches" in h) == (o.missed > 0)
+            assert ("career ends" in h) == o.retire
+
+
+def test_a_three_year_deal_through_the_api(client, deck):
+    seed = next(s for s in range(1, 2000) if all(len(C.draw_event(s, k).options) == 1 for k in range(2)))
+    d = _token(client, seed=seed, debut=2017)
+    clubs_2018 = {C.canonical(deck.cards_by_fs[fs][0].franchise) for fs in C.year_fs_ids(deck, 2018)}
+    i = next(n for n, o in enumerate(d["pending"]["offers"]) if C.canonical(o["franchise"]) in clubs_2018)
+    assert d["pending"]["offers"][i]["price3"]
+    d = client.post("/api/career/move", json={"token": d["token"], "move": f"c{i}"}).json()
+    assert d["seasons"][0]["contract_year"] == 1
+    o = d["pending"]["offers"]
+    assert len(o) == 1 and o[0]["contract_year"] == 2 and o[0]["price3"] is None
+    bad = client.post("/api/career/move", json={"token": d["token"], "move": "c0"})
+    assert bad.status_code == 409
+
+
+def test_an_event_card_reaches_the_page_with_its_real_name(client, deck):
+    seed = next(s for s in range(1, 5000) if C.draw_event(s, 0).key == "mentor")
+    d = _token(client, seed=seed)
+    d = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
+    e = d["pending"]["event"]
+    assert e["key"] == "mentor" and "{name}" not in e["text"] and "senior player" not in e["text"]
+    names = {c.name for fs in C.year_fs_ids(deck, 2014) for c in deck.cards_by_fs[fs]}
+    assert any(n in e["text"] for n in names)

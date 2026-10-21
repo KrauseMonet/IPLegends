@@ -142,9 +142,10 @@ STAY_DISCOUNT = 0.9                  # staying put costs a little money
 PRICE_CAP = 2700                     # lakh: the real record (Pant, 2025)
 
 # --- event cards -----------------------------------------------------------------------
-# One per season, drawn from `{seed}:event:{k}`. Declared game design. Each option is
-# (label, this-season ability change, permanent ability change, captain this season).
-# An event with one option is shown, not asked.
+# One per season, drawn from the seed (and the setup, for who may get which card) -- never
+# from your choices. Declared game design. Each option is (label, this-season ability
+# change, permanent ability change, captain this season, extra league matches missed,
+# retire now). An event with one option is shown, not asked.
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,8 @@ class EventOption:
     season: float = 0.0
     permanent: float = 0.0
     captain: bool = False
+    missed: int = 0                     # extra league matches missed this season (A200)
+    retire: bool = False                # ends the career before the season is played
 
 
 @dataclass(frozen=True)
@@ -162,6 +165,13 @@ class Event:
     text: str
     weight: int
     options: tuple[EventOption, ...]
+    # [A200] "{name}" in the text is a REAL player: "mentor" the best of your own kind in
+    # your franchise's real squad that year, "rival" the best player in another team that
+    # year. Never a captain: captains are not in the archive.
+    who: str | None = None
+    # [A200] Who can draw the card: "late" only from LATE_FROM seasons on, "overseas" only
+    # an overseas player. Decided by the seed and the setup, never by a choice.
+    when: str | None = None
 
 
 EVENTS: tuple[Event, ...] = (
@@ -178,7 +188,28 @@ EVENTS: tuple[Event, ...] = (
     Event("coach", "A new coach", "A coach wants to rebuild your technique from scratch.", 2,
           (EventOption("Rebuild it", season=-0.10, permanent=0.10),
            EventOption("Stick with what works"))),
+    # [A200] six more, each declared like the five above and checked by the calibration.
+    Event("injury", "An injury", "A side strain in the first fortnight. The physio wants six weeks.", 1,
+          (EventOption("Rush back", season=-0.10, missed=2),
+           EventOption("Take the full six weeks", missed=5))),
+    Event("mentor", "A mentor", "{name} offers to work with you through the season.", 1,
+          (EventOption("Learn from him", season=-0.05, permanent=0.05),
+           EventOption("Do it your way")), who="mentor"),
+    Event("rivalry", "A rivalry", "The papers have built up your duel with {name}.", 1,
+          (EventOption("Rise to it", season=0.05),), who="rival"),
+    Event("slump", "Out of form", "Nothing is coming off in the nets.", 1,
+          (EventOption("Work through it", season=-0.10),
+           EventOption("Take a break", missed=3))),
+    Event("home_league", "A league back home",
+          "Your home board wants you for its own T20 league, which runs into the IPL's opening weeks.", 2,
+          (EventOption("Skip it"),
+           EventOption("Play there first", permanent=0.03, missed=4)), when="overseas"),
+    Event("one_more", "One more season?", "You are past your best, and the franchise still wants you.", 3,
+          (EventOption("One more year"),
+           EventOption("Retire on a high", retire=True)), when="late"),
 )
+
+LATE_FROM = 10                       # "One more season?" from the eleventh season on
 
 
 # Cards that make no sense for a man who has lost his place: in a squad season they become
@@ -186,7 +217,7 @@ EVENTS: tuple[Event, ...] = (
 NOT_IN_A_SQUAD_SEASON = frozenset({"captain"})
 
 # How often a card may come up in one career. Unlisted: no limit beyond no-repeats.
-EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 3}
+EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 3, "injury": 2, "mentor": 2, "slump": 2}
 
 
 class CareerError(ValueError):
@@ -635,18 +666,29 @@ def season_display(deck: Deck, year: int, card: Card, percentile: float) -> int:
 # --- offers ---------------------------------------------------------------------------
 
 
+# [A200] Contracts, ratified by the user: a three-year deal is paid less and locks you in,
+# and form cannot end your career while a year of it remains. The IPL itself runs on
+# three-year cycles between mega auctions.
+CONTRACT_YEARS = 3
+CONTRACT_DISCOUNT = 0.85
+
+
 @dataclass(frozen=True)
 class Offer:
     fs_id: int
     franchise: str
     short: str
-    price: int                  # lakh
+    price: int                  # lakh, a one-year deal
     strength: int | None        # the franchise's twelve's mean card rating, without you
     stay: bool = False
+    price3: int | None = None   # lakh a year on a three-year deal; None when not offered
+    contract_year: int = 0      # 2 or 3: the season of a three-year deal already signed
+    position: int | None = None  # where you would bat in that eleven (A200)
+    attack_rank: int | None = None  # where you would come in its attack, if you bowl
 
 
 def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
-               last_display: int | None) -> list[Offer]:
+               last_display: int | None, contract: "Contract | None" = None) -> list[Offer]:
     """Your current franchise first (if it still exists this year), then OFFERS others.
     `current` is a CANONICAL franchise, so Delhi Daredevils and Delhi Capitals are one club
     and staying across the rename is staying. A debutant is uncapped and every offer is
@@ -656,6 +698,16 @@ def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
     rng = random.Random(f"{seed}:offers:{k}")
     fss = year_fs_ids(deck, year)
     club = {fs: canonical(deck.cards_by_fs[fs][0].franchise) for fs in fss}
+    if contract is not None and contract.left > 0:
+        signed = [fs for fs in fss if club[fs] == contract.club]
+        if signed:                     # a club with no team this year voids the deal
+            fs = signed[0]
+            squad = deck.cards_by_fs[fs]
+            xi, impact = opposition_twelve(list(squad))
+            c = squad[0]
+            return [Offer(fs, c.franchise, _abbrev(c.franchise, year), contract.price,
+                          team_rating(xi + ([impact] if impact else [])).overall, True,
+                          contract_year=CONTRACT_YEARS - contract.left + 1)]
     others = [fs for fs in fss if club[fs] != current]
     picked = sorted(rng.sample(others, min(OFFERS, len(others))))
     value = DEBUT_PRICE if last_display is None else value_curve(last_display, mega=True)
@@ -667,33 +719,70 @@ def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
         price = (DEBUT_PRICE if last_display is None
                  else max(DEBUT_PRICE, min(PRICE_CAP, 5 * round(price / 5))))
         c = squad[0]
+        price3 = price if last_display is None else max(
+            DEBUT_PRICE, 5 * round(price * CONTRACT_DISCOUNT / 5))
         return Offer(fs, c.franchise, _abbrev(c.franchise, year), price,
-                     team_rating(xi + ([impact] if impact else [])).overall, stay)
+                     team_rating(xi + ([impact] if impact else [])).overall, stay, price3)
 
     out = [offer(fs, True) for fs in fss if current is not None and club[fs] == current]
     return out + [offer(fs, False) for fs in picked]
 
 
-def event_sequence(seed: int) -> list[Event]:
-    """The career's event cards, one per season, from the seed alone (never from your
-    choices, so an answer cannot change which card comes next). No card twice running,
-    and none beyond `EVENT_LIMIT` times in a career: four coaches in a row reads as a bug
-    and stacks a permanent effect the curve was not drawn for."""
+def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
+    """(batting position, place in the attack or None) for you in that franchise's eleven,
+    by the same selection the season itself makes."""
+    xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]))
+    position = next(i for i, c in enumerate(xi, 1) if c.person_id == YOU_ID)
+    if not bowls_for_you(you):
+        return position, None
+    me = next(c for c in xi if c.person_id == YOU_ID)
+    attack = sorted((c for c in xi if c.has_bowl), key=lambda c: -c.bowl)
+    return position, next(i for i, c in enumerate(attack, 1) if c is me)
+
+
+def event_sequence(seed: int, overseas: bool = False) -> list[Event]:
+    """The career's event cards, one per season, from the seed and the passport alone (never
+    from your choices, so an answer cannot change which card comes next). No card twice
+    running, and none beyond `EVENT_LIMIT` times in a career: four coaches in a row reads as
+    a bug and stacks a permanent effect the curve was not drawn for. A card's `when` decides
+    who may draw it at all."""
     rng = random.Random(f"{seed}:events")
     out: list[Event] = []
     used: dict[str, int] = {}
-    for _ in range(MAX_SEASONS):
+    for k in range(MAX_SEASONS):
         allowed = [e for e in EVENTS
                    if (not out or e.key == "quiet" or e is not out[-1])
-                   and used.get(e.key, 0) < EVENT_LIMIT.get(e.key, MAX_SEASONS)]
+                   and used.get(e.key, 0) < EVENT_LIMIT.get(e.key, MAX_SEASONS)
+                   and (e.when != "late" or k >= LATE_FROM)
+                   and (e.when != "overseas" or overseas)]
         e = rng.choices(allowed, weights=[e.weight for e in allowed])[0]
         used[e.key] = used.get(e.key, 0) + 1
         out.append(e)
     return out
 
 
-def draw_event(seed: int, k: int) -> Event:
-    return event_sequence(seed)[k]
+def draw_event(seed: int, k: int, overseas: bool = False) -> Event:
+    return event_sequence(seed, overseas)[k]
+
+
+def event_name(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> str | None:
+    """The real player an event names: the best of your kind in your own squad (a mentor),
+    or the best player of any other team that year (a rival), by his card that season."""
+    if event.who == "mentor":
+        kind = _kind(you)
+        mates = [c for c in deck.cards_by_fs[fs_id]
+                 if c.display is not None and _kind(c) == kind]
+        # A spinner is mentored by a spinner when the squad has one (a pace bowler offering
+        # to coach a leg-spinner reads wrong); otherwise by the best of his kind.
+        same = [c for c in mates if you.bowling_style and c.bowling_style == you.bowling_style]
+        best = max(same or mates, key=lambda c: (c.display, c.person_id), default=None)
+    elif event.who == "rival":
+        others = [c for fs in year_fs_ids(deck, year) if fs != fs_id
+                  for c in deck.cards_by_fs[fs] if c.display is not None]
+        best = max(others, key=lambda c: (c.display, c.person_id), default=None)
+    else:
+        return None
+    return best.name if best else None
 
 
 # --- a season, and a career -------------------------------------------------------------
@@ -733,6 +822,8 @@ class SeasonRecord:
     four_fors: int = 0
     best: tuple[int, int] = (0, 0)
     squad: bool = False                # a squad season: a poor one went before (A198)
+    extra_missed: int = 0              # matches an event card cost you, inside `missed` (A200)
+    contract_year: int = 0             # 1-3 on a three-year deal, 0 on a one-year (A200)
     missed: int = 0                    # league matches missed (A198)
     percentile: float = 0.0
     form: int = 70                     # the season's own card, before the reputation floor
@@ -746,8 +837,29 @@ class SeasonRecord:
     highlights: list[Highlight] = field(default_factory=list)
 
 
+def _best_bat(inn, but: str = YOU_ID):
+    """The innings' top scorer other than `but`, or None if nobody else scored."""
+    others = [b for b in (inn.batting if inn else []) if b.player.person_id != but and b.runs]
+    return max(others, key=lambda b: (b.runs, -b.balls), default=None)
+
+
+def _best_ball(inn, but: str = YOU_ID):
+    others = [w for w in (inn.bowling if inn else []) if w.player.person_id != but and w.wickets]
+    return max(others, key=lambda w: (w.wickets, -w.runs), default=None)
+
+
+def _bat_line(b) -> str:
+    return f"{b.player.name} {b.runs}{'' if b.out else '*'}"
+
+
+def _ball_line(w) -> str:
+    return f"{w.player.name} {w.wickets}/{w.runs}"
+
+
 def _highlights(results: list[Result], yours: Side) -> list[Highlight]:
-    """Your best few moments: fifties and three-fors, the playoff games, a title."""
+    """Your best few moments -- fifties and three-fors, a final -- each with the real
+    teammate who did most beside you in that match, off the scorecard (A200). The names
+    are the real squad's; a partnership is not claimed, because the engine keeps none."""
     out: list[tuple[int, Highlight]] = []
     for r in results:
         if yours is not r.home and yours is not r.away:
@@ -757,17 +869,26 @@ def _highlights(results: list[Result], yours: Side) -> list[Highlight]:
         bowl = r.away_innings if yours is r.home else r.home_innings
         for b in (bat.batting if bat else []):
             if b.player.person_id == YOU_ID and b.runs >= 50:
+                mate = _best_bat(bat)
+                beside = f" · {_bat_line(mate)}" if mate else ""
                 out.append((b.runs, Highlight(r.stage, opp.short,
-                            f"{b.runs}{'' if b.out else '*'} off {b.balls}")))
+                            f"{b.runs}{'' if b.out else '*'} off {b.balls}{beside}")))
         for w in (bowl.bowling if bowl else []):
             if w.player.person_id == YOU_ID and w.wickets >= 3:
+                mate = _best_ball(bowl)
+                beside = f" · {_ball_line(mate)}" if mate else ""
                 out.append((25 * w.wickets, Highlight(r.stage, opp.short,
-                            f"{w.wickets}/{w.runs} in {w.overs} overs")))
+                            f"{w.wickets}/{w.runs} in {w.overs} overs{beside}")))
         if r.stage == "Final":
             won = r.winner is yours
+            star = _best_bat(bat, but="")          # the side's top scorer, you included
             # `margin` names the winner ("RCB 2015 by 9 wickets"), so it reads as an aside.
-            out.append((1000 if won else 500, Highlight(r.stage, opp.short,
-                        f"{'Won' if won else 'Lost'} the final{f' ({r.margin})' if r.margin else ''}")))
+            text = f"{'Won' if won else 'Lost'} the final{f' ({r.margin})' if r.margin else ''}"
+            if star and star.player.person_id == YOU_ID:
+                text += f" · you top-scored with {star.runs}"
+            elif star:
+                text += f" · {_bat_line(star)} top-scored"
+            out.append((1000 if won else 500, Highlight(r.stage, opp.short, text)))
     return [h for _, h in sorted(out, key=lambda x: -x[0])[:4]]
 
 
@@ -798,13 +919,14 @@ class Year:
     missed: int                        # league matches you missed
 
 
-def missed_block(seed: int, k: int, league_matches: int, squad: bool = False) -> range:
+def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
+                 extra: int = 0) -> range:
     """Which of your league matches you miss: one block, its length from the real share of
     matches a regular (or, in a squad season, a non-regular) plays. Its own random stream,
     so missing matches never changes how the matches themselves are drawn."""
     rng = random.Random(f"{seed}:avail:{k}")
     shares = SQUAD_SHARES if squad else AVAILABILITY_SHARES
-    missed = round((1 - rng.choice(shares)) * league_matches)
+    missed = min(league_matches, round((1 - rng.choice(shares)) * league_matches) + extra)
     start = rng.randrange(league_matches - missed + 1)
     return range(start, start + missed)
 
@@ -834,7 +956,7 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
 
 
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                  squad: bool = False) -> Year:
+                  squad: bool = False, extra_missed: int = 0) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`."""
     from game.__main__ import opposition_twelve
@@ -852,7 +974,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     roster[id(yours)][YOU_ID] = me
     yours_index = sides.index(yours)
     league_matches = sum(yours_index in pair for pair in fixtures(len(sides), double))
-    out = missed_block(seed, k, league_matches, squad)
+    out = missed_block(seed, k, league_matches, squad, extra_missed)
     played = 0
     rested = _rested_lineup(yours, me)
     bowl_rng = random.Random(f"{seed}:bowls:{k}")
@@ -891,7 +1013,7 @@ def season_caps(lines: dict[tuple[str, int], Line]) -> tuple[Line, Line | None]:
 
 def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
                 record: SeasonRecord) -> SeasonRecord:
-    year = simulate_year(deck, model, seed, k, you, record.squad)
+    year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -922,6 +1044,7 @@ class Pending:
     year: int
     k: int
     squad: bool = False                # the season ahead is a squad season
+    event_text: str | None = None      # the card's text, with any real name filled in
     offers: list[Offer] = field(default_factory=list)
     event: Event | None = None
 
@@ -1032,6 +1155,13 @@ def form_after(squad: bool, percentile: float, bar: float | None = None) -> tupl
 
 
 @dataclass
+class Contract:
+    club: str                             # canonical franchise
+    price: int                            # lakh a year
+    left: int                             # seasons of it still to play
+
+
+@dataclass
 class Checkpoint:
     """Everything the career loop carries from one season to the next, so a career can be
     resumed after its last completed season without replaying the seasons before it (A199).
@@ -1047,6 +1177,7 @@ class Checkpoint:
     # How the career ended, or None while it goes on. Without it a finished career's
     # checkpoint resumes into another season, which the API test caught.
     ended: str | None = None              # "retired" | "released"
+    contract: Contract | None = None      # a three-year deal in progress (A200)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -1059,9 +1190,10 @@ class Checkpoint:
             r["best"] = tuple(r["best"])
             r["highlights"] = [Highlight(**h) for h in r["highlights"]]
             seasons.append(SeasonRecord(**r))
+        contract = Contract(**d["contract"]) if d.get("contract") else None
         return cls(k=d["k"], permanent=d["permanent"], current=d["current"],
                    last_display=d["last_display"], squad=d["squad"], seasons=seasons,
-                   ended=d.get("ended"))
+                   ended=d.get("ended"), contract=contract)
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -1083,19 +1215,37 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
         k = cp.k
         year = setup.debut + k
+        offers = offers_for(deck, seed, k, year, cp.current, cp.last_display, cp.contract)
+        if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
+            cp.contract = None                 # the club has no team this year: deal void
         career.checkpoint = copy.deepcopy(cp)
-        offers = offers_for(deck, seed, k, year, cp.current, cp.last_display)
         move = next(it, None)
         if move is None:
-            career.pending = Pending("offer", year, k, offers=offers, squad=cp.squad)
+            here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
+                           fs_id=offers[0].fs_id, year=year, franchise=offers[0].franchise)
+            placed = []
+            for o in offers:
+                pos, rank = where_you_play(deck, dataclasses.replace(
+                    here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id)
+                placed.append(dataclasses.replace(o, position=pos, attack_rank=rank))
+            career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad)
             return career
         if move == "r":
             if k == 0:
                 raise CareerError("a career has to start before it can end")
             career.retired, cp.ended = True, "retired"
             break
-        offer = offers[_index(move, "o", len(offers))]
-        event = draw_event(seed, k)
+        if move.startswith("c"):
+            offer = offers[_index(move, "c", len(offers))]
+            if offer.contract_year or offer.price3 is None:
+                raise CareerError("that offer is not a three-year deal")
+            cp.contract = Contract(canonical(offer.franchise), offer.price3, CONTRACT_YEARS)
+            offer = dataclasses.replace(offer, price=offer.price3)
+        else:
+            offer = offers[_index(move, "o", len(offers))]
+            if not offer.contract_year:
+                cp.contract = None
+        event = draw_event(seed, k, setup.overseas)
         if cp.squad and event.key in NOT_IN_A_SQUAD_SEASON:
             event = EVENTS[0]              # nobody asks a squad player to captain the side
         if len(event.options) == 1:
@@ -1103,10 +1253,19 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         else:
             move = next(it, None)
             if move is None:
+                text = event.text
+                if event.who:
+                    probe = ability(start, ceiling, 0.0, setup=setup, fs_id=offer.fs_id,
+                                    year=year, franchise=offer.franchise)
+                    text = text.replace("{name}", event_name(deck, event, offer.fs_id, year,
+                                                             probe) or "A senior player")
                 career.pending = Pending("event", year, k, offers=[offer], event=event,
-                                         squad=cp.squad)
+                                         squad=cp.squad, event_text=text)
                 return career
             option = event.options[_index(move, "e", len(event.options))]
+        if option.retire:
+            career.retired, cp.ended = True, "retired"
+            break
         cp.permanent += option.permanent
         t = arc_point(k, cp.permanent, option.season)
         you = ability(start, ceiling, t, setup=setup, fs_id=offer.fs_id, year=year,
@@ -1114,7 +1273,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         record = SeasonRecord(k=k, year=year, franchise=offer.franchise, short=offer.short,
                               price=offer.price, stayed=offer.stay, event=event.key,
                               choice=option.label, captain=option.captain, ability=t,
-                              teams=0, squad=cp.squad)
+                              teams=0, squad=cp.squad, extra_missed=option.missed,
+                              contract_year=(CONTRACT_YEARS - cp.contract.left + 1
+                                             if cp.contract else 0))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         played = _cached_season(deck, model, seed, k, you, record,
@@ -1124,7 +1285,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         cp.seasons.append(played)
         cp.current, cp.last_display = canonical(offer.franchise), played.display
         cp.k += 1
+        if cp.contract is not None:
+            cp.contract.left -= 1
+            if cp.contract.left == 0:
+                cp.contract = None
         cp.squad, released = form_after(cp.squad, played.percentile, poor_bar(setup.role))
+        if released and cp.contract is not None:
+            released = False                   # a contract year remains: you stay, benched
         if released:
             career.released, cp.ended = True, "released"
             break
@@ -1162,6 +1329,9 @@ def policy_move(career: Career, policy: str, rng: random.Random) -> str:
         i = 0
     else:
         i = rng.randrange(len(p.offers))
+        if p.offers[i].price3 is not None and not p.offers[i].contract_year \
+                and rng.random() < 0.5:
+            return f"c{i}"                     # a careless player signs long half the time
     return f"o{i}"
 
 

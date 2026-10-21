@@ -147,25 +147,43 @@ function crRoll(){
   });
 }
 
+function crPlace(o){
+  if (o.attack_rank != null)
+    return o.attack_rank <= 2 ? 'Opens the bowling' : `Bowls ${crOrd(o.attack_rank)} in the attack`;
+  return o.position != null ? `Bats at ${o.position}` : '';
+}
+
 function crOffers(d){
   const p = d.pending;
   const strength = o => o.strength == null ? '' : `<span class="cr-strength">Squad <b>${o.strength}</b></span>`;
+  const deal = (o, i) => o.contract_year
+    ? `<div class="cr-deal"><button class="act lead" onclick="crMove('o${i}')">Play on</button>
+         <span>Year ${o.contract_year} of 3 · ${esc(o.price)}</span></div>`
+    : `<div class="cr-deal">
+         <button class="act lead" onclick="crMove('o${i}')">1 year · ${esc(o.price)}</button>
+         ${o.price3 ? `<button class="act" onclick="crMove('c${i}')">3 years · ${esc(o.price3)}/yr</button>` : ''}
+       </div>`;
   $('#crStage').innerHTML = `
     <div class="cr-step">
       <div class="over-line">${p.year} · SEASON ${p.season_no}</div>
-      <h2 class="cr-h">${p.season_no === 1 ? 'Who signs you?' : 'Who wants you this season?'}</h2>
+      <h2 class="cr-h">${p.offers.some(o => o.contract_year) ? 'Your contract goes on'
+        : p.season_no === 1 ? 'Who signs you?' : 'Who wants you this season?'}</h2>
       ${p.club_gone ? `<p class="room-note" style="text-align:center">${esc(p.club_gone)} have no team in ${p.year}, so there is no staying put.</p>` : ''}
-      ${p.squad ? `<p class="cr-warn">Last season was poor: whoever you join, you start as a squad
-        player and will get only a few matches. Another poor season and nobody will sign you.</p>` : ''}
+      ${p.squad ? `<p class="cr-warn">Last season was poor: you start this one as a squad player and
+        will get only a few matches.${p.offers.some(o => o.contract_year) ? ' Your contract keeps you safe from release.'
+        : ' Another poor season and nobody will sign you.'}</p>` : ''}
       <div class="cr-offers">${p.offers.map((o, i) => `
-        <button class="cr-offer${o.stay ? ' stay' : ''}" onclick="crMove('o${i}')">
-          ${o.stay ? '<span class="cr-tag">Stay</span>' : ''}
+        <div class="cr-offer${o.stay ? ' stay' : ''}">
+          ${o.stay ? `<span class="cr-tag">${o.contract_year ? 'Contract' : 'Stay'}</span>` : ''}
           ${crestImg(o.crest, 'cr-offer-crest')}
           <b>${esc(o.franchise)}</b>
-          <span class="cr-price">${esc(o.price)}</span>
+          <span class="cr-place">${esc(crPlace(o))}</span>
           ${strength(o)}
-        </button>`).join('')}</div>
-      <p class="room-note">Stronger squads win more titles, but you may play a smaller part in them.</p>
+          ${deal(o, i)}
+        </div>`).join('')}</div>
+      <p class="room-note">A three-year deal fixes your price for three seasons and keeps you
+        safe from release, but you cannot move or earn a raise. Stronger squads win more
+        titles, but you may play a smaller part in them.</p>
       ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
         <button class="act" onclick="crRetire()">Retire instead</button></div>` : ''}
     </div>`;
@@ -223,6 +241,7 @@ function crSeason(d, r){
           ${crBadge(r.orange_cap, 'orange', 'Orange Cap')}
           ${crBadge(r.purple_cap, 'purple', 'Purple Cap')}
           ${crBadge(r.captain, '', 'Captain')}
+          ${crBadge(r.contract_year > 0, '', `Contract year ${r.contract_year} of 3`)}
           ${crBadge(r.squad, 'dim', 'Squad player')}
           ${crBadge(r.missed > 0, 'dim', `Missed ${r.missed} match${r.missed === 1 ? '' : 'es'}`)}
           ${crBadge(r.card > r.form, 'dim', `Form ${r.form}, reputation held you at ${r.card}`)}

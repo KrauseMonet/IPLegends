@@ -650,3 +650,189 @@ def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
     assert first.seasons[0].squad is False and first.complete      # released after two
     second = first.seasons[1]
     assert second.squad and not second.captain and second.event == "quiet"
+
+
+# --- contracts, where you play, the new cards, real names (A200) ----------------------------
+
+
+def _seed_quiet(n, overseas=False):
+    return next(s for s in range(2000) if all(len(C.draw_event(s, k, overseas).options) == 1
+                                              for k in range(n)))
+
+
+def _lasting_offer(deck, model, seed, setup, years=3):
+    """An offer from a club with a team in each of the next `years` seasons."""
+    offers = C.play_career(deck, model, seed, setup, []).pending.offers
+    clubs = [{C.canonical(deck.cards_by_fs[fs][0].franchise)
+              for fs in C.year_fs_ids(deck, setup.debut + y)} for y in range(years)]
+    return next(i for i, o in enumerate(offers)
+                if all(C.canonical(o.franchise) in c for c in clubs))
+
+
+def test_a_three_year_deal_is_three_seasons_at_one_price_then_the_market(deck, model):
+    seed = _seed_quiet(4)
+    i = _lasting_offer(deck, model, seed, _setup())
+    c = C.play_career(deck, model, seed, _setup(), [f"c{i}"])
+    assert C.play_career(deck, model, seed, _setup(), []).pending.offers[i].price3 == C.DEBUT_PRICE
+    for year in (2, 3):
+        o = c.pending.offers
+        assert len(o) == 1 and o[0].stay and o[0].contract_year == year
+        assert o[0].franchise == c.seasons[0].franchise and o[0].price == c.seasons[0].price
+        c = C.play_career(deck, model, seed, _setup(), [f"c{i}"] + ["o0"] * (year - 1))
+    assert [r.contract_year for r in c.seasons] == [1, 2, 3]
+    assert len(c.pending.offers) > 1 and not any(o.contract_year for o in c.pending.offers)
+
+
+def test_a_signed_year_cannot_be_signed_again(deck, model):
+    seed = _seed_quiet(2)
+    with pytest.raises(C.CareerError):
+        C.play_career(deck, model, seed, _setup(), ["c1", "c0"])
+
+
+def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, monkeypatch):
+    """Every season poor: a one-year player is released after two, a three-year one plays
+    out his deal and goes after it ends."""
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
+    seed = _seed_quiet(4)
+    one = C.play_career(deck, model, seed, _setup(), ["o0", "o0"])
+    assert one.released and len(one.seasons) == 2
+    i = _lasting_offer(deck, model, seed, _setup())
+    three = C.play_career(deck, model, seed, _setup(), [f"c{i}", "o0", "o0"])
+    assert three.released and len(three.seasons) == 3
+    assert [r.squad for r in three.seasons] == [False, True, True]
+
+
+def test_a_contract_lapses_when_the_club_has_no_team(deck, model):
+    """Chennai have no team in 2016: a deal signed there in 2015 cannot carry over."""
+    setup = C.Setup("Tester", "opener", 2015)
+    seed = next(s for s in range(2000) if len(C.draw_event(s, 0).options) == 1 and any(
+        "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None)))
+    i = next(n for n, o in enumerate(C.play_career(deck, model, seed, setup, []).pending.offers)
+             if "Chennai" in o.franchise)
+    c = C.play_career(deck, model, seed, setup, [f"c{i}"])
+    assert len(c.pending.offers) > 1 and not any(o.contract_year for o in c.pending.offers)
+    assert c.checkpoint.contract is None
+
+
+def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
+    """The position on the offer is the one the season then uses, for a batter and a
+    bowler alike (no event, so the season's ability is the offer's)."""
+    for role in ("opener", "pace"):
+        seed = _seed_quiet(1)
+        c = C.play_career(deck, model, seed, _setup(role), [])
+        for o in c.pending.offers:
+            assert 1 <= o.position <= 11
+            assert (o.attack_rank is not None) == (role == "pace")
+            if o.attack_rank is not None:
+                assert 1 <= o.attack_rank <= 5
+            you = C.ability(c.start, c.ceiling, C.arc_point(0, 0.0, 0.0), setup=_setup(role),
+                            fs_id=o.fs_id, year=2012, franchise=o.franchise)
+            _, yours = C.year_sides(deck, 2012, you)
+            assert next(i for i, x in enumerate(yours.xi, 1) if x.person_id == C.YOU_ID) == o.position
+
+
+def test_late_and_overseas_cards_only_reach_who_they_are_for():
+    for seed in range(600):
+        for overseas in (False, True):
+            seq = C.event_sequence(seed, overseas)
+            for k, e in enumerate(seq):
+                if e.when == "late":
+                    assert k >= C.LATE_FROM
+                if e.when == "overseas":
+                    assert overseas
+    seen = {e.key for s in range(600) for e in C.event_sequence(s, True)}
+    assert {"one_more", "home_league", "injury", "mentor", "rivalry", "slump"} <= seen
+
+
+def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monkeypatch):
+    """Nobody is released here (POOR_PERCENTILE 0), so the career reaches the late card."""
+    monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
+    setup = C.Setup("Tester", "opener", 2008)
+    seed, k = next((s, k) for s in range(5000) for k in range(C.LATE_FROM, 14)
+                   if C.draw_event(s, k).key == "one_more"
+                   and all(len(C.draw_event(s, j).options) == 1 for j in range(k)))
+    moves = ["o0"] * k
+    before = C.play_career(deck, model, seed, setup, moves + ["o0"])
+    assert before.pending.kind == "event" and before.pending.event.key == "one_more"
+    done = C.play_career(deck, model, seed, setup, moves + ["o0", "e1"])
+    assert done.retired and done.complete and len(done.seasons) == k
+
+
+def test_an_event_that_costs_matches_adds_them_to_the_block():
+    for seed in range(200):
+        base = C.missed_block(seed, 2, 14)
+        hurt = C.missed_block(seed, 2, 14, extra=4)
+        assert len(hurt) == min(14, len(base) + 4) and hurt.start <= 14 - len(hurt)
+
+
+def test_a_mentor_is_a_real_teammate_and_a_rival_a_real_opponent(deck):
+    mentor = next(e for e in C.EVENTS if e.key == "mentor")
+    rival = next(e for e in C.EVENTS if e.key == "rivalry")
+    for fs in C.year_fs_ids(deck, 2018):
+        squad = deck.cards_by_fs[fs]
+        bowler = Card(fs_id=fs, person_id=C.YOU_ID, name="me", role="bowler")
+        name = C.event_name(deck, mentor, fs, 2018, bowler)
+        assert name in {c.name for c in squad if c.role == "bowler"}
+        best = max((c for c in squad if c.role == "bowler"), key=lambda c: c.display)
+        assert name == best.name or C._kind(best) != "bowler"
+        rname = C.event_name(deck, rival, fs, 2018, bowler)
+        assert rname not in {c.name for c in squad}
+        assert rname in {c.name for f in C.year_fs_ids(deck, 2018) for c in deck.cards_by_fs[f]}
+
+
+def test_a_highlight_names_a_real_teammate_from_that_match(deck, model):
+    start, ceiling = C.spin(deck, 8, "opener")
+    for fs in C.year_fs_ids(deck, 2016):
+        c0 = deck.cards_by_fs[fs][0]
+        you = C.ability(start, ceiling, 1.0, setup=_setup(), fs_id=fs, year=2016,
+                        franchise=c0.franchise)
+        year = C.simulate_year(deck, model, 13, 1, you)
+        hl = C._highlights(year.results, year.yours)
+        squad_names = {c.name for c in deck.cards_by_fs[fs]}
+        for h in hl:
+            if " · " in h.text and "the final" not in h.text:
+                named = h.text.split(" · ", 1)[1].rsplit(" ", 1)[0]
+                assert named in squad_names, h.text
+        if any(" · " in h.text for h in hl):
+            return
+    pytest.fail("no highlight with a teammate in eight seasons")
+
+
+def test_a_spinners_mentor_is_a_spinner_when_the_squad_has_one(deck):
+    mentor = next(e for e in C.EVENTS if e.key == "mentor")
+    checked = 0
+    for fs, squad in deck.cards_by_fs.items():
+        spinners = [c for c in squad if c.role == "bowler" and c.bowling_style == "spin"
+                    and c.display is not None]
+        if not spinners:
+            continue
+        you = Card(fs_id=fs, person_id=C.YOU_ID, name="me", role="bowler", bowling_style="spin")
+        name = C.event_name(deck, mentor, fs, squad[0].season_year, you)
+        assert name == max(spinners, key=lambda c: (c.display, c.person_id)).name
+        checked += 1
+    assert checked > 100
+
+
+def test_a_finals_line_names_its_real_top_scorer_you_included(deck, model):
+    """Across real seasons, every final line names whoever made the most runs for your side
+    in that final -- and says "you" when it was you."""
+    start, ceiling = C.spin(deck, 8, "opener")
+    finals = 0
+    for year in (2010, 2016, 2019, 2023):
+        for fs in C.year_fs_ids(deck, year):
+            c0 = deck.cards_by_fs[fs][0]
+            you = C.ability(start, ceiling, 1.0, setup=_setup(), fs_id=fs, year=year,
+                            franchise=c0.franchise)
+            y = C.simulate_year(deck, model, 17, 1, you)
+            final = y.results[-1]
+            if y.yours is not final.home and y.yours is not final.away:
+                continue
+            inn = final.home_innings if y.yours is final.home else final.away_innings
+            top = max(inn.batting, key=lambda b: (b.runs, -b.balls))
+            line = next(h.text for h in C._highlights(y.results, y.yours) if "the final" in h.text)
+            if top.player.person_id == C.YOU_ID:
+                assert f"you top-scored with {top.runs}" in line
+            else:
+                assert f"{top.player.name} {top.runs}" in line and "you top-scored" not in line
+            finals += 1
+    assert finals >= 3

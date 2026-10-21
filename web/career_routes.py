@@ -103,6 +103,7 @@ class SeasonOut(BaseModel):
     stayed: bool
     squad: bool
     captain: bool
+    contract_year: int            # 1-3 on a three-year deal, 0 on a one-year
     event: str
     choice: str
     card: int                     # the season's card, after the reputation floor
@@ -133,9 +134,13 @@ class OfferOut(BaseModel):
     franchise: str
     short: str
     crest: str | None
-    price: str
+    price: str                    # a one-year deal
+    price3: str | None            # a year, on a three-year deal; None when not offered
+    contract_year: int            # 2 or 3 when this is a deal already signed, else 0
     strength: int | None
     stay: bool
+    position: int | None          # where you would bat in that eleven
+    attack_rank: int | None       # where you would come in its attack, if you bowl
 
 
 class EventOptionOut(BaseModel):
@@ -213,7 +218,8 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
     return SeasonOut(
         year=r.year, franchise=r.franchise, short=r.short,
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
-        squad=r.squad, captain=r.captain, event=r.event, choice=r.choice, card=r.display,
+        squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
+        choice=r.choice, card=r.display,
         form=r.form, matches=r.matches, missed=r.missed, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
@@ -234,6 +240,10 @@ def option_hint(o: C.EventOption) -> str:
         bits.append("better from here on" if o.permanent > 0 else "a lasting cost")
     if o.captain:
         bits.append("you captain the side")
+    if o.missed:
+        bits.append(f"miss {o.missed} matches")
+    if o.retire:
+        bits.append("your career ends here")
     return ", ".join(bits).capitalize() if bits else "No change"
 
 
@@ -250,14 +260,17 @@ def _club_gone(career: C.Career) -> str | None:
 def _pending(p: C.Pending) -> PendingOut:
     event = None
     if p.kind == "event":
-        event = EventOut(key=p.event.key, title=p.event.title, text=p.event.text,
+        event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
                          options=[EventOptionOut(label=o.label, hint=option_hint(o))
                                   for o in p.event.options])
     return PendingOut(
         kind=p.kind, year=p.year, season_no=p.k + 1, squad=p.squad,
         offers=[OfferOut(franchise=o.franchise, short=o.short,
                          crest=crests.crest_url(o.franchise, p.year), price=crore(o.price),
-                         strength=o.strength, stay=o.stay) for o in p.offers],
+                         price3=(crore(o.price3) if o.price3 is not None and not o.contract_year
+                                 else None),
+                         contract_year=o.contract_year, strength=o.strength, stay=o.stay,
+                         position=o.position, attack_rank=o.attack_rank) for o in p.offers],
         event=event, can_retire=p.kind == "offer" and p.k > 0)
 
 

@@ -3902,6 +3902,20 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-moment-opt span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
 .cr-call{font-style:normal;font-family:var(--mono);font-size:10.5px;color:#1a1204;background:var(--gold);
   border-radius:5px;padding:1px 5px;margin-right:4px}
+.cr-call.mob{background:var(--red-2);color:#1a0603}
+.cr-verdict{font-style:normal;font-family:var(--mono);font-size:10.5px;border-radius:5px;padding:1px 5px;margin-left:4px}
+.cr-verdict.kept{color:#04150d;background:var(--mint)}
+.cr-verdict.dropped{color:#1a0603;background:var(--red-2)}
+.cr-dnp.drop{color:var(--red-2)}
+/* the live form line [A205] */
+.cr-feed-panel > .cr-form{grid-column:1/-1;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cr-form span{flex:0 0 auto}
+.cr-form b{flex:0 0 auto}
+.cr-form i{color:var(--ink-2)}
+.cr-form.hot b{color:var(--mint)}
+.cr-form.cold b{color:var(--red-2)}
+.cr-moment.mob{border-color:var(--red-2);background:linear-gradient(170deg,#2a0c08,var(--panel) 70%)}
+.cr-moment.mob .over-line{color:var(--red-2)}
 .cr-loading.small{padding:14px 0}
 .cr-loading.small b{font-size:22px}
 @media (max-width:560px){ .cr-moment-opts{grid-template-columns:1fr} }

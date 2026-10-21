@@ -1009,26 +1009,40 @@ def _moment_year(deck, model, role="opener", seed=29, fs_only=MOMENT_FS):
 
 
 def test_a_season_stops_only_where_something_is_at_stake(deck, model):
-    """Recomputed independently: a league stop has few matches left and your side within two
-    points of the qualification line; anything else is a playoff."""
+    """Recomputed independently, at EVERY stop of the season: a must-win has few matches left
+    and your side within two points of the qualification line; a playoff carries its stage's
+    stakes; a make-or-break (A205, tested on its own) names the drop."""
     you, need = _moment_year(deck, model)
-    m, season = need.moment, need.season
-    if m.stage == "league":
-        pts = {s.name: 0 for s in season.sides}
-        for r in season.results:
-            if r.winner is None:
-                pts[r.home.name] += 1; pts[r.away.name] += 1
+    answers, kinds = (), []
+    while True:
+        try:
+            C.simulate_year(deck, model, 29, 2, you, answers=answers)
+            break
+        except C._NeedMoment as need:
+            m, season = need.moment, need.season
+            kinds.append(m.kind)
+            if m.kind == "must_win":
+                assert m.stage == "league"
+                pts = {s.name: 0 for s in season.sides}
+                for r in season.results:
+                    if r.winner is None:
+                        pts[r.home.name] += 1; pts[r.away.name] += 1
+                    else:
+                        pts[r.winner.name] += 2
+                mine = pts[need.yours.name]
+                ranked = sorted(pts.values(), reverse=True)
+                assert min(abs(mine - ranked[3]), abs(mine - ranked[4])) <= C.MUST_WIN_EDGE
+                played = sum(need.yours is r.home or need.yours is r.away for r in season.results)
+                each = 16 if len(season.sides) == 9 else 14
+                assert each - played <= C.MUST_WIN_WINDOW
+            elif m.kind == "playoff":
+                assert m.stage in C.PLAYOFF_STAKES and m.stakes == C.PLAYOFF_STAKES[m.stage]
             else:
-                pts[r.winner.name] += 2
-        mine = pts[need.yours.name]
-        ranked = sorted(pts.values(), reverse=True)
-        assert min(abs(mine - ranked[3]), abs(mine - ranked[4])) <= C.MUST_WIN_EDGE
-        played = sum(need.yours is r.home or need.yours is r.away for r in season.results)
-        each = 16 if len(season.sides) == 9 else 14
-        assert each - played <= C.MUST_WIN_WINDOW
-    else:
-        assert m.stage in C.PLAYOFF_STAKES and m.stakes == C.PLAYOFF_STAKES[m.stage]
-    assert m.labels == C.APPROACH_LABELS["batter"]
+                assert m.kind == "make_or_break" and m.stage == "league"
+                assert f"next {C._WORDS[C.DROP_MATCHES]} matches" in m.stakes
+            assert m.labels == C.APPROACH_LABELS["batter"]
+            answers = answers + (1,)
+    assert "must_win" in kinds and "playoff" in kinds, kinds
 
 
 def test_your_call_is_played_in_that_match_and_only_that_one(deck, model):
@@ -1073,7 +1087,7 @@ def test_the_feed_tags_the_match_you_called_not_an_earlier_meeting(deck, model):
     opp = lambda r: (r.away if year.yours is r.home else r.home).short
     # The fixture must hold a league call on a REPEAT meeting, or this test cannot fail.
     assert any(st == "league" and any(opp(q) == opp(mine[num - 1]) for q in mine[:num - 1])
-               for num, st, _, _ in year.approaches)
+               for num, st, _, _, _ in year.approaches)
     for line, r in zip(detail.feed, mine):
         inn = r.home_innings if year.yours is r.home else r.away_innings
         shifted = any(b.player.person_id == C.YOU_ID
@@ -1100,6 +1114,7 @@ def test_every_league_stop_and_only_those_is_a_close_race(deck, model, monkeypat
             answers = answers + (1,)                       # Balanced: no result changes
     pts = {s.name: 0 for s in year.season.sides}
     mine = [r for r in year.season.results if year.yours in (r.home, r.away)]
+    breaks = {a[0] for a in year.approaches if a[4] == "make_or_break"}  # one call a match
     expected, outside_edge, k = set(), 0, 0
     for r in year.season.results:
         if year.yours in (r.home, r.away):
@@ -1110,7 +1125,7 @@ def test_every_league_stop_and_only_those_is_a_close_race(deck, model, monkeypat
             gap = m - ranked[4] if m > ranked[4] else ranked[3] - m if m < ranked[3] else 0
             inn = r.home_innings if year.yours is r.home else r.away_innings
             played = any(b.player.person_id == C.YOU_ID for b in inn.batting)
-            if played and left <= C.MUST_WIN_WINDOW:
+            if played and left <= C.MUST_WIN_WINDOW and k not in breaks:
                 if gap <= C.MUST_WIN_EDGE:
                     expected.add(k)
                 else:
@@ -1120,7 +1135,7 @@ def test_every_league_stop_and_only_those_is_a_close_race(deck, model, monkeypat
         else:
             pts[r.winner.name] += 2
     assert outside_edge, "the fixture must reach the window outside the edge, or the edge never acts"
-    assert {a[0] for a in year.approaches if a[1] == "league"} == expected
+    assert {a[0] for a in year.approaches if a[4] == "must_win"} == expected
 
 
 def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monkeypatch):
@@ -1132,7 +1147,7 @@ def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monke
             break
         except C._NeedMoment:
             answers = answers + (1,)
-    league = [a for a in year.approaches if a[1] == "league"]
+    league = [a for a in year.approaches if a[4] == "must_win"]
     assert len(league) <= C.MUST_WIN_MAX
     # Without the cap this season stops more than once in the league, so the cap is binding.
     monkeypatch.setattr(C, "MUST_WIN_MAX", 99)
@@ -1143,7 +1158,7 @@ def test_at_most_one_league_moment_and_every_playoff_you_play(deck, model, monke
             break
         except C._NeedMoment:
             answers = answers + (1,)
-    assert sum(a[1] == "league" for a in uncapped.approaches) > len(league)
+    assert sum(a[4] == "must_win" for a in uncapped.approaches) > len(league)
     played_po = [r.stage for r in year.season.playoffs
                  if year.yours in (r.home, r.away)
                  and any(b.player.person_id == C.YOU_ID
@@ -1163,3 +1178,216 @@ def test_an_answer_too_many_is_refused(deck, model):
             answers = answers + (1,)
     with pytest.raises(C.CareerError):
         C.simulate_year(deck, model, 29, 2, you, answers=answers + (1,))
+
+
+# --- form, make-or-break and drops (A205) ---------------------------------------------
+
+from types import SimpleNamespace as _NS
+
+
+def _book(specs: dict[str, tuple[str, str | None]]) -> "C.FormBook":
+    """A form book over one side (id 1) of stub cards: {person: (role, band)}."""
+    return C.FormBook({1: {p: _NS(role=r, band=b) for p, (r, b) in specs.items()}})
+
+
+def _games(book, person: str, values: list) -> None:
+    for v in values:
+        book.games[(person, 1)].append(v if isinstance(v, tuple) else (v, 0, 0, 0, True))
+
+
+def test_form_reads_the_last_three_matches_only():
+    book = _book({"a": ("batter", "opener"), "b": ("batter", "opener"), "c": ("batter", "opener")})
+    _games(book, "a", [100, 100, 0, 0, 0])            # all five: 200; last three: 0
+    _games(book, "b", [15] * 6)                       # last three: 45; all six: 90
+    _games(book, "c", [15] * 6)
+    assert book.form_rank(("a", 1)) == 0.0
+    assert C.form_word(book.form_rank(("a", 1))) == "Out of form"
+
+
+def test_form_is_ranked_among_your_own_kind():
+    book = _book({"a": ("batter", "opener"), "b": ("batter", "opener"), "c": ("batter", "opener"),
+                  "x": ("bowler", "tail"), "y": ("bowler", "tail"), "z": ("bowler", "tail")})
+    _games(book, "a", [3, 3, 4]); _games(book, "b", [10, 10, 10]); _games(book, "c", [12, 12, 12])
+    for p in "xyz":
+        _games(book, p, [(0, 1, 30, 24, None)] * 3)   # bowlers: no runs at all
+    assert book.form_rank(("a", 1)) == 0.0            # with the bowlers it would sit mid-table
+
+
+def test_a_batter_is_ranked_within_his_band_when_it_holds_enough():
+    specs = {f"m{i}": ("batter", "middle") for i in range(C.MIN_BAND_PEERS + 1)}
+    specs.update({f"o{i}": ("batter", "opener") for i in range(4)})
+    book = _book(specs)
+    for i in range(C.MIN_BAND_PEERS + 1):
+        _games(book, f"m{i}", [10 + i] * 3)
+    for i in range(4):
+        _games(book, f"o{i}", [60] * 3)
+    top = f"m{C.MIN_BAND_PEERS}"
+    assert book.form_rank((top, 1)) == 1.0             # among openers it would be low
+    assert C.form_word(book.form_rank((top, 1))) == "In form"
+
+
+def test_a_form_score_is_runs_for_a_batter_and_runs_saved_for_a_bowler():
+    game = (5, 2, 30, 24, True)
+    assert C.FormBook.score("batter", game) == 5
+    assert C.FormBook.score("bowler", game) == pytest.approx(2 * C.FORM_WICKET_RUNS - 30
+                                                             + C.FORM_PAR_PER_BALL * 24)
+    assert C.FormBook.score("allrounder", game) == pytest.approx(5 + 2 * C.FORM_WICKET_RUNS - 30
+                                                                 + C.FORM_PAR_PER_BALL * 24)
+
+
+def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_not_needed():
+    """A side's bowling is in the innings the OTHER side batted (A101's trap). A batter who
+    did not bat, or a bowler who did not bowl, has no form reading from that match."""
+    home, away = _NS(), _NS()
+    bat = lambda p, runs, faced, out: _NS(player=_NS(person_id=p), runs=runs, faced_any=faced, out=out)
+    bowl = lambda p, w, r, b: _NS(player=_NS(person_id=p), wickets=w, runs=r, balls=b)
+    r = _NS(home=home, away=away,
+            home_innings=_NS(batting=[bat("h_bat", 30, True, True), bat("h_dnb", 0, False, False),
+                                      bat("h_bowl", 0, False, False), bat("h_part", 0, False, False)],
+                             bowling=[bowl("a_bowl", 2, 25, 24)]),
+            away_innings=_NS(batting=[bat("a_bowl", 4, True, True)],
+                             bowling=[bowl("h_bowl", 3, 20, 24), bowl("h_part", 1, 12, 12)]))
+    book = C.FormBook({id(home): {"h_bat": _NS(role="batter", band="opener"),
+                                  "h_dnb": _NS(role="batter", band="middle"),
+                                  "h_bowl": _NS(role="bowler", band="tail"),
+                                  "h_part": _NS(role="batter", band="middle")},
+                       id(away): {"a_bowl": _NS(role="bowler", band="tail")}})
+    book.add([r])
+    assert book.games[("h_bat", id(home))] == [(30, 0, 0, 0, True)]
+    assert ("h_dnb", id(home)) not in book.games
+    assert ("h_part", id(home)) not in book.games     # a batter who only bowled: not his job
+    assert book.games[("h_bowl", id(home))] == [(0, 3, 20, 24, None)]
+    assert book.games[("a_bowl", id(away))] == [(4, 2, 25, 24, True)]
+
+
+MOB_FS = {"dropped": 50, "kept": 26, "behind": 77}   # 2019: Delhi, Chennai, Kolkata (found by search)
+
+
+def _mob_you(deck, fs, role="opener"):
+    start, ceiling = C.spin(deck, 3, role)
+    return C.ability(start, ceiling, 0.0, setup=_setup(role), fs_id=fs, year=2019,
+                     franchise=deck.cards_by_fs[fs][0].franchise)
+
+
+def _in_xi(year, r) -> bool:
+    inn = r.home_innings if year.yours is r.home else r.away_innings
+    return any(b.player.person_id == C.YOU_ID for b in inn.batting)
+
+
+def _your_league(year):
+    return [r for r in year.season.results if year.yours in (r.home, r.away)]
+
+
+def _poor_points(year, late: bool = False) -> list[int]:
+    """Recomputed from the results: your league matches (1-based) you played having FORM
+    poor as it stood straight after your previous match, with a match still to come.
+    `late` reads it instead just before the match, other sides' matches included -- the
+    wrong rule, kept so a fixture can show the two differ."""
+    book, key = C.FormBook(year.roster), (C.YOU_ID, id(year.yours))
+    results = year.season.results
+    idx = [i for i, r in enumerate(results) if year.yours in (r.home, r.away)]
+    out = []
+    for k, i in enumerate(idx, 1):
+        if late:
+            book.add(results[:i])
+        elif k > 1:
+            book.add(results[:idx[k - 2] + 1])
+        rank = book.form_rank(key)
+        if _in_xi(year, results[i]) and rank is not None and rank < C.FORM_POOR and k < len(idx):
+            out.append(k)
+    return out
+
+
+@pytest.mark.parametrize("fixture", ["dropped", "kept"])
+def test_a_make_or_break_comes_the_first_time_your_form_turns_poor(deck, model, fixture):
+    """Form as it stood straight after your own last match. Chennai ("kept") is where it
+    matters, found by search: reading it later, after other sides' matches, moves the first
+    poor reading from match 5 to match 12."""
+    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS[fixture]), answers=None)
+    poor = _poor_points(year)
+    assert poor, "the fixture must reach poor form"
+    assert list(year.verdicts) == [poor[0]]
+    if fixture == "kept":
+        assert _poor_points(year, late=True)[0] != poor[0], "the fixture must tell the readings apart"
+
+
+def test_one_make_or_break_a_season(deck, model, monkeypatch):
+    you = _mob_you(deck, MOB_FS["dropped"])
+    assert len(C.simulate_year(deck, model, 31, 2, you, answers=None).verdicts) == C.MAKE_OR_BREAK_MAX
+    monkeypatch.setattr(C, "MAKE_OR_BREAK_MAX", 99)
+    assert len(C.simulate_year(deck, model, 31, 2, you, answers=None).verdicts) > 1   # it binds
+
+
+def _single_rank(year, k: int) -> float:
+    """Your k-th league match against every match of your kind up to and including it."""
+    book, key = C.FormBook(year.roster), (C.YOU_ID, id(year.yours))
+    results = year.season.results
+    i = [j for j, r in enumerate(results) if year.yours in (r.home, r.away)][k - 1]
+    book.add(results[:i + 1])
+    return book.last_match_rank(key)
+
+
+def test_failing_a_make_or_break_drops_you_for_the_next_two_matches(deck, model):
+    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
+    (k, verdict), = year.verdicts.items()
+    assert verdict == "dropped" and _single_rank(year, k) < C.FORM_POOR
+    mine = _your_league(year)
+    assert _in_xi(year, mine[k - 1])
+    assert not any(_in_xi(year, r) for r in mine[k:k + C.DROP_MATCHES])
+    assert year.dropped == list(range(k + 1, k + 1 + C.DROP_MATCHES))
+
+
+def test_coming_through_a_make_or_break_keeps_your_place(deck, model):
+    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["kept"]), answers=None)
+    (k, verdict), = year.verdicts.items()
+    assert verdict == "kept" and _single_rank(year, k) >= C.FORM_POOR
+    assert _in_xi(year, _your_league(year)[k]) and year.dropped == []
+
+
+def test_a_drop_comes_off_the_missed_block(deck, model):
+    """The block was measured from real seasons, so it already holds real drops: a drop
+    gives back block matches still to come, and only a block already behind you cannot."""
+    year = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), answers=None)
+    mine = _your_league(year)
+    block = C.missed_block(31, 2, len(mine))
+    assert min(block) > max(year.dropped) - 1, "the fixture's block must lie after the drop"
+    assert all(_in_xi(year, mine[i]) for i in block)               # given back
+    assert year.missed == C.DROP_MATCHES
+    behind = C.simulate_year(deck, model, 29, 2, _mob_you(deck, MOB_FS["behind"]), answers=None)
+    block = C.missed_block(29, 2, len(_your_league(behind)))
+    assert max(block) + 1 < min(behind.dropped), "the fixture's block must lie before the drop"
+    assert behind.missed == len(block) + C.DROP_MATCHES
+
+
+def test_squad_seasons_and_allrounders_never_get_a_make_or_break(deck, model):
+    squad = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"]), squad=True,
+                            answers=None)
+    assert _poor_points(squad), "the fixture must reach poor form"
+    assert squad.verdicts == {}
+    ar = C.simulate_year(deck, model, 31, 2, _mob_you(deck, MOB_FS["dropped"], "allrounder"),
+                         answers=None)
+    assert _poor_points(ar), "the fixture must reach poor form"
+    assert ar.verdicts == {}
+
+
+def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
+    you = _mob_you(deck, MOB_FS["dropped"])
+    answers = ()
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 31, 2, you, answers=answers)
+            break
+        except C._NeedMoment:
+            answers = answers + (1,)
+    detail = C.season_detail(year)
+    (k, _), = year.verdicts.items()
+    league = [l for l in detail.feed if l.stage == "league"]
+    assert league[k - 2].form_word == "Out of form"            # what the make-or-break read
+    assert league[k - 1].stop == "make_or_break" and league[k - 1].verdict == "dropped"
+    assert league[k - 1].approach == C.APPROACH_LABELS["batter"][1]
+    assert [l.dropped for l in league[k:k + C.DROP_MATCHES]] == [True] * C.DROP_MATCHES
+    assert not any(l.dropped for l in league[:k] + league[k + C.DROP_MATCHES:])
+    book = C.FormBook(year.roster)
+    book.add(year.results)
+    assert detail.feed[-1].form == [C.form_figure("batter", g) for g in
+                               book.games[(C.YOU_ID, id(year.yours))][-C.FORM_SHOWN:]]

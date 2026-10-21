@@ -110,6 +110,7 @@ class SeasonOut(BaseModel):
     form: int                     # the season's own card
     matches: int
     missed: int
+    dropped: int = 0              # of those, dropped for form (A205)
     runs: int
     balls: int
     outs: int
@@ -169,6 +170,7 @@ class MomentOut(BaseModel):
     opp_crest: str | None
     stakes: str
     options: list[MomentOptionOut]
+    kind: str = "must_win"        # "must_win" | "playoff" | "make_or_break" (A205)
 
 
 class PendingOut(BaseModel):
@@ -241,6 +243,11 @@ class MatchLineOut(BaseModel):
     purple_you: bool
     watch: int | None             # index into `watch`
     approach: str | None = None   # your call, when this was a key moment (A204)
+    stop: str | None = None       # what kind of key moment it was (A205)
+    verdict: str | None = None    # a make-or-break's outcome: "kept" | "dropped"
+    dropped: bool = False         # left out for form
+    form: list[str] = []          # your last five matches, oldest first
+    form_word: str | None = None  # In form / Steady / Out of form
 
 
 class TableRowOut(BaseModel):
@@ -294,7 +301,7 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
         choice=r.choice, card=r.display,
-        form=r.form, matches=r.matches, missed=r.missed, runs=r.runs, balls=r.balls,
+        form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
         best=f"{r.best[0]}/{r.best[1]}" if r.bowl_balls else None, position=r.position,
@@ -341,7 +348,8 @@ def _moment(m: C.Moment, role: str) -> MomentOut:
     hints = BOWLING_HINTS if role in ("pace", "spin") else APPROACH_HINTS
     return MomentOut(stage=m.stage, opponent=m.opponent, opp_short=m.opp_short,
                      opp_crest=crests.crest_url(m.opp_franchise, m.opp_year), stakes=m.stakes,
-                     options=[MomentOptionOut(label=l, hint=h) for l, h in zip(m.labels, hints)])
+                     options=[MomentOptionOut(label=l, hint=h) for l, h in zip(m.labels, hints)],
+                     kind=m.kind)
 
 
 def _pending(p: C.Pending, role: str = "") -> PendingOut:
@@ -391,7 +399,8 @@ def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
         position=l.position, season_runs=l.season_runs, season_wickets=l.season_wickets,
         orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
-        approach=l.approach)
+        approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
+        form_word=l.form_word)
         for l in detail.feed]
     table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
                          played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,

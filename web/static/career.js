@@ -221,6 +221,7 @@ function crStageName(stage, n){
 }
 
 function crFigures(l){
+  if (l.dropped) return '<span class="cr-dnp drop">Dropped</span>';
   if (!l.played) return '<span class="cr-dnp">Did not play</span>';
   const bits = [];
   if (l.batted) bits.push(`<b>${l.runs}${l.out ? '' : '*'}</b> (${l.balls})`);
@@ -234,8 +235,24 @@ function crFeedRow(l, n){
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-res">${l.result}</span>
     <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
-    <span class="cr-fr-you">${l.approach ? `<em class="cr-call">${esc(l.approach)}</em> ` : ''}${crFigures(l)}</span>
+    <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}</span>
   </li>`;
+}
+
+// A make-or-break's outcome, on the match that decided it [A205].
+function crVerdict(l){
+  if (!l.verdict) return '';
+  return l.verdict === 'kept' ? ' <em class="cr-verdict kept">Kept your place</em>'
+                              : ' <em class="cr-verdict dropped">Dropped</em>';
+}
+
+// Your last five matches and where they leave you among your kind this season [A205]: the
+// same reading that decides a make-or-break.
+function crForm(l){
+  if (!l.form || !l.form.length) return '';
+  const cls = {'In form': 'hot', 'Out of form': 'cold'}[l.form_word] || '';
+  return `<div class="cr-form ${cls}"><span>Form</span><b>${esc(l.form_word || 'Settling in')}</b>
+    <i>${l.form.map(esc).join(' · ')}</i></div>`;
 }
 
 function crFeedPanel(l){
@@ -247,7 +264,8 @@ function crFeedPanel(l){
     <div><span>Table</span><b>${pos}</b></div>
     <div><span>You</span><b>${crNum(l.season_runs)} runs · ${l.season_wickets} wkts</b></div>
     ${cap('Orange Cap', l.orange, crNum(l.orange_n), l.orange_you, 'runs')}
-    ${cap('Purple Cap', l.purple, l.purple_n, l.purple_you, 'wkts')}`;
+    ${cap('Purple Cap', l.purple, l.purple_n, l.purple_you, 'wkts')}
+    ${crForm(l)}`;
 }
 
 // The feed survives between requests [A204]: a season can pause at a key moment, and the
@@ -325,11 +343,12 @@ function crFeedSkip(){
 
 // A key moment [A204]: the season has stopped, and this match is yours to call.
 function crMomentCard(){
-  const m = CR.feed.d.pending.moment;
+  const m = CR.feed.d.pending.moment, mob = m.kind === 'make_or_break';
+  const head = mob ? 'MAKE OR BREAK' : `KEY MOMENT · ${esc(m.stage === 'league' ? 'League' : m.stage).toUpperCase()}`;
   $('#crFeedAction').innerHTML = `
-    <div class="cr-moment">
+    <div class="cr-moment${mob ? ' mob' : ''}">
       <div class="cr-moment-top">${crestImg(m.opp_crest, 'cr-moment-crest')}
-        <div><div class="over-line">KEY MOMENT · ${esc(m.stage === 'league' ? 'League' : m.stage).toUpperCase()}</div>
+        <div><div class="over-line">${head}</div>
           <b>v ${esc(m.opponent)}</b></div></div>
       <p class="cr-moment-stakes">${esc(m.stakes)}</p>
       <div class="cr-moment-label">How do you play it?</div>
@@ -454,7 +473,8 @@ function crSeason(d, r){
           ${crBadge(r.captain, '', 'Captain')}
           ${crBadge(r.contract_year > 0, '', `Contract year ${r.contract_year} of 3`)}
           ${crBadge(r.squad, 'dim', 'Squad player')}
-          ${crBadge(r.missed > 0, 'dim', `Missed ${r.missed} match${r.missed === 1 ? '' : 'es'}`)}
+          ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}`)}
+          ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
           ${crBadge(r.card > r.form, 'dim', `Form ${r.form}, reputation held you at ${r.card}`)}
         </div>
         <div class="cr-lines">

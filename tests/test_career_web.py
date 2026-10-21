@@ -264,3 +264,23 @@ def test_the_move_that_plays_a_season_carries_it_as_it_happened(client):
         assert w["home_innings"]["over_log"] and w["yours"]
     v = client.post("/api/career/view", json={"token": d["token"]}).json()
     assert v["season_play"] is None and v["seasons"] == d["seasons"]
+
+
+def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
+    """Each key moment the API pauses at names its kind (A205), and a played match line
+    carries the live form line the page draws."""
+    d, kinds, forms = _token(client, role="middle", seed=1), set(), []
+    for _ in range(40):
+        p = d["pending"]
+        if p is None:
+            break
+        if p["kind"] == "moment":
+            kinds.add(p["moment"]["kind"])
+            forms += [l["form"] for l in d["season_play"]["feed"] if l["form"]]
+        move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
+        r = client.post("/api/career/move", json={"token": d["token"], "move": move})
+        assert r.status_code == 200, r.text
+        d = r.json()
+    assert kinds <= {"must_win", "playoff", "make_or_break"}
+    assert "make_or_break" in kinds, kinds
+    assert forms and all(1 <= len(f) <= 5 for f in forms)

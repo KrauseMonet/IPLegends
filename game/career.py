@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+from collections import defaultdict
 import math
 import random
 import statistics
@@ -211,6 +212,125 @@ def _ordinal(n: int) -> str:
     return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
+# [A205] Form, and being dropped for it. Measured over 1,707 real regular seasons: a player
+# whose LAST THREE matches sit in the worst third of his kind misses the next two 3-4 times
+# as often as one in the best third (batters 5.4% against 1.6%, bowlers 7.6% against 2.4%),
+# while a bad FIRST HALF barely moves the second (29% against 22% missing two or more). So
+# form is read off the last three matches, ranked against everybody of your kind in the same
+# simulated season. A form score is declared, not fitted: a batter's runs; a bowler's runs
+# saved against par (FORM_PAR_PER_BALL a ball) plus FORM_WICKET_RUNS a wicket; an all-rounder
+# both. The most common real stretch out of the side, past a single match, is two matches.
+# A batter is ranked among batters of his band, as the season card ranks him (A198): ranked
+# with openers, every middle-order batter read out of form (31% of seasons dropped, against
+# an opener's 17%). An all-rounder gets the form line but never a make-or-break: for real
+# all-rounders recent form barely predicts a drop (4.0% against 2.7%).
+FORM_MATCHES = 3                     # matches a form reading looks back over
+FORM_WICKET_RUNS = 20                # a wicket in a form score, in runs
+FORM_PAR_PER_BALL = 1.3              # runs a ball conceded at par
+FORM_POOR = 1 / 3                    # the worst third of your kind is out of form
+FORM_GOOD = 2 / 3                    # the best third is in form
+FORM_SHOWN = 5                       # matches on the live form line
+DROP_MATCHES = 2                     # matches a failed make-or-break costs you
+_WORDS = {2: "two", 3: "three", 4: "four"}
+MAKE_OR_BREAK_MAX = 1                # a season
+
+
+class FormBook:
+    """Every player's matches this season, in the order played, for reading form. A match
+    counts for a player when he is in his side's eleven (its batting card lists all eleven).
+    Keyed on (person, side): a person can appear for two sides in a deck year (A96)."""
+
+    def __init__(self, roster: dict[int, dict[str, Card]]):
+        self.roster = roster
+        # (runs, wickets, runs conceded, balls bowled, out: True/False, None did not bat)
+        self.games: dict[tuple[str, int], list[tuple]] = defaultdict(list)
+        self.seen = 0
+
+    def kind(self, key: tuple[str, int]) -> str | None:
+        card = self.roster.get(key[1], {}).get(key[0])
+        return _kind(card) if card is not None else None
+
+    def add(self, results: list[Result]) -> None:
+        """Take in any results not yet read (the list only grows)."""
+        for r in results[self.seen:]:
+            for side, inn, other in ((r.home, r.home_innings, r.away_innings),
+                                     (r.away, r.away_innings, r.home_innings)):
+                bowled = {w.player.person_id: w for w in (other.bowling if other else [])}
+                for b in (inn.batting if inn else []):
+                    w = bowled.get(b.player.person_id)
+                    batted, bowled_any = b.faced_any or b.out, bool(w and w.balls)
+                    key = (b.player.person_id, id(side))
+                    kind = self.kind(key)
+                    # Not asked to do your job is not a failure: a batter who did not bat, a
+                    # bowler who did not bowl, anybody who did neither.
+                    if (not batted and not bowled_any or kind == "batter" and not batted
+                            or kind == "bowler" and not bowled_any):
+                        continue
+                    self.games[key].append(
+                        (b.runs, w.wickets if w else 0, w.runs if w else 0,
+                         w.balls if w else 0, b.out if batted else None))
+        self.seen = len(results)
+
+    @staticmethod
+    def score(kind: str, game: tuple[int, int, int, int]) -> float:
+        runs, wickets, conceded, balls = game[:4]
+        bowling = FORM_WICKET_RUNS * wickets - conceded + FORM_PAR_PER_BALL * balls
+        return runs if kind == "batter" else bowling if kind == "bowler" else runs + bowling
+
+    def _rank(self, mine: float, pool: list[float]) -> float:
+        """Your place among `pool` (yours included): 0 the worst, 1 the best."""
+        below = sum(v < mine for v in pool)
+        return below / max(1, len(pool) - 1)
+
+    def _peers(self, key: tuple[str, int], kind: str, ready) -> list[tuple[str, int]]:
+        """Everyone of your kind passing `ready`; a batter's narrowed to his band when the
+        band holds enough of them (the season card's rule, A198)."""
+        peers = [k for k, gs in self.games.items() if self.kind(k) == kind and ready(gs)]
+        if kind == "batter":
+            group = BAND_GROUP.get(self.roster[key[1]][key[0]].band)
+            band = [k for k in peers if k == key or
+                    BAND_GROUP.get(self.roster[k[1]][k[0]].band) == group]
+            if len(band) - 1 >= MIN_BAND_PEERS:
+                return band
+        return peers
+
+    def form_rank(self, key: tuple[str, int]) -> float | None:
+        """Your last FORM_MATCHES against the last FORM_MATCHES of everyone of your kind who
+        has played that many; None before you have."""
+        kind, games = self.kind(key), self.games.get(key, [])
+        if kind is None or len(games) < FORM_MATCHES:
+            return None
+        pool = [sum(self.score(kind, g) for g in self.games[k][-FORM_MATCHES:])
+                for k in self._peers(key, kind, lambda gs: len(gs) >= FORM_MATCHES)]
+        return self._rank(sum(self.score(kind, g) for g in games[-FORM_MATCHES:]), pool)
+
+    def last_match_rank(self, key: tuple[str, int]) -> float:
+        """Your latest match against every match played by anyone of your kind so far."""
+        kind = self.kind(key)
+        pool = [self.score(kind, g) for k in self._peers(key, kind, bool)
+                for g in self.games[k]]
+        return self._rank(self.score(kind, self.games[key][-1]), pool)
+
+
+def form_word(rank: float | None) -> str | None:
+    if rank is None:
+        return None
+    return "Out of form" if rank < FORM_POOR else "In form" if rank > FORM_GOOD else "Steady"
+
+
+def form_figure(kind: str, game: tuple) -> str:
+    """One match on the form line: runs for a batter (`*` not out, `-` did not bat),
+    wickets/runs for a bowler, both for an all-rounder who bowled."""
+    runs, wickets, conceded, balls, out = game
+    bat = "-" if out is None else f"{runs}{'' if out else '*'}"
+    bowl = f"{wickets}/{conceded}"
+    if kind == "batter":
+        return bat
+    if kind == "bowler":
+        return bowl if balls else "-"
+    return f"{bat} & {bowl}" if balls else bat
+
+
 @dataclass
 class Moment:
     """A key moment the season stopped at: what is at stake and against whom."""
@@ -221,12 +341,16 @@ class Moment:
     opp_year: int | None
     stakes: str
     labels: tuple[str, str, str]
+    kind: str = "must_win"             # "must_win" | "playoff" | "make_or_break" (A205)
 
 
 class _NeedMoment(Exception):
-    def __init__(self, moment: Moment, season, yours: Side, approaches: list):
+    def __init__(self, moment: Moment, season, yours: Side, approaches: list,
+                 roster: dict | None = None, dropped: list | None = None,
+                 verdicts: dict | None = None):
         self.moment, self.season, self.yours = moment, season, yours
         self.approaches = approaches
+        self.roster, self.dropped, self.verdicts = roster or {}, dropped or [], verdicts or {}
 
 
 # --- the market ------------------------------------------------------------------------
@@ -937,6 +1061,7 @@ class SeasonRecord:
     extra_missed: int = 0              # matches an event card cost you, inside `missed` (A200)
     contract_year: int = 0             # 1-3 on a three-year deal, 0 on a one-year (A200)
     missed: int = 0                    # league matches missed (A198)
+    dropped: int = 0                   # of them, dropped for form after a make-or-break (A205)
     percentile: float = 0.0
     form: int = 70                     # the season's own card, before the reputation floor
     display: int = 70
@@ -1035,6 +1160,8 @@ class Year:
     roster: dict[int, dict[str, Card]]
     missed: int                        # league matches you missed
     approaches: list = field(default_factory=list)   # your key moments (A204)
+    dropped: list = field(default_factory=list)      # your match numbers, dropped for (A205)
+    verdicts: dict = field(default_factory=dict)     # make-or-break number -> kept | dropped
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
@@ -1080,8 +1207,13 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     leaders against `tournament_leaders`.
 
     `answers` are your approaches at the season's key moments (A204), in order. None plays
-    the season with no moments at all (every match balanced); a tuple plays it with moments,
-    and when one comes up with no answer left the season pauses (`_NeedMoment`)."""
+    every key moment Balanced without stopping; a tuple plays it with moments, and when one
+    comes up with no answer left the season pauses (`_NeedMoment`).
+
+    A make-or-break (A205) is a key moment like any other, but its outcome is real whatever
+    the call: fail it and you are dropped for DROP_MATCHES league matches, which come off
+    the season's missed block rather than adding to it (that block was measured from real
+    seasons, so it already holds real drops)."""
     from game.__main__ import opposition_twelve
 
     sides, yours = year_sides(deck, you.season_year, you)
@@ -1098,7 +1230,14 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     yours_index = sides.index(yours)
     schedule = balanced_order(fixtures(len(sides), double), lambda pair: pair)
     league_matches = sum(yours_index in pair for pair in schedule)
-    out = missed_block(seed, k, league_matches, squad, extra_missed)
+    out = set(missed_block(seed, k, league_matches, squad, extra_missed))
+    dropped: set[int] = set()                      # league indices you were dropped for
+    dropped_seen: list[int] = []                   # ... as your match numbers, for the feed
+    verdicts: dict[int, str] = {}                  # make-or-break match -> "kept" | "dropped"
+    book = FormBook(roster)
+    you_key = (YOU_ID, id(yours))
+    breaks = 0
+    pending_break: int | None = None               # your match number of an unresolved one
     played = 0
     rested = _rested_lineup(yours, me)
     bowl_rng = random.Random(f"{seed}:bowls:{k}")
@@ -1110,30 +1249,48 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     # league meets every side twice, and keying on the opponent tagged the wrong meeting.
     approaches: list[tuple[int, str, str, str]] = []
 
-    def moment(a: Side, b: Side, season, stage: str, left: int) -> None:
-        """Stop for a key moment, or apply its answer to your card for this match."""
+    def moment(a: Side, b: Side, season, stage: str, left: int,
+               make_or_break: str | None = None) -> None:
+        """Stop for a key moment, or apply its answer to your card for this match. A
+        make-or-break carries its own stakes; a league match otherwise stops only as a
+        must-win."""
         nonlocal used, must_wins
-        if answers is None or not any(c.person_id == YOU_ID for c in yours.xi):
+        if not any(c.person_id == YOU_ID for c in yours.xi):
             return
-        if stage == "league":
+        if make_or_break is not None:
+            kind, stakes = "make_or_break", make_or_break
+        elif stage == "league":
             if must_wins >= MUST_WIN_MAX:
                 return
-            stakes = league_stakes(season, yours, left)
+            kind, stakes = "must_win", league_stakes(season, yours, left)
             if stakes is None:
                 return
         else:
-            stakes = PLAYOFF_STAKES.get(stage, stage)
+            kind, stakes = "playoff", PLAYOFF_STAKES.get(stage, stage)
+        if answers is None:
+            return                                 # every call Balanced, nobody asked
         opp = b if a is yours else a
         if used >= len(answers):
             raise _NeedMoment(Moment(stage, opp.name, opp.short, opp.franchise, opp.year,
-                                     stakes, labels), season, yours, list(approaches))
+                                     stakes, labels, kind), season, yours, list(approaches),
+                              roster, list(dropped_seen), dict(verdicts))
         choice = answers[used]
         used += 1
-        if stage == "league":
+        if kind == "must_win":
             must_wins += 1
-        approaches.append((seen, stage, opp.short, labels[choice]))
+        approaches.append((seen, stage, opp.short, labels[choice], kind))
         yours.xi = [approach_card(c, choice) if c.person_id == YOU_ID else c
                     for c in yours.xi]
+
+    def drop_from(idx: int) -> None:
+        """Dropped for this match and the next: the matches come off the missed block's
+        future end, so a season holds no more absences than the real ones it was drawn
+        from. A block already behind you cannot give any back."""
+        drop = set(range(idx, min(idx + DROP_MATCHES, league_matches)))
+        extra = len(drop - out)
+        for i in sorted((i for i in out if i > max(drop)), reverse=True)[:extra]:
+            out.discard(i)
+        dropped.update(drop)
 
     def lineup() -> tuple[list[Card], Card | None]:
         """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays."""
@@ -1142,12 +1299,39 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         return rested
 
     def league_hook(a: Side, b: Side, season, stage: str) -> None:
-        nonlocal played, seen
+        nonlocal played, seen, breaks, pending_break
         if yours is a or yours is b:
-            yours.xi, yours.impact = without if played in out else lineup()
+            # Form is read as it stood straight after your own last match -- the moment the
+            # feed shows it -- never shifted by other sides' matches played since.
+            mine = [i for i, r in enumerate(season.results) if yours in (r.home, r.away)]
+            if mine:
+                book.add(season.results[:mine[-1] + 1])
+            idx = played
+            if pending_break is not None:
+                # the make-or-break was your last match: did you fail again?
+                failed = book.last_match_rank(you_key) < FORM_POOR
+                verdicts[pending_break] = "dropped" if failed else "kept"
+                if failed:
+                    drop_from(idx)
+                pending_break = None
+            benched = idx in out or idx in dropped
+            yours.xi, yours.impact = without if benched else lineup()
             played += 1
             seen += 1
-            moment(a, b, season, stage, league_matches - played + 1)
+            if idx in dropped:
+                dropped_seen.append(seen)
+            stakes = None
+            rank = (None if benched or squad or _kind(me) == "allrounder"
+                    else book.form_rank(you_key))
+            if (rank is not None and rank < FORM_POOR and breaks < MAKE_OR_BREAK_MAX
+                    and idx + 1 < league_matches):
+                last = book.games[you_key][-FORM_MATCHES:]
+                figures = ", ".join(form_figure(_kind(me), g) for g in last)
+                stakes = (f"Your last three: {figures}. Fail again and you are out of the "
+                          f"side for the next {_WORDS.get(DROP_MATCHES, DROP_MATCHES)} matches.")
+                breaks += 1
+                pending_break = seen
+            moment(a, b, season, stage, league_matches - played + 1, stakes)
 
     def playoff_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal seen
@@ -1164,8 +1348,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         yours.xi, yours.impact = with_you
     if answers is not None and used < len(answers):
         raise CareerError("more answers than the season had moments")
-    year = Year(season, yours, season.results + season.playoffs, roster, len(out))
+    year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped))
     year.approaches = approaches
+    year.dropped, year.verdicts = dropped_seen, verdicts
     return year
 
 
@@ -1214,6 +1399,11 @@ class MatchLine:
     purple: tuple[str, int, bool] = ("", 0, False)
     watch: int | None = None            # index into SeasonDetail.watch
     approach: str | None = None         # your call, when this was a key moment (A204)
+    stop: str | None = None             # what kind of key moment: must_win, playoff, make_or_break
+    verdict: str | None = None          # a make-or-break's outcome: "kept" | "dropped" (A205)
+    dropped: bool = False               # left out for form (A205)
+    form: list[str] = field(default_factory=list)   # your last FORM_SHOWN matches, oldest first
+    form_word: str | None = None        # In form / Steady / Out of form, after this match
 
 
 @dataclass
@@ -1272,8 +1462,12 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
         return totals[key][0], totals[key][3], key[0] == YOU_ID
 
     moments = list(year.approaches)
+    book = FormBook(year.roster)
+    you_key = (YOU_ID, id(yours))
+    you_card = year.roster.get(id(yours), {}).get(YOU_ID)
+    you_kind = _kind(you_card) if you_card is not None else "batter"
     n = 0                                          # your side's match number
-    for r in year.results:
+    for i, r in enumerate(year.results):
         for side, inn, other in ((r.home, r.home_innings, r.away_innings),
                                  (r.away, r.away_innings, r.home_innings)):
             for b in (inn.batting if inn else []):
@@ -1317,7 +1511,13 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
         me = totals.get((YOU_ID, id(yours)))
         line.season_runs, line.season_wickets = (me[1], me[3]) if me else (0, 0)
         if moments and moments[0][0] == n:
-            line.approach = moments.pop(0)[3]
+            m = moments.pop(0)
+            line.approach, line.stop = m[3], m[4]
+        line.verdict = year.verdicts.get(n)
+        line.dropped = n in year.dropped
+        book.add(year.results[:i + 1])     # form as it stands straight after this match
+        line.form = [form_figure(you_kind, g) for g in book.games.get(you_key, [])[-FORM_SHOWN:]]
+        line.form_word = form_word(book.form_rank(you_key))
         if r.stage == "league":
             line.position = next(i for i, s in enumerate(rank_table(standings), 1)
                                  if s.side is yours)
@@ -1346,6 +1546,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
+    record.dropped = len(year.dropped)
     key = (YOU_ID, id(yours))
     me = lines.get(key) or Line(card=you, side=yours)
     lines[key] = me
@@ -1631,7 +1832,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             # The season stops at a key moment: told up to here, waiting for your call.
             so_far = Year(need.season, need.yours,
                           list(need.season.results) + list(need.season.playoffs or []),
-                          {}, 0, need.approaches)
+                          need.roster, 0, need.approaches, need.dropped, need.verdicts)
             career.detail = season_detail(so_far, complete=False)
             career.pending = Pending("moment", year, k, squad=cp.squad, offers=[offer],
                                      moment=need.moment)

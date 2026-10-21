@@ -769,12 +769,20 @@ def event_name(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> st
     """The real player an event names: the best of your kind in your own squad (a mentor),
     or the best player of any other team that year (a rival), by his card that season."""
     if event.who == "mentor":
-        kind = _kind(you)
-        mates = [c for c in deck.cards_by_fs[fs_id]
-                 if c.display is not None and _kind(c) == kind]
-        # A spinner is mentored by a spinner when the squad has one (a pace bowler offering
-        # to coach a leg-spinner reads wrong); otherwise by the best of his kind.
-        same = [c for c in mates if you.bowling_style and c.bowling_style == you.bowling_style]
+        # Somebody who actually did your job that season, by A33's volume floors and
+        # whatever his listed role -- Jadeja, an "all-rounder", is Gujarat Lions 2017's real
+        # spinner, where the first version picked a man with 24 balls whose card was mostly
+        # prior. A bowler's mentor shares his style where the squad has one (a pace bowler
+        # coaching a leg-spinner reads wrong). The old rule is the fallback for a thin squad.
+        bowls = you.role in ("bowler", "allrounder")
+        mates = [c for c in deck.cards_by_fs[fs_id] if c.display is not None and (
+            (c.bowl_balls or 0) >= BOWL_REGULAR_BALLS if bowls
+            else (c.bat_balls or 0) >= BAT_REGULAR_BALLS)]
+        if not mates:
+            mates = [c for c in deck.cards_by_fs[fs_id]
+                     if c.display is not None and _kind(c) == _kind(you)]
+        same = [c for c in mates if bowls and you.bowling_style
+                and c.bowling_style == you.bowling_style]
         best = max(same or mates, key=lambda c: (c.display, c.person_id), default=None)
     elif event.who == "rival":
         others = [c for fs in year_fs_ids(deck, year) if fs != fs_id

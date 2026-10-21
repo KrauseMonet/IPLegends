@@ -772,9 +772,7 @@ def test_a_mentor_is_a_real_teammate_and_a_rival_a_real_opponent(deck):
         squad = deck.cards_by_fs[fs]
         bowler = Card(fs_id=fs, person_id=C.YOU_ID, name="me", role="bowler")
         name = C.event_name(deck, mentor, fs, 2018, bowler)
-        assert name in {c.name for c in squad if c.role == "bowler"}
-        best = max((c for c in squad if c.role == "bowler"), key=lambda c: c.display)
-        assert name == best.name or C._kind(best) != "bowler"
+        assert name in {c.name for c in squad if (c.bowl_balls or 0) >= 150}
         rname = C.event_name(deck, rival, fs, 2018, bowler)
         assert rname not in {c.name for c in squad}
         assert rname in {c.name for f in C.year_fs_ids(deck, 2018) for c in deck.cards_by_fs[f]}
@@ -798,12 +796,14 @@ def test_a_highlight_names_a_real_teammate_from_that_match(deck, model):
     pytest.fail("no highlight with a teammate in eight seasons")
 
 
-def test_a_spinners_mentor_is_a_spinner_when_the_squad_has_one(deck):
+def test_a_spinners_mentor_is_a_spinner_who_bowled_that_season(deck):
+    """Whoever bowled real overs of your style that season, by A33's floor, whatever the
+    archive calls his role -- checked against an independent filter of every squad."""
     mentor = next(e for e in C.EVENTS if e.key == "mentor")
     checked = 0
     for fs, squad in deck.cards_by_fs.items():
-        spinners = [c for c in squad if c.role == "bowler" and c.bowling_style == "spin"
-                    and c.display is not None]
+        spinners = [c for c in squad if c.bowling_style == "spin" and c.display is not None
+                    and (c.bowl_balls or 0) >= 150]
         if not spinners:
             continue
         you = Card(fs_id=fs, person_id=C.YOU_ID, name="me", role="bowler", bowling_style="spin")
@@ -811,6 +811,10 @@ def test_a_spinners_mentor_is_a_spinner_when_the_squad_has_one(deck):
         assert name == max(spinners, key=lambda c: (c.display, c.person_id)).name
         checked += 1
     assert checked > 100
+    gl = next(fs for fs, v in deck.cards_by_fs.items()
+              if v[0].franchise == "Gujarat Lions" and v[0].season_year == 2017)
+    you = Card(fs_id=gl, person_id=C.YOU_ID, name="me", role="bowler", bowling_style="spin")
+    assert C.event_name(deck, mentor, gl, 2017, you) == "RA Jadeja"
 
 
 def test_a_finals_line_names_its_real_top_scorer_you_included(deck, model):

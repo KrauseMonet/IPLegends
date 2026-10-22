@@ -131,11 +131,41 @@ function renderPuzzles(r){
   $('#pzBadges').innerHTML = sorted.map(badgeHtml).join('');
 }
 
+// Build a Career's Hall of Fame [A210]: your finished careers, the best first. Each opens to
+// its milestones; where it would sit on the real all-time lists is the server's to say.
+function hofRow(c){
+  const t = c.card || {};
+  const years = `${c.debut}–${c.debut + c.seasons - 1}`;
+  const rank = (n, what) => n != null && n <= 25 ? `<em class="hof-rank">${ordinal(n)} all-time for ${what}</em>` : '';
+  const ms = (t.milestones || []).map(([y, text]) => `<li><span>${y}</span>${esc(text)}</li>`).join('');
+  return `<details class="hof">
+    <summary>
+      <span class="hof-crests">${c.crests.map(u => crestImg(u, 'hof-crest')).join('')}</span>
+      <span class="hof-who"><b>${esc(c.name)}</b><span>${esc(c.role_label)}${c.overseas ? ' · overseas' : ''} · ${years}</span></span>
+      <span class="hof-num"><b>${c.runs.toLocaleString()}</b> runs · <b>${c.wickets}</b> wkts</span>
+      <span class="hof-num"><b>${c.titles}</b> title${c.titles === 1 ? '' : 's'} · peak <b>${c.peak_card}</b></span>
+      ${rank(c.runs_rank, 'runs')}${rank(c.wickets_rank, 'wickets')}
+    </summary>
+    ${ms ? `<ol class="hof-ms">${ms}</ol>` : '<p class="pf-empty">No milestones in this one.</p>'}
+  </details>`;
+}
+
+function ordinal(n){
+  const t = n % 100, u = n % 10;
+  return n + (t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th');
+}
+
+function renderHall(list){
+  if (!list.length) return;
+  $('#hofList').innerHTML = list.map(hofRow).join('');
+}
+
 async function boot(){
   const meta = loadMeta().then(m => { renderDeckStats(m); });
   const me = loadMe();
   const profile = api('/api/profile').catch(err => err);   // 401 handled below, not thrown
   const puzzles = api('/api/puzzles/me').catch(() => null);  // an extra: its absence must not blank the page
+  const hall = api('/api/career/hall').catch(() => null);      // likewise
 
   await Promise.all([meta, me]);
   if (!ME || !ME.account_id){
@@ -145,8 +175,11 @@ async function boot(){
   const p = await profile;
   if (p instanceof Error){ slip(p.message); return; }
   render(p);
+  const careers = await hall;
+  if (careers) renderHall(careers);
   const record = await puzzles;
   if (record) renderPuzzles(record);
+  if (location.hash === '#hall') document.getElementById('hall').scrollIntoView({block: 'start'});
 }
 
 boot();

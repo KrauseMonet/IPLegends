@@ -284,3 +284,26 @@ def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
     assert kinds <= {"must_win", "playoff", "make_or_break"}
     assert "make_or_break" in kinds, kinds
     assert forms and all(1 <= len(f) <= 5 for f in forms)
+
+
+def test_each_milestone_rides_on_the_feed_row_of_its_match(client):
+    """A209: the API puts a season's milestones on the very rows the career recorded them
+    against, and lists the season's honours on the season card. Played through the routes,
+    opener seed 7, until a season with a match milestone (its 1,000th run, in 2012)."""
+    d = client.post("/api/career/start", json={"name": "Ms", "role": "opener", "debut": 2010,
+                                               "seed": 7}).json()
+    found = None
+    for _ in range(40):
+        p = d["pending"]
+        move = "o0" if p["kind"] == "offer" else "e0" if p["kind"] == "event" else "m1"
+        d = client.post("/api/career/move", json={"token": d["token"], "move": move}).json()
+        sp = d.get("season_play")
+        if sp and sp["complete"] and any(l["milestones"] for l in sp["feed"]):
+            found = d
+            break
+    assert found, "the fixture must reach a season with a match milestone"
+    _, _, cp, _ = R.read_token(found["token"])
+    rec = cp.seasons[-1]
+    on_rows = [(i, t) for i, l in enumerate(found["season_play"]["feed"]) for t in l["milestones"]]
+    assert on_rows == [(m.match, m.text) for m in rec.milestones if m.match is not None]
+    assert found["seasons"][-1]["milestones"] == [m.text for m in rec.milestones]

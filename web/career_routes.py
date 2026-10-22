@@ -18,14 +18,14 @@ import hmac
 import json
 import random
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import career as C
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_HOST, SITE_NAME
-from web import auth, bingo_routes, crests
+from web import auth, bingo_routes, career_results, crests, db
 
 router = APIRouter()
 
@@ -129,6 +129,9 @@ class SeasonOut(BaseModel):
     orange_cap: bool
     purple_cap: bool
     highlights: list[HighlightOut]
+    five_fors: int = 0
+    hat_tricks: int = 0
+    milestones: list[str] = []    # A209
 
 
 class OfferOut(BaseModel):
@@ -187,6 +190,11 @@ class PendingOut(BaseModel):
     moment: MomentOut | None = None
 
 
+class MilestoneOut(BaseModel):
+    year: int
+    text: str
+
+
 class SummaryOut(BaseModel):
     seasons: int
     regular_seasons: int
@@ -211,6 +219,9 @@ class SummaryOut(BaseModel):
     runs_rank: int | None
     wickets_rank: int | None
     ending: str                   # "retired" | "released" | "the end of the archive"
+    five_fors: int = 0
+    hat_tricks: int = 0
+    milestones: list[MilestoneOut] = []       # A209, the career's in order
 
 
 class MatchLineOut(BaseModel):
@@ -248,6 +259,7 @@ class MatchLineOut(BaseModel):
     dropped: bool = False         # left out for form
     form: list[str] = []          # your last five matches, oldest first
     form_word: str | None = None  # In form / Steady / Out of form
+    milestones: list[str] = []    # career milestones reached in this match (A209)
 
 
 class TableRowOut(BaseModel):
@@ -308,7 +320,9 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         teams=r.teams, playoffs=r.playoffs, finalist=r.finalist, champion=r.champion,
         orange_cap=r.orange_cap, purple_cap=r.purple_cap,
         highlights=[HighlightOut(stage=h.stage, opponent=h.opponent, text=h.text)
-                    for h in r.highlights])
+                    for h in r.highlights],
+        five_fors=r.five_fors, hat_tricks=r.hat_tricks,
+        milestones=[m.text for m in r.milestones])
 
 
 def option_hint(o: C.EventOption) -> str:
@@ -382,10 +396,13 @@ def _summary(c: C.Career) -> SummaryOut:
         titles=s.titles, finals=s.finals, orange_caps=s.orange_caps,
         purple_caps=s.purple_caps, captaincies=s.captaincies, franchises=s.franchises,
         earnings=crore(s.earnings), peak_card=s.peak_display, peak_year=s.peak_year,
-        runs_rank=s.runs_rank, wickets_rank=s.wickets_rank, ending=ending)
+        runs_rank=s.runs_rank, wickets_rank=s.wickets_rank, ending=ending,
+        five_fors=s.five_fors, hat_tricks=s.hat_tricks,
+        milestones=[MilestoneOut(year=y, text=t) for y, t in s.milestones])
 
 
-def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
+def _season_play(detail: C.SeasonDetail,
+                 milestones: list[C.CareerMilestone] = ()) -> SeasonPlayOut:
     from web.app import _result_out      # the solo season's own match shape
 
     yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
@@ -400,8 +417,8 @@ def _season_play(detail: C.SeasonDetail) -> SeasonPlayOut:
         orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
-        form_word=l.form_word)
-        for l in detail.feed]
+        form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i])
+        for i, l in enumerate(detail.feed)]
     table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
                          played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,
                          you=t.you) for t in detail.table]
@@ -442,7 +459,8 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
-        season_play=_season_play(career.detail) if career.detail else None)
+        season_play=(_season_play(career.detail, career.live_milestones)
+                     if career.detail else None))
 
 
 def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
@@ -529,3 +547,94 @@ def career_view(body: ViewIn) -> CareerOut:
     except C.CareerError as e:
         raise HTTPException(409, str(e)) from None
     return _out(seed, career, partial)
+
+
+# --- saving, and the Hall of Fame [A210] ------------------------------------------------------
+
+
+def _account(request: Request) -> int:
+    token = request.cookies.get(auth.COOKIE_NAME)
+    account_id = auth.verify_session_cookie(token) if token is not None else None
+    if account_id is None:
+        raise HTTPException(401, "Sign in to keep your careers.")
+    return account_id
+
+
+class SaveIn(BaseModel):
+    token: str = Field(max_length=200_000)
+
+
+class SaveOut(BaseModel):
+    saved: bool                   # newly saved by this call
+    careers: int                  # how many this account now holds
+
+
+@router.post("/api/career/save")
+def career_save(body: SaveIn, request: Request, response: Response) -> SaveOut:
+    """Keep a finished career. The token is signed (A199), so it needs no replay to be
+    trusted; a career still going is refused, and saving one twice is a no-op."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    seed, setup, checkpoint, partial = read_token(body.token)
+    deck, model = _state()
+    try:
+        career = C.play_career(deck, model, seed, setup, partial, resume=checkpoint)
+    except C.CareerError as e:
+        raise HTTPException(409, str(e)) from None
+    if career.summary is None:
+        raise HTTPException(409, "That career is still going.")
+    with db.connection() as conn:
+        new = career_results.save(conn, account_id, career_results.natural_key(body.token), career)
+        n = career_results.count(conn, account_id)
+    return SaveOut(saved=new, careers=n)
+
+
+class HallOut(BaseModel):
+    key: str
+    name: str
+    role: str
+    role_label: str
+    debut: int
+    overseas: bool
+    seasons: int
+    matches: int
+    runs: int
+    wickets: int
+    titles: int
+    peak_card: int
+    peak_year: int
+    ending: str
+    runs_rank: int | None         # place on the real all-time list, derived when read
+    wickets_rank: int | None
+    crests: list[str | None]      # each club, in the order you joined it
+    card: dict
+    completed_at: str
+
+
+@router.get("/api/career/hall")
+def career_hall(request: Request, response: Response) -> list[HallOut]:
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    with db.connection() as conn:
+        rows = career_results.hall(conn, account_id)
+    facts = _facts()
+    real_runs = [p.runs for p in facts] if facts is not None else None
+    real_wkts = [p.wickets for p in facts] if facts is not None else None
+    out = []
+    for r in rows:
+        clubs = []
+        for t in r["card"].get("timeline", []):
+            if all(canonical(t["franchise"]) != canonical(c[0]) for c in clubs):
+                clubs.append((t["franchise"], t["year"]))
+        out.append(HallOut(
+            key=r["key"], name=r["name"], role=r["role"],
+            role_label=C.ROLES.get(r["role"], {}).get("label", r["role"]), debut=r["debut"],
+            overseas=r["overseas"], seasons=r["seasons"], matches=r["matches"],
+            runs=r["runs"], wickets=r["wickets"], titles=r["titles"],
+            peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
+            runs_rank=C.all_time_rank(r["runs"], real_runs) if real_runs is not None else None,
+            wickets_rank=(C.all_time_rank(r["wickets"], real_wkts)
+                          if real_wkts is not None else None),
+            crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
+            completed_at=r["completed_at"].isoformat()))
+    return out

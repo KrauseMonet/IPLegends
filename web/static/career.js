@@ -229,6 +229,12 @@ function crFigures(l){
   return bits.join(' · ') || '<span class="cr-dnp">Not needed</span>';
 }
 
+// Career milestones reached in this match [A209], under its row.
+function crFeedMilestones(l){
+  if (!l.milestones || !l.milestones.length) return '';
+  return `<li class="cr-ms">${l.milestones.map(t => `<span>★ ${esc(t)}</span>`).join('')}</li>`;
+}
+
 function crFeedRow(l, n){
   return `<li class="cr-fr ${l.result === 'W' ? 'won' : l.result === 'L' ? 'lost' : ''}${l.stage !== 'league' ? ' po' : ''}">
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
@@ -302,7 +308,7 @@ function crFeedStop(){
 function crFeedAppend(){
   const f = CR.feed, l = f.sp.feed[f.i++];
   if (l.stage === 'league') f.n += 1;
-  $('#crFeedList').insertAdjacentHTML('beforeend', crFeedRow(l, f.n));
+  $('#crFeedList').insertAdjacentHTML('beforeend', crFeedRow(l, f.n) + crFeedMilestones(l));
   crFeedPanel(l);
   return l;
 }
@@ -322,7 +328,7 @@ function crFeedStep(){
       <button class="act" onclick="crFeedResume()">Skip it</button>`;
     return;
   }
-  f.timer = setTimeout(crFeedStep, CR_FEED_MS);
+  f.timer = setTimeout(crFeedStep, l.milestones && l.milestones.length ? CR_FEED_MS * 4 : CR_FEED_MS);
 }
 
 function crFeedResume(){
@@ -481,6 +487,8 @@ function crSeason(d, r){
           <div><b>${r.matches}</b> matches<span>${esc(r.price)}${r.stayed ? ' · stayed' : ''}</span></div>
           ${crBat(r)}${crBowl(r)}
         </div>
+        ${r.milestones && r.milestones.length ? `<div class="cr-msl"><div class="cr-label">Milestones</div>
+          ${r.milestones.map(t => `<div>★ ${esc(t)}</div>`).join('')}</div>` : ''}
         ${r.highlights.length ? `<div class="cr-hl"><div class="cr-label">Highlights</div>
           ${r.highlights.map(h => `<div><span>${esc(h.stage === 'league' ? 'League' : h.stage)} v ${esc(h.opponent)}</span><b>${esc(h.text)}</b></div>`).join('')}</div>` : ''}
       </div>
@@ -516,14 +524,42 @@ function crEnd(d){
           <div><b>${s.titles}</b> title${s.titles === 1 ? '' : 's'}<span>${s.finals} final${s.finals === 1 ? '' : 's'} · ${s.orange_caps} Orange, ${s.purple_caps} Purple Cap${s.orange_caps + s.purple_caps === 1 ? '' : 's'}</span></div>
           <div><b>${s.peak_card}</b> peak card<span>${s.peak_year} · earned ${esc(s.earnings)}</span></div>
         </div>
+        ${s.milestones && s.milestones.length ? `<div class="cr-msl cr-msl-career"><div class="cr-label">Milestones</div>
+          ${s.milestones.map(m => `<div><span>${m.year}</span>${esc(m.text)}</div>`).join('')}</div>` : ''}
       </div>
+      <div class="cr-keep" id="crKeep"></div>
       <pre class="bg-share-preview">${esc(d.share)}</pre>
       <div class="foot-actions" style="justify-content:center">
         <button class="act lead" onclick="pzShare(CR.data.share, 'Career copied. No names in it.')">Share your career</button>
         <button class="act" onclick="crNew()">Start a new career</button>
       </div>
     </div>`;
+  crKeep(d);
 }
+
+// A finished career goes into the Hall of Fame on your profile [A210]: saved for a signed-in
+// player as soon as it ends (saving one twice is a no-op), or offered to somebody signed out.
+async function crKeep(d){
+  const box = document.getElementById('crKeep');
+  if (!box) return;
+  try { await CR.me; } catch(e){}
+  if (!ME || !ME.account_id){
+    box.innerHTML = `<span>Sign in to keep this career in your Hall of Fame.</span>
+      <button class="act" onclick="openAuthModal('login')">Sign in</button>`;
+    return;
+  }
+  box.innerHTML = '<span>Saving to your Hall of Fame…</span>';
+  try {
+    const r = await api('/api/career/save', {method: 'POST', headers: CR_JSON, retry: true,
+                                             body: JSON.stringify({token: d.token})});
+    box.innerHTML = `<span>★ In your Hall of Fame · ${r.careers} career${r.careers === 1 ? '' : 's'}</span>
+      <a class="act" href="/profile#hall">See them</a>`;
+  } catch(e){
+    box.innerHTML = `<span>Could not save it just now.</span>
+      <button class="act" onclick="crKeep(CR.data)">Try again</button>`;
+  }
+}
+document.addEventListener('signedin', () => { if (CR.data && CR.data.summary) crKeep(CR.data); });
 
 function crNew(){
   crSave({token: null});
@@ -535,7 +571,7 @@ function crNew(){
 
 (async function crBoot(){
   if (typeof restoreOverSpeed === 'function') restoreOverSpeed();
-  loadMe();
+  CR.me = loadMe();                    // who you are decides whether a finished career is saved
   loadMeta().then(renderDeckStats).catch(() => {});
   try { CR.options = await api('/api/career/options'); }
   catch(e){ slip('Could not load the career page. Try again.'); return; }

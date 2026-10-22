@@ -712,6 +712,7 @@ class Line:
     bowl_runs: int = 0
     wickets: int = 0
     four_fors: int = 0
+    five_fors: int = 0
     best: tuple[int, int] = (0, 0)       # (wickets, runs) in one innings
 
 
@@ -769,6 +770,7 @@ def season_lines(results: list[Result],
                 ln.bowl_runs += w.runs
                 ln.wickets += w.wickets
                 ln.four_fors += w.wickets >= 4
+                ln.five_fors += w.wickets >= 5
                 if (w.wickets, -w.runs) > (ln.best[0], -ln.best[1]):
                     ln.best = (w.wickets, w.runs)
         for key in played:
@@ -1073,6 +1075,8 @@ class SeasonRecord:
     bowl_balls: int = 0
     bowl_runs: int = 0
     four_fors: int = 0
+    five_fors: int = 0                 # (A209)
+    hat_tricks: int = 0                # (A209)
     best: tuple[int, int] = (0, 0)
     squad: bool = False                # a squad season: a poor one went before (A198)
     extra_missed: int = 0              # matches an event card cost you, inside `missed` (A200)
@@ -1089,6 +1093,7 @@ class SeasonRecord:
     orange_cap: bool = False
     purple_cap: bool = False
     highlights: list[Highlight] = field(default_factory=list)
+    milestones: list["CareerMilestone"] = field(default_factory=list)   # (A209)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -1425,6 +1430,9 @@ class MatchLine:
     dropped: bool = False               # left out for form (A205)
     form: list[str] = field(default_factory=list)   # your last FORM_SHOWN matches, oldest first
     form_word: str | None = None        # In form / Steady / Out of form, after this match
+    # This match's own landmarks for you: "fifty"|"hundred", "four_for"|"five_for", "hattrick"
+    # (A209). Whether one is a career FIRST is the career's business (`career_milestones`).
+    landmarks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1448,6 +1456,24 @@ class SeasonDetail:
     table: list[TableRow]               # the league as it finished (or stands, if paused)
     watch: list[Result]                 # your key moments and playoff matches, in order
     complete: bool = True               # False: the season is paused at a key moment
+
+
+def _landmarks(line: MatchLine, theirs) -> list[str]:
+    out = []
+    if line.batted and line.runs >= 100:
+        out.append("hundred")
+    elif line.batted and line.runs >= 50:
+        out.append("fifty")
+    if line.wickets >= 5:
+        out.append("five_for")
+    elif line.wickets >= 4:
+        out.append("four_for")
+    # The engine records a hat-trick on the ball it happens (A167); it belongs to the
+    # innings you BOWLED in, which is the other side's.
+    if any(m.kind == "hattrick" and m.person_id == YOU_ID
+           for m in (theirs.milestones if theirs else [])):
+        out.append("hattrick")
+    return out
 
 
 def _score(runs: int, wickets: int) -> str:
@@ -1529,6 +1555,7 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
             if w.player.person_id == YOU_ID and w.balls:
                 line.played = True
                 line.wickets, line.bowl_runs, line.bowl_balls = w.wickets, w.runs, w.balls
+        line.landmarks = _landmarks(line, theirs)
         me = totals.get((YOU_ID, id(yours)))
         line.season_runs, line.season_wickets = (me[1], me[3]) if me else (0, 0)
         if moments and moments[0][0] == n:
@@ -1572,7 +1599,8 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     me = lines.get(key) or Line(card=you, side=yours)
     lines[key] = me
     for name in ("matches", "innings", "runs", "balls", "outs", "fifties", "hundreds",
-                 "highest", "wickets", "bowl_balls", "bowl_runs", "four_fors", "best"):
+                 "highest", "wickets", "bowl_balls", "bowl_runs", "four_fors", "five_fors",
+                 "best"):
         setattr(record, name, getattr(me, name))
     record.teams = len(season.sides)
     record.percentile = season_percentile(lines, key)
@@ -1586,7 +1614,93 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.orange_cap = top_bat is me and me.runs > 0
     record.purple_cap = top_bowl is me and me.wickets > 0
     record.highlights = _highlights(results, yours)
-    return record, season_detail(year)
+    detail = season_detail(year)
+    record.hat_tricks = sum("hattrick" in l.landmarks for l in detail.feed)
+    return record, detail
+
+
+# --- career milestones [A209] -----------------------------------------------------------------
+# Firsts and round numbers, on the match they happened in. Counted from the season RECORDS
+# before this one, never from milestones already stored: a career saved in a browser before
+# milestones existed has none stored, and would otherwise fire "maiden fifty" for a veteran.
+
+RUN_MARK = 1000           # every thousand career runs
+WICKET_MARK = 50          # every fifty career wickets
+MATCH_MARK = 50           # every fifty matches
+_NTH = {2: "Second", 3: "Third", 4: "Fourth", 5: "Fifth", 6: "Sixth", 7: "Seventh",
+        8: "Eighth", 9: "Ninth", 10: "Tenth"}
+
+
+@dataclass
+class CareerMilestone:
+    key: str                  # "maiden_fifty", "runs", "title", ... (what kind, for the page)
+    text: str
+    match: int | None = None  # index into that season's feed; None for a season honour
+
+
+def _marks(before: int, after: int, step: int) -> list[int]:
+    return list(range((before // step + 1) * step, after + 1, step))
+
+
+def career_milestones(previous: list[SeasonRecord], feed: list[MatchLine] | None,
+                      record: SeasonRecord | None = None) -> list[CareerMilestone]:
+    """This season's milestones, given the seasons before it. With `record` None (a season
+    paused at a key moment) only the ones on matches already played: the season's honours
+    are not known until it ends."""
+    prior = lambda f: sum(getattr(r, f) for r in previous)
+    matches, runs, wickets = prior("matches"), prior("runs"), prior("wickets")
+    fifty_plus, hundreds = prior("fifties") + prior("hundreds"), prior("hundreds")
+    four_plus, five_plus = prior("four_fors"), prior("five_fors")
+    out: list[CareerMilestone] = []
+    for i, l in enumerate(feed or []):
+        if not l.played:
+            continue
+        add = lambda key, text: out.append(CareerMilestone(key, text, i))
+        opp = l.opp_short
+        matches += 1
+        for m in _marks(matches - 1, matches, MATCH_MARK):
+            add("matches", f"{m} IPL matches")
+        if l.batted:
+            score = f"{l.runs}{'' if l.out else '*'}"
+            if l.runs >= 100 and hundreds == 0:
+                add("maiden_hundred", f"Maiden IPL hundred: {score} v {opp}")
+            elif 50 <= l.runs < 100 and fifty_plus == 0:
+                add("maiden_fifty", f"Maiden IPL fifty: {score} v {opp}")
+            fifty_plus += l.runs >= 50
+            hundreds += l.runs >= 100
+            for m in _marks(runs, runs + l.runs, RUN_MARK):
+                add("runs", f"{m:,} IPL runs")
+            runs += l.runs
+        if l.bowl_balls:
+            figures = f"{l.wickets}/{l.bowl_runs}"
+            if l.wickets >= 5 and five_plus == 0:
+                add("maiden_five_for", f"First five-wicket haul: {figures} v {opp}")
+            elif l.wickets >= 4 and four_plus == 0:
+                add("maiden_four_for", f"First four-wicket haul: {figures} v {opp}")
+            four_plus += l.wickets >= 4
+            five_plus += l.wickets >= 5
+            for m in _marks(wickets, wickets + l.wickets, WICKET_MARK):
+                add("wickets", f"{m} IPL wickets")
+            wickets += l.wickets
+        if "hattrick" in l.landmarks:
+            add("hattrick", f"Hat-trick v {opp}")
+    if record is None:
+        return out
+    if record.champion:
+        n = prior("champion") + 1
+        final = next((i for i in range(len(feed or []) - 1, -1, -1)
+                      if feed[i].stage == "Final"), None)
+        out.append(CareerMilestone("title", "IPL champions" if n == 1
+                                   else f"{_NTH.get(n, f'{n}th')} IPL title", final))
+    if record.orange_cap:
+        out.append(CareerMilestone("orange_cap", f"Orange Cap: {record.runs:,} runs"))
+    if record.purple_cap:
+        out.append(CareerMilestone("purple_cap", f"Purple Cap: {record.wickets} wickets"))
+    if record.display >= 90 and all(r.display < 90 for r in previous):
+        out.append(CareerMilestone("elite", f"First 90+ season card: {record.display}"))
+    if record.captain and not any(r.captain for r in previous):
+        out.append(CareerMilestone("captain", f"Captain of {record.franchise}"))
+    return out
 
 
 @dataclass
@@ -1628,6 +1742,9 @@ class Summary:
     peak_year: int
     runs_rank: int | None = None       # 1 + real IPL players with more career runs
     wickets_rank: int | None = None
+    five_fors: int = 0
+    hat_tricks: int = 0
+    milestones: list[tuple[int, str]] = field(default_factory=list)   # (year, text), A209
 
 
 @dataclass
@@ -1644,6 +1761,10 @@ class Career:
     checkpoint: "Checkpoint | None" = None
     # The season played in THIS call, as it happened (A202); None when no season was played.
     detail: "SeasonDetail | None" = None
+    # Its milestones (A209), each on its match in `detail.feed`. Kept apart from the detail,
+    # which the season cache shares between careers that reached the same season by
+    # different paths and so with different careers behind them.
+    live_milestones: list[CareerMilestone] = field(default_factory=list)
 
     @property
     def complete(self) -> bool:
@@ -1669,12 +1790,20 @@ def summarise(career: Career, real_runs: list[int] | None = None,
         orange_caps=sum(r.orange_cap for r in s), purple_caps=sum(r.purple_cap for r in s),
         captaincies=sum(r.captain for r in s), regular_seasons=sum(not r.squad for r in s),
         franchises=franchises,
-        earnings=sum(r.price for r in s), peak_display=peak.display, peak_year=peak.year)
+        earnings=sum(r.price for r in s), peak_display=peak.display, peak_year=peak.year,
+        five_fors=sum(r.five_fors for r in s), hat_tricks=sum(r.hat_tricks for r in s),
+        milestones=[(r.year, m.text) for r in s for m in r.milestones])
     if real_runs is not None:
-        total.runs_rank = 1 + sum(x > total.runs for x in real_runs)
+        total.runs_rank = all_time_rank(total.runs, real_runs)
     if real_wickets is not None:
-        total.wickets_rank = 1 + sum(x > total.wickets for x in real_wickets)
+        total.wickets_rank = all_time_rank(total.wickets, real_wickets)
     return total
+
+
+def all_time_rank(n: int, real: list[int]) -> int:
+    """Where a career total would sit on a real all-time list: one more than the real
+    players above it. The career card and the Hall of Fame (A210) both read it."""
+    return 1 + sum(x > n for x in real)
 
 
 # [A198] Real cards carry a reputation floor (A159): a season below the player's own career
@@ -1743,6 +1872,7 @@ class Checkpoint:
             r = dict(r)
             r["best"] = tuple(r["best"])
             r["highlights"] = [Highlight(**h) for h in r["highlights"]]
+            r["milestones"] = [CareerMilestone(**m) for m in r.get("milestones", [])]
             seasons.append(SeasonRecord(**r))
         contract = Contract(**d["contract"]) if d.get("contract") else None
         return cls(k=d["k"], permanent=d["permanent"], current=d["current"],
@@ -1855,11 +1985,15 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                           list(need.season.results) + list(need.season.playoffs or []),
                           need.roster, 0, need.approaches, need.dropped, need.verdicts)
             career.detail = season_detail(so_far, complete=False)
+            career.live_milestones = career_milestones(cp.seasons, career.detail.feed)
             career.pending = Pending("moment", year, k, squad=cp.squad, offers=[offer],
                                      moment=need.moment)
             return career
         played.form = played.display
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
+        played.milestones = career_milestones(
+            cp.seasons, career.detail.feed if career.detail else None, played)
+        career.live_milestones = played.milestones
         cp.seasons.append(played)
         cp.current, cp.last_display = canonical(offer.franchise), played.display
         cp.k += 1

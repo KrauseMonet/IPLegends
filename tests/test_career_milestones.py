@@ -126,12 +126,12 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    # seed 1, found by search: a hat-trick in 2011, so the count has something to agree with
-    career, moves = C.auto_career(deck, model, 1, setup, "strength")
+    # seed 4, found by search: a hat-trick, so the count has something to agree with
+    career, moves = C.auto_career(deck, model, 4, setup, "strength")
     seasons, checked = career.seasons, 0
     assert sum(r.hat_tricks for r in seasons) >= 1, "the fixture must take a hat-trick"
     for k in range(len(seasons)):
-        played = C.play_career(deck, model, 1, setup, moves[:_moves_through(moves, k)])
+        played = C.play_career(deck, model, 4, setup, moves[:_moves_through(moves, k)])
         feed = played.detail.feed
         rec = played.checkpoint.seasons[k]
         for l in feed:
@@ -147,5 +147,5 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
 
 def _moves_through(moves, k):
     """The moves that play the career up to and including season k: an offer opens each."""
-    opens = [i for i, m in enumerate(moves) if m[0] in "oc"]
+    opens = [i for i, m in enumerate(moves) if m[0] in "ocbk"]   # an offer, or a mega year
     return opens[k + 1] if k + 1 < len(opens) else len(moves)

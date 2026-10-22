@@ -973,6 +973,151 @@ def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
     return out + [offer(fs, False) for fs in picked]
 
 
+# --- mega-auction years [A212] ---------------------------------------------------------------
+# In the real mega-auction years every contract ends. Your club may approach you to retain you
+# at one of the real 2025 capped slabs, and it is your call: stay at that price, or go into
+# the auction at a base price you choose. There every club that year sets a ceiling for you
+# on the auction engine's own mega value curve (A142), with its own view of you, your old
+# club paying the auction's loyalty premium, and the bidding is the auction's own ladder
+# (`bid_log`). A base nobody reaches leaves you unsold, and one club signs you late at your
+# base as a squad player (ratified). All of it is seeded, so a career stays a pure function
+# of its moves.
+
+MEGA_YEARS = frozenset({2011, 2014, 2018, 2022, 2025})
+RETAIN_CARD = 85                         # below this card your club does not come to you
+RETAIN_TIERS = ((93, 1800), (89, 1400), (RETAIN_CARD, 1100))   # the real capped slabs, lakh
+BASE_PRICES = (200, 150, 125, 100, 75, 50, 40, 30)              # the real base-price choices
+MEGA_SPREAD = 0.30                       # each club's view of you, a lognormal sigma
+
+
+@dataclass(frozen=True)
+class MegaOffer:
+    retain: Offer | None                 # your club's retention offer, None when it makes none
+    bases: tuple[int, ...]
+    suggested: int                       # index into `bases`: the auction's own base for your card
+
+
+@dataclass
+class MegaResult:
+    base: int
+    sold: bool                           # False: unsold, signed late at the base
+    retained: bool
+    fs_id: int
+    franchise: str
+    short: str
+    price: int
+    bids: list[tuple[str, str, int]] = field(default_factory=list)   # (franchise, short, price)
+
+
+def retention_slab(last_display: int | None) -> int | None:
+    return next((price for floor, price in RETAIN_TIERS if (last_display or 0) >= floor), None)
+
+
+def _club_offer(deck: Deck, fs: int, year: int, price: int, stay: bool) -> Offer:
+    from game.__main__ import opposition_twelve
+
+    squad = deck.cards_by_fs[fs]
+    xi, impact = opposition_twelve(list(squad))
+    c = squad[0]
+    return Offer(fs, c.franchise, _abbrev(c.franchise, year), price,
+                 team_rating(xi + ([impact] if impact else [])).overall, stay)
+
+
+def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | None) -> MegaOffer:
+    from game.auction import BASE_PRICE_TIERS
+
+    retain = None
+    slab = retention_slab(last_display)
+    if slab is not None and current is not None:
+        mine = [fs for fs in year_fs_ids(deck, year)
+                if canonical(deck.cards_by_fs[fs][0].franchise) == current]
+        if mine:
+            retain = _club_offer(deck, mine[0], year, slab, True)
+    d = last_display or 0
+    base = next(price for floor, price in BASE_PRICE_TIERS if d >= floor)
+    return MegaOffer(retain, BASE_PRICES, BASE_PRICES.index(base))
+
+
+def mega_ceilings(deck: Deck, seed: int, k: int, year: int, current: str | None,
+                  last_display: int | None) -> dict[int, int]:
+    """What each club that year will pay for you, lakh, by franchise-season: the auction's mega
+    value for your card, each club's own view of it, and your old club's loyalty premium."""
+    from game.auction import LOYALTY
+
+    value = value_curve(last_display, mega=True)
+    out = {}
+    for fs in year_fs_ids(deck, year):
+        view = value * math.exp(random.Random(f"{seed}:mega:{k}:{fs}").gauss(0, MEGA_SPREAD))
+        if current is not None and canonical(deck.cards_by_fs[fs][0].franchise) == current:
+            view *= LOYALTY
+        out[fs] = min(PRICE_CAP, int(view))
+    return out
+
+
+def mega_auction(deck: Deck, seed: int, k: int, year: int, current: str | None,
+                 last_display: int | None, base: int) -> MegaResult:
+    from game.auction import Lot, bid_log
+
+    fss = year_fs_ids(deck, year)
+    by_fs = mega_ceilings(deck, seed, k, year, current, last_display)
+    ceilings = {i: by_fs[fs] for i, fs in enumerate(fss)}
+    lot = Lot(index=k, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="", base=base)
+    bids = bid_log(lot, ceilings, seed, 0)
+    if bids:
+        fs, price = fss[bids[-1].team], bids[-1].price
+    else:
+        fs, price = random.Random(f"{seed}:mega-late:{k}").choice(fss), base
+    c = deck.cards_by_fs[fs][0]
+    return MegaResult(base, bool(bids), False, fs, c.franchise, _abbrev(c.franchise, year), price,
+                      [(deck.cards_by_fs[fss[b.team]][0].franchise,
+                        _abbrev(deck.cards_by_fs[fss[b.team]][0].franchise, year), b.price)
+                       for b in bids])
+
+
+def mega_text(res: MegaResult) -> str:
+    from game.auction import crore
+
+    if res.retained:
+        return f"Retained by {res.franchise} at {crore(res.price)}"
+    if not res.sold:
+        return f"Unsold at {crore(res.base)}; signed late by {res.franchise}"
+    return f"Mega auction: sold to {res.franchise} for {crore(res.price)} (base {crore(res.base)})"
+
+
+# --- the captain's bowling plan [A213] --------------------------------------------------------
+# A captain gives each of his side's bowlers a phase: powerplay, middle or death. It is set
+# before the season and may be changed at any key moment (A204); `choose_bowler` honours it
+# without ever leaving an innings unable to finish. A move: "p" and one digit per bowler, in
+# the order `plan_bowlers` lists them -- 0 any, 1 powerplay, 2 middle, 3 death.
+
+PLAN_MAX = 6                              # the five who bowl and an Impact Player who might
+PLAN_CODES = {"0": None, "1": "powerplay", "2": "middle", "3": "death"}
+
+
+def plan_bowlers(deck: Deck, you: Card, fs_id: int) -> list[Card]:
+    """Who a plan is for: your side's bowlers, as the side would rank them (A203)."""
+    from game.__main__ import bowling_order
+
+    xi, impact = xi_with(you, list(deck.cards_by_fs[fs_id]))
+    pool = [c for c in xi + ([impact] if impact else []) if c.has_bowl]
+    return sorted(pool, key=bowling_order)[:PLAN_MAX]
+
+
+def parse_plan(digits: str, bowlers: list[Card]) -> tuple[tuple[str, str], ...]:
+    """A plan as a hashable tuple of (person id, phase), from its digits."""
+    if len(digits) != len(bowlers) or any(d not in PLAN_CODES for d in digits):
+        raise CareerError(f"a bowling plan needs one of 0-3 for each of {len(bowlers)} bowlers")
+    return tuple(sorted((c.person_id, PLAN_CODES[d]) for c, d in zip(bowlers, digits)
+                        if PLAN_CODES[d]))
+
+
+def next_captain(captain_now: bool, poor: bool, club: str) -> str | None:
+    """Whose armband you hold next season (A213): the club you captained this one, unless the
+    season was poor. Changing club ends it too, because the armband is checked against the
+    club you sign for."""
+    return club if captain_now and not poor else None
+
+
 def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
     """(batting position, place in the attack or None) for you in that franchise's eleven,
     by the same selection the season itself makes."""
@@ -1094,6 +1239,8 @@ class SeasonRecord:
     purple_cap: bool = False
     highlights: list[Highlight] = field(default_factory=list)
     milestones: list["CareerMilestone"] = field(default_factory=list)   # (A209)
+    mega: str = ""                     # how a mega-auction year went (A212)
+    plan: list[list[str]] = field(default_factory=list)   # [name, phase] as the season began (A213)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -1160,17 +1307,18 @@ SEASON_CACHE_MAX = 4000
 
 def _cached_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
                    record: SeasonRecord, key: tuple,
-                   answers: tuple[int, ...] | None = None) -> tuple[SeasonRecord, "SeasonDetail"]:
+                   answers: tuple | None = None,
+                   plan: tuple[tuple[str, str], ...] = ()) -> tuple[SeasonRecord, "SeasonDetail"]:
     """The record is copied (the career goes on to change it); the detail is shared, since
     nothing changes it after it is built. Your answers are part of the key: a different call
     at a key moment is a different season. A season that pauses raises and is not cached."""
-    full = (id(deck), id(model), seed, k, key, answers)
+    full = (id(deck), id(model), seed, k, key, answers, plan)
     hit = _SEASON_CACHE.get(full)
     if hit is None:
         if len(_SEASON_CACHE) >= SEASON_CACHE_MAX:
             _SEASON_CACHE.clear()
         hit = _SEASON_CACHE[full] = play_season_detail(deck, model, seed, k, you, record,
-                                                       answers)
+                                                       answers, plan)
     return copy.deepcopy(hit[0]), hit[1]
 
 
@@ -1231,7 +1379,8 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
 
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   squad: bool = False, extra_missed: int = 0,
-                  answers: tuple[int, ...] | None = None) -> Year:
+                  answers: tuple | None = None,
+                  plan: tuple[tuple[str, str], ...] = ()) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -1247,6 +1396,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     from game.__main__ import opposition_twelve
 
     sides, yours = year_sides(deck, you.season_year, you)
+    yours.bowling_plan = dict(plan) or None          # a captain's plan (A213)
     rng = random.Random(f"{seed}:season:{k}")
     rng.shuffle(sides)                  # who meets twice in a ten-team year is the draw's
     double = double_at_for(len(sides))
@@ -1306,8 +1456,12 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             raise _NeedMoment(Moment(stage, opp.name, opp.short, opp.franchise, opp.year,
                                      stakes, labels, kind), season, yours, list(approaches),
                               roster, list(dropped_seen), dict(verdicts))
-        choice = answers[used]
+        ans = answers[used]
         used += 1
+        # An answer is a call, or a call with a new bowling plan from this match on (A213).
+        choice, replan = (ans, None) if isinstance(ans, int) else ans
+        if replan is not None:
+            yours.bowling_plan = dict(replan) or None
         if kind == "must_win":
             must_wins += 1
         approaches.append((seen, stage, opp.short, labels[choice], kind))
@@ -1592,9 +1746,11 @@ def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
 
 
 def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
-                       record: SeasonRecord, answers: tuple[int, ...] | None = None
+                       record: SeasonRecord, answers: tuple | None = None,
+                       plan: tuple[tuple[str, str], ...] = ()
                        ) -> tuple[SeasonRecord, SeasonDetail]:
-    year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers)
+    year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers,
+                         plan)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -1719,6 +1875,9 @@ class Pending:
     moment: "Moment | None" = None     # a key moment the season is paused at (A204)
     offers: list[Offer] = field(default_factory=list)
     event: Event | None = None
+    mega: MegaOffer | None = None      # a mega-auction year's choice (A212)
+    plan_bowlers: list[Card] = field(default_factory=list)   # a captain's plan is for these (A213)
+    plan: dict[str, str] = field(default_factory=dict)        # ... and stands at this
 
 
 @dataclass
@@ -1771,6 +1930,8 @@ class Career:
     # which the season cache shares between careers that reached the same season by
     # different paths and so with different careers behind them.
     live_milestones: list[CareerMilestone] = field(default_factory=list)
+    # A mega auction decided in THIS call (A212), for the page to play; None otherwise.
+    auction: MegaResult | None = None
 
     @property
     def complete(self) -> bool:
@@ -1867,6 +2028,8 @@ class Checkpoint:
     # checkpoint resumes into another season, which the API test caught.
     ended: str | None = None              # "retired" | "released"
     contract: Contract | None = None      # a three-year deal in progress (A200)
+    captain: str | None = None            # the club whose armband you hold (A213)
+    plan: dict[str, str] = field(default_factory=dict)   # your last bowling plan, as a default
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -1883,7 +2046,8 @@ class Checkpoint:
         contract = Contract(**d["contract"]) if d.get("contract") else None
         return cls(k=d["k"], permanent=d["permanent"], current=d["current"],
                    last_display=d["last_display"], squad=d["squad"], seasons=seasons,
-                   ended=d.get("ended"), contract=contract)
+                   ended=d.get("ended"), contract=contract, captain=d.get("captain"),
+                   plan=dict(d.get("plan") or {}))
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -1905,51 +2069,93 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     def nxt() -> str | None:
         return queue.pop(0) if queue else None
 
-    def take_answers() -> tuple[int, ...]:
+    def take_answers(bowlers: list[Card]) -> tuple:
         """This season's answers at its key moments: the `m{i}` moves that follow its offer
-        and event (A204)."""
+        and event (A204). A captain's may carry a new bowling plan, `m{i}p{digits}` (A213)."""
         out = []
         while queue and isinstance(queue[0], str) and queue[0].startswith("m"):
-            out.append(_index(queue.pop(0), "m", 3))
+            mv = queue.pop(0)
+            call, _, digits = mv.partition("p")
+            choice = _index(call, "m", 3)
+            if not _:
+                out.append(choice)
+            elif not bowlers:
+                raise CareerError("only a captain sets a bowling plan")
+            else:
+                out.append((choice, parse_plan(digits, bowlers)))
         return tuple(out)
 
     career.retired, career.released = cp.ended == "retired", cp.ended == "released"
     while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
         k = cp.k
         year = setup.debut + k
-        offers = offers_for(deck, seed, k, year, cp.current, cp.last_display, cp.contract)
-        if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
-            cp.contract = None                 # the club has no team this year: deal void
-        career.checkpoint = copy.deepcopy(cp)
-        move = nxt()
-        if move is None:
-            here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
-                           fs_id=offers[0].fs_id, year=year, franchise=offers[0].franchise)
-            placed = []
-            for o in offers:
-                pos, rank = where_you_play(deck, dataclasses.replace(
-                    here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id)
-                placed.append(dataclasses.replace(o, position=pos, attack_rank=rank))
-            career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad)
-            return career
-        if move == "r":
-            if k == 0:
-                raise CareerError("a career has to start before it can end")
-            career.retired, cp.ended = True, "retired"
-            break
-        if move.startswith("c"):
-            offer = offers[_index(move, "c", len(offers))]
-            if offer.contract_year or offer.price3 is None:
-                raise CareerError("that offer is not a three-year deal")
-            cp.contract = Contract(canonical(offer.franchise), offer.price3, CONTRACT_YEARS)
-            offer = dataclasses.replace(offer, price=offer.price3)
+        squad_now, mega_note = cp.squad, ""
+        if year in MEGA_YEARS and k > 0:
+            cp.contract = None                 # a mega auction ends every deal (A212)
+            mo = mega_offer(deck, year, cp.current, cp.last_display)
+            career.checkpoint = copy.deepcopy(cp)
+            move = nxt()
+            if move is None:
+                if mo.retain is not None:
+                    here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
+                                   fs_id=mo.retain.fs_id, year=year, franchise=mo.retain.franchise)
+                    pos, rank = where_you_play(deck, here, mo.retain.fs_id)
+                    mo = dataclasses.replace(mo, retain=dataclasses.replace(
+                        mo.retain, position=pos, attack_rank=rank))
+                career.pending = Pending("mega", year, k, squad=cp.squad, mega=mo)
+                return career
+            if move == "r":
+                career.retired, cp.ended = True, "retired"
+                break
+            if move == "k":
+                if mo.retain is None:
+                    raise CareerError("your club has not offered to retain you")
+                offer = mo.retain
+                career.auction = MegaResult(0, True, True, offer.fs_id, offer.franchise,
+                                            offer.short, offer.price)
+            else:
+                base = mo.bases[_index(move, "b", len(mo.bases))]
+                a = career.auction = mega_auction(deck, seed, k, year, cp.current,
+                                                  cp.last_display, base)
+                offer = _club_offer(deck, a.fs_id, year, a.price, canonical(a.franchise) == cp.current)
+                squad_now = squad_now or not a.sold          # a late signing is a squad player
+            mega_note = mega_text(career.auction)
         else:
-            offer = offers[_index(move, "o", len(offers))]
-            if not offer.contract_year:
-                cp.contract = None
+            offers = offers_for(deck, seed, k, year, cp.current, cp.last_display, cp.contract)
+            if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
+                cp.contract = None                 # the club has no team this year: deal void
+            career.checkpoint = copy.deepcopy(cp)
+            move = nxt()
+            if move is None:
+                here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
+                               fs_id=offers[0].fs_id, year=year, franchise=offers[0].franchise)
+                placed = []
+                for o in offers:
+                    pos, rank = where_you_play(deck, dataclasses.replace(
+                        here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id)
+                    placed.append(dataclasses.replace(o, position=pos, attack_rank=rank))
+                career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad)
+                return career
+            if move == "r":
+                if k == 0:
+                    raise CareerError("a career has to start before it can end")
+                career.retired, cp.ended = True, "retired"
+                break
+            if move.startswith("c"):
+                offer = offers[_index(move, "c", len(offers))]
+                if offer.contract_year or offer.price3 is None:
+                    raise CareerError("that offer is not a three-year deal")
+                cp.contract = Contract(canonical(offer.franchise), offer.price3, CONTRACT_YEARS)
+                offer = dataclasses.replace(offer, price=offer.price3)
+            else:
+                offer = offers[_index(move, "o", len(offers))]
+                if not offer.contract_year:
+                    cp.contract = None
         event = draw_event(seed, k, setup.overseas)
-        if cp.squad and event.key in NOT_IN_A_SQUAD_SEASON:
-            event = EVENTS[0]              # nobody asks a squad player to captain the side
+        # The armband stays once taken, until you change club or have a poor season (A213).
+        already = cp.captain is not None and cp.captain == canonical(offer.franchise)
+        if (squad_now or already) and event.key in NOT_IN_A_SQUAD_SEASON:
+            event = EVENTS[0]              # nobody asks a squad player (or the captain) to lead
         if len(event.options) == 1:
             option = event.options[0]
         else:
@@ -1962,7 +2168,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     text = text.replace("{name}", event_name(deck, event, offer.fs_id, year,
                                                              probe) or "A senior player")
                 career.pending = Pending("event", year, k, offers=[offer], event=event,
-                                         squad=cp.squad, event_text=text)
+                                         squad=squad_now, event_text=text)
                 return career
             option = event.options[_index(move, "e", len(event.options))]
         if option.retire:
@@ -1972,19 +2178,39 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         t = arc_point(k, cp.permanent, option.season)
         you = ability(start, ceiling, t, setup=setup, fs_id=offer.fs_id, year=year,
                       franchise=offer.franchise)
+        captain_now = option.captain or (already and not squad_now)
+        plan: tuple[tuple[str, str], ...] = ()
+        bowlers: list[Card] = plan_bowlers(deck, you, offer.fs_id) if captain_now else []
+        if bowlers:
+            move = nxt()
+            if move is None:
+                career.pending = Pending("plan", year, k, squad=squad_now, offers=[offer],
+                                         plan_bowlers=bowlers,
+                                         plan={c.person_id: cp.plan[c.person_id]
+                                               for c in bowlers if c.person_id in cp.plan})
+                return career
+            if not move.startswith("p"):
+                raise CareerError(f"expected a bowling plan, got {move!r}")
+            plan = parse_plan(move[1:], bowlers)
         record = SeasonRecord(k=k, year=year, franchise=offer.franchise, short=offer.short,
                               price=offer.price, stayed=offer.stay, event=event.key,
-                              choice=option.label, captain=option.captain, ability=t,
-                              teams=0, squad=cp.squad, extra_missed=option.missed,
+                              choice=option.label, captain=captain_now, ability=t,
+                              teams=0, squad=squad_now, extra_missed=option.missed, mega=mega_note,
                               contract_year=(CONTRACT_YEARS - cp.contract.left + 1
                                              if cp.contract else 0))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
-        answers = take_answers()
+        record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
+                       if c.person_id in dict(plan)]
+        answers = take_answers(bowlers)
+        current = dict(plan)               # the plan as it stands after this season's replans
+        for a in answers:
+            if not isinstance(a, int):
+                current = dict(a[1])
         try:
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
                                                    (setup, start, ceiling, offer, option, t,
-                                                    cp.squad), answers)
+                                                    squad_now), answers, plan)
         except _NeedMoment as need:
             # The season stops at a key moment: told up to here, waiting for your call.
             so_far = Year(need.season, need.yours,
@@ -1992,8 +2218,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                           need.roster, 0, need.approaches, need.dropped, need.verdicts)
             career.detail = season_detail(so_far, complete=False)
             career.live_milestones = career_milestones(cp.seasons, career.detail.feed)
-            career.pending = Pending("moment", year, k, squad=cp.squad, offers=[offer],
-                                     moment=need.moment)
+            career.pending = Pending("moment", year, k, squad=squad_now, offers=[offer],
+                                     moment=need.moment,
+                                     plan_bowlers=bowlers, plan=current)
             return career
         played.form = played.display
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
@@ -2008,6 +2235,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if cp.contract.left == 0:
                 cp.contract = None
         cp.squad, released = form_after(cp.squad, played.percentile, poor_bar(setup.role))
+        cp.captain = next_captain(captain_now, cp.squad, canonical(offer.franchise))
+        if bowlers:
+            cp.plan = current
         if released and cp.contract is not None:
             released = False                   # a contract year remains: you stay, benched
         if released:
@@ -2025,7 +2255,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
 
 def _index(move: str, kind: str, n: int) -> int:
     if not isinstance(move, str) or not move.startswith(kind) or not move[1:].isdigit():
-        raise CareerError(f"expected a {'n offer' if kind == 'o' else 'n event'} move, got {move!r}")
+        what = {"o": "an offer", "c": "an offer", "e": "an event answer", "m": "a key-moment call",
+                "b": "a base price"}.get(kind, "a")
+        raise CareerError(f"expected {what} move, got {move!r}")
     i = int(move[1:])
     if not 0 <= i < n:
         raise CareerError(f"no choice {i} here")
@@ -2037,6 +2269,13 @@ def _index(move: str, kind: str, n: int) -> int:
 
 def policy_move(career: Career, policy: str, rng: random.Random) -> str:
     p = career.pending
+    if p.kind == "plan":                       # A213: the automatic players set none
+        return "p" + "0" * len(p.plan_bowlers)
+    if p.kind == "mega":                       # A212
+        m = p.mega
+        if policy == "random":
+            return rng.choice((["k"] if m.retain else []) + [f"b{i}" for i in range(len(m.bases))])
+        return "k" if m.retain else f"b{m.suggested}"
     if p.kind == "moment":
         return f"m{rng.randrange(3) if policy == 'random' else 1}"
     if p.kind == "event":

@@ -38,13 +38,21 @@ def model():
 
 
 def _play(deck, model, seed, setup, moves, **kw):
-    """`play_career` with every key moment answered "Balanced" (A204), so a test written
+    """`play_career` with every key moment answered "Balanced" (A204), every mega-auction year
+    (A212) and bowling plan (A213) answered as an automatic player would, so a test written
     for offers and events keeps testing them. The given moves are fed one at a time."""
     moves, made = list(moves), []
     while True:
         c = C.play_career(deck, model, seed, setup, made, **kw)
         if c.pending is not None and c.pending.kind == "moment":
             made.append("m1")
+            continue
+        if c.pending is not None and c.pending.kind == "plan":
+            made.append(C.policy_move(c, "strength", None))
+            continue
+        if c.pending is not None and c.pending.kind == "mega" and moves and moves[0][0] in "oc":
+            moves.pop(0)                        # that season's offer move answers its mega year
+            made.append(C.policy_move(c, "strength", None))
             continue
         if not moves:
             return c
@@ -90,8 +98,8 @@ def test_2016_has_the_two_stand_ins_and_not_the_two_suspended_sides(deck):
 # --- ability -----------------------------------------------------------------------------
 
 
-def _setup(role="opener", overseas=False):
-    return C.Setup("Tester", role, 2012, overseas)
+def _setup(role="opener", overseas=False, debut=2012):
+    return C.Setup("Tester", role, debut, overseas)
 
 
 def test_ability_is_the_start_at_zero_and_the_ceiling_at_one(deck):
@@ -694,15 +702,18 @@ def _lasting_offer(deck, model, seed, setup, years=3):
 
 
 def test_a_three_year_deal_is_three_seasons_at_one_price_then_the_market(deck, model):
+    # 2014-16, then an ordinary market in 2017: a deal from 2012 would reach the 2014 mega
+    # auction, which ends every deal (A212), and one from 2015 would end into 2018's. A debut
+    # is a signing even in a mega year.
     seed = _seed_quiet(4)
-    i = _lasting_offer(deck, model, seed, _setup())
-    c = _play(deck, model, seed, _setup(), [f"c{i}"])
-    assert _play(deck, model, seed, _setup(), []).pending.offers[i].price3 == C.DEBUT_PRICE
+    i = _lasting_offer(deck, model, seed, _setup(debut=2014))
+    c = _play(deck, model, seed, _setup(debut=2014), [f"c{i}"])
+    assert _play(deck, model, seed, _setup(debut=2014), []).pending.offers[i].price3 == C.DEBUT_PRICE
     for year in (2, 3):
         o = c.pending.offers
         assert len(o) == 1 and o[0].stay and o[0].contract_year == year
         assert o[0].franchise == c.seasons[0].franchise and o[0].price == c.seasons[0].price
-        c = _play(deck, model, seed, _setup(), [f"c{i}"] + ["o0"] * (year - 1))
+        c = _play(deck, model, seed, _setup(debut=2014), [f"c{i}"] + ["o0"] * (year - 1))
     assert [r.contract_year for r in c.seasons] == [1, 2, 3]
     assert len(c.pending.offers) > 1 and not any(o.contract_year for o in c.pending.offers)
 
@@ -718,10 +729,10 @@ def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, mon
     out his deal and goes after it ends."""
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = _seed_quiet(4)
-    one = _play(deck, model, seed, _setup(), ["o0", "o0"])
+    one = _play(deck, model, seed, _setup(debut=2015), ["o0", "o0"])
     assert one.released and len(one.seasons) == 2
-    i = _lasting_offer(deck, model, seed, _setup())
-    three = _play(deck, model, seed, _setup(), [f"c{i}", "o0", "o0"])
+    i = _lasting_offer(deck, model, seed, _setup(debut=2015))
+    three = _play(deck, model, seed, _setup(debut=2015), [f"c{i}", "o0", "o0"])
     assert three.released and len(three.seasons) == 3
     assert [r.squad for r in three.seasons] == [False, True, True]
 

@@ -601,23 +601,72 @@ class Innings:
         return f"{self.balls // BALLS_PER_OVER}.{self.balls % BALLS_PER_OVER}"
 
 
-def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None) -> BowlerCard:
+def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
+                  over: int | None = None, plan: dict[str, str] | None = None) -> BowlerCard:
     """Fewest overs bowled first, best bowler breaking the tie, never two overs running.
 
-    A real captain saves their best for the death; this one does not, and that is a
-    deliberate omission rather than an oversight -- bowling order is a tactical layer, and
-    adding one before the engine underneath it has been read would bury the engine's own
-    behaviour under a policy's.
+    A real captain saves their best for the death; this one does not, unless a captain has
+    set a PLAN (A213: Build a Career's armband): a phase per bowler, "powerplay", "middle" or
+    "death". Then this over's phase goes to its planned bowlers first, the unplanned next,
+    and a bowler saved for a later phase last -- but never in a way that leaves the innings
+    unable to finish its twenty overs (`_can_finish`). With no plan, exactly as before: no
+    other mode changes.
     """
     available = [b for b in bowlers
                  if b.balls < MAX_OVERS_PER_BOWLER * BALLS_PER_OVER and b is not previous]
-    return min(available, key=lambda b: (b.balls, -(b.player.bowl or 0.0)))
+    default = lambda b: (b.balls, -(b.player.bowl or 0.0))
+    if not plan or over is None:
+        return min(available, key=default)
+    phase = phase_of_over(over)
+    order = sorted(available, key=lambda b: (_plan_rank(plan.get(b.player.person_id), phase),)
+                   + default(b))
+    for b in order:
+        if _can_finish(bowlers, b, OVERS - over - 1):
+            return b
+    return min(available, key=default)
+
+
+PLAN_PHASES = ("powerplay", "middle", "death")
+
+
+def phase_of_over(over: int) -> str:
+    """SPEC 4.8/A5's phases of a full twenty, as Season Analysis uses them: overs 1-6, 7-15,
+    16-20 (0-based 0-5, 6-14, 15-19)."""
+    return "powerplay" if over < 6 else "middle" if over < 15 else "death"
+
+
+def _plan_rank(planned: str | None, phase: str) -> int:
+    """0: planned for this phase. 1: no plan (or planned for a phase already gone). 2: saved
+    for a phase still to come."""
+    if planned == phase:
+        return 0
+    if planned in PLAN_PHASES and PLAN_PHASES.index(planned) > PLAN_PHASES.index(phase):
+        return 2
+    return 1
+
+
+def _can_finish(bowlers: list[BowlerCard], chosen: BowlerCard, overs_left: int) -> bool:
+    """With `chosen` bowling this over, can the next `overs_left` still be bowled -- four
+    overs each, never two running? Always handing the over to whoever has most overs left
+    (other than the man who just bowled) is optimal for that, so playing it out decides."""
+    left = {id(b): MAX_OVERS_PER_BOWLER - b.balls // BALLS_PER_OVER - (b is chosen)
+            for b in bowlers}
+    prev = id(chosen)
+    for _ in range(overs_left):
+        pick = max((k for k, n in left.items() if n > 0 and k != prev),
+                   key=lambda k: left[k], default=None)
+        if pick is None:
+            return False
+        left[pick] -= 1
+        prev = pick
+    return True
 
 
 def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                  rng: random.Random, target: int | None = None, *,
                  overs: int = OVERS, max_wickets: int = WICKETS,
-                 state_over: int | None = None) -> Innings:
+                 state_over: int | None = None,
+                 plan: dict[str, str] | None = None) -> Innings:
     """One innings. The three keyword-only parameters exist for the super over and
     nothing else; every one of them defaults to an ordinary twenty-over innings, so a
     caller that does not name them gets exactly the behaviour this function has always
@@ -649,7 +698,9 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     streak: dict[int, int] = {}
 
     for over in range(overs):
-        bowler = choose_bowler(attack, previous)
+        # A captain's phase plan (A213) is for a full twenty only; a super over has none.
+        bowler = (choose_bowler(attack, previous, over, plan) if plan and overs == OVERS
+                  else choose_bowler(attack, previous))
         previous = bowler
         over_wickets_by_bowler = 0
         over_start_runs, over_start_wickets = innings.runs, innings.wickets

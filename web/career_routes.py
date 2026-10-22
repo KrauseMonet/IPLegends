@@ -132,6 +132,8 @@ class SeasonOut(BaseModel):
     five_fors: int = 0
     hat_tricks: int = 0
     milestones: list[str] = []    # A209
+    mega: str = ""                # how a mega-auction year went (A212)
+    plan: list[str] = []          # "Name: Death", the plan the season began with (A213)
 
 
 class OfferOut(BaseModel):
@@ -145,6 +147,44 @@ class OfferOut(BaseModel):
     stay: bool
     position: int | None          # where you would bat in that eleven
     attack_rank: int | None       # where you would come in its attack, if you bowl
+
+
+class MegaOut(BaseModel):
+    """A mega-auction year's choice (A212): your club's retention offer, if it made one, or
+    the auction at a base price of your choosing."""
+    retain: OfferOut | None
+    bases: list[str]              # the base prices, in crore/lakh words
+    suggested: int                # index: the auction's own base for your card
+    retain_card: int = C.RETAIN_CARD   # the card a club wants before it retains you
+
+
+class AuctionBidOut(BaseModel):
+    short: str
+    crest: str | None
+    price: str
+
+
+class AuctionOut(BaseModel):
+    """The mega auction decided by THIS move, for the page to play (A212)."""
+    retained: bool
+    sold: bool
+    base: str
+    franchise: str
+    short: str
+    crest: str | None
+    price: str
+    bids: list[AuctionBidOut]
+
+
+class PlanBowlerOut(BaseModel):
+    """One of your side's bowlers, for a captain's plan (A213), with his real season's
+    figures to plan by. `phase` is where the plan has him now: powerplay, middle, death or None."""
+    name: str
+    you: bool
+    style: str | None
+    wickets: int | None
+    economy: float | None
+    phase: str | None
 
 
 class EventOptionOut(BaseModel):
@@ -188,6 +228,8 @@ class PendingOut(BaseModel):
     # after 2012): why there is no offer to stay.
     club_gone: str | None = None
     moment: MomentOut | None = None
+    mega: MegaOut | None = None
+    plan: list[PlanBowlerOut] | None = None    # a captain's side: set it, or change it here (A213)
 
 
 class MilestoneOut(BaseModel):
@@ -301,6 +343,7 @@ class CareerOut(BaseModel):
     summary: SummaryOut | None
     share: str | None
     season_play: SeasonPlayOut | None = None
+    auction: AuctionOut | None = None
 
 
 def _template(c) -> TemplateOut:
@@ -323,7 +366,8 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         highlights=[HighlightOut(stage=h.stage, opponent=h.opponent, text=h.text)
                     for h in r.highlights],
         five_fors=r.five_fors, hat_tricks=r.hat_tricks,
-        milestones=[m.text for m in r.milestones])
+        milestones=[m.text for m in r.milestones], mega=r.mega,
+        plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan])
 
 
 def option_hint(o: C.EventOption) -> str:
@@ -353,6 +397,8 @@ def _club_gone(career: C.Career) -> str | None:
     return last if canonical(last) not in playing else None
 
 
+PHASE_WORDS = {"powerplay": "Powerplay", "middle": "Middle overs", "death": "Death"}
+
 APPROACH_HINTS = ("Fewer runs, safer: out less often", "Your usual game",
                   "More runs, riskier: out more often")
 BOWLING_HINTS = ("Cheaper overs, fewer wickets", "Your usual game",
@@ -373,16 +419,36 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
         event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
                          options=[EventOptionOut(label=o.label, hint=option_hint(o))
                                   for o in p.event.options])
+    plan = [PlanBowlerOut(name=c.name, you=c.person_id == C.YOU_ID, style=c.bowling_style,
+                          wickets=c.bowl_wickets, economy=c.economy,
+                          phase=p.plan.get(c.person_id)) for c in p.plan_bowlers] or None
+    mega = None
+    if p.kind == "mega" and p.mega is not None:
+        mega = MegaOut(retain=_offer(p.mega.retain, p.year) if p.mega.retain else None,
+                       bases=[crore(b) for b in p.mega.bases], suggested=p.mega.suggested)
     return PendingOut(
         kind=p.kind, year=p.year, season_no=p.k + 1, squad=p.squad,
-        offers=[OfferOut(franchise=o.franchise, short=o.short,
-                         crest=crests.crest_url(o.franchise, p.year), price=crore(o.price),
-                         price3=(crore(o.price3) if o.price3 is not None and not o.contract_year
-                                 else None),
-                         contract_year=o.contract_year, strength=o.strength, stay=o.stay,
-                         position=o.position, attack_rank=o.attack_rank) for o in p.offers],
-        event=event, can_retire=p.kind == "offer" and p.k > 0,
-        moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None)
+        offers=[_offer(o, p.year) for o in p.offers],
+        event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
+        moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
+        mega=mega, plan=plan)
+
+
+def _offer(o: C.Offer, year: int) -> OfferOut:
+    return OfferOut(franchise=o.franchise, short=o.short,
+                    crest=crests.crest_url(o.franchise, year), price=crore(o.price),
+                    price3=(crore(o.price3) if o.price3 is not None and not o.contract_year
+                            else None),
+                    contract_year=o.contract_year, strength=o.strength, stay=o.stay,
+                    position=o.position, attack_rank=o.attack_rank)
+
+
+def _auction(a: C.MegaResult, year: int) -> AuctionOut:
+    return AuctionOut(retained=a.retained, sold=a.sold, base=crore(a.base) if a.base else "",
+                      franchise=a.franchise, short=a.short,
+                      crest=crests.crest_url(a.franchise, year), price=crore(a.price),
+                      bids=[AuctionBidOut(short=sh, crest=crests.crest_url(f, year), price=crore(pr))
+                            for f, sh, pr in a.bids])
 
 
 def _summary(c: C.Career) -> SummaryOut:
@@ -463,14 +529,20 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
         season_play=(_season_play(career.detail, career.live_milestones)
-                     if career.detail else None))
+                     if career.detail else None),
+        auction=_auction(career.auction, _auction_year(career)) if career.auction else None)
+
+
+def _auction_year(career: C.Career) -> int:
+    """The year the auction just decided was for: the season pending, or the one just played."""
+    return career.pending.year if career.pending else career.seasons[-1].year
 
 
 def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     """The moves to keep beside the checkpoint: those that answered the season now pending
     (an offer awaiting its event, a season paused at a key moment), none once a season is
     played or the career is over."""
-    return (moves if career.pending is not None and career.pending.kind in ("event", "moment")
+    return (moves if career.pending is not None and career.pending.kind in ("event", "plan", "moment")
             else [])
 
 
@@ -520,7 +592,7 @@ def career_start(body: StartIn) -> CareerOut:
 
 class MoveIn(BaseModel):
     token: str = Field(max_length=200_000)
-    move: str = Field(max_length=8)
+    move: str = Field(max_length=16)          # "m1p012303": a call with a new plan (A213)
 
 
 @router.post("/api/career/move")

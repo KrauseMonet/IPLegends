@@ -57,11 +57,14 @@ async function crMove(move){
   if (CR.busy) return;
   CR.busy = true;
   const before = CR.data.seasons.length;
-  if (move !== 'r') crLoading(`Playing ${CR.data.pending.year}…`);
+  const mega = move === 'k' || move[0] === 'b';
+  if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
     const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
     crSave({token: d.token});
-    crShow(d, d.seasons.length > before ? 'season' : null);
+    const next = () => crShow(d, d.seasons.length > before ? 'season' : null);
+    if (mega && d.auction){ CR.data = d; crHead(d); crTimeline(d); return crAuctionPlay(d.auction, next); }
+    next();
   } catch(e){
     slip(e.message || 'That did not go through. Try again.');
     crShow(CR.data, null);
@@ -85,6 +88,8 @@ function crShow(d, moment){
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
   if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
   if (!d.pending) return crEnd(d);
+  if (d.pending.kind === 'mega') return crMega(d);
+  if (d.pending.kind === 'plan') return crPlan(d);
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
 }
 
@@ -187,6 +192,133 @@ function crOffers(d){
         titles, but you may play a smaller part in them.</p>
       ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
         <button class="act" onclick="crRetire()">Retire instead</button></div>` : ''}
+    </div>`;
+}
+
+// --- a mega-auction year [A212] --------------------------------------------------------------
+// Every contract ends. Your club may come to you with a retention offer at one of the real
+// slabs; take it, or go into the auction at a base price you choose.
+
+function crMega(d){
+  const p = d.pending, m = p.mega, last = d.seasons[d.seasons.length - 1];
+  CR.base = m.suggested;
+  const retain = m.retain ? `
+    <div class="cr-offer stay cr-retain">
+      <span class="cr-tag">Retention</span>
+      ${crestImg(m.retain.crest, 'cr-offer-crest')}
+      <b>${esc(m.retain.franchise)}</b>
+      <span class="cr-place">${esc(crPlace(m.retain))}</span>
+      <div class="cr-deal"><button class="act lead" onclick="crMove('k')">Stay · ${esc(m.retain.price)}</button></div>
+      <p class="room-note">Your club wants to keep you before the auction, at a retention slab.</p>
+    </div>` : `<p class="room-note" style="text-align:center">${esc(last.franchise)} have not asked to retain you.
+      Retention is offered from a season card of ${m.retain_card}.</p>`;
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · MEGA AUCTION · SEASON ${p.season_no}</div>
+      <h2 class="cr-h">Every contract ends this year</h2>
+      ${p.squad ? `<p class="cr-warn">Last season was poor: whoever buys you, you start as a squad player.</p>` : ''}
+      <div class="cr-offers cr-mega">
+        ${retain}
+        <div class="cr-offer cr-auction">
+          <span class="cr-tag">Auction</span>
+          <b>Go into the auction</b>
+          <span class="cr-place">Your base price</span>
+          <div class="cr-bases">${m.bases.map((b, i) => `<button class="room-choice${i === m.suggested ? ' sel' : ''}"
+            onclick="crPickBase(${i}, this)">${esc(b)}${i === m.suggested ? '<i>usual</i>' : ''}</button>`).join('')}</div>
+          <div class="cr-deal"><button class="act${m.retain ? '' : ' lead'}" onclick="crMove('b' + CR.base)">Enter the auction</button></div>
+          <p class="room-note">Every club bids what it thinks you are worth. Set your base too high
+            and nobody may meet it: then a club signs you late, at your base, as a squad player.</p>
+        </div>
+      </div>
+      ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
+        <button class="act" onclick="crRetire()">Retire instead</button></div>` : ''}
+    </div>`;
+}
+
+function crPickBase(i, btn){
+  CR.base = i;
+  document.querySelectorAll('.cr-bases .room-choice').forEach(b => b.classList.toggle('sel', b === btn));
+}
+
+// The bidding, played back: at most ~4 s whatever the number of bids (the auction floor's
+// own budget, A146), then the hammer.
+function crAuctionPlay(a, done){
+  const finish = `<div class="foot-actions" style="justify-content:center">
+      <button class="act lead" id="crAucGo">Continue</button></div>`;
+  if (a.retained){
+    $('#crStage').innerHTML = `<div class="cr-step"><div class="cr-auc-stage sold">
+      <div class="over-line">RETAINED</div>${crestImg(a.crest, 'cr-auc-crest')}
+      <b class="cr-auc-price">${esc(a.price)}</b><span>${esc(a.franchise)} keep you</span></div>${finish}</div>`;
+    $('#crAucGo').onclick = done;
+    return;
+  }
+  $('#crStage').innerHTML = `<div class="cr-step"><div class="cr-auc-stage" id="crAuc">
+      <div class="over-line">ON THE BLOCK · BASE ${esc(a.base)}</div>
+      <div class="cr-auc-lead" id="crAucLead"><b class="cr-auc-price">${esc(a.base)}</b><span>Who will open?</span></div>
+      <div class="cr-auc-count" id="crAucCount"></div>
+      <div class="cr-auc-stamp" id="crAucStamp"></div></div>
+      <div id="crAucAfter"></div></div>`;
+  const bids = a.bids, reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const gap = reduce ? 0 : Math.max(40, Math.min(220, 4000 / Math.max(1, bids.length)));
+  let i = 0;
+  const hammer = () => {
+    $('#crAuc').classList.add(a.sold ? 'sold' : 'unsold');
+    $('#crAucStamp').innerHTML = a.sold ? `SOLD · ${esc(a.short)}` : 'UNSOLD';
+    $('#crAucLead').innerHTML = `${crestImg(a.crest, 'cr-auc-crest')}<b class="cr-auc-price">${esc(a.price)}</b>
+      <span>${a.sold ? esc(a.franchise) : `Nobody met your base. ${esc(a.franchise)} sign you late, as a squad player.`}</span>`;
+    $('#crAucAfter').innerHTML = finish;
+    $('#crAucGo').onclick = done;
+  };
+  (function step(){
+    if (i >= bids.length) return setTimeout(hammer, reduce ? 0 : 500);
+    const b = bids[i++];
+    $('#crAucLead').innerHTML = `${crestImg(b.crest, 'cr-auc-crest')}<b class="cr-auc-price">${esc(b.price)}</b><span>${esc(b.short)}</span>`;
+    $('#crAucCount').textContent = `${i} bid${i === 1 ? '' : 's'}`;
+    setTimeout(step, gap);
+  })();
+}
+
+// --- the captain's bowling plan [A213] ------------------------------------------------------
+// A phase for each of your side's bowlers. The order the server lists them in is the order
+// the move's digits follow: 0 any, 1 powerplay, 2 middle, 3 death.
+
+const CR_PHASES = [['Any', null], ['Powerplay', 'powerplay'], ['Middle', 'middle'], ['Death', 'death']];
+
+function crPlanStart(plan){
+  CR.plan = plan.map(b => Math.max(0, CR_PHASES.findIndex(([, p]) => p === b.phase)));
+  CR.planDirty = false;
+}
+
+function crPlanRows(plan){
+  return plan.map((b, i) => {
+    const facts = b.you ? 'You' : [b.style ? b.style[0].toUpperCase() + b.style.slice(1) : null,
+      b.wickets != null ? `${b.wickets} wkts` : null, b.economy != null ? `econ ${b.economy.toFixed(2)}` : null]
+      .filter(Boolean).join(' · ');
+    return `<div class="cr-plan-row"><span class="cr-plan-who"><b>${b.you ? 'You' : esc(b.name)}</b><i>${esc(b.you ? 'your own overs' : facts)}</i></span>
+      <div class="cr-plan-ph">${CR_PHASES.map(([label], j) => `<button class="room-choice${CR.plan[i] === j ? ' sel' : ''}"
+        onclick="crPlanPick(${i}, ${j}, this)">${label}</button>`).join('')}</div></div>`;
+  }).join('');
+}
+
+function crPlanPick(i, j, btn){
+  CR.plan[i] = j;
+  CR.planDirty = true;
+  btn.parentElement.querySelectorAll('.room-choice').forEach(b => b.classList.toggle('sel', b === btn));
+}
+
+function crPlan(d){
+  const p = d.pending, o = p.offers[0];
+  crPlanStart(p.plan);
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · ${esc(o.franchise).toUpperCase()} · CAPTAIN</div>
+      <h2 class="cr-h">Your bowling plan</h2>
+      <p class="room-note" style="text-align:center">Give each bowler a phase. Their overs go there first;
+        a bowler kept for the death is held back until he is needed. Nobody bowls more than four
+        overs or two running, and a plan never leaves an innings short of bowlers.</p>
+      <div class="cr-plan">${crPlanRows(p.plan)}</div>
+      <div class="foot-actions" style="justify-content:center">
+        <button class="act lead" onclick="crMove('p' + CR.plan.join(''))">Start the season</button></div>
     </div>`;
 }
 
@@ -357,6 +489,8 @@ function crMomentCard(){
         <div><div class="over-line">${head}</div>
           <b>v ${esc(m.opponent)}</b></div></div>
       <p class="cr-moment-stakes">${esc(m.stakes)}</p>
+      ${CR.feed.d.pending.plan ? `<details class="cr-plan-moment"><summary>Change the bowling plan</summary>
+        <div class="cr-plan">${(crPlanStart(CR.feed.d.pending.plan), crPlanRows(CR.feed.d.pending.plan))}</div></details>` : ''}
       <div class="cr-moment-label">How do you play it?</div>
       <div class="cr-moment-opts">${m.options.map((o, i) => `
         <button class="cr-moment-opt${i === 1 ? ' mid' : ''}" onclick="crCall(${i})">
@@ -370,7 +504,8 @@ async function crCall(i){
   CR.busy = true;
   $('#crFeedAction').innerHTML = `<div class="cr-loading small"><div class="cr-ball"></div><b>Playing it…</b></div>`;
   try {
-    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move: `m${i}`})});
+    const move = `m${i}` + (CR.planDirty ? 'p' + CR.plan.join('') : '');
+    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
     crSave({token: d.token});
     CR.data = d;
     crHead(d);
@@ -482,11 +617,14 @@ function crSeason(d, r){
           ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}`)}
           ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
           ${crBadge(r.card > r.form, 'dim', `Form ${r.form}, reputation held you at ${r.card}`)}
+          ${crBadge(!!r.mega, 'gold', esc(r.mega || ''))}
         </div>
         <div class="cr-lines">
           <div><b>${r.matches}</b> matches<span>${esc(r.price)}${r.stayed ? ' · stayed' : ''}</span></div>
           ${crBat(r)}${crBowl(r)}
         </div>
+        ${r.plan && r.plan.length ? `<div class="cr-msl cr-plan-card"><div class="cr-label">Your bowling plan</div>
+          <div>${r.plan.map(esc).join(' · ')}</div></div>` : ''}
         ${r.milestones && r.milestones.length ? `<div class="cr-msl"><div class="cr-label">Milestones</div>
           ${r.milestones.map(t => `<div>★ ${esc(t)}</div>`).join('')}</div>` : ''}
         ${r.highlights.length ? `<div class="cr-hl"><div class="cr-label">Highlights</div>

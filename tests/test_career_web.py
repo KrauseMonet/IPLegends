@@ -107,7 +107,8 @@ def test_a_season_is_played_one_move_at_a_time(client, monkeypatch):
     while seasons < 2:
         p = d["pending"]
         asked |= p["kind"] == "event"
-        move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
+        move = {"offer": "o0", "event": "e0", "mega": "b0",
+                "plan": "p" + "0" * len(p.get("plan") or [])}.get(p["kind"], "m1")
         r = client.post("/api/career/move", json={"token": d["token"], "move": move})
         assert r.status_code == 200, r.text
         d = r.json()
@@ -218,9 +219,10 @@ def test_hints_name_missed_matches_and_an_ending():
 
 def test_a_three_year_deal_through_the_api(client, deck):
     seed = next(s for s in range(1, 2000) if all(len(C.draw_event(s, k).options) == 1 for k in range(2)))
-    d = _token(client, seed=seed, debut=2017)
-    clubs_2018 = {C.canonical(deck.cards_by_fs[fs][0].franchise) for fs in C.year_fs_ids(deck, 2018)}
-    i = next(n for n, o in enumerate(d["pending"]["offers"]) if C.canonical(o["franchise"]) in clubs_2018)
+    # 2015 and 2016: a 2017 deal's second year would be 2018, a mega year that ends it (A212)
+    d = _token(client, seed=seed, debut=2015)
+    clubs_2016 = {C.canonical(deck.cards_by_fs[fs][0].franchise) for fs in C.year_fs_ids(deck, 2016)}
+    i = next(n for n, o in enumerate(d["pending"]["offers"]) if C.canonical(o["franchise"]) in clubs_2016)
     assert d["pending"]["offers"][i]["price3"]
     d = client.post("/api/career/move", json={"token": d["token"], "move": f"c{i}"}).json()
     d = _through_moments(client, d)

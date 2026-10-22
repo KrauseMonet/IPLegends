@@ -281,6 +281,9 @@ class Side:
     # Plain facts rather than a crest URL: the engine does not know the web exists.
     franchise: str | None = None
     year: int | None = None
+    # A captain's phase plan for this side's bowlers (A213), person id -> "powerplay" |
+    # "middle" | "death". Only a Build a Career side ever has one.
+    bowling_plan: dict[str, str] | None = None
 
 
 @dataclass
@@ -788,7 +791,8 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
                        if away_forced else away.xi)
     away_bowl_impact_1 = away.impact if away_forced else None
     first = play_innings(model, lineup(home.xi, model, None),
-                          attack(away_bowling_1, model, away_bowl_impact_1), rng)
+                          attack(away_bowling_1, model, away_bowl_impact_1), rng,
+                          plan=away.bowling_plan)
 
     home_target = None if home.impact is None else decide_impact(home, away, "bowl", first)
     away_target = (None if away.impact is None or away_forced
@@ -800,7 +804,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     home_bowl_impact = home.impact if home_target is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
-                          rng, target=first.runs)
+                          rng, target=first.runs, plan=home.bowling_plan)
 
     if stats is not None and track is not None:
         if track is home:

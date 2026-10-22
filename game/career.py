@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 
 from etl.feasibility import Card, Deck, team_rating
 from etl.franchise_map import canonical
-from game.analysis import batting_rank, bowling_rank
+from game.analysis import SeasonAnalysis, batting_rank, bowling_rank, season_analysis
 from game.auction import value_curve
 from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
@@ -1456,6 +1456,10 @@ class SeasonDetail:
     table: list[TableRow]               # the league as it finished (or stands, if paused)
     watch: list[Result]                 # your key moments and playoff matches, in order
     complete: bool = True               # False: the season is paused at a key moment
+    # The draft season's chart set for this season (A211), your side tracked. A pure
+    # function of the season alone, so it can ride in the shared cache with the rest.
+    analysis: SeasonAnalysis | None = None
+    results: list[Result] = field(default_factory=list)   # every match, for the analysis' crests
 
 
 def _landmarks(line: MatchLine, theirs) -> list[str]:
@@ -1616,6 +1620,8 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.highlights = _highlights(results, yours)
     detail = season_detail(year)
     record.hat_tricks = sum("hattrick" in l.landmarks for l in detail.feed)
+    detail.analysis = season_analysis(results, track=yours)
+    detail.results = results
     return record, detail
 
 

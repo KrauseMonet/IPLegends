@@ -284,6 +284,7 @@ class SeasonPlayOut(BaseModel):
     your_name: str
     your_crest: str | None
     complete: bool = True
+    analysis: dict | None = None  # AnalysisOut, the solo season's own shape, for analysis.js (A211)
 
 
 class CareerOut(BaseModel):
@@ -403,7 +404,7 @@ def _summary(c: C.Career) -> SummaryOut:
 
 def _season_play(detail: C.SeasonDetail,
                  milestones: list[C.CareerMilestone] = ()) -> SeasonPlayOut:
-    from web.app import _result_out      # the solo season's own match shape
+    from web.app import _analysis_out, _result_out      # the solo season's own shapes
 
     yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
     you_row = next(t for t in detail.table if t.you)
@@ -426,7 +427,9 @@ def _season_play(detail: C.SeasonDetail,
     return SeasonPlayOut(feed=feed, table=table, watch=watch, your_short=you_row.short,
                          your_name=you_row.name,
                          your_crest=next(x.crest for x in table if x.you),
-                         complete=detail.complete)
+                         complete=detail.complete,
+                         analysis=(_analysis_out(detail.analysis, detail.results).model_dump()
+                                   if detail.analysis is not None else None))
 
 
 def share_text(c: C.Career) -> str:

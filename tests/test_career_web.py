@@ -307,3 +307,26 @@ def test_each_milestone_rides_on_the_feed_row_of_its_match(client):
     on_rows = [(i, t) for i, l in enumerate(found["season_play"]["feed"]) for t in l["milestones"]]
     assert on_rows == [(m.match, m.text) for m in rec.milestones if m.match is not None]
     assert found["seasons"][-1]["milestones"] == [m.text for m in rec.milestones]
+
+
+def test_a_played_season_carries_its_analysis_with_your_side_tracked(client, deck, model):
+    """A211: the draft season's chart set, for the career's season. Your side's runs in it are
+    your side's innings, summed here from the season's own scorecards; a reload carries none."""
+    d = client.post("/api/career/start", json={"name": "An", "role": "opener", "debut": 2014,
+                                               "seed": 5}).json()
+    moves = []
+    while not (d.get("season_play") and d["season_play"]["complete"]):
+        p = d["pending"]
+        moves.append("o0" if p["kind"] == "offer" else "e0" if p["kind"] == "event" else "m1")
+        d = client.post("/api/career/move", json={"token": d["token"], "move": moves[-1]}).json()
+    a = d["season_play"]["analysis"]
+    assert a is not None
+    seed, setup, _, _ = R.read_token(d["token"])
+    detail = C.play_career(deck, model, seed, setup, moves).detail
+    yours = next(s for r in detail.results for s in (r.home, r.away) if getattr(s, "you", False))
+    runs = sum((r.home_innings if r.home is yours else r.away_innings).runs
+               for r in detail.results if yours in (r.home, r.away))
+    assert a["fixtures"] == len(detail.results)
+    assert a["your_total_runs"] == runs > 0
+    again = client.post("/api/career/view", json={"token": d["token"]}).json()
+    assert again["season_play"] is None

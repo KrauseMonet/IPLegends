@@ -494,8 +494,21 @@ function crSeason(d, r){
       </div>
       ${!d.pending && d.summary ? `<p class="cr-warn">${d.summary.ending === 'released'
         ? 'Two poor seasons running, and no franchise came for you.' : 'That was the last season.'}</p>` : ''}
-      <div class="foot-actions" style="justify-content:center">${next}</div>
+      <div class="foot-actions" style="justify-content:center">${next}${d.season_play && d.season_play.complete
+        && d.season_play.analysis ? '<button class="act" id="crAnBtn" onclick="crAnalysis()">Season analysis</button>' : ''}</div>
+      <div class="an-wrap hide" id="crAnHost"></div>
     </div>`;
+}
+
+// The season's charts [A211], the draft season's own (analysis.js), drawn under the card. Only
+// in the response that played the season, as its feed is: a reload goes to the card alone.
+function crAnalysis(){
+  const sp = CR.data && CR.data.season_play, host = document.getElementById('crAnHost');
+  if (!sp || !sp.analysis || !host) return;
+  host.classList.remove('hide');
+  renderAnalysis(sp.analysis, host);
+  document.getElementById('crAnBtn').remove();
+  host.scrollIntoView({block: 'start', behavior: 'smooth'});
 }
 
 function crRank(n, what){

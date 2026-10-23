@@ -702,7 +702,7 @@ function crSeason(d, r){
           ${crBadge(r.captain, '', 'Captain')}
           ${crBadge(r.contract_year > 0, '', `Contract year ${r.contract_year} of 3`)}
           ${crBadge(r.squad, 'dim', 'Squad player')}
-          ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}`)}
+          ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}${r.absence_reason ? ' · ' + esc(r.absence_reason) : ''}`)}
           ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
           ${crBadge(r.card > r.form, 'dim', `Played to ${r.form}, reputation held the grade at ${r.card}`)}
           ${crBadge(!!r.mega, 'gold', esc(r.mega || ''))}

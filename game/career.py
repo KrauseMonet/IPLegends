@@ -165,6 +165,41 @@ POOR_PERCENTILE = 0.30
 SQUAD_SHARES = (0.053, 0.062, 0.071, 0.111, 0.133, 0.176, 0.188, 0.214, 0.222, 0.25, 0.286,
                 0.316, 0.357, 0.375, 0.429, 0.429, 0.5, 0.533, 0.615, 0.714)
 
+# [A216] Stars play. One distribution for every regular sent a 95-rated player out for ten
+# league matches in a season as readily as a 75, and the matches were missed for no reason
+# anybody was told. So the block's length is drawn from the shares of regulars of your
+# RATING TIER and PASSPORT, a star loses at most STAR_MAX_ABSENCE of the league to chance,
+# and every chance absence carries a reason: an injury of your kind, or (overseas players
+# only) international duty, which falls at the start or the end of the league.
+#
+# AVAILABILITY_BY_TIER is keyed (tier floor, overseas) over a Rating's floors 88 / 82 / 0.
+# Every entry is PROVISIONAL and equal to AVAILABILITY_SHARES until `tools.availability`
+# is run against the archive (it needs the database): that tool prints the measured tables
+# for this block, and `--check` fails while they disagree. What already acts is the cap.
+AVAILABILITY_TIERS = (88, 82, 0)
+# Each entry is its own tuple (equal, not identical, to the pooled one) so a lookup of the
+# wrong tier is still a different object and a test can tell.
+AVAILABILITY_BY_TIER: dict[tuple[int, bool], tuple[float, ...]] = {
+    key: tuple(list(AVAILABILITY_SHARES))
+    for key in ((88, False), (88, True), (82, False), (82, True), (0, False), (0, True))
+}
+# Declared: a player rated STAR_RATING or more misses at most a quarter of the league to
+# chance. An event card's injury is not chance and is not capped.
+STAR_MAX_ABSENCE = 0.25
+# Declared: of an overseas player's chance absences, the share that are international duty.
+INTERNATIONAL_DUTY_SHARE = 0.5
+DUTY = "international duty"
+# What keeps a man out, by kind. Unlisted kinds read as a batter's.
+INJURIES = {
+    "pace": ("a side strain", "a hamstring strain", "a back spasm", "an ankle injury",
+             "a shoulder injury"),
+    "spin": ("a split webbing", "a finger injury", "a hamstring strain", "a calf strain"),
+    "allrounder": ("a side strain", "a hamstring strain", "a knee injury", "a groin strain"),
+    "keeper": ("a finger injury", "a hamstring strain", "a concussion", "a knee injury"),
+    "batter": ("a hamstring strain", "a hand fracture", "a groin strain", "a concussion",
+               "illness"),
+}
+
 # --- key moments (A204) ----------------------------------------------------------------
 # A few matches a season stop and ask how you will play them. The approach moves your two
 # engine numbers for that match only, in opposite directions, at an exchange rate MEASURED
@@ -1388,6 +1423,7 @@ class SeasonRecord:
     contract_year: int = 0             # 1-3 on a three-year deal, 0 on a one-year (A200)
     missed: int = 0                    # league matches missed (A198)
     dropped: int = 0                   # of them, dropped for form after a make-or-break (A205)
+    absence_reason: str = ""           # why the rest were missed, when chance did it (A216)
     percentile: float = 0.0
     form: int = 70                     # the season's own card, before the reputation floor
     display: int = 70
@@ -1495,25 +1531,82 @@ class Year:
     approaches: list = field(default_factory=list)   # your key moments (A204)
     dropped: list = field(default_factory=list)      # your match numbers, dropped for (A205)
     verdicts: dict = field(default_factory=dict)     # make-or-break number -> kept | dropped
+    absence_reason: str | None = None                # why the chance block was missed (A216)
+
+
+def availability_shares(rating: int | None, overseas: bool | None) -> tuple[float, ...]:
+    """The shares of the league a regular plays, for your Rating tier and passport (A216).
+    No Rating (an older caller) is every regular together, as A198 measured it."""
+    if rating is None:
+        return AVAILABILITY_SHARES
+    floor = next(f for f in AVAILABILITY_TIERS if rating >= f)
+    return AVAILABILITY_BY_TIER[(floor, bool(overseas))]
+
+
+def injury_kind(card: Card) -> str:
+    """Which list of injuries a card draws from."""
+    if card.role == "keeper":
+        return "keeper"
+    if card.role == "allrounder":
+        return "allrounder"
+    if card.role == "bowler":
+        return card.bowling_style or "pace"
+    return "batter"
+
+
+def absence(seed: int, k: int, league_matches: int, squad: bool = False, extra: int = 0,
+            form_drop: float = 0.0, rating: int | None = None, overseas: bool | None = False,
+            role: str | None = None) -> tuple[range, str | None]:
+    """Which of your league matches you miss, and why: one block, its length from the real
+    share of matches a regular (or, in a squad season, a non-regular) plays. Its own random
+    stream, so missing matches never changes how the matches themselves are drawn.
+
+    `form_drop` is the chance this season's share already held a real two-match form drop
+    (FORM_DROP_RATE): for a player who can be dropped for form in the season itself, that
+    much is taken off the block, on a stream of its own (A205).
+
+    [A216] With a Rating, the share is your tier's and passport's, a star's chance absence
+    is capped, and an event card's absence (`extra`) REPLACES the chance one rather than
+    adding to it -- the card is why you missed those matches, and the block was measured
+    from seasons that already held real injuries. In a squad season the card overlaps the
+    matches you were not picked for. A chance absence names its reason; an event card's
+    is the card's own, so it returns None. Without a Rating the old rule stands: the card's
+    matches are added and no reason is given."""
+    rng = random.Random(f"{seed}:avail:{k}")
+    shares = SQUAD_SHARES if squad else availability_shares(rating, overseas)
+    base = round((1 - rng.choice(shares)) * league_matches)
+    if form_drop and random.Random(f"{seed}:avail-form:{k}").random() < form_drop:
+        base = max(0, base - DROP_MATCHES)
+    if rating is None:
+        missed = min(league_matches, base + extra)
+        start = rng.randrange(league_matches - missed + 1)
+        return range(start, start + missed), None
+    if not squad and rating >= STAR_RATING:
+        base = min(base, int(STAR_MAX_ABSENCE * league_matches))
+    why = random.Random(f"{seed}:avail-why:{k}")
+    reason: str | None = None
+    if squad:
+        missed = min(league_matches, max(extra, base))
+    elif extra:
+        missed = min(league_matches, extra)
+    else:
+        missed = base
+        if missed:
+            if overseas and why.random() < INTERNATIONAL_DUTY_SHARE:
+                reason = DUTY
+            else:
+                reason = why.choice(INJURIES.get(role or "batter", INJURIES["batter"]))
+    if reason == DUTY:
+        start = 0 if why.random() < 0.5 else league_matches - missed
+    else:
+        start = rng.randrange(league_matches - missed + 1)
+    return range(start, start + missed), reason
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
                  extra: int = 0, form_drop: float = 0.0) -> range:
-    """Which of your league matches you miss: one block, its length from the real share of
-    matches a regular (or, in a squad season, a non-regular) plays. Its own random stream,
-    so missing matches never changes how the matches themselves are drawn.
-
-    `form_drop` is the chance this season's share already held a real two-match form drop
-    (FORM_DROP_RATE): for a player who can be dropped for form in the season itself, that
-    much is taken off the block, on a stream of its own (A205)."""
-    rng = random.Random(f"{seed}:avail:{k}")
-    shares = SQUAD_SHARES if squad else AVAILABILITY_SHARES
-    base = round((1 - rng.choice(shares)) * league_matches)
-    if form_drop and random.Random(f"{seed}:avail-form:{k}").random() < form_drop:
-        base = max(0, base - DROP_MATCHES)
-    missed = min(league_matches, base + extra)
-    start = rng.randrange(league_matches - missed + 1)
-    return range(start, start + missed)
+    """`absence` without a Rating: the block alone, by the old rule (A198)."""
+    return absence(seed, k, league_matches, squad, extra, form_drop)[0]
 
 
 # [A198] Real all-rounders in regular seasons bowl 14.4 balls a match (195 seasons); a
@@ -1543,7 +1636,8 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   squad: bool = False, extra_missed: int = 0,
                   answers: tuple | None = None,
-                  plan: tuple[tuple[str, str], ...] = ()) -> Year:
+                  plan: tuple[tuple[str, str], ...] = (),
+                  rating: int | None = None) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -1574,8 +1668,10 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     schedule = balanced_order(fixtures(len(sides), double), lambda pair: pair)
     league_matches = sum(yours_index in pair for pair in schedule)
     droppable = not squad and _kind(you) != "allrounder"
-    out = set(missed_block(seed, k, league_matches, squad, extra_missed,
-                           FORM_DROP_RATE[_kind(you)] if droppable else 0.0))
+    block, absence_reason = absence(seed, k, league_matches, squad, extra_missed,
+                                    FORM_DROP_RATE[_kind(you)] if droppable else 0.0,
+                                    rating, you.overseas, injury_kind(you))
+    out = set(block)
     dropped: set[int] = set()                      # league indices you were dropped for
     dropped_seen: list[int] = []                   # ... as your match numbers, for the feed
     verdicts: dict[int, str] = {}                  # make-or-break match -> "kept" | "dropped"
@@ -1694,6 +1790,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped))
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
+    year.absence_reason = absence_reason
     return year
 
 
@@ -1918,10 +2015,11 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                        plan: tuple[tuple[str, str], ...] = ()
                        ) -> tuple[SeasonRecord, SeasonDetail]:
     year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers,
-                         plan)
+                         plan, record.rating)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
+    record.absence_reason = year.absence_reason or ""
     record.dropped = len(year.dropped)
     key = (YOU_ID, id(yours))
     me = lines.get(key) or Line(card=you, side=yours)
@@ -2465,6 +2563,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             cp.contract.left -= 1
             if cp.contract.left == 0:
                 cp.contract = None
+        if played.absence_reason:
+            n = played.missed - played.dropped
+            notes.append(f"You missed {n} league match{'' if n == 1 else 'es'}: "
+                         f"{played.absence_reason}.")
         cp.squad, released = form_after(cp.squad, played.percentile, poor_bar(setup.role))
         if k < YOUTH_SEASONS:
             if cp.squad:

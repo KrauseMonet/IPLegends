@@ -115,6 +115,7 @@ class SeasonOut(BaseModel):
     matches: int
     missed: int
     dropped: int = 0              # of those, dropped for form (A205)
+    absence_reason: str = ""      # why the rest were missed, when chance did it (A216)
     runs: int
     balls: int
     outs: int
@@ -370,7 +371,7 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
         choice=r.choice, card=r.display, rating=r.rating or None, age=C.DEBUT_AGE + r.k,
         notes=list(r.notes),
-        form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, runs=r.runs, balls=r.balls,
+        form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, absence_reason=r.absence_reason, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
         best=f"{r.best[0]}/{r.best[1]}" if r.bowl_balls else None, position=r.position,

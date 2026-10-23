@@ -365,3 +365,20 @@ def test_every_match_of_yours_opens_its_own_scorecard(client):
         assert mine.split("/")[0].split(" ")[0] == l["score_for"].split("/")[0].split(" ")[0]
         assert card["home_innings"]["over_log"] == [] and card["away_innings"]["over_log"] == []
         assert card["home_innings"]["batting"] and card["home_innings"]["bowling"]
+
+
+def test_answers_that_no_longer_replay_resume_from_the_last_season(client):
+    """[A214] A token carrying this season's answers from before an engine change: they are
+    dropped and the season's choices asked again, rather than the career refused (which the
+    page takes for an unreadable career and forgets)."""
+    d = _token(client, seed=4)
+    seed, setup, cp, _ = R.read_token(d["token"])
+    deck, model = R._state()
+    career = C.play_career(deck, model, seed, setup, [], resume=cp)
+    stale = R.make_token(seed, setup, career, ["o0", "e7"])          # no such answer
+    v = client.post("/api/career/view", json={"token": stale})
+    assert v.status_code == 200 and v.json()["pending"]["kind"] == "offer"
+    m = client.post("/api/career/move", json={"token": stale, "move": "e0"})
+    assert m.status_code == 200 and m.json()["pending"]["kind"] == "offer"
+    # a move that is simply wrong for a sound token is still refused
+    assert client.post("/api/career/move", json={"token": d["token"], "move": "e9"}).status_code == 409

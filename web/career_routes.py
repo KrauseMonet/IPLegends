@@ -645,6 +645,22 @@ class MoveIn(BaseModel):
     move: str = Field(max_length=16)          # "m1p012303": a call with a new plan (A213)
 
 
+def _stale(deck, model, seed, setup, checkpoint, partial) -> C.Career | None:
+    """[A214] A season's answers so far that no longer replay -- a token from before an
+    engine change, mid-season (an event that asked a question may now ask none). The
+    checkpoint is a completed season and always replays, so the career resumes from it
+    and only this season's choices are asked again. None when the answers still replay.
+    Seen on production minutes after A214 went live: three such moves refused with 409,
+    and the page took a refused reload for an unreadable career and dropped it."""
+    if not partial:
+        return None
+    try:
+        C.play_career(deck, model, seed, setup, partial, _facts(), resume=checkpoint)
+        return None
+    except C.CareerError:
+        return C.play_career(deck, model, seed, setup, [], _facts(), resume=checkpoint)
+
+
 @router.post("/api/career/move")
 def career_move(body: MoveIn) -> CareerOut:
     seed, setup, checkpoint, partial = read_token(body.token)
@@ -653,6 +669,9 @@ def career_move(body: MoveIn) -> CareerOut:
     try:
         career = C.play_career(deck, model, seed, setup, moves, _facts(), resume=checkpoint)
     except C.CareerError as e:
+        restarted = _stale(deck, model, seed, setup, checkpoint, partial)
+        if restarted is not None:
+            return _out(seed, restarted, [])
         raise HTTPException(409, str(e)) from None
     return _out(seed, career, _moves_since_checkpoint(career, moves))
 
@@ -670,6 +689,9 @@ def career_view(body: ViewIn) -> CareerOut:
     try:
         career = C.play_career(deck, model, seed, setup, partial, _facts(), resume=checkpoint)
     except C.CareerError as e:
+        restarted = _stale(deck, model, seed, setup, checkpoint, partial)
+        if restarted is not None:
+            return _out(seed, restarted, [])
         raise HTTPException(409, str(e)) from None
     return _out(seed, career, partial)
 

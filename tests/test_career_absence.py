@@ -102,3 +102,23 @@ def test_a_careers_season_card_says_why_you_missed_matches(deck_model, monkeypat
     n = first.missed - first.dropped
     assert n >= 2
     assert f"You missed {n} league matches: a split webbing." in first.notes
+
+
+def test_a_drop_onto_matches_you_were_injured_for_is_not_counted_as_a_drop(deck_model,
+                                                                             monkeypatch):
+    """Delhi 2019, seed 31 (test_career's MOB fixture) fails its make-or-break. Put an injury
+    over exactly the two matches it drops you for: you missed them for the injury, so the
+    season records the injury and no drop -- not "Missed 0, dropped for 2" beside a card
+    that says two matches were missed."""
+    deck, model = deck_model
+    start, ceiling = C.spin(deck, 3, "opener")
+    you = C.ability(start, ceiling, 0.0, setup=C.Setup("You", "opener", 2012), fs_id=140,
+                    year=2019, franchise=deck.cards_by_fs[140][0].franchise)
+    plain = C.simulate_year(deck, model, 31, 2, you, answers=None)
+    assert len(plain.dropped) == C.DROP_MATCHES           # the fixture really drops you
+    first = plain.dropped[0] - 1                           # your match number -> league index
+    block = range(first, first + C.DROP_MATCHES)
+    monkeypatch.setattr(C, "absence", lambda *a, **kw: (block, "a hamstring strain"))
+    hurt = C.simulate_year(deck, model, 31, 2, you, answers=None)
+    assert hurt.verdicts == plain.verdicts                 # the same make-or-break, failed
+    assert hurt.dropped == [] and hurt.missed == C.DROP_MATCHES

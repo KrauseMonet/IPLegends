@@ -1758,7 +1758,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             yours.xi, yours.impact = without if benched else lineup()
             played += 1
             seen += 1
-            if idx in dropped:
+            # A drop that lands on matches you were already out injured for is not a drop:
+            # the injury is why you missed them, and the card says so (A216).
+            if idx in dropped and idx not in out:
                 dropped_seen.append(seen)
             stakes = None
             rank = None if benched or not droppable else book.form_rank(you_key)

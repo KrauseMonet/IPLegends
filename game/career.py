@@ -147,6 +147,47 @@ STAR_RATING = 85
 AVAILABILITY_SHARES = (0.25, 0.571, 0.643, 0.706, 0.75, 0.786, 0.812, 0.857, 0.875, 0.929,
                        0.933, 0.938, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 
+# [A216] ...and by how long you have been at your club, which the user pointed out and the
+# archive bears out: real regulars play every match in 26% of their first seasons at a club
+# (Indian; overseas 16%) and in 52% from their third (overseas 35%), and miss three or more
+# of fourteen in 42% against 20%. Ratified: a player SETTLED at his club -- SETTLED_SEASONS
+# there before this one -- loses nothing to chance; only an injury card (mostly pacers) or a
+# make-or-break drop keeps him out. His first and second seasons draw from the real players
+# in theirs, measured the same way as the table above (regular seasons by A33's floors, a
+# team's matches as the denominator, 20 quantiles) over every regular season, keyed on
+# seasons in a row at the same franchise (any squad) and passport: 381 / 316 first seasons,
+# 260 / 163 second. The table above stays for older callers with no Rating.
+SETTLED_SEASONS = 2
+SETTLED_SHARES = (1.0,)
+AVAILABILITY_BY_TENURE = {
+    (0, False): (0.471, 0.562, 0.588, 0.643, 0.688, 0.714, 0.733, 0.786, 0.812, 0.857,
+                 0.867, 0.929, 0.929, 0.938, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+    (0, True): (0.429, 0.5, 0.5, 0.562, 0.571, 0.625, 0.643, 0.688, 0.733, 0.75,
+                0.786, 0.8, 0.812, 0.867, 0.895, 0.929, 1.0, 1.0, 1.0, 1.0),
+    (1, False): (0.5, 0.588, 0.647, 0.706, 0.714, 0.769, 0.786, 0.846, 0.875, 0.929,
+                 0.929, 0.938, 0.941, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+    (1, True): (0.438, 0.5, 0.571, 0.643, 0.667, 0.706, 0.714, 0.786, 0.812, 0.846,
+                0.857, 0.923, 0.929, 0.933, 0.938, 1.0, 1.0, 1.0, 1.0, 1.0),
+}
+# [A216] Ratified by the user over the measured tail: a star does not lose a big chunk of a
+# season to chance, even in his first seasons at a club. At this Rating the random absence
+# is at most this share of the league; only an event card can keep him out longer.
+STAR_AVAILABILITY_RATING = 88
+STAR_MAX_ABSENCE = 0.25
+# [A216] Why you missed the matches you missed. Declared, since the archive records no
+# reasons: an overseas player's absence is international duty half the time (at the start of
+# the season or the end of it); otherwise it is an injury of your kind, an illness or a
+# family matter, and a short one may be a rest. Only a player new to his club has one.
+OVERSEAS_DUTY = 0.5
+INJURIES = {
+    "pace": ("a side strain", "a hamstring strain", "a back spasm", "an ankle injury"),
+    "spin": ("a finger injury", "a shoulder strain", "a hamstring strain"),
+    "allrounder": ("a side strain", "a hamstring strain", "a calf strain", "a finger injury"),
+    "batter": ("a hamstring strain", "a broken finger", "a groin strain", "a back spasm"),
+}
+OTHER_ABSENCE = (("illness", 0.15), ("a family matter", 0.10))
+REST_AFTER = 2                       # an absence this short may be a rest
+
 # [A198] Form decides whether you keep your place, ratified by the user: real careers are
 # rare because players lose it (real bowlers with ten or more seasons were regulars in a
 # median 8 of 12), and a player who is a regular every year is, realistically, near the top
@@ -389,10 +430,12 @@ class Moment:
 class _NeedMoment(Exception):
     def __init__(self, moment: Moment, season, yours: Side, approaches: list,
                  roster: dict | None = None, dropped: list | None = None,
-                 verdicts: dict | None = None):
+                 verdicts: dict | None = None, absent: list | None = None,
+                 absence_reason: str | None = None):
         self.moment, self.season, self.yours = moment, season, yours
         self.approaches = approaches
         self.roster, self.dropped, self.verdicts = roster or {}, dropped or [], verdicts or {}
+        self.absent, self.absence_reason = absent or [], absence_reason
 
 
 # --- the market ------------------------------------------------------------------------
@@ -1284,6 +1327,21 @@ def draw_outcome(seed: int, k: int, option: EventOption) -> Outcome | None:
     return rng.choices(option.outcomes, weights=[o.chance for o in option.outcomes])[0]
 
 
+def absence_words(reason: str, missed: int, first: int) -> str:
+    """The season card's line for a random absence [A216]."""
+    span = (f"match {first}" if missed == 1 else f"matches {first}-{first + missed - 1}")
+    plural = "match" if missed == 1 else "matches"
+    if reason == "international duty":
+        return f"You missed {missed} {plural} on international duty ({span})."
+    if reason == "rested":
+        return f"You were rested for {missed} {plural} ({span})."
+    if reason == "illness":
+        return f"Illness kept you out of {missed} {plural} ({span})."
+    if reason == "a family matter":
+        return f"You went home for a family matter and missed {missed} {plural} ({span})."
+    return f"You missed {missed} {plural} with {reason} ({span})."
+
+
 def _effect_words(text: str, season: int, permanent: int, missed: int) -> str:
     """A sentence on the season card: the story, then what it did in numbers [A214]."""
     bits = []
@@ -1404,6 +1462,9 @@ class SeasonRecord:
     rating: int = 0                    # your Rating this season, events included (A214); 0 = older token
     development: float = 0.0           # Rating points the season's form adds to the next (A214)
     notes: list[str] = field(default_factory=list)   # what happened, in words (A214)
+    absence: str = ""                  # why the season's absence happened (A216)
+    absent_from: int = 0               # its first league match, 1-based; 0 = none
+    tenure: int = 0                    # seasons in a row at this club before this one (A216)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -1495,25 +1556,95 @@ class Year:
     approaches: list = field(default_factory=list)   # your key moments (A204)
     dropped: list = field(default_factory=list)      # your match numbers, dropped for (A205)
     verdicts: dict = field(default_factory=dict)     # make-or-break number -> kept | dropped
+    absent: list = field(default_factory=list)       # league indices of the season's absence (A216)
+    absence_reason: str | None = None                # why, or None for an event card's own
+
+
+def availability_shares(tenure: int | None, overseas: bool) -> tuple[float, ...]:
+    """The share of the league you are available for, drawn from real players in the same
+    season at their club as you are, with your passport; all of it once you are settled."""
+    if tenure is None:
+        return AVAILABILITY_SHARES
+    if tenure >= SETTLED_SEASONS:
+        return SETTLED_SHARES
+    return AVAILABILITY_BY_TENURE[(tenure, bool(overseas))]
+
+
+def tenure_at(seasons: list, franchise: str) -> int:
+    """Your seasons in a row at this club, counted back from the last (A216). By the
+    canonical franchise, so Delhi Daredevils to Delhi Capitals is one club."""
+    club, n = canonical(franchise), 0
+    for r in reversed(seasons):
+        if canonical(r.franchise) != club:
+            break
+        n += 1
+    return n
+
+
+def absence_reason(seed: int, k: int, missed: int, overseas: bool, role: str | None) -> str:
+    """Why the season's absence happened [A216], from its own stream."""
+    rng = random.Random(f"{seed}:absence:{k}")
+    if overseas and rng.random() < OVERSEAS_DUTY:
+        return "international duty"
+    if missed <= REST_AFTER and rng.random() < 0.3:
+        return "rested"
+    roll = rng.random()
+    for what, p in OTHER_ABSENCE:
+        if roll < p:
+            return what
+        roll -= p
+    kind = role if role in INJURIES else "batter"
+    return rng.choice(INJURIES[kind])
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
-                 extra: int = 0, form_drop: float = 0.0) -> range:
-    """Which of your league matches you miss: one block, its length from the real share of
-    matches a regular (or, in a squad season, a non-regular) plays. Its own random stream,
-    so missing matches never changes how the matches themselves are drawn.
+                 extra: int = 0, form_drop: float = 0.0, rating: int | None = None,
+                 overseas: bool = False, role: str | None = None, tenure: int = 0) -> range:
+    return absence(seed, k, league_matches, squad, extra, form_drop, rating, overseas, role,
+                   tenure)[0]
+
+
+def absence(seed: int, k: int, league_matches: int, squad: bool = False,
+            extra: int = 0, form_drop: float = 0.0, rating: int | None = None,
+            overseas: bool = False, role: str | None = None,
+            tenure: int = 0) -> tuple[range, str | None]:
+    """Which of your league matches you miss, and why: one block, its length from the real
+    share of matches a regular like you plays (or, in a squad season, a non-regular).
+    `tenure` is your seasons in a row at this club before this one: settled
+    (SETTLED_SEASONS+), a regular season costs you nothing by chance. Its
+    own random stream, so missing matches never changes how the matches themselves are drawn.
 
     `form_drop` is the chance this season's share already held a real two-match form drop
     (FORM_DROP_RATE): for a player who can be dropped for form in the season itself, that
-    much is taken off the block, on a stream of its own (A205)."""
+    much is taken off the block, on a stream of its own (A205).
+
+    [A216] `extra` is an event card's absence (an injury, a break, a league back home). In a
+    regular season it REPLACES the random one, whose real figures already hold injuries,
+    rather than adding to it; in a squad season the larger of the two stands. A star (Rating
+    STAR_AVAILABILITY_RATING+) loses at most STAR_MAX_ABSENCE of the league to chance. The
+    reason is None when the absence is the event card's own, which names itself."""
     rng = random.Random(f"{seed}:avail:{k}")
-    shares = SQUAD_SHARES if squad else AVAILABILITY_SHARES
+    shares = (SQUAD_SHARES if squad else
+              availability_shares(tenure if rating is not None else None, overseas))
     base = round((1 - rng.choice(shares)) * league_matches)
     if form_drop and random.Random(f"{seed}:avail-form:{k}").random() < form_drop:
         base = max(0, base - DROP_MATCHES)
-    missed = min(league_matches, base + extra)
-    start = rng.randrange(league_matches - missed + 1)
-    return range(start, start + missed)
+    if rating and rating >= STAR_AVAILABILITY_RATING and not squad:
+        base = min(base, int(STAR_MAX_ABSENCE * league_matches))
+    if rating is None:                         # the table before A216, for older callers
+        missed = min(league_matches, base + extra)
+        reason = None
+    elif extra and not (squad and base > extra):
+        missed, reason = min(league_matches, extra), None
+    else:
+        missed = min(league_matches, base)
+        reason = absence_reason(seed, k, missed, overseas, role) if missed else None
+    if reason == "international duty":
+        # duty takes you away at the start of the season or the end of it
+        start = 0 if rng.random() < 0.5 else league_matches - missed
+    else:
+        start = rng.randrange(league_matches - missed + 1)
+    return range(start, start + missed), reason
 
 
 # [A198] Real all-rounders in regular seasons bowl 14.4 balls a match (195 seasons); a
@@ -1543,7 +1674,8 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   squad: bool = False, extra_missed: int = 0,
                   answers: tuple | None = None,
-                  plan: tuple[tuple[str, str], ...] = ()) -> Year:
+                  plan: tuple[tuple[str, str], ...] = (),
+                  rating: int | None = None, extra_reason: str = "", tenure: int = 0) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -1574,8 +1706,14 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     schedule = balanced_order(fixtures(len(sides), double), lambda pair: pair)
     league_matches = sum(yours_index in pair for pair in schedule)
     droppable = not squad and _kind(you) != "allrounder"
-    out = set(missed_block(seed, k, league_matches, squad, extra_missed,
-                           FORM_DROP_RATE[_kind(you)] if droppable else 0.0))
+    kind_of_injury = (you.bowling_style if you.role == "bowler" else
+                      "allrounder" if you.role == "allrounder" else "batter")
+    block, absence_why = absence(seed, k, league_matches, squad, extra_missed,
+                                 FORM_DROP_RATE[_kind(you)] if droppable else 0.0,
+                                 rating, bool(you.overseas), kind_of_injury, tenure)
+    if block and absence_why is None:
+        absence_why = extra_reason or None        # the event card's own absence
+    out = set(block)
     dropped: set[int] = set()                      # league indices you were dropped for
     dropped_seen: list[int] = []                   # ... as your match numbers, for the feed
     verdicts: dict[int, str] = {}                  # make-or-break match -> "kept" | "dropped"
@@ -1618,7 +1756,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         if used >= len(answers):
             raise _NeedMoment(Moment(stage, opp.name, opp.short, opp.franchise, opp.year,
                                      stakes, labels, kind), season, yours, list(approaches),
-                              roster, list(dropped_seen), dict(verdicts))
+                              roster, list(dropped_seen), dict(verdicts), sorted(out),
+                              absence_why)
         ans = answers[used]
         used += 1
         # An answer is a call, or a call with a new bowling plan from this match on (A213).
@@ -1691,7 +1830,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         yours.xi, yours.impact = with_you
     if answers is not None and used < len(answers):
         raise CareerError("more answers than the season had moments")
-    year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped))
+    year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
+                absent=sorted(out), absence_reason=absence_why)
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
     return year
@@ -1742,6 +1882,7 @@ class MatchLine:
     purple: tuple[str, int, bool] = ("", 0, False)
     watch: int | None = None            # index into SeasonDetail.watch
     card: int | None = None             # index into SeasonDetail.cards: its scorecard (A214)
+    absence: str | None = None          # why you missed this match (A216)
     approach: str | None = None         # your call, when this was a key moment (A204)
     stop: str | None = None             # what kind of key moment: must_win, playoff, make_or_break
     verdict: str | None = None          # a make-or-break's outcome: "kept" | "dropped" (A205)
@@ -1887,6 +2028,9 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
             line.approach, line.stop = m[3], m[4]
         line.verdict = year.verdicts.get(n)
         line.dropped = n in year.dropped
+        if (not line.played and not line.dropped and r.stage == "league"
+                and n - 1 in year.absent):
+            line.absence = year.absence_reason or "out"
         book.add(year.results[:i + 1])     # form as it stands straight after this match
         line.form = [form_figure(you_kind, g) for g in book.games.get(you_key, [])[-FORM_SHOWN:]]
         line.form_word = form_word(book.form_rank(you_key))
@@ -1918,11 +2062,14 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                        plan: tuple[tuple[str, str], ...] = ()
                        ) -> tuple[SeasonRecord, SeasonDetail]:
     year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers,
-                         plan)
+                         plan, record.rating if record.rating else None, record.absence,
+                         record.tenure)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
     record.dropped = len(year.dropped)
+    record.absence = year.absence_reason or ""
+    record.absent_from = year.absent[0] + 1 if year.absent else 0
     key = (YOU_ID, id(yours))
     me = lines.get(key) or Line(card=you, side=yours)
     lines[key] = me
@@ -2406,6 +2553,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if skill:
             notes.append(skill)
         option = dataclasses.replace(option, missed=extra)
+        # what keeps you out when an event card does (A216): it names itself
+        absence_label = (event.title.lower() if option.injury or (now and now.missed) or
+                         event.key in ("slump", "home_league") and extra else
+                         "an injury that came back" if landed_missed else "")
         you = ability(start, ceiling, t, setup=setup, fs_id=offer.fs_id, year=year,
                       franchise=offer.franchise)
         captain_now = option.captain or (already and not squad_now)
@@ -2428,7 +2579,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                               teams=0, squad=squad_now, extra_missed=option.missed, mega=mega_note,
                               contract_year=(CONTRACT_YEARS - cp.contract.left + 1
                                              if cp.contract else 0),
-                              rating=rating_at(start, ceiling, t))
+                              rating=rating_at(start, ceiling, t), absence=absence_label,
+                              tenure=tenure_at(cp.seasons, offer.franchise))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
@@ -2441,12 +2593,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         try:
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
                                                    (setup, start, ceiling, offer, option, t,
-                                                    squad_now), answers, plan)
+                                                    squad_now, record.tenure), answers, plan)
         except _NeedMoment as need:
             # The season stops at a key moment: told up to here, waiting for your call.
             so_far = Year(need.season, need.yours,
                           list(need.season.results) + list(need.season.playoffs or []),
-                          need.roster, 0, need.approaches, need.dropped, need.verdicts)
+                          need.roster, 0, need.approaches, need.dropped, need.verdicts,
+                          need.absent, need.absence_reason)
             career.detail = season_detail(so_far, complete=False)
             career.live_milestones = career_milestones(cp.seasons, career.detail.feed)
             career.pending = Pending("moment", year, k, squad=squad_now, offers=[offer],
@@ -2477,6 +2630,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             notes.append(f"{'What you did this season' if dev > 0 else 'A hard season'} "
                          f"{'adds' if dev > 0 else 'takes'} {max(1, round(abs(dev)))} Rating "
                          f"{'to' if dev > 0 else 'from'} next season.")
+        if played.absence and not played.extra_missed:
+            notes.append(absence_words(played.absence, played.missed - played.dropped,
+                                       played.absent_from))
         played.notes = notes
         cp.captain = next_captain(captain_now, cp.squad, canonical(offer.franchise))
         if bowlers:

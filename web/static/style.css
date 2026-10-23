@@ -4051,6 +4051,7 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-verdict.kept{color:#04150d;background:var(--mint)}
 .cr-verdict.dropped{color:#1a0603;background:var(--red-2)}
 .cr-dnp.drop{color:var(--red-2)}
+.cr-dnp.out{color:var(--gold-2)}
 /* the live form line [A205] */
 .cr-feed-panel > .cr-form{grid-column:1/-1;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .cr-form span{flex:0 0 auto}

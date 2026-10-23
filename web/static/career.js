@@ -410,7 +410,9 @@ function crStageName(stage, n){
 
 function crFigures(l){
   if (l.dropped) return '<span class="cr-dnp drop">Dropped</span>';
-  if (!l.played) return '<span class="cr-dnp">Did not play</span>';
+  if (!l.played) return l.absence
+    ? `<span class="cr-dnp out">${l.absence === 'rested' ? 'Rested' : 'Out · ' + esc(l.absence)}</span>`
+    : '<span class="cr-dnp">Did not play</span>';
   const bits = [];
   if (l.batted) bits.push(`<b>${l.runs}${l.out ? '' : '*'}</b> (${l.balls})`);
   if (l.bowl_balls) bits.push(`<b>${l.wickets}/${l.bowl_runs}</b>`);

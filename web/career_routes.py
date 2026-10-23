@@ -308,6 +308,7 @@ class MatchLineOut(BaseModel):
     form: list[str] = []          # your last five matches, oldest first
     form_word: str | None = None  # In form / Steady / Out of form
     card: int | None = None       # index into `cards`: this match's scorecard (A214)
+    absence: str | None = None    # why you missed this match (A216)
     milestones: list[str] = []    # career milestones reached in this match (A209)
 
 
@@ -509,7 +510,7 @@ def _season_play(detail: C.SeasonDetail,
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
         form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i],
-        card=l.card)
+        card=l.card, absence=l.absence)
         for i, l in enumerate(detail.feed)]
     table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
                          played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,

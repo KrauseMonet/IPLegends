@@ -382,3 +382,105 @@ def test_answers_that_no_longer_replay_resume_from_the_last_season(client):
     assert m.status_code == 200 and m.json()["pending"]["kind"] == "offer"
     # a move that is simply wrong for a sound token is still refused
     assert client.post("/api/career/move", json={"token": d["token"], "move": "e9"}).status_code == 409
+
+
+# --- [A217] the page's tier-1 facelift: your player marked, the IPL points table -------------
+
+def _season_with_moves(client, role, seed):
+    """Play a career's first season through the API, keeping the moves so the engine's own
+    season can be rebuilt beside the response."""
+    d = client.post("/api/career/start", json={"name": "Marked", "role": role, "debut": 2014,
+                                               "seed": seed}).json()
+    moves = []
+    while not (d.get("season_play") and d["season_play"]["complete"]):
+        moves.append(_auto_move(d["pending"]))
+        d = client.post("/api/career/move", json={"token": d["token"], "move": moves[-1]}).json()
+    return d, moves
+
+
+def test_your_player_and_only_him_is_marked_in_every_scorecard(client, deck, model):
+    """Each batting and bowling row, crease entry and over carries `you` exactly where the
+    engine's own player is the career's (by person id, never the name), so the lists line
+    up one to one with the engine's -- including the rule that a bowler with no ball has no
+    row. Checked on an all-rounder, so both kinds of mark have somewhere to be."""
+    d, moves = _season_with_moves(client, "allrounder", 6)
+    seed, setup, _, _ = R.read_token(d["token"])
+    detail = C.play_career(deck, model, seed, setup, moves).detail
+    sp = d["season_play"]
+    assert len(sp["cards"]) == len(detail.cards)
+    seen = {"bat": 0, "bowl": 0, "over": 0, "crease": 0}
+    for card, r in zip(sp["cards"], detail.cards):
+        for key, inn in (("home_innings", r.home_innings), ("away_innings", r.away_innings)):
+            out = card[key]
+            want = [b.player.person_id == C.YOU_ID for b in inn.batting]
+            assert [row["you"] for row in out["batting"]] == want
+            seen["bat"] += sum(want)
+            bowled = [bo for bo in inn.bowling if bo.balls > 0]
+            want = [bo.player.person_id == C.YOU_ID for bo in bowled]
+            assert [row["you"] for row in out["bowling"]] == want
+            assert [row["name"] for row in out["bowling"]] == [bo.player.name for bo in bowled]
+            seen["bowl"] += sum(want)
+    for w, r in zip(sp["watch"], detail.watch):
+        for key, inn in (("home_innings", r.home_innings), ("away_innings", r.away_innings)):
+            for row, o in zip(w[key]["over_log"], inn.over_log):
+                assert row["bowler_you"] == (o.bowler_id == C.YOU_ID)
+                seen["over"] += row["bowler_you"]
+                for end in ("striker", "non_striker"):
+                    snap = getattr(o, end)
+                    if snap is not None:
+                        assert row[end]["you"] == (snap.person_id == C.YOU_ID)
+                        seen["crease"] += row[end]["you"]
+    assert all(seen.values()), seen
+
+
+def _balls(overs: str) -> int:
+    o, b = overs.split(".")
+    return 6 * int(o) + int(b)
+
+
+def test_the_league_table_is_the_ipl_points_table(client, deck, model):
+    """The career's table carries what the solo season's points table draws: position, For
+    and Against as runs/overs, and the last five league results. For/Against reproduce each
+    row's own NRR (the IPL's all-out rule is in the overs), and the form is each side's last
+    five league results in the order they were played, recounted from the season itself."""
+    d, moves = _season_with_moves(client, "opener", 9)
+    seed, setup, _, _ = R.read_token(d["token"])
+    detail = C.play_career(deck, model, seed, setup, moves).detail
+    table = d["season_play"]["table"]
+    assert [t["pos"] for t in table] == list(range(1, len(table) + 1))
+    for t in table:
+        nrr = 6 * (t["runs_for"] / _balls(t["overs_for"])
+                   - t["runs_against"] / _balls(t["overs_against"]))
+        assert round(nrr, 3) == pytest.approx(t["nrr"], abs=0.0015)
+        league = [r for r in detail.results if r.stage == "league"
+                  and t["short"] in (r.home.short, r.away.short)]
+        want = ["T" if r.winner is None else "W" if r.winner.short == t["short"] else "L"
+                for r in league][-5:]
+        assert t["form"] == want and len(want) == 5
+        assert t["won"] + t["lost"] + t["tied"] == t["played"] == len(league)
+    assert len({t["short"] for t in table}) == len(table)          # shorts name one side each
+
+
+def test_a_bowler_who_never_bowled_does_not_shift_the_marks():
+    """`web.app._innings_out` leaves out a bowler who got no ball, so the marks must skip him
+    too or every row after him reads as somebody else's. A real season rarely lists one ahead
+    of you, so the case is built by hand."""
+    from types import SimpleNamespace as NS
+    pl = lambda pid: NS(person_id=pid)
+    inn = NS(batting=[NS(player=pl("a"))],
+             bowling=[NS(player=pl("idle"), balls=0), NS(player=pl("b"), balls=12),
+                      NS(player=pl(C.YOU_ID), balls=24)],
+             over_log=[])
+    result = NS(home_innings=inn, away_innings=None)
+    out = {"home_innings": {"batting": [{"name": "a"}],
+                            "bowling": [{"name": "b"}, {"name": "you"}], "over_log": []}}
+    R._mark_you(result, out)
+    assert [row["you"] for row in out["home_innings"]["bowling"]] == [False, True]
+
+
+def test_a_level_match_is_a_tie_in_the_form():
+    from types import SimpleNamespace as NS
+    a, b = NS(), NS()
+    assert C.form_letter(NS(winner=None), a) == "T"
+    assert C.form_letter(NS(winner=a), a) == "W"
+    assert C.form_letter(NS(winner=a), b) == "L"

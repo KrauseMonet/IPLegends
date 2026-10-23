@@ -1135,6 +1135,10 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
 .scorecard-frame tr.top-bat td{background:rgba(245,184,61,.08)}
 .scorecard-frame tr.top-bat td:first-child{color:var(--gold-2);font-weight:750;
   box-shadow:inset 2px 0 0 var(--gold)}
+/* [A217] Your own player, where the page has one (Build a Career). After .top-bat, so a
+   row that is both reads as yours. */
+.scorecard-frame tr.you-row td{background:rgba(52,211,153,.10)}
+.scorecard-frame tr.you-row td:first-child{color:var(--ink);font-weight:750;box-shadow:inset 3px 0 0 var(--mint)}
 /* [A115] A zero boundary count is a dash, dimmed further than an ordinary cell, so the
    eye lands on the batters who did clear the rope rather than filtering past a column of
    noughts to find them. */
@@ -2401,6 +2405,8 @@ html{scroll-padding-top:80px}
 .sb-extra{font:600 11px var(--mono);color:var(--ink-3);white-space:nowrap}
 .sb-bat-row.landmark .sb-fig strong{color:var(--gold-2)}
 .sb-bat-row.fresh{animation:batIn .5s ease-out}
+.sb-bat-row.you{border-color:var(--gold)}
+.sb-bowl-row.you b{color:var(--gold-2)}
 .sb-bowl-row{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right;
   padding-left:16px;border-left:1px solid var(--line);font-size:14px}
 .sb-bowl-row > span:first-child{font:700 9.5px var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
@@ -3735,38 +3741,51 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
    view while the next decision is made. */
 .cr{max-width:860px;margin:0 auto}
 .cr-panel{max-width:620px;margin:0 auto}
+/* [A217] the page title belongs to the create screen; once a career is under way every step
+   starts at the player bar, so the decision itself sits higher up the screen */
+.cr.started > .report{display:none}
 .cr-label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--ink-3);margin:22px 0 8px}
 .cr-row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .cr-select{appearance:auto}
 /* [A214] the player card and the path of a career */
-.cr-head{padding:6px 0 4px}
-.cr-pc{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;
+.cr-head{padding:4px 0 0}
+/* [A217] a slim player bar: Rating, name, club in one row; potential and totals under it */
+.cr-pc{display:grid;grid-template-columns:auto 1fr auto;gap:6px 16px;align-items:center;
   background:linear-gradient(160deg,var(--panel-2),var(--panel));border:1px solid var(--line-strong);
-  border-radius:20px;padding:16px 18px}
-.cr-pc-rating{width:92px;height:104px;border-radius:16px;display:flex;flex-direction:column;align-items:center;
+  border-radius:16px;padding:10px 14px}
+.cr-pc-rating{grid-row:span 2;width:64px;height:70px;border-radius:12px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;border:2px solid var(--line-strong);background:rgba(255,255,255,.03)}
-.cr-pc-rating b{font-family:var(--display);font-size:54px;line-height:1;font-weight:400}
-.cr-pc-rating span{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.cr-pc-rating b{font-family:var(--display);font-size:38px;line-height:1;font-weight:400}
+.cr-pc-rating span{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
 .cr-pc-rating.good{border-color:var(--mint)}
 .cr-pc-rating.star{border-color:var(--gold);color:var(--gold-2)}
 .cr-pc-rating.elite{border-color:var(--gold);color:#1a1204;background:linear-gradient(160deg,#ffd77a,var(--gold))}
 .cr-pc-rating.elite span{color:#3a2a06}
 .cr-pc-who{min-width:0}
-.cr-pc-who > b{display:block;font-family:var(--display);font-size:clamp(28px,5vw,42px);letter-spacing:.01em;line-height:1.05;
+.cr-pc-who > b{display:block;font-family:var(--display);font-size:clamp(22px,3.4vw,30px);letter-spacing:.01em;line-height:1.05;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cr-pc-who > span{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
-.cr-pot{display:flex;align-items:center;gap:10px;margin-top:10px}
+.cr-pc-foot{grid-column:2/-1;display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap}
+.cr-pot{display:flex;align-items:center;gap:10px;flex:1 1 220px;max-width:360px}
 .cr-pot-bar{flex:1;height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;max-width:320px}
 .cr-pot-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--mint),var(--gold))}
 .cr-pot span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);white-space:nowrap}
 .cr-pot b{color:var(--gold-2)}
-.cr-pc-club{display:flex;flex-direction:column;align-items:center;gap:4px;max-width:120px;text-align:center}
+.cr-pc-club{display:flex;align-items:center;gap:8px;max-width:220px;text-align:right}
 .cr-pc-club span{font-family:var(--mono);font-size:11px;color:var(--ink-2);line-height:1.3}
-.cr-pc-crest{height:52px;width:52px;object-fit:contain}
-.cr-tot{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--ink-3);padding:10px 4px 0}
-.cr-tot b{color:var(--mint);font-size:16px}
-.cr-path{margin-top:14px;border:1px solid var(--line);border-radius:16px;padding:10px 12px 8px;background:var(--panel)}
+.cr-pc-crest{height:38px;width:38px;object-fit:contain;order:2}
+.cr-tot{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.cr-tot b{color:var(--mint);font-size:14px}
+/* [A217] the career chart folds away behind its own line; open on the season and career cards */
+.cr-path-wrap{margin-top:10px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.cr-path-wrap > summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;white-space:nowrap;
+  padding:9px 14px;font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;color:var(--gold-2)}
+.cr-path-wrap > summary::-webkit-details-marker{display:none}
+.cr-path-wrap > summary::before{content:'▸';transition:transform .15s;color:var(--ink-3)}
+.cr-path-wrap[open] > summary::before{transform:rotate(90deg)}
+.cr-path-wrap > summary span{color:var(--ink-3);letter-spacing:0}
+.cr-path{padding:0 12px 8px}
 .cr-path-key{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-bottom:6px}
 .cr-path-key i{display:inline-block;vertical-align:middle;margin-right:5px}
 .cr-path-key i.bar{width:9px;height:12px;border-radius:2px;background:var(--mint)}
@@ -3794,11 +3813,14 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-path-crest{height:18px;width:18px;object-fit:contain}
 .cr-path-area{margin-top:16px}
 @media (max-width:560px){
-  .cr-pc{grid-template-columns:auto 1fr;gap:12px;padding:14px}
-  .cr-pc-rating{width:72px;height:84px}
-  .cr-pc-rating b{font-size:40px}
-  .cr-pc-club{grid-column:1/-1;flex-direction:row;max-width:none;justify-content:flex-start}
-  .cr-pc-crest{height:28px;width:28px}
+  .cr-pc{gap:8px 12px;padding:10px 12px}
+  .cr-pc-rating{grid-row:auto;width:56px;height:62px}
+  .cr-pc-rating b{font-size:32px}
+  .cr-pc-who > span{font-size:11px}
+  .cr-pc-club span{display:none}
+  .cr-pc-crest{height:32px;width:32px}
+  .cr-pc-foot{grid-column:1/-1;gap:6px 14px}
+  .cr-pot{flex-basis:100%;max-width:none}
 }
 .cr-stage{padding-top:18px}
 .cr-step{max-width:720px;margin:0 auto}
@@ -3878,6 +3900,10 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-card b{display:block;font-family:var(--display);font-size:48px;line-height:1;font-weight:400}
 .cr-card span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
 .cr-card.elite{border-color:var(--gold);color:var(--gold-2)}
+/* [A217] where the Rating goes next season, under this season's: the bar above already shows it */
+.cr-card em{display:block;font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:2px;white-space:nowrap}
+.cr-card em.up{color:var(--mint)}
+.cr-card em.down{color:var(--red-2)}
 .cr-badges{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 4px}
 .cr-badge{font-family:var(--mono);font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-strong)}
 .cr-badge.gold{background:var(--gold);color:#1a1204;border-color:var(--gold)}
@@ -3899,14 +3925,15 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-final-crest{height:46px;width:46px;object-fit:contain}
 .cr-rank{font-family:var(--mono);font-size:14px;color:var(--ink-2);margin-top:4px}
 .cr-rank b{color:var(--gold-2);font-size:20px}
-.cr-final .cr-lines{text-align:left}
+.cr-final .cr-lines,.cr-final .cr-msl{text-align:left}
 @media (max-width:560px){
   .cr-row,.cr-spin{grid-template-columns:1fr}
   .cr-offers{grid-template-columns:1fr 1fr}
   .cr-offer-crest{height:48px;width:48px}
   .cr-season-top{grid-template-columns:auto 1fr}
   .cr-cards{grid-column:1/-1;justify-content:center}
-  .cr-card{display:flex;align-items:baseline;gap:10px;justify-content:center}
+  .cr-card{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 10px;justify-content:center}
+  .cr-card em{flex-basis:100%;text-align:center}
   .cr-card b{font-size:40px}
 }
 
@@ -3939,13 +3966,8 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-fr-you b{color:var(--mint)}
 .cr-dnp{color:var(--ink-3)}
 .cr-table-wrap{margin-top:16px}
-.cr-table{width:100%;border-collapse:collapse;font-size:14px}
-.cr-table th{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);
-  text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-.cr-table td{padding:7px 8px;border-bottom:1px solid var(--line)}
-.cr-table td:nth-child(2){display:flex;align-items:center;gap:6px}
-.cr-table tr.you td{color:var(--gold-2);font-weight:700}
-.cr-table tr.cut td{border-bottom:2px solid var(--gold)}
+/* the IPL points table needs about 750px; the feed's step takes the page's full width */
+.cr-step.cr-feed{max-width:none}
 @media (max-width:560px){
   /* two columns, your own line across both: three squeezed "11 runs · …" and the cap
      leaders' names into ellipses */
@@ -3999,8 +4021,12 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 
 /* a mega-auction year [A212] */
 .cr-mega{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
-.cr-bases{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:6px 0 2px}
-.cr-bases .room-choice{padding:6px 10px;font-size:13px}
+/* [A217] no retention offer: one centred auction card, the note above it, not a stray column */
+.cr-mega.solo{grid-template-columns:minmax(0,440px);justify-content:center}
+.cr-mega-note{text-align:center;margin:0 auto 14px;max-width:52ch}
+.cr-bases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;margin:6px 0 2px}
+.cr-bases .room-choice{padding:6px 4px;font-size:13px;margin:0;white-space:nowrap}
+@media (max-width:560px){.cr-bases .room-choice{font-size:11.5px;letter-spacing:0;padding:6px 2px}}
 .cr-bases .room-choice i{display:block;font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--ink-3)}
 .cr-auc-stage{position:relative;text-align:center;border:1px solid var(--line-strong);border-radius:18px;

@@ -1907,6 +1907,20 @@ class TableRow:
     points: int
     nrr: float
     you: bool
+    # The IPL table's For/Against and the side's last five league results, oldest first
+    # (A153's points table, shared with the solo season since this change). Balls, not
+    # overs: the page's table writes them as overs.
+    runs_for: int = 0
+    balls_for: int = 0
+    runs_against: int = 0
+    balls_against: int = 0
+    form: list[str] = field(default_factory=list)
+
+
+def form_letter(r: Result, side) -> str:
+    """One league result as a side's form letter: W, L, or T for a match still level after
+    the super overs (A135). By identity, as `Side` has no `eq=False`."""
+    return "T" if r.winner is None else "W" if r.winner is side else "L"
 
 
 @dataclass
@@ -1978,6 +1992,7 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
     you_key = (YOU_ID, id(yours))
     you_card = year.roster.get(id(yours), {}).get(YOU_ID)
     you_kind = _kind(you_card) if you_card is not None else "batter"
+    form: dict[int, list[str]] = {id(s): [] for s in season.sides}   # league results, in order
     n = 0                                          # your side's match number
     for i, r in enumerate(year.results):
         for side, inn, other in ((r.home, r.home_innings, r.away_innings),
@@ -1993,6 +2008,8 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
                 t[5] += w.balls
         if r.stage == "league":
             credit_result(standings, r)
+            for side in (r.home, r.away):
+                form[id(side)].append(form_letter(r, side))
         if yours is not r.home and yours is not r.away:
             continue
         home = yours is r.home
@@ -2047,7 +2064,9 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
 
     table = [TableRow(short=s.side.short, name=s.side.name, franchise=s.side.franchise,
                       year=s.side.year, played=s.played, won=s.won, lost=s.lost, tied=s.tied,
-                      points=s.points, nrr=round(s.nrr, 3), you=s.side is yours)
+                      points=s.points, nrr=round(s.nrr, 3), you=s.side is yours,
+                      runs_for=s.runs_for, balls_for=s.balls_for, runs_against=s.runs_against,
+                      balls_against=s.balls_against, form=form[id(s.side)][-5:])
              for s in rank_table(standings)]
     return SeasonDetail(feed, table, watch, complete, cards=cards)
 

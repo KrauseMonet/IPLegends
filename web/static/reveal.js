@@ -229,15 +229,15 @@ function renderCrease(batters, bowler){
     if (b.sixes) bits.push(`${b.sixes}×6`);
     const sr = b.balls ? (100 * b.runs / b.balls).toFixed(0) : '–';
     const fresh = before.length && !before.includes(b.name);
-    return `<div class="sb-bat-row${b.onStrike ? ' on' : ''}${fresh ? ' fresh' : ''}${b.runs >= 50 ? ' landmark' : ''}">
+    return `<div class="sb-bat-row${b.onStrike ? ' on' : ''}${fresh ? ' fresh' : ''}${b.runs >= 50 ? ' landmark' : ''}${b.you ? ' you' : ''}">
       <span class="sb-strike" aria-label="${b.onStrike ? 'on strike' : ''}">${b.onStrike ? '▸' : ''}</span>
-      <b>${esc(b.name)}</b>
+      <b>${esc(b.name)}${youTag(b.you)}</b>
       <span class="sb-fig"><strong>${b.runs}${b.out ? '' : '*'}</strong> <em>(${b.balls})</em></span>
       <span class="sb-extra">${bits.join(' ')}${bits.length ? ' · ' : ''}SR ${sr}</span>
     </div>`;
   });
   const bowl = bowler
-    ? `<div class="sb-bowl-row"><span>Bowling</span><b>${esc(bowler.name)}</b>
+    ? `<div class="sb-bowl-row${bowler.you ? ' you' : ''}"><span>Bowling</span><b>${esc(bowler.name)}${youTag(bowler.you)}</b>
         <span class="sb-fig"><strong>${bowler.wickets}-${bowler.runs}</strong>
         <em>(${oversText(bowler.balls)} ov)</em></span></div>`
     : '';
@@ -327,7 +327,7 @@ function renderOverStep(){
     renderCrease(
       [{...o.striker, onStrike: true}, {...o.non_striker, onStrike: false}],
       o.bowler_balls ? {name: o.bowler, balls: o.bowler_balls, runs: o.bowler_runs,
-                        wickets: o.bowler_wickets} : null);
+                        wickets: o.bowler_wickets, you: !!o.bowler_you} : null);
   }
   OVER_STEP.hold = fireMilestones(o.balls) ? MILESTONE_HOLD : 0;
 }
@@ -484,6 +484,11 @@ function impactTag(isImpact){
   return isImpact ? ' <span class="impact-tag">IMP</span>' : '';
 }
 
+// Your own player in a row, where the page has one [A217] -- Build a Career marks him `you`.
+function youTag(isYou){
+  return isYou ? ' <span class="you-pill">you</span>' : '';
+}
+
 // [A115] A boundary count of zero reads as a dash, not a 0. Ten noughts down a column is
 // noise a reader has to filter past to find the two numbers that matter; a dash is the
 // same convention this app already uses for "no average yet" and "nothing to report".
@@ -507,17 +512,17 @@ function scorecardInnings(side, score, inn){
     // zero: a column of noughts is what makes a scorecard hard to scan, and the two
     // batters who did hit boundaries are the ones the column exists to find.
     return b.faced_any
-    ? `<tr class="${isTop ? 'top-bat' : ''}"><td>${b.name}${b.out ? '' : ' *'}${impactTag(b.is_impact)}</td><td class="n">${b.runs}</td>
+    ? `<tr class="${isTop ? 'top-bat' : ''}${b.you ? ' you-row' : ''}"><td>${esc(b.name)}${b.out ? '' : ' *'}${impactTag(b.is_impact)}${youTag(b.you)}</td><td class="n">${b.runs}</td>
         <td class="n">${b.balls}</td>${bdyCell(b.fours)}${bdyCell(b.sixes)}<td class="n">${b.strike_rate}</td></tr>`
-    : `<tr class="tail"><td>${b.name}${impactTag(b.is_impact)}</td>
+    : `<tr class="tail${b.you ? ' you-row' : ''}"><td>${esc(b.name)}${impactTag(b.is_impact)}${youTag(b.you)}</td>
         <td class="n" colspan="5" style="font-style:italic">did not bat</td></tr>`;
   }).join('');
   // Boundaries CONCEDED ride in the row's tooltip rather than as two more columns. Seven
   // columns do not fit a phone, and this is a secondary reading of a bowling figure --
   // the primary one, economy, is already there.
-  const bowling = inn.bowling.map(bo => `<tr title="${bo.fours} four${
+  const bowling = inn.bowling.map(bo => `<tr class="${bo.you ? 'you-row' : ''}" title="${bo.fours} four${
       bo.fours === 1 ? '' : 's'} and ${bo.sixes} six${bo.sixes === 1 ? '' : 'es'} conceded">
-    <td>${bo.name}${impactTag(bo.is_impact)}</td>
+    <td>${esc(bo.name)}${impactTag(bo.is_impact)}${youTag(bo.you)}</td>
     <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
     <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';

@@ -313,14 +313,22 @@ class MatchLineOut(BaseModel):
 
 
 class TableRowOut(BaseModel):
+    """The solo season's points-table row (A153), so the page draws both with one table."""
+    pos: int
     short: str
     name: str
     crest: str | None
     played: int
     won: int
     lost: int
+    tied: int = 0
     points: int
     nrr: float
+    runs_for: int = 0
+    overs_for: str = "0.0"
+    runs_against: int = 0
+    overs_against: str = "0.0"
+    form: list[str] = []
     you: bool
 
 
@@ -512,17 +520,49 @@ def _season_play(detail: C.SeasonDetail,
         form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i],
         card=l.card, absence=l.absence)
         for i, l in enumerate(detail.feed)]
-    table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
-                         played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,
-                         you=t.you) for t in detail.table]
-    watch = [_result_out(r, yours).model_dump() for r in detail.watch]
-    cards = [_scorecard(_result_out(r, yours).model_dump()) for r in detail.cards]
+    table = [TableRowOut(pos=i, short=t.short, name=t.name,
+                         crest=crests.crest_url(t.franchise, t.year), played=t.played,
+                         won=t.won, lost=t.lost, tied=t.tied, points=t.points, nrr=t.nrr,
+                         runs_for=t.runs_for, overs_for=_overs(t.balls_for),
+                         runs_against=t.runs_against, overs_against=_overs(t.balls_against),
+                         form=t.form, you=t.you) for i, t in enumerate(detail.table, 1)]
+    watch = [_mark_you(r, _result_out(r, yours).model_dump()) for r in detail.watch]
+    cards = [_scorecard(_mark_you(r, _result_out(r, yours).model_dump())) for r in detail.cards]
     return SeasonPlayOut(feed=feed, table=table, watch=watch, cards=cards, your_short=you_row.short,
                          your_name=you_row.name,
                          your_crest=next(x.crest for x in table if x.you),
                          complete=detail.complete,
                          analysis=(_analysis_out(detail.analysis, detail.results).model_dump()
                                    if detail.analysis is not None else None))
+
+
+def _mark_you(result, r: dict) -> dict:
+    """Mark your own player in a serialised match: `you` on his batting and bowling rows
+    and on his crease entries, `bowler_you` on the overs he bowled -- so a scorecard and the
+    ball-by-ball board can pick him out. Matched on person id (never the name, which is the
+    player's own free text and could equal a real one), and done here rather than in the
+    shared serialisers so no other mode's payload grows a field that is always false. The
+    lists line up one to one with `web.app._innings_out`'s, including its rule that a
+    bowler who never got a ball has no row."""
+    for key, inn in (("home_innings", result.home_innings), ("away_innings", result.away_innings)):
+        out = r.get(key)
+        if not out or inn is None:
+            continue
+        for row, b in zip(out["batting"], inn.batting):
+            row["you"] = b.player.person_id == C.YOU_ID
+        for row, bo in zip(out["bowling"], [bo for bo in inn.bowling if bo.balls > 0]):
+            row["you"] = bo.player.person_id == C.YOU_ID
+        for row, o in zip(out["over_log"], inn.over_log):
+            row["bowler_you"] = o.bowler_id == C.YOU_ID
+            for end in ("striker", "non_striker"):
+                snap = getattr(o, end)
+                if row.get(end) and snap is not None:
+                    row[end]["you"] = snap.person_id == C.YOU_ID
+    return r
+
+
+def _overs(balls: int) -> str:
+    return f"{balls // 6}.{balls % 6}"
 
 
 def _scorecard(r: dict) -> dict:

@@ -112,6 +112,7 @@ class SeasonOut(BaseModel):
     rating: int | None = None     # your Rating that season (A214); None on an older token
     age: int = 0                  # A214, shown only
     notes: list[str] = []         # what happened, in words (A214)
+    note_tones: list[str] = []    # 'up' | 'down' | '' per note, for the page's marks (A218)
     matches: int
     missed: int
     dropped: int = 0              # of those, dropped for form (A205)
@@ -166,6 +167,7 @@ class AuctionBidOut(BaseModel):
     short: str
     crest: str | None
     price: str
+    lakh: int = 0                 # the same price, for the auctioneer's voice (A218)
 
 
 class AuctionOut(BaseModel):
@@ -178,6 +180,7 @@ class AuctionOut(BaseModel):
     crest: str | None
     price: str
     bids: list[AuctionBidOut]
+    price_lakh: int = 0           # A218, as `lakh` above
 
 
 class PlanBowlerOut(BaseModel):
@@ -378,7 +381,7 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
         choice=r.choice, card=r.display, rating=r.rating or None, age=C.DEBUT_AGE + r.k,
-        notes=list(r.notes),
+        notes=list(r.notes), note_tones=[C.note_tone(t) for t in r.notes],
         form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
@@ -479,7 +482,9 @@ def _auction(a: C.MegaResult, year: int) -> AuctionOut:
     return AuctionOut(retained=a.retained, sold=a.sold, base=crore(a.base) if a.base else "",
                       franchise=a.franchise, short=a.short,
                       crest=crests.crest_url(a.franchise, year), price=crore(a.price),
-                      bids=[AuctionBidOut(short=sh, crest=crests.crest_url(f, year), price=crore(pr))
+                      price_lakh=a.price,
+                      bids=[AuctionBidOut(short=sh, crest=crests.crest_url(f, year), price=crore(pr),
+                                          lakh=pr)
                             for f, sh, pr in a.bids])
 
 

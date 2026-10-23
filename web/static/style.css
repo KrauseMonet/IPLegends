@@ -3789,11 +3789,23 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-path-key{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-bottom:6px}
 .cr-path-key i{display:inline-block;vertical-align:middle;margin-right:5px}
 .cr-path-key i.bar{width:9px;height:12px;border-radius:2px;background:var(--mint)}
-.cr-path-key i.dot{width:8px;height:8px;border-radius:50%;background:#fff;border:2px solid var(--bg)}
+.cr-path-key i.dot{width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px var(--bg),0 0 0 3px rgba(255,255,255,.35)}
+.cr-path-key i.dot.hot{background:var(--mint)}
+.cr-path-key i.dot.cold{background:var(--red-2)}
+.cr-path-key i.t{width:9px;height:11px;border-radius:2px;margin:0 3px 0 6px}
+.cr-path-key i.dot{margin:0 4px 0 8px}
+.cr-path-key i.t.base{background:rgba(52,211,153,.32)}
+.cr-path-key i.t.good{background:rgba(52,211,153,.6)}
+.cr-path-key i.t.star{background:rgba(245,184,61,.75)}
+.cr-path-key i.t.elite{background:var(--gold)}
+.cr-path-key i.t.faded{opacity:.45}
 .cr-path-key i.pot{width:14px;border-top:2px dashed var(--gold)}
-.cr-path-plot{position:relative;display:flex;gap:6px;overflow-x:auto;padding-top:4px}
-.cr-path-pot{position:absolute;left:-3px;right:-3px;border-top:2px dashed rgba(245,184,61,.6);pointer-events:none;z-index:1}
-.cr-path-col{flex:1 0 34px;max-width:56px;display:flex;flex-direction:column;align-items:center;gap:3px}
+.cr-path-plot{position:relative;display:flex;gap:0;overflow-x:auto;padding:4px 0 0 22px;background-attachment:local}
+.cr-path-pot{position:absolute;left:0;right:0;border-top:2px dashed rgba(245,184,61,.6);pointer-events:none;z-index:1}
+/* [A218] the gridlines' numbers, in the plot's left gutter beside the first column */
+.cr-path-axis{position:absolute;left:-21px;margin-bottom:-6px;font-family:var(--mono);font-size:9px;line-height:1;color:var(--ink-3)}
+.cr-path-cup{position:absolute;left:0;right:0;text-align:center;font-size:13px;line-height:1;margin-bottom:3px;z-index:2}
+.cr-path-col{flex:1 0 40px;max-width:60px;display:flex;flex-direction:column;align-items:center;gap:3px}
 .cr-path-area{position:relative;width:100%;height:120px}
 .cr-path-bar{position:absolute;left:14%;right:14%;bottom:0;border-radius:6px 6px 2px 2px;background:rgba(52,211,153,.6);
   display:flex;justify-content:center;align-items:flex-start}
@@ -3803,13 +3815,13 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-path-bar.elite{background:var(--gold)}
 .cr-path-bar.base{background:rgba(52,211,153,.32)}
 .cr-path-bar.base b{color:var(--ink)}
-.cr-path-dot{position:absolute;right:2px;width:10px;height:10px;margin-bottom:-5px;border-radius:50%;
-  background:#fff;border:2px solid var(--bg);z-index:2}
+.cr-path-dot{position:absolute;right:4px;width:12px;height:12px;margin-bottom:-6px;border-radius:50%;
+  background:#fff;box-shadow:0 0 0 2px var(--bg),0 0 0 3px rgba(255,255,255,.35);z-index:2}
 .cr-path-dot.hot{background:var(--mint)}
 .cr-path-dot.cold{background:var(--red-2)}
 .cr-path-col.squad .cr-path-bar{opacity:.45}
 .cr-path-col span{font-family:var(--mono);font-size:10px;color:var(--ink-3);line-height:1}
-.cr-path-col.champ span{font-size:12px}
+.cr-path-col.champ span{color:var(--gold-2);font-weight:700}
 .cr-path-crest{height:18px;width:18px;object-fit:contain}
 .cr-path-area{margin-top:16px}
 @media (max-width:560px){
@@ -3834,14 +3846,22 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
   display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;transition:transform .12s,border-color .12s}
 .cr-offer:hover,.cr-offer:focus-visible{transform:translateY(-2px);border-color:var(--gold)}
 .cr-offer b{font-size:15px;line-height:1.25}
+/* [A218] each offer in its club's colours (a .crest-KEY class carries --team and --team-deep),
+   and the deal pinned to the bottom so the buttons line up whatever the name's length */
+.cr-offer[class*="crest-"]{background:linear-gradient(170deg,color-mix(in srgb,var(--team-deep) 85%,var(--panel-2)),var(--panel) 80%);
+  border-color:color-mix(in srgb,var(--team) 40%,var(--line-strong))}
+.cr-offer[class*="crest-"]::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;border-radius:16px 16px 0 0;background:var(--team)}
+.cr-offer .cr-deal{margin-top:auto;padding-top:8px}
 .cr-offer-crest{height:64px;width:64px;object-fit:contain}
 .cr-price{font-family:var(--mono);font-size:18px;font-weight:800;color:var(--mint)}
 .cr-place{font-family:var(--mono);font-size:12.5px;color:var(--gold-2)}
 .cr-deal{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px}
 .cr-deal .act{width:100%;padding:10px 8px;font-size:12.5px}
 .cr-deal span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
-.cr-strength{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
-.cr-strength b{color:var(--ink)}
+.cr-strength{display:flex;align-items:center;gap:8px;width:100%;max-width:200px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.cr-strength i{flex:1;height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.cr-strength i b{display:block;height:100%;border-radius:inherit;background:var(--team,var(--mint))}
+.cr-strength em{font-style:normal;color:var(--ink);font-weight:700;font-size:12.5px}
 .cr-tag{position:absolute;top:10px;left:10px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
   text-transform:uppercase;background:var(--gold);color:#1a1204;border-radius:6px;padding:2px 7px}
 .cr-event{background:linear-gradient(170deg,var(--panel-2),var(--panel));border:1px solid var(--line-strong);
@@ -3859,9 +3879,14 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-event-now b{color:var(--ink)}
 .cr-event-injury,.cr-event-niggle,.cr-event-fracture{border-color:rgba(226,71,46,.45)}
 .cr-notes{margin-top:16px;border:1px solid var(--line);border-radius:14px;padding:4px 14px 6px;background:rgba(255,255,255,.02)}
-.cr-notes p{margin:0;padding:8px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.5}
-.cr-notes .cr-label{margin:10px 0 6px}
-.cr-notes .cr-label + p{border-top:0}
+.cr-notes .cr-label{margin:10px 0 8px}
+/* [A218] each note a small card, marked ▲ when it helped you and ▼ when it cost you */
+.cr-note-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.cr-note{display:flex;gap:10px;align-items:baseline;margin:0;padding:8px 10px;border-radius:10px;
+  background:rgba(255,255,255,.03);border:1px solid var(--line);font-size:14.5px;line-height:1.45}
+.cr-note i{font-style:normal;flex:0 0 auto;font-size:11px;color:var(--ink-3)}
+.cr-note.up{border-color:rgba(52,211,153,.35)}.cr-note.up i{color:var(--mint)}
+.cr-note.down{border-color:rgba(226,71,46,.35)}.cr-note.down i{color:var(--red-2)}
 .cr-spin-num{display:flex;align-items:baseline;gap:8px;margin-top:6px}
 .cr-spin-num b{font-family:var(--display);font-size:40px;font-weight:400;line-height:1}
 .cr-spin-card.ceiling .cr-spin-num b{color:var(--gold-2)}
@@ -3889,6 +3914,15 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-season,.cr-final{background:linear-gradient(170deg,var(--panel-2),var(--panel));border:1px solid var(--line-strong);
   border-radius:20px;padding:22px}
 .cr-season.champ{border-color:var(--gold);box-shadow:0 0 30px rgba(245,184,61,.18)}
+/* [A218] the season card in its club's colours; a title season keeps the gold edge and gets a ribbon */
+.cr-season[class*="crest-"]{position:relative;overflow:hidden;
+  background:linear-gradient(165deg,color-mix(in srgb,var(--team-deep) 90%,var(--panel-2)),var(--panel) 70%)}
+.cr-season[class*="crest-"]:not(.champ){border-color:color-mix(in srgb,var(--team) 45%,var(--line-strong))}
+.cr-season[class*="crest-"]::before{content:'';position:absolute;inset:0 0 auto 0;height:4px;background:var(--team)}
+.cr-season.champ::before{background:linear-gradient(90deg,var(--gold),#ffe08a,var(--gold))}
+.cr-ribbon{margin:-6px auto 14px;width:max-content;max-width:100%;font-family:var(--mono);font-size:12px;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;color:#1a1204;background:linear-gradient(90deg,var(--gold),#ffe08a,var(--gold));
+  border-radius:999px;padding:5px 16px;box-shadow:0 0 18px rgba(245,184,61,.35)}
 .cr-season-top{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center}
 .cr-season-top .over-line{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--ink-3)}
 .cr-season-crest{height:60px;width:60px;object-fit:contain}
@@ -3949,7 +3983,7 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-cap.you b{color:var(--gold-2)}
 .cr-feed-list{list-style:none;margin:0;padding:0;max-height:420px;overflow-y:auto;
   border:1px solid var(--line);border-radius:14px}
-.cr-fr{display:grid;grid-template-columns:86px 1.2fr 28px 1.4fr 1.2fr;gap:8px;align-items:center;
+.cr-fr{display:grid;grid-template-columns:72px 28px minmax(84px,.9fr) minmax(0,1.5fr) auto;gap:10px;align-items:center;
   padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px;animation:cr-in .25s ease-out}
 .cr-fr:last-child{border-bottom:0}
 .cr-fr.po{background:rgba(245,184,61,.07)}
@@ -3962,8 +3996,16 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-fr.lost .cr-fr-res{background:var(--red);color:#fff}
 .cr-fr-score{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
 .cr-fr-score i{color:var(--ink-3);font-style:normal}
-.cr-fr-you{font-family:var(--mono);font-size:12.5px;text-align:right}
-.cr-fr-you b{color:var(--mint)}
+.cr-fr-you{font-family:var(--mono);font-size:12.5px}
+.cr-fr-score{text-align:right}
+/* [A218] a big game gold, a good one green, a poor one red; the rest plain */
+.cr-fig{white-space:nowrap}
+.cr-fig b{color:var(--ink)}
+.cr-fig i{font-style:normal;color:var(--ink-3)}
+.cr-fig.good b{color:var(--mint)}
+.cr-fig.great b{color:var(--gold-2)}
+.cr-fig.great{background:rgba(245,184,61,.12);border-radius:5px;padding:1px 5px}
+.cr-fig.poor b{color:var(--red-2)}
 .cr-dnp{color:var(--ink-3)}
 .cr-table-wrap{margin-top:16px}
 /* the IPL points table needs about 750px; the feed's step takes the page's full width */
@@ -3971,12 +4013,24 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 @media (max-width:560px){
   /* two columns, your own line across both: three squeezed "11 runs · …" and the cap
      leaders' names into ellipses */
-  .cr-feed-panel{grid-template-columns:1fr 1fr;position:static}
-  .cr-feed-panel > div:nth-child(3){grid-column:1/-1}
-  .cr-fr{grid-template-columns:auto 1fr auto;grid-template-areas:"n opp res" "score score you"}
+  /* [A218] one compact strip rather than five tiles, and the match list flows with the page
+     rather than scrolling inside it (a scroll box inside a scrolling page catches the thumb) */
+  .cr-feed-panel{display:flex;flex-wrap:wrap;gap:6px 14px;position:static;border:1px solid var(--line);
+    border-radius:12px;background:var(--panel);padding:9px 12px}
+  .cr-feed-panel > div{background:none;border:0;padding:0;display:flex;align-items:baseline;gap:6px}
+  .cr-feed-panel b{font-size:13px}
+  .cr-feed-panel i{font-size:11px}
+  .cr-feed-panel > .cr-cap span{display:none}
+  .cr-feed-panel > .cr-cap::before{font-family:var(--mono);font-size:10px;letter-spacing:.1em}
+  .cr-feed-panel > .cr-cap:nth-of-type(4)::before{content:'🟧'}
+  .cr-feed-panel > .cr-cap:nth-of-type(5)::before{content:'🟪'}
+  .cr-feed-panel > .cr-form{flex-basis:100%;border-top:1px solid var(--line);padding-top:6px}
+  .cr-feed-list{max-height:none;overflow:visible}
+  .cr-fr{grid-template-columns:auto 1fr auto;grid-template-areas:"n opp res" "you you score"}
   .cr-fr-n{grid-area:n}.cr-fr-opp{grid-area:opp}
   .cr-fr-res{grid-area:res;justify-self:end;min-width:26px;padding:1px 6px}
   .cr-fr-score{grid-area:score}.cr-fr-you{grid-area:you}
+  .cr-fr-you{white-space:normal}
 }
 
 /* career milestones [A209] */
@@ -4036,7 +4090,12 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-auc-crest{height:72px;width:72px;object-fit:contain}
 .cr-auc-price{font-family:var(--display);font-size:clamp(40px,8vw,64px);font-weight:400;color:var(--gold-2)}
 .cr-auc-lead span{font-size:15px;color:var(--ink-2)}
-.cr-auc-count{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.cr-auc-stage[class*="crest-"]{background:linear-gradient(170deg,color-mix(in srgb,var(--team-deep) 90%,#1d1606),var(--panel) 70%);
+  transition:background .2s}
+.cr-auc-sound{position:absolute;top:12px;left:12px;display:flex;gap:6px;z-index:2}
+.cr-auc-trail{margin:6px auto 0;max-width:520px;text-align:left}
+@media (max-width:560px){.cr-auc-sound{position:static;justify-content:flex-start;margin:-10px 0 12px -6px}
+  .cr-auc-stamp{top:12px;right:10px;font-size:15px;padding:3px 8px;border-width:2px}}
 .cr-auc-stamp{position:absolute;top:18px;right:18px;font-family:var(--display);font-size:22px;letter-spacing:.06em;
   padding:4px 12px;border:3px solid currentColor;border-radius:8px;transform:rotate(-8deg);opacity:0}
 .cr-auc-stage.sold .cr-auc-stamp{color:var(--mint);opacity:1;animation:cr-ms-pop .5s cubic-bezier(.2,1.6,.4,1)}

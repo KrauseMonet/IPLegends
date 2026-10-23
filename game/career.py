@@ -39,6 +39,7 @@ import dataclasses
 from collections import defaultdict
 import math
 import random
+import re
 import statistics
 from dataclasses import dataclass, field
 
@@ -1342,6 +1343,13 @@ def absence_words(reason: str, missed: int, first: int) -> str:
     return f"You missed {missed} {plural} with {reason} ({span})."
 
 
+def development_words(dev: float) -> str:
+    """The season card's line for a young player's development [A214]."""
+    return (f"{'What you did this season' if dev > 0 else 'A hard season'} "
+            f"{'adds' if dev > 0 else 'takes'} {max(1, round(abs(dev)))} Rating "
+            f"{'to' if dev > 0 else 'from'} next season.")
+
+
 def _effect_words(text: str, season: int, permanent: int, missed: int) -> str:
     """A sentence on the season card: the story, then what it did in numbers [A214]."""
     bits = []
@@ -1352,6 +1360,26 @@ def _effect_words(text: str, season: int, permanent: int, missed: int) -> str:
     if missed:
         bits.append(f"{missed} match{'es' if missed != 1 else ''} missed")
     return text + (f" ({', '.join(bits)})" if bits else "")
+
+
+# Which way a season-card note points, for the page's ▲/▼ [A218]. Read off the wording the
+# functions above and below produce, so it lives beside them: a change of wording that this
+# stops recognising fails `tests/test_career_web.py`, which feeds it each generator's output.
+_NOTE_UP = re.compile(r"\badds \d+ Rating to next season|more runs per 100 balls"
+                      r"|get out \d+% less often|fewer runs an over|take wickets \d+% more often")
+_NOTE_DOWN = re.compile(r"\btakes \d+ Rating from next season|fewer runs per 100 balls"
+                        r"|get out \d+% more often|more runs an over|take wickets \d+% less often")
+
+
+def note_tone(text: str) -> str:
+    """'up', 'down', or '' for a note that is mixed or changes nothing. A Rating change
+    decides; matches missed count against only when nothing else in the note moves."""
+    signs = re.findall(r"([+-])\d+ Rating (?:this season|for good)", text)
+    ups = signs.count("+") + len(_NOTE_UP.findall(text))
+    downs = signs.count("-") + len(_NOTE_DOWN.findall(text))
+    if not ups and not downs and re.search(r"\b\d+ match(?:es)? missed\b", text):
+        downs = 1
+    return "up" if ups and not downs else "down" if downs and not ups else ""
 
 
 def skill_words(before: Card, after: Card) -> str | None:
@@ -2646,9 +2674,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         played.development = dev
         cp.permanent += points_t(dev, start, ceiling)
         if abs(dev) >= 0.5:
-            notes.append(f"{'What you did this season' if dev > 0 else 'A hard season'} "
-                         f"{'adds' if dev > 0 else 'takes'} {max(1, round(abs(dev)))} Rating "
-                         f"{'to' if dev > 0 else 'from'} next season.")
+            notes.append(development_words(dev))
         if played.absence and not played.extra_missed:
             notes.append(absence_words(played.absence, played.missed - played.dropped,
                                        played.absent_from))

@@ -23,7 +23,7 @@ const crBowls = d => d && (d.role === 'pace' || d.role === 'spin');
 // "10 wkts · 89 runs" for a bowler, "156 runs" for a batter who took none. The role's own
 // figure is always shown, even at nought; the other only when there is something in it.
 function crFigs(d, runs, wkts){
-  const r = `<b>${crNum(runs)}</b> runs`, w = `<b>${wkts}</b> wkts`;
+  const r = `<b>${crNum(runs)}</b> run${runs === 1 ? '' : 's'}`, w = `<b>${wkts}</b> wkt${wkts === 1 ? '' : 's'}`;
   return crBowls(d) ? [w, runs ? r : null] : [r, wkts ? w : null];
 }
 
@@ -159,21 +159,33 @@ function crTimeline(d, hold, open){
   if (!s.length){ $('#crTimeline').innerHTML = ''; return; }
   const y = v => Math.max(0, Math.min(100, (v - 55) / (99 - 55) * 100));
   const peak = Math.max(...s.map(r => r.rating || r.card));
+  // Gridlines at 70, 80 and 90 across the whole plot, as a background that scrolls with it
+  // (`local`), so they run on however many seasons there are. The bar area is 120px tall and
+  // starts 20px down the plot; the numbers sit in a gutter on the left of the first column.
+  const gy = g => (20 + 120 * (1 - y(g) / 100)).toFixed(1);
+  const grid = [70, 80, 90].map(g => `linear-gradient(to bottom,transparent ${gy(g)}px,rgba(255,255,255,.09) ${gy(g)}px,`
+    + `rgba(255,255,255,.09) calc(${gy(g)}px + 1px),transparent calc(${gy(g)}px + 1px))`).join(',');
   $('#crTimeline').innerHTML = `
     <details class="cr-path-wrap"${open ? ' open' : ''}>
     <summary>Career path <span>${s.length} season${s.length === 1 ? '' : 's'} · peak Rating ${peak}</span></summary>
     <div class="cr-path">
-      <div class="cr-path-key"><span><i class="bar"></i>Rating</span><span><i class="dot"></i>Season grade</span>
-        <span><i class="pot"></i>Potential ${d.potential}</span></div>
-      <div class="cr-path-plot">
-        ${s.map(r => { const rt = r.rating || r.card; return `
-        <div class="cr-path-col${r.champion ? ' champ' : ''}${r.squad ? ' squad' : ''}" title="${r.year} · ${esc(r.franchise)} · Rating ${rt} · grade ${r.card}">
+      <div class="cr-path-key">
+        <span class="cr-path-tiers" title="Rating bars by level">Rating <i class="t base"></i>&lt;77 <i class="t good"></i>77+
+          <i class="t star"></i>84+ <i class="t elite"></i>90+</span>
+        <span><i class="dot hot"></i>Grade 3+ above <i class="dot cold"></i>3+ below <i class="dot"></i>close</span>
+        <span><i class="pot"></i>Potential ${d.potential}</span>
+        ${s.some(r => r.squad) ? '<span><i class="t good faded"></i>Squad season</span>' : ''}</div>
+      <div class="cr-path-plot" style="background-image:${grid}">
+        ${s.map((r, i) => { const rt = r.rating || r.card; return `
+        <div class="cr-path-col${r.champion ? ' champ' : ''}${r.squad ? ' squad' : ''}" title="${r.year} · ${esc(r.franchise)} · Rating ${rt} · grade ${r.card}${r.champion ? ' · champions' : ''}">
           <div class="cr-path-area">
+            ${i ? '' : [70, 80, 90].map(g => `<span class="cr-path-axis" style="bottom:${y(g)}%">${g}</span>`).join('')}
             <div class="cr-path-pot" style="bottom:${y(d.potential)}%"></div>
             <div class="cr-path-bar ${crTier(rt)}" style="height:${y(rt)}%"><b>${rt}</b></div>
+            ${r.champion ? `<div class="cr-path-cup" style="bottom:${y(rt)}%">🏆</div>` : ''}
             <div class="cr-path-dot${r.card >= rt + 3 ? ' hot' : r.card <= rt - 3 ? ' cold' : ''}" style="bottom:${y(r.card)}%"></div>
           </div>
-          ${crestImg(r.crest, 'cr-path-crest')}<span>${r.champion ? '🏆' : String(r.year).slice(2)}</span>
+          ${crestImg(r.crest, 'cr-path-crest')}<span>${String(r.year).slice(2)}</span>
         </div>`; }).join('')}
       </div>
     </div></details>`;
@@ -236,7 +248,10 @@ function crPlace(o){
 
 function crOffers(d){
   const p = d.pending;
-  const strength = o => o.strength == null ? '' : `<span class="cr-strength">Squad <b>${o.strength}</b></span>`;
+  // The squad's twelve's mean card rating, without you [A218]: a bar from a weak squad (74)
+  // to a great one (90), so three offers compare at a glance rather than by reading numbers.
+  const strength = o => o.strength == null ? '' : `<div class="cr-strength" title="Squad strength: the mean rating of its best twelve, without you">
+      <span>Squad</span><i><b style="width:${Math.max(4, Math.min(100, Math.round(100 * (o.strength - 74) / 16)))}%"></b></i><em>${o.strength}</em></div>`;
   const deal = (o, i) => o.contract_year
     ? `<div class="cr-deal"><button class="act lead" onclick="crMove('o${i}')">Play on</button>
          <span>Year ${o.contract_year} of 3 · ${esc(o.price)}</span></div>`
@@ -254,7 +269,7 @@ function crOffers(d){
         will get only a few matches.${p.offers.some(o => o.contract_year) ? ' Your contract keeps you safe from release.'
         : ' Another poor season and nobody will sign you.'}</p>` : ''}
       <div class="cr-offers">${p.offers.map((o, i) => `
-        <div class="cr-offer${o.stay ? ' stay' : ''}">
+        <div class="cr-offer${o.stay ? ' stay' : ''} ${crestClass(o.crest)}">
           ${o.stay ? `<span class="cr-tag">${o.contract_year ? 'Contract' : 'Stay'}</span>` : ''}
           ${crestImg(o.crest, 'cr-offer-crest')}
           <b>${esc(o.franchise)}</b>
@@ -278,7 +293,7 @@ function crMega(d){
   const p = d.pending, m = p.mega, last = d.seasons[d.seasons.length - 1];
   CR.base = m.suggested;
   const retain = m.retain ? `
-    <div class="cr-offer stay cr-retain">
+    <div class="cr-offer stay cr-retain ${crestClass(m.retain.crest)}">
       <span class="cr-tag">Retention</span>
       ${crestImg(m.retain.crest, 'cr-offer-crest')}
       <b>${esc(m.retain.franchise)}</b>
@@ -318,39 +333,91 @@ function crPickBase(i, btn){
 }
 
 // The bidding, played back: at most ~4 s whatever the number of bids (the auction floor's
-// own budget, A146), then the hammer.
+// own budget, A146), then the hammer. With the floor's sound and auctioneer [A218]: a knock
+// per bid (at most one every 90 ms, so a long war rattles rather than roars), the strip of
+// the last six bids, the stage in the leading club's colours, and the sale announced.
+const CR_KNOCK_GAP = 90;
+
+function crAucSound(){
+  const el = document.getElementById('crAucSound');
+  if (!el) return;
+  el.innerHTML = `
+    <button class="auc-sound-btn${SOUND_ON ? ' on' : ''}" onclick="setSound(${!SOUND_ON}); crAucSound()"
+      title="Gavel and bids">${SOUND_ON ? 'Sound on' : 'Sound off'}</button>
+    <button class="auc-sound-btn${VOICE_ON ? ' on' : ''}" onclick="setVoice(${!VOICE_ON}); crAucSound()"
+      title="The auctioneer announces the sale">${VOICE_ON ? 'Voice on' : 'Voice off'}</button>`;
+}
+
+function crAucTrail(bids){
+  const el = document.getElementById('crAucTrail');
+  if (!el) return;
+  if (!bids.length){ el.innerHTML = '<span class="auc-trail-sum">No bids yet</span>'; return; }
+  const teams = [];
+  bids.forEach(b => { if (!teams.includes(b.short)) teams.push(b.short); });
+  const who = teams.length === 2 ? `${teams[0]} v ${teams[1]}` : teams.length === 1 ? teams[0] : `${teams.length} teams`;
+  const last = bids.slice(-6);
+  el.innerHTML = `<span class="auc-trail-sum"><b>${bids.length}</b> bid${bids.length === 1 ? '' : 's'} · ${esc(who)}</span>
+    <span class="auc-trail-bids">${last.map((b, i) => `<span class="auc-trail-bid ${crestClass(b.crest)}${i === last.length - 1 ? ' new' : ''}"
+      title="${esc(b.short)} ${esc(b.price)}">${crestImg(b.crest, '', `<i>${esc(b.short)}</i>`)}${esc(b.price)}</span>`).join('')}</span>`;
+}
+
 function crAuctionPlay(a, done){
+  const name = (CR.data && CR.data.name) || 'You';
+  const british = VOICE_STYLE === 'british';
   const finish = `<div class="foot-actions" style="justify-content:center">
       <button class="act lead" id="crAucGo">Continue</button></div>`;
   if (a.retained){
-    $('#crStage').innerHTML = `<div class="cr-step"><div class="cr-auc-stage sold">
+    $('#crStage').innerHTML = `<div class="cr-step"><div class="cr-auc-stage sold ${crestClass(a.crest)}">
+      <div class="cr-auc-sound" id="crAucSound"></div>
       <div class="over-line">RETAINED</div>${crestImg(a.crest, 'cr-auc-crest')}
       <b class="cr-auc-price">${esc(a.price)}</b><span>${esc(a.franchise)} keep you</span></div>${finish}</div>`;
+    crAucSound();
     $('#crAucGo').onclick = done;
+    play('sold', true);
+    speak(british ? ['Retained.', `${name} stays with ${a.franchise},`, `at ${priceSpoken(a.price_lakh)}.`]
+                  : `${name} retained by ${a.franchise} for ${priceWords(a.price_lakh)}.`);
     return;
   }
   $('#crStage').innerHTML = `<div class="cr-step"><div class="cr-auc-stage" id="crAuc">
+      <div class="cr-auc-sound" id="crAucSound"></div>
       <div class="over-line">ON THE BLOCK · BASE ${esc(a.base)}</div>
       <div class="cr-auc-lead" id="crAucLead"><b class="cr-auc-price">${esc(a.base)}</b><span>Who will open?</span></div>
-      <div class="cr-auc-count" id="crAucCount"></div>
+      <div class="auc-trail cr-auc-trail" id="crAucTrail"></div>
       <div class="cr-auc-stamp" id="crAucStamp"></div></div>
       <div id="crAucAfter"></div></div>`;
+  crAucSound();
+  crAucTrail([]);
+  speak(british ? [`${name}.`, 'Who will open the bidding?'] : `${name}. Base price ${a.base.replace('₹', '')}.`);
   const bids = a.bids, reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const gap = reduce ? 0 : Math.max(40, Math.min(220, 4000 / Math.max(1, bids.length)));
-  let i = 0;
+  const stage = $('#crAuc');
+  let i = 0, lastKnock = 0, tint = '';
+  const retint = cls => { if (tint) stage.classList.remove(tint); tint = cls; if (cls) stage.classList.add(cls); };
   const hammer = () => {
-    $('#crAuc').classList.add(a.sold ? 'sold' : 'unsold');
+    stage.classList.add(a.sold ? 'sold' : 'unsold');
+    retint(crestClass(a.crest));
     $('#crAucStamp').innerHTML = a.sold ? `SOLD · ${esc(a.short)}` : 'UNSOLD';
     $('#crAucLead').innerHTML = `${crestImg(a.crest, 'cr-auc-crest')}<b class="cr-auc-price">${esc(a.price)}</b>
       <span>${a.sold ? esc(a.franchise) : `Nobody met your base. ${esc(a.franchise)} sign you late, as a squad player.`}</span>`;
     $('#crAucAfter').innerHTML = finish;
     $('#crAucGo').onclick = done;
+    if (a.sold){
+      play('sold', true);
+      speak(british ? ['Sold!', `${name}.`, `To ${a.franchise},`, `at ${priceSpoken(a.price_lakh)}.`]
+                    : `Sold! ${name}, to ${a.franchise}, for ${priceWords(a.price_lakh)}.`);
+    } else {
+      play('unsold');
+      speak(british ? [`${name}.`, 'No bid. Passed.'] : `${name}. Unsold.`);
+    }
   };
   (function step(){
     if (i >= bids.length) return setTimeout(hammer, reduce ? 0 : 500);
     const b = bids[i++];
     $('#crAucLead').innerHTML = `${crestImg(b.crest, 'cr-auc-crest')}<b class="cr-auc-price">${esc(b.price)}</b><span>${esc(b.short)}</span>`;
-    $('#crAucCount').textContent = `${i} bid${i === 1 ? '' : 's'}`;
+    retint(crestClass(b.crest));
+    crAucTrail(bids.slice(0, i));
+    const now = performance.now();
+    if (now - lastKnock >= CR_KNOCK_GAP){ lastKnock = now; play('bid', false); }
     setTimeout(step, gap);
   })();
 }
@@ -434,13 +501,28 @@ function crStageName(stage, n){
   return stage === 'league' ? `Match ${n}` : stage;
 }
 
+// How a game went, for its colour [A218]: declared marks, presentation only -- a fifty or
+// three wickets is a big game, thirty runs or two wickets a good one; out cheaply, or two
+// overs or more at eleven an over without a wicket, a poor one. A bowler out cheaply at
+// number ten has not had a poor game, so a batting failure is marked only for a batter.
+function crBatTone(l){
+  if (l.runs >= 50) return 'great';
+  if (l.runs >= 30) return 'good';
+  return l.out && l.runs < 10 && !crBowls(CR.data) ? 'poor' : '';
+}
+function crBowlTone(l){
+  if (l.wickets >= 3) return 'great';
+  if (l.wickets >= 2) return 'good';
+  return !l.wickets && l.bowl_balls >= 12 && 6 * l.bowl_runs / l.bowl_balls >= 11 ? 'poor' : '';
+}
+
 function crFigures(l){
   if (l.dropped) return '<span class="cr-dnp drop">Dropped</span>';
   if (!l.played) return l.absence
     ? `<span class="cr-dnp out">${l.absence === 'rested' ? 'Rested' : 'Out · ' + esc(l.absence)}</span>`
     : '<span class="cr-dnp">Did not play</span>';
-  const bat = l.batted ? `<b>${l.runs}${l.out ? '' : '*'}</b> (${l.balls})` : null;
-  const bowl = l.bowl_balls ? `<b>${l.wickets}/${l.bowl_runs}</b>` : null;
+  const bat = l.batted ? `<span class="cr-fig ${crBatTone(l)}"><b>${l.runs}${l.out ? '' : '*'}</b> <i>(${l.balls})</i></span>` : null;
+  const bowl = l.bowl_balls ? `<span class="cr-fig ${crBowlTone(l)}"><b>${l.wickets}/${l.bowl_runs}</b> <i>(${crOvers(l.bowl_balls)})</i></span>` : null;
   const bits = crBowls(CR.data) ? [bowl, bat] : [bat, bowl];
   return bits.filter(Boolean).join(' · ') || '<span class="cr-dnp">Not needed</span>';
 }
@@ -451,14 +533,16 @@ function crFeedMilestones(l){
   return `<li class="cr-ms">${l.milestones.map(t => `<span>★ ${esc(t)}</span>`).join('')}</li>`;
 }
 
+const crOvers = balls => balls % 6 ? `${Math.floor(balls / 6)}.${balls % 6}` : String(balls / 6);
+
 function crFeedRow(l, n){
   const open = l.card != null ? ` onclick="crScorecard(${l.card})" title="Open the scorecard"` : '';
   return `<li class="cr-fr ${l.result === 'W' ? 'won' : l.result === 'L' ? 'lost' : ''}${l.stage !== 'league' ? ' po' : ''}${open ? ' open' : ''}"${open}>
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
-    <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-res">${l.result}</span>
-    <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
+    <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}</span>
+    <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
   </li>`;
 }
 
@@ -715,7 +799,8 @@ function crSeason(d, r){
   const lines = crBowls(d) ? crBowl(r) + crBat(r) : crBat(r) + crBowl(r);
   $('#crStage').innerHTML = `
     <div class="cr-step">
-      <div class="cr-season${r.champion ? ' champ' : ''}">
+      <div class="cr-season${r.champion ? ' champ' : ''} ${crestClass(r.crest)}">
+        ${r.champion ? `<div class="cr-ribbon">🏆 IPL champions ${r.year}</div>` : ''}
         <div class="cr-season-top">
           ${crestImg(r.crest, 'cr-season-crest')}
           <div><div class="over-line">${r.year} · ${esc(r.franchise).toUpperCase()}</div>
@@ -726,7 +811,6 @@ function crSeason(d, r){
           </div>
         </div>
         <div class="cr-badges">
-          ${crBadge(r.champion, 'gold', '🏆 Champions')}
           ${crBadge(r.orange_cap, 'orange', 'Orange Cap')}
           ${crBadge(r.purple_cap, 'purple', 'Purple Cap')}
           ${crBadge(r.captain, '', 'Captain')}
@@ -742,7 +826,8 @@ function crSeason(d, r){
           ${lines}
         </div>
         ${r.notes && r.notes.length ? `<div class="cr-notes"><div class="cr-label">What happened</div>
-          ${r.notes.map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''}
+          <div class="cr-note-list">${r.notes.map((t, i) => { const tone = (r.note_tones || [])[i] || '';
+            return `<p class="cr-note ${tone}"><i>${tone === 'up' ? '▲' : tone === 'down' ? '▼' : '•'}</i>${esc(t)}</p>`; }).join('')}</div></div>` : ''}
         ${r.plan && r.plan.length ? `<div class="cr-msl cr-plan-card"><div class="cr-label">Your bowling plan</div>
           <div>${r.plan.map(esc).join(' · ')}</div></div>` : ''}
         ${r.milestones && r.milestones.length ? `<div class="cr-msl"><div class="cr-label">Milestones</div>

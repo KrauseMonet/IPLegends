@@ -484,3 +484,57 @@ def test_a_level_match_is_a_tie_in_the_form():
     assert C.form_letter(NS(winner=None), a) == "T"
     assert C.form_letter(NS(winner=a), a) == "W"
     assert C.form_letter(NS(winner=a), b) == "L"
+
+
+# --- [A218] tier 2: the notes' marks, and the auctioneer's prices ---------------------------
+
+def test_every_season_note_is_marked_the_way_it_points(deck):
+    """`note_tone` reads the wording the season card's own generators write, so it is fed
+    their output here rather than hand-typed sentences: a change of wording it stops
+    recognising fails this, instead of quietly losing its ▲ or ▼."""
+    import dataclasses
+    t = C.note_tone
+    assert t(C._effect_words("A lift.", 2, 0, 0)) == "up"
+    assert t(C._effect_words("A niggle.", -2, 0, 0)) == "down"
+    assert t(C._effect_words("Rebuilt.", 0, 3, 0)) == "up"
+    assert t(C._effect_words("Rebuild.", -3, 5, 0)) == ""                 # mixed
+    assert t(C._effect_words("Rested.", 0, 0, 2)) == "down"               # matches missed alone
+    assert t(C._effect_words("Played through.", 1, 0, 2)) == "up"         # the Rating decides
+    assert t(C._effect_words("Nothing.", 0, 0, 0)) == ""
+    assert t(C.development_words(1.2)) == "up"
+    assert t(C.development_words(-0.8)) == "down"
+    assert t(C.absence_words("rested", 2, 5)) == ""                       # information, not a cost
+    card = next(c for cs in deck.cards_by_fs.values() for c in cs
+                if c.bat_scoring is not None and c.bowl_scoring is not None and c.role == "allrounder")
+    better_bat = dataclasses.replace(card, bat_scoring=card.bat_scoring + 0.08,
+                                     bat_dismissal=card.bat_dismissal * 0.9)
+    worse_bowl = dataclasses.replace(card, bowl_scoring=card.bowl_scoring - 0.1,
+                                     bowl_dismissal=card.bowl_dismissal * 0.9)
+    assert t(C.skill_words(card, better_bat)) == "up"
+    assert t(C.skill_words(better_bat, card)) == "down"
+    assert t(C.skill_words(card, worse_bowl)) == "down"
+    assert t(C.skill_words(worse_bowl, card)) == "up"
+    safer = dataclasses.replace(card, bat_dismissal=card.bat_dismissal * 0.85)   # out less, nothing else
+    assert t(C.skill_words(card, safer)) == "up"
+    assert t(C.skill_words(safer, card)) == "down"
+    mixed = dataclasses.replace(card, bat_scoring=card.bat_scoring + 0.08, bat_dismissal=card.bat_dismissal * 1.2)
+    assert t(C.skill_words(card, mixed)) == ""
+
+
+def test_the_career_auction_carries_its_prices_in_lakh_for_the_voice():
+    """The page speaks a price ("three crore, fifty lakh") from `lakh`; it must be the same
+    price the screen shows as text, bid by bid and at the hammer."""
+    a = C.MegaResult(base=50, sold=True, retained=False, fs_id=1, franchise="Mumbai Indians",
+                     short="MI", price=350,
+                     bids=[("Rajasthan Royals", "RR", 55), ("Mumbai Indians", "MI", 350)])
+    out = R._auction(a, 2018)
+    assert out.price_lakh == 350 and out.price == R.crore(350)
+    assert [(b.lakh, b.price) for b in out.bids] == [(55, R.crore(55)), (350, R.crore(350))]
+
+
+def test_a_seasons_notes_reach_the_page_with_one_mark_each(client):
+    d, _ = _season_with_moves(client, "pace", 3)
+    assert sum(len(s["notes"]) for s in d["seasons"])          # something to mark
+    for s in d["seasons"]:
+        assert len(s["note_tones"]) == len(s["notes"])
+        assert [C.note_tone(n) for n in s["notes"]] == s["note_tones"]

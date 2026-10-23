@@ -257,6 +257,9 @@ class SummaryOut(BaseModel):
     hundreds: int
     wickets: int
     economy: float | None
+    bowling_average: float | None = None      # runs a wicket (A220)
+    bowling_strike_rate: float | None = None  # balls a wicket (A220)
+    best_bowling: str | None = None           # the career's best figures, "4/18" (A220)
     titles: int
     finals: int
     orange_caps: int
@@ -489,6 +492,16 @@ def _auction(a: C.MegaResult, year: int) -> AuctionOut:
                             for f, sh, pr in a.bids])
 
 
+def _best_bowling(seasons) -> str | None:
+    """The career's best figures: the most wickets in a match, the fewest runs breaking a tie
+    -- the scorecard convention, read off each season's own best."""
+    bests = [r.best for r in seasons if r.bowl_balls]
+    if not bests:
+        return None
+    w, runs = max(bests, key=lambda b: (b[0], -b[1]))
+    return f"{w}/{runs}"
+
+
 def _summary(c: C.Career) -> SummaryOut:
     s = c.summary
     ending = "retired" if c.retired else "released" if c.released else "the end of the archive"
@@ -498,6 +511,9 @@ def _summary(c: C.Career) -> SummaryOut:
         average=round(s.runs / s.outs, 1) if s.outs else None, highest=s.highest,
         fifties=s.fifties, hundreds=s.hundreds, wickets=s.wickets,
         economy=round(6 * s.bowl_runs / s.bowl_balls, 2) if s.bowl_balls else None,
+        bowling_average=round(s.bowl_runs / s.wickets, 1) if s.wickets else None,
+        bowling_strike_rate=round(s.bowl_balls / s.wickets, 1) if s.wickets else None,
+        best_bowling=_best_bowling(c.seasons),
         titles=s.titles, finals=s.finals, orange_caps=s.orange_caps,
         purple_caps=s.purple_caps, captaincies=s.captaincies, franchises=s.franchises,
         earnings=crore(s.earnings), peak_card=s.peak_display, peak_year=s.peak_year,

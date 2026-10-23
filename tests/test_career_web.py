@@ -579,3 +579,28 @@ def test_the_career_cards_milestones_carry_their_kind(client, deck, model):
     assert [(m["year"], m["text"]) for m in got] == list(career.summary.milestones)
     assert [m["key"] for m in got] == [m.key for r in career.seasons for m in r.milestones]
     assert got and all(m["key"] for m in got)
+
+
+def test_the_career_cards_bowling_rates_add_up_from_its_seasons(client):
+    """[A220] Average, strike rate and best figures, recounted here from the seasons the API
+    lists, not from the summary they came out of."""
+    d = client.post("/api/career/start", json={"name": "Rates", "role": "allrounder",
+                                               "debut": 2012, "seed": 6}).json()
+    while d["pending"]:
+        d = client.post("/api/career/move", json={"token": d["token"],
+                                                  "move": _auto_move(d["pending"])}).json()
+    s, seasons = d["summary"], d["seasons"]
+    wkts = sum(r["wickets"] for r in seasons)
+    runs = sum(r["bowl_runs"] for r in seasons)
+    balls = sum(r["bowl_balls"] for r in seasons)
+    assert wkts == s["wickets"] > 0
+    assert s["bowling_average"] == round(runs / wkts, 1)
+    assert s["bowling_strike_rate"] == round(balls / wkts, 1)
+    bests = [tuple(map(int, r["best"].split("/"))) for r in seasons if r["best"]]
+    w, r = max(bests, key=lambda b: (b[0], -b[1]))
+    assert s["best_bowling"] == f"{w}/{r}"
+    # a tie on wickets goes to the cheaper figures, as a scorecard has it
+    assert R._best_bowling([type("S", (), {"bowl_balls": 6, "best": (3, 30)}),
+                            type("S", (), {"bowl_balls": 6, "best": (3, 17)}),
+                            type("S", (), {"bowl_balls": 6, "best": (2, 4)})]) == "3/17"
+    assert R._best_bowling([type("S", (), {"bowl_balls": 0, "best": (0, 0)})]) is None

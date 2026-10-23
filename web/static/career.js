@@ -927,7 +927,7 @@ function crEnd(d){
   const s = d.summary;
   if (!s) return;
   const bat = s.runs ? `<div><b>${crNum(s.runs)}</b> runs<span>SR ${s.strike_rate ?? '—'} · avg ${s.average ?? '—'} · HS ${s.highest}${s.hundreds ? ` · ${s.hundreds}×100` : ''}${s.fifties ? ` · ${s.fifties}×50` : ''}</span></div>` : '';
-  const bowl = s.wickets ? `<div><b>${s.wickets}</b> wickets<span>econ ${s.economy ?? '—'}</span></div>` : '';
+  const bowl = s.wickets ? `<div><b>${s.wickets}</b> wickets<span>econ ${s.economy ?? '—'} · avg ${s.bowling_average ?? '—'} · SR ${s.bowling_strike_rate ?? '—'}${s.best_bowling ? ` · best ${s.best_bowling}` : ''}</span></div>` : '';
   const ending = s.ending === 'retired' ? 'Retired' : s.ending === 'released' ? 'Released' : 'Played to 2026';
   $('#crStage').innerHTML = `
     <div class="cr-step">
@@ -982,6 +982,21 @@ function crStory(d){
 // Drawn on a canvas in the journey card's own language (reveal.js's helpers), 1080 x 1350 so
 // it fits a phone screen and a chat preview. Your name, your clubs and your numbers; never
 // the real players the two spins were drawn from (A199's share line keeps them back too).
+
+// A career's rates [A220], as two short lines each: a batter's strike rate and average, then
+// his best score and hundreds and fifties; a bowler's economy and average, then his strike
+// rate and best figures. A discipline never practised says so rather than printing noughts.
+function crBatRates(s){
+  if (!s.runs && s.strike_rate == null) return ['DID NOT BAT', ''];
+  const tons = [s.hundreds ? `${s.hundreds}×100` : null, s.fifties ? `${s.fifties}×50` : null].filter(Boolean);
+  return [`SR ${s.strike_rate ?? '–'} · AVG ${s.average ?? '–'}`, [`HS ${s.highest}`, ...tons].join(' · ')];
+}
+function crBowlRates(s){
+  if (s.economy == null) return ['DID NOT BOWL', ''];
+  return [`ECON ${s.economy.toFixed(2)} · AVG ${s.bowling_average ?? '–'}`,
+          [s.bowling_strike_rate != null ? `SR ${s.bowling_strike_rate}` : null,
+           s.best_bowling ? `BB ${s.best_bowling}` : null].filter(Boolean).join(' · ')];
+}
 
 function crShowCard(){
   const d = CR.data;
@@ -1094,12 +1109,14 @@ async function crDrawCard(d){
     ctx.fillText(fitText(ctx, ranks.join(' · '), tw, 400, 34, CARD_DISPLAY, 20), tx, 312);
   }
 
-  // --- four tiles, your own discipline first ------------------------------------------------
+  // --- four tiles, your own discipline first, each with its rates under it [A220] ----------
   let y = HEAD_H + 10;
-  const bat = [crNum(s.runs), 'RUNS'], bowl = [String(s.wickets), 'WICKETS'];
-  const tiles = [...(crBowls(d) ? [bowl, bat] : [bat, bowl]), [String(s.matches), 'MATCHES'], [String(s.titles), s.titles === 1 ? 'TITLE' : 'TITLES']];
-  const TILE_H = 160, tg = 18, tw4 = (inner - tg * 3) / 4;
-  tiles.forEach(([val, label], i) => {
+  const bat = [crNum(s.runs), 'RUNS', ...crBatRates(s)], bowl = [String(s.wickets), 'WICKETS', ...crBowlRates(s)];
+  const tiles = [...(crBowls(d) ? [bowl, bat] : [bat, bowl]),
+    [String(s.matches), 'MATCHES', `${s.regular_seasons} OF ${s.seasons} SEASONS`, 'AS A REGULAR'],
+    [String(s.titles), s.titles === 1 ? 'TITLE' : 'TITLES', s.finals ? `${s.finals} FINAL${s.finals === 1 ? '' : 'S'}` : 'NO FINALS', '']];
+  const TILE_H = 214, tg = 18, tw4 = (inner - tg * 3) / 4;
+  tiles.forEach(([val, label, rate1, rate2], i) => {
     const x = M + i * (tw4 + tg);
     ctx.fillStyle = 'rgba(255,255,255,.035)';
     ctx.beginPath(); ctx.roundRect(x, y, tw4, TILE_H, 14); ctx.fill();
@@ -1109,12 +1126,13 @@ async function crDrawCard(d){
     ctx.fillText(fitText(ctx, val, tw4 - 44, 400, 66, CARD_DISPLAY, 30), x + 22, y + 106);
     ctx.fillStyle = ink3; ctx.font = `700 17px ${CARD_FIGS}`;
     ctx.fillText(label, x + 22, y + 138);
+    ctx.fillStyle = ink2;
+    [rate1, rate2].forEach((t, k) => { if (t) ctx.fillText(fitText(ctx, t, tw4 - 44, 600, 17, CARD_FIGS, 11), x + 22, y + 170 + 24 * k); });
   });
 
   // --- honours, one line --------------------------------------------------------------------
   y += TILE_H + 56;
   const honours = [];
-  if (s.finals) honours.push([`${s.finals} FINAL${s.finals === 1 ? '' : 'S'}`, ink2]);
   if (s.orange_caps) honours.push([`ORANGE CAP ×${s.orange_caps}`, capOrange]);
   if (s.purple_caps) honours.push([`PURPLE CAP ×${s.purple_caps}`, capPurple]);
   honours.push([`${s.earnings.replace('₹', '₹ ')} EARNED`, mint]);
@@ -1135,7 +1153,7 @@ async function crDrawCard(d){
   ctx.textAlign = 'right'; ctx.fillStyle = ink3; ctx.font = `700 16px ${CARD_FIGS}`;
   ctx.fillText('RATING EACH SEASON · 🏆 A TITLE', W - M, y);
   ctx.textAlign = 'left';
-  const plotTop = y + 30, plotH = 230, n = seasons.length;
+  const plotTop = y + 30, plotH = 196, n = seasons.length;
   const slot = inner / Math.max(n, 8), barW = Math.min(46, slot * .62);
   const yOf = v => plotTop + plotH - plotH * Math.max(0, Math.min(1, (v - 55) / (99 - 55)));
   [70, 80, 90].forEach(g => {

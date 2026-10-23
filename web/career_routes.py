@@ -242,6 +242,7 @@ class PendingOut(BaseModel):
 class MilestoneOut(BaseModel):
     year: int
     text: str
+    key: str = ""                 # "title", "orange_cap", ... for the timeline's colour (A219)
 
 
 class SummaryOut(BaseModel):
@@ -503,7 +504,10 @@ def _summary(c: C.Career) -> SummaryOut:
         peak_rating=s.peak_rating or None, peak_rating_year=s.peak_rating_year or None,
         runs_rank=s.runs_rank, wickets_rank=s.wickets_rank, ending=ending,
         five_fors=s.five_fors, hat_tricks=s.hat_tricks,
-        milestones=[MilestoneOut(year=y, text=t) for y, t in s.milestones])
+        # From the seasons rather than `s.milestones`, which keeps (year, text) pairs for the
+        # saved card; the same walk in the same order, with each milestone's kind kept.
+        milestones=[MilestoneOut(year=r.year, text=m.text, key=m.key)
+                    for r in c.seasons for m in r.milestones])
 
 
 def _season_play(detail: C.SeasonDetail,
@@ -648,6 +652,7 @@ def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
 class RoleOut(BaseModel):
     key: str
     label: str
+    blurb: str = ""
 
 
 class OptionsOut(BaseModel):
@@ -658,7 +663,7 @@ class OptionsOut(BaseModel):
 
 @router.get("/api/career/options")
 def career_options() -> OptionsOut:
-    return OptionsOut(roles=[RoleOut(key=k, label=v["label"]) for k, v in C.ROLES.items()],
+    return OptionsOut(roles=[RoleOut(key=k, label=v["label"], blurb=v["blurb"]) for k, v in C.ROLES.items()],
                       first_debut=C.FIRST_DEBUT, last_debut=C.LAST_DEBUT)
 
 

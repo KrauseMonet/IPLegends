@@ -29,10 +29,30 @@ function crFigs(d, runs, wkts){
 
 function crPick(group, btn){
   document.querySelectorAll(`#${group} .room-choice`).forEach(b => b.classList.toggle('sel', b === btn));
+  if (group === 'crRoles') crRoleNote();
+}
+
+// On a phone the role cards show only their names; the chosen role's line sits under them.
+function crRoleNote(){
+  const el = document.getElementById('crRoleNote'), sel = document.querySelector('#crRoles .room-choice.sel');
+  if (el && sel) el.textContent = sel.querySelector('.cr-role-blurb').textContent;
 }
 const crChosen = group => (document.querySelector(`#${group} .room-choice.sel`) || {}).dataset;
 
 // --- create --------------------------------------------------------------------------------
+
+// Small line icons for the role cards [A219]: a bat, a ball, gloves. Drawn in currentColor
+// so a chosen card's colour carries into its icon.
+const CR_SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const CR_BAT = '<path d="M15.5 3.5l5 5-10.5 10.5a2.5 2.5 0 0 1-3.5 0l-1.5-1.5a2.5 2.5 0 0 1 0-3.5z"/><path d="M6 18l-3 3"/>';
+const CR_BALL = '<circle cx="12" cy="12" r="8"/><path d="M7 6.5c2.5 3 2.5 8 0 11M17 6.5c-2.5 3-2.5 8 0 11"/>';
+const CR_ROLE_ICON = {
+  opener: CR_SVG(CR_BAT), middle: CR_SVG(CR_BAT), finisher: CR_SVG(CR_BAT + '<path d="M18 2l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/>'),
+  keeper: CR_SVG('<path d="M6 21v-9a2 2 0 0 1 4 0V8a2 2 0 0 1 4 0v4a2 2 0 0 1 4 0v3a6 6 0 0 1-6 6z"/><path d="M6 14l-2-2"/>'),
+  pace: CR_SVG(CR_BALL + '<path d="M2 9h3M1 13h4"/>'), spin: CR_SVG(CR_BALL + '<path d="M20 4a10 10 0 0 1 2 6"/>'),
+  allrounder: CR_SVG('<g transform="translate(-2 2) scale(.8)">' + CR_BAT + '</g><circle cx="17.5" cy="7" r="4"/>'),
+};
 
 function crShowCreate(){
   CR.data = null;
@@ -40,11 +60,18 @@ function crShowCreate(){
   $('#crMain').classList.add('hide');
   $('#crCreate').classList.remove('hide');
   const o = CR.options;
+  // A card per role [A219]: an icon, the name and one line on what the job is, the line
+  // the server's own role table carries so it cannot promise a rule the game lacks.
   $('#crRoles').innerHTML = o.roles.map((r, i) =>
-    `<button class="room-choice${i ? '' : ' sel'}" data-v="${r.key}" onclick="crPick('crRoles', this)">${esc(r.label)}</button>`).join('');
+    `<button class="room-choice cr-role${i ? '' : ' sel'}" data-v="${r.key}" onclick="crPick('crRoles', this)">
+      <span class="cr-role-icon">${CR_ROLE_ICON[r.key] || ''}</span>
+      <b>${esc(r.label)}</b><span class="cr-role-blurb">${esc(r.blurb || '')}</span></button>`).join('')
+    + '<p class="cr-role-note" id="crRoleNote"></p>';
+  crRoleNote();
   const years = [];
   for (let y = o.first_debut; y <= o.last_debut; y++) years.push(y);
-  $('#crDebut').innerHTML = years.map(y => `<option value="${y}"${y === 2012 ? ' selected' : ''}>${y}</option>`).join('');
+  $('#crDebut').innerHTML = years.map(y =>
+    `<button class="room-choice${y === 2012 ? ' sel' : ''}" data-v="${y}" onclick="crPick('crDebut', this)">${y}</button>`).join('');
 }
 
 async function crStart(btn){
@@ -54,7 +81,7 @@ async function crStart(btn){
   CR.busy = true; btn.disabled = true;
   try {
     const d = await api('/api/career/start', {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify({
-      name, role: crChosen('crRoles').v, debut: Number($('#crDebut').value),
+      name, role: crChosen('crRoles').v, debut: Number(crChosen('crDebut').v),
       overseas: crChosen('crPassport').v === '1'})});
     crSave({token: d.token});
     CR.seen = 0;
@@ -102,7 +129,13 @@ function crShow(d, moment){
   // The chart opens by itself only where the career is the subject: the season card and
   // the career card. Everywhere else it folds away so the decision sits near the top.
   crTimeline(d, hold, (moment === 'season' && !d.season_play) || !d.pending);
-  if (moment === 'spin') return crSpin(d);
+  if (moment === 'spin'){
+    // The player bar shows the Rating and potential the two spins decide [A219]; it waits
+    // for the names to stop rolling rather than giving the answer away first.
+    $('#crHead').classList.add('cr-held');
+    return crSpin(d);
+  }
+  $('#crHead').classList.remove('cr-held');
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
   if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
   if (!d.pending) return crEnd(d);
@@ -202,7 +235,7 @@ function crTemplateCard(label, t, cls, what){
     ${crestImg(t.crest, 'cr-spin-crest')}
     <b class="cr-roll" data-final="${esc(t.name)}">${esc(t.name)}</b>
     <span>${t.year} · ${esc(t.franchise)}</span>
-    ${t.card ? `<div class="cr-spin-num"><b>${t.card}</b><i>${what}</i></div>` : ''}
+    ${t.card ? `<div class="cr-spin-num cr-held"><b>${t.card}</b><i>${what}</i></div>` : ''}
   </div>`;
 }
 
@@ -215,24 +248,39 @@ function crSpin(d){
     <p class="room-note">Your Rating climbs from the first toward the second over your first
       five or six seasons, then falls away with age. Coaches, mentors and injuries move it;
       each season's grade is how the matches actually went.</p>
-    <div class="foot-actions" style="justify-content:center">
+    <div class="foot-actions cr-held" id="crSpinGo" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>
     </div>`;
-  crRoll();
+  crRoll(() => {
+    $('#crHead').classList.remove('cr-held');
+    const go = document.getElementById('crSpinGo');
+    if (go) go.classList.remove('cr-held');
+  });
 }
 
 // A short decelerating flicker of real names before the spin settles, like the deal's
 // (rollDeal): the result is already fixed by the server, this only reveals it.
-function crRoll(){
+function crRoll(done){
   const els = [...document.querySelectorAll('.cr-roll')];
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // Each card's number appears as its name settles, and `done` runs once both have.
+  const settle = el => {
+    el.textContent = el.dataset.final;
+    el.classList.add('settled');
+    const num = el.parentElement.querySelector('.cr-spin-num');
+    if (num) num.classList.remove('cr-held');
+    if (els.every(e => e.classList.contains('settled')) && done) done();
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !els.length){
+    els.forEach(settle);
+    if (!els.length && done) done();
+    return;
+  }
   const pool = ['V Kohli', 'MS Dhoni', 'JJ Bumrah', 'SP Narine', 'AB de Villiers', 'R Ashwin',
                 'CH Gayle', 'SL Malinga', 'RG Sharma', 'Rashid Khan', 'AD Russell', 'DA Warner'];
   els.forEach((el, n) => {
     let delay = 40, steps = 0;
-    const final = el.dataset.final;
     (function tick(){
-      if (steps++ > 10 + 5 * n){ el.textContent = final; el.classList.add('settled'); return; }
+      if (steps++ > 10 + 5 * n){ settle(el); return; }
       el.textContent = pool[Math.floor(Math.random() * pool.length)];
       delay *= 1.13;
       setTimeout(tick, delay);
@@ -897,19 +945,253 @@ function crEnd(d){
           <div><b>${s.peak_rating || s.peak_card}</b> peak Rating<span>${s.peak_rating_year || s.peak_year} · best season grade ${s.peak_card} (${s.peak_year})</span></div>
           <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
         </div>
-        ${d.injuries && d.injuries.length ? `<div class="cr-msl cr-msl-career cr-inj"><div class="cr-label">Injuries</div>
-          ${d.injuries.map(t => { const [y, w] = t.split(' · '); return `<div><span>${esc(y)}</span>${esc(w)}</div>`; }).join('')}</div>` : ''}
-        ${s.milestones && s.milestones.length ? `<div class="cr-msl cr-msl-career"><div class="cr-label">Milestones</div>
-          ${s.milestones.map(m => `<div><span>${m.year}</span>${esc(m.text)}</div>`).join('')}</div>` : ''}
+        ${crStory(d)}
       </div>
       <div class="cr-keep" id="crKeep"></div>
-      <pre class="bg-share-preview">${esc(d.share)}</pre>
       <div class="foot-actions" style="justify-content:center">
-        <button class="act lead" onclick="pzShare(CR.data.share, 'Career copied. No names in it.')">Share your career</button>
+        <button class="act lead" onclick="crShowCard()">Your career card</button>
+        <button class="act" onclick="pzShare(CR.data.share, 'Career copied. No names in it.')">Share as text</button>
         <button class="act" onclick="crNew()">Start a new career</button>
       </div>
     </div>`;
   crKeep(d);
+}
+
+// The career's milestones and injuries as one timeline, a row per year with that season's
+// club [A219]. Coloured by the milestone's own kind, which the server sends (`key`), so a
+// title, a cap or an injury is told apart without reading its words.
+const CR_STORY_CLS = {title: 'gold', orange_cap: 'orange', purple_cap: 'purple', elite: 'elite',
+                      captain: 'capt'};
+function crStory(d){
+  const s = d.summary, byYear = new Map();
+  const add = (y, cls, text) => { if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push({cls, text}); };
+  (s.milestones || []).forEach(m => add(m.year, CR_STORY_CLS[m.key] || '', m.text));
+  (d.injuries || []).forEach(t => { const i = t.indexOf(' · '); add(Number(t.slice(0, i)), 'inj', t.slice(i + 3)); });
+  if (!byYear.size) return '';
+  const years = [...byYear.keys()].sort((a, b) => a - b);
+  return `<div class="cr-story"><div class="cr-label">The story</div><ol>${years.map(y => {
+    const season = d.seasons.find(r => r.year === y);
+    return `<li class="${season && season.champion ? 'champ' : ''}">
+      <div class="cr-story-when"><b>${y}</b>${season ? crestImg(season.crest, 'cr-story-crest') : ''}</div>
+      <div class="cr-story-what">${byYear.get(y).map(e =>
+        `<span class="cr-story-chip ${e.cls}">${e.cls === 'inj' ? '✚ ' : e.cls === 'gold' ? '🏆 ' : ''}${esc(e.text)}</span>`).join('')}</div>
+    </li>`; }).join('')}</ol></div>`;
+}
+
+// --- the career card as an image [A219] ------------------------------------------------------
+// Drawn on a canvas in the journey card's own language (reveal.js's helpers), 1080 x 1350 so
+// it fits a phone screen and a chat preview. Your name, your clubs and your numbers; never
+// the real players the two spins were drawn from (A199's share line keeps them back too).
+
+function crShowCard(){
+  const d = CR.data;
+  if (!d || !d.summary) return;
+  $('#crCardOverlay').classList.remove('hide');
+  crDrawCard(d).catch(() => slip('Could not draw the card.'));
+}
+
+function crHideCard(e){
+  if (e && e.target !== e.currentTarget) return;
+  $('#crCardOverlay').classList.add('hide');
+}
+
+async function crShareCard(){
+  const canvas = $('#crCanvas');
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+  const file = blob && new File([blob], 'career-card.png', {type: 'image/png'});
+  if (file && navigator.canShare && navigator.canShare({files: [file]})){
+    try { await navigator.share({files: [file], text: CR.data.share}); return; }
+    catch(e){ if (e && e.name === 'AbortError') return; }
+  }
+  $('#crCardDownload').click();
+}
+
+// The club a career is most remembered at: the crest it wore for the most seasons.
+function crMainClub(seasons){
+  const n = new Map();
+  seasons.forEach(r => n.set(r.crest, (n.get(r.crest) || 0) + 1));
+  let best = null, top = 0;
+  for (const [crest, c] of n) if (c > top){ best = crest; top = c; }
+  return seasons.find(r => r.crest === best) || seasons[0];
+}
+
+async function crDrawCard(d){
+  if (document.fonts && document.fonts.load){
+    await Promise.all([`400 80px ${CARD_DISPLAY}`, `700 30px ${CARD_BODY}`, `700 24px ${CARD_FIGS}`]
+      .map(f => document.fonts.load(f).catch(() => null)));
+  }
+  const s = d.summary, seasons = d.seasons;
+  const clubs = [];
+  seasons.forEach(r => { const c = clubs.find(x => x.crest === r.crest && x.franchise === r.franchise);
+    if (c) c.last = r.year; else clubs.push({crest: r.crest, franchise: r.franchise, first: r.year, last: r.year}); });
+  const main = crMainClub(seasons);
+  const [mainImg] = await loadImages([main && main.crest]);
+  const clubImgs = await loadImages(clubs.map(c => c.crest));
+  const yearImgs = await loadImages(seasons.map(r => r.crest));
+  const canvas = $('#crCanvas'), ctx = canvas.getContext('2d');
+  const gold = themeColor('gold'), gold2 = themeColor('gold-2'), ink = themeColor('ink'),
+        ink2 = themeColor('ink-2'), ink3 = themeColor('ink-3'), mint = themeColor('mint'),
+        line = themeColor('line'), lineStrong = themeColor('line-strong'), bg = themeColor('bg'),
+        bg2 = themeColor('bg-2'), capOrange = themeColor('cap-orange'), capPurple = themeColor('cap-purple');
+  const col = sideColours({crest: main && main.crest});
+  const W = 1080, H = 1350, M = 60, inner = W - 2 * M, HEAD_H = 400;
+  canvas.width = W; canvas.height = H;
+
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, bg2); bgGrad.addColorStop(1, bg);
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+
+  // --- the header, in the main club's colours ---------------------------------------------
+  ctx.save();
+  const hg = ctx.createLinearGradient(0, 0, W, HEAD_H);
+  hg.addColorStop(0, col.deep); hg.addColorStop(1, bg2);
+  ctx.fillStyle = hg; ctx.fillRect(0, 0, W, HEAD_H);
+  ctx.globalAlpha = .14; ctx.fillStyle = col.team;
+  for (let i = -2; i < 9; i++){
+    ctx.beginPath();
+    ctx.moveTo(560 + i * 90, 0); ctx.lineTo(620 + i * 90, 0);
+    ctx.lineTo(500 + i * 90, HEAD_H); ctx.lineTo(440 + i * 90, HEAD_H); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  if (mainImg){ ctx.globalAlpha = .18; drawImageFit(ctx, mainImg, W - M - 300, 40, 300); ctx.globalAlpha = 1; }
+  const fade = ctx.createLinearGradient(0, HEAD_H - 120, 0, HEAD_H);
+  fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, bg2);
+  ctx.fillStyle = fade; ctx.fillRect(0, HEAD_H - 120, W, 120);
+  ctx.restore();
+  ctx.fillStyle = col.team; ctx.fillRect(0, 0, W, 10);
+
+  // the peak Rating, as the player card's badge
+  const peak = s.peak_rating || s.peak_card, bx = M, by = 92, bw = 190, bh = 210;
+  const tier = crTier(peak);
+  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 26);
+  if (tier === 'elite'){
+    const eg = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+    eg.addColorStop(0, '#ffd77a'); eg.addColorStop(1, gold);
+    ctx.fillStyle = eg; ctx.fill();
+  } else { ctx.fillStyle = 'rgba(255,255,255,.04)'; ctx.fill(); }
+  ctx.lineWidth = 5; ctx.strokeStyle = tier === 'base' ? lineStrong : tier === 'good' ? mint : gold; ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = tier === 'elite' ? '#1a1204' : tier === 'star' ? gold2 : ink;
+  ctx.font = `400 116px ${CARD_DISPLAY}`;
+  ctx.fillText(String(peak), bx + bw / 2, by + 140);
+  ctx.font = `700 18px ${CARD_FIGS}`;
+  ctx.fillStyle = tier === 'elite' ? '#3a2a06' : ink3;
+  ctx.fillText('PEAK RATING', bx + bw / 2, by + 182);
+
+  const tx = bx + bw + 40, tw = W - M - tx;
+  const ending = s.ending === 'retired' ? 'RETIRED' : s.ending === 'released' ? 'RELEASED' : 'PLAYED TO 2026';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = col.ink; ctx.font = `700 22px ${CARD_FIGS}`;
+  ctx.fillText(`BUILD A CAREER · ${d.role_label.toUpperCase()}`, tx, 122);
+  ctx.fillStyle = ink;
+  ctx.fillText(fitText(ctx, d.name.toUpperCase(), tw, 400, 88, CARD_DISPLAY, 40), tx, 214);
+  ctx.fillStyle = ink2; ctx.font = `600 24px ${CARD_FIGS}`;
+  ctx.fillText(fitText(ctx, `${d.debut}–${d.debut + s.seasons - 1} · ${s.seasons} SEASONS · ${ending}`, tw, 600, 24, CARD_FIGS, 16), tx, 262);
+  const ranks = [s.runs_rank && s.runs_rank <= 25 ? `${cardOrdinal(s.runs_rank)} ALL-TIME FOR RUNS` : null,
+                 s.wickets_rank && s.wickets_rank <= 25 ? `${cardOrdinal(s.wickets_rank)} ALL-TIME FOR WICKETS` : null].filter(Boolean);
+  if (ranks.length){
+    ctx.fillStyle = gold2; ctx.font = `400 34px ${CARD_DISPLAY}`;
+    ctx.fillText(fitText(ctx, ranks.join(' · '), tw, 400, 34, CARD_DISPLAY, 20), tx, 312);
+  }
+
+  // --- four tiles, your own discipline first ------------------------------------------------
+  let y = HEAD_H + 10;
+  const bat = [crNum(s.runs), 'RUNS'], bowl = [String(s.wickets), 'WICKETS'];
+  const tiles = [...(crBowls(d) ? [bowl, bat] : [bat, bowl]), [String(s.matches), 'MATCHES'], [String(s.titles), s.titles === 1 ? 'TITLE' : 'TITLES']];
+  const TILE_H = 160, tg = 18, tw4 = (inner - tg * 3) / 4;
+  tiles.forEach(([val, label], i) => {
+    const x = M + i * (tw4 + tg);
+    ctx.fillStyle = 'rgba(255,255,255,.035)';
+    ctx.beginPath(); ctx.roundRect(x, y, tw4, TILE_H, 14); ctx.fill();
+    ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = col.team; ctx.fillRect(x + 22, y + 22, 34, 4);
+    ctx.fillStyle = label.startsWith('TITLE') && s.titles ? gold2 : ink;
+    ctx.fillText(fitText(ctx, val, tw4 - 44, 400, 66, CARD_DISPLAY, 30), x + 22, y + 106);
+    ctx.fillStyle = ink3; ctx.font = `700 17px ${CARD_FIGS}`;
+    ctx.fillText(label, x + 22, y + 138);
+  });
+
+  // --- honours, one line --------------------------------------------------------------------
+  y += TILE_H + 56;
+  const honours = [];
+  if (s.finals) honours.push([`${s.finals} FINAL${s.finals === 1 ? '' : 'S'}`, ink2]);
+  if (s.orange_caps) honours.push([`ORANGE CAP ×${s.orange_caps}`, capOrange]);
+  if (s.purple_caps) honours.push([`PURPLE CAP ×${s.purple_caps}`, capPurple]);
+  honours.push([`${s.earnings.replace('₹', '₹ ')} EARNED`, mint]);
+  ctx.font = `700 22px ${CARD_FIGS}`;
+  let hx = M;
+  honours.forEach(([text, c]) => {
+    const w = ctx.measureText(text).width + 36;
+    ctx.strokeStyle = c; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(hx, y - 30, w, 44, 22); ctx.stroke();
+    ctx.fillStyle = c; ctx.fillText(text, hx + 18, y);
+    hx += w + 14;
+  });
+
+  // --- the career path: a bar per season, its crest and year under it ------------------------
+  y += 70;
+  ctx.fillStyle = ink; ctx.font = `400 36px ${CARD_DISPLAY}`;
+  ctx.fillText('THE CAREER PATH', M, y);
+  ctx.textAlign = 'right'; ctx.fillStyle = ink3; ctx.font = `700 16px ${CARD_FIGS}`;
+  ctx.fillText('RATING EACH SEASON · 🏆 A TITLE', W - M, y);
+  ctx.textAlign = 'left';
+  const plotTop = y + 30, plotH = 230, n = seasons.length;
+  const slot = inner / Math.max(n, 8), barW = Math.min(46, slot * .62);
+  const yOf = v => plotTop + plotH - plotH * Math.max(0, Math.min(1, (v - 55) / (99 - 55)));
+  [70, 80, 90].forEach(g => {
+    ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(M, yOf(g)); ctx.lineTo(W - M, yOf(g)); ctx.stroke();
+  });
+  seasons.forEach((r, i) => {
+    const rt = r.rating || r.card, cx = M + slot * i + slot / 2, top = yOf(rt);
+    const t = crTier(rt);
+    ctx.fillStyle = t === 'elite' ? gold : t === 'star' ? 'rgba(245,184,61,.75)' : t === 'good' ? 'rgba(52,211,153,.6)' : 'rgba(52,211,153,.32)';
+    ctx.globalAlpha = r.squad ? .45 : 1;
+    ctx.beginPath(); ctx.roundRect(cx - barW / 2, top, barW, plotTop + plotH - top, [8, 8, 2, 2]); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = t === 'elite' || t === 'star' ? '#1a1204' : '#04150d';
+    if (plotTop + plotH - top > 34){ ctx.font = `700 ${barW > 36 ? 18 : 14}px ${CARD_FIGS}`; ctx.fillText(String(rt), cx, top + 24); }
+    if (r.champion){ ctx.font = `400 24px ${CARD_BODY}`; ctx.fillText('🏆', cx, top - 8); }
+    if (yearImgs[i]) drawImageFit(ctx, yearImgs[i], cx - 16, plotTop + plotH + 10, 32);
+    ctx.fillStyle = r.champion ? gold2 : ink3; ctx.font = `700 16px ${CARD_FIGS}`;
+    ctx.fillText(String(r.year).slice(2), cx, plotTop + plotH + 66);
+  });
+  ctx.textAlign = 'left';
+
+  // --- the clubs ------------------------------------------------------------------------------
+  y = plotTop + plotH + 100;
+  // Three to a row, two rows: up to six, and a longer list keeps five and says how many
+  // more rather than dropping them.
+  const shown = clubs.length > 6 ? clubs.slice(0, 5) : clubs;
+  const cw = inner / 3, rowH = 74;
+  if (clubs.length > 6){
+    ctx.fillStyle = ink2; ctx.font = `400 30px ${CARD_DISPLAY}`;
+    ctx.fillText(`+${clubs.length - 5} MORE`, M + 2 * cw, y + rowH + 38);
+  }
+  shown.forEach((c, i) => {
+    const x = M + (i % 3) * cw, y0 = y + Math.floor(i / 3) * rowH;
+    if (clubImgs[i]) drawImageFit(ctx, clubImgs[i], x, y0, 54);
+    ctx.fillStyle = ink; ctx.font = `700 21px ${CARD_BODY}`;
+    ctx.fillText(fitText(ctx, c.franchise, cw - 80, 700, 21, CARD_BODY, 14), x + 66, y0 + 24);
+    ctx.fillStyle = ink3; ctx.font = `600 16px ${CARD_FIGS}`;
+    ctx.fillText(c.first === c.last ? String(c.first) : `${c.first}–${String(c.last).slice(2)}`, x + 66, y0 + 48);
+  });
+
+  // --- footer and rim --------------------------------------------------------------------------
+  const fy = H - 46;
+  ctx.strokeStyle = lineStrong; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(M, fy - 40); ctx.lineTo(W - M, fy - 40); ctx.stroke();
+  ctx.fillStyle = ink; ctx.font = `400 30px ${CARD_DISPLAY}`;
+  ctx.fillText('THE LEGENDS', M, fy);
+  const lw = ctx.measureText('THE LEGENDS ').width;
+  ctx.fillStyle = gold; ctx.fillText('ALMANACK', M + lw, fy);
+  ctx.textAlign = 'right'; ctx.fillStyle = ink3; ctx.font = `700 18px ${CARD_FIGS}`;
+  ctx.fillText('BUILD A CAREER', W - M, fy - 4);
+  ctx.textAlign = 'left';
+  ctx.strokeStyle = col.team; ctx.lineWidth = 6; ctx.strokeRect(3, 3, W - 6, H - 6);
+
+  $('#crCardDownload').href = canvas.toDataURL('image/png');
 }
 
 // A finished career goes into the Hall of Fame on your profile [A210]: saved for a signed-in

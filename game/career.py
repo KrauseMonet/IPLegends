@@ -71,8 +71,12 @@ ROLES: dict[str, dict] = {
     # [A214] Batting roles filter on where the template REALLY batted that season (A76's
     # `positions`), not the squad `band`, which a few innings can move: an opener's ceiling
     # was drawn as a finisher's season, which reads as two careers cobbled together.
-    "opener":     {"label": "Opening batter", "role": ("batter",), "slots": TOP_SLOTS},
-    "middle":     {"label": "Middle-order batter", "role": ("batter",), "slots": MIDDLE_SLOTS},
+    # `blurb` is the create screen's one line per role [A219]. Every claim in it is a rule
+    # in this file: the slots, the 15% bar, INJURY_RISK, ALLROUNDER_BOWL_SHARE.
+    "opener":     {"label": "Opening batter", "role": ("batter",), "slots": TOP_SLOTS,
+                   "blurb": "Bats 1 to 3: the new ball, and the most balls to score from."},
+    "middle":     {"label": "Middle-order batter", "role": ("batter",), "slots": MIDDLE_SLOTS,
+                   "blurb": "Bats 3 to 5 and holds the innings together."},
     # A finisher's templates are anybody who batted regularly in the finisher band, his
     # BATTING only (A198): only 22 real cards in nineteen years are batters there, too few
     # to spin from, and real finishers are mostly all-rounders. Your finisher still does not
@@ -82,11 +86,16 @@ ROLES: dict[str, dict] = {
     # careers ended in release -- realistic (real batting-only finishers rarely held a
     # place), but it made the role unplayable.
     "finisher":   {"label": "Finisher", "role": ("batter", "keeper", "allrounder"),
-                   "slots": FINISHER_SLOTS, "batting_only": True, "poor_percentile": 0.15},
-    "keeper":     {"label": "Wicketkeeper-batter", "role": ("keeper",)},
-    "pace":       {"label": "Fast bowler", "role": ("bowler",), "style": "pace"},
-    "spin":       {"label": "Spinner", "role": ("bowler",), "style": "spin"},
-    "allrounder": {"label": "All-rounder", "role": ("allrounder",)},
+                   "slots": FINISHER_SLOTS, "batting_only": True, "poor_percentile": 0.15,
+                   "blurb": "Bats 5 to 7, fast at the end. The hardest place to lose."},
+    "keeper":     {"label": "Wicketkeeper-batter", "role": ("keeper",),
+                   "blurb": "Keeps wicket and bats. Every side needs one."},
+    "pace":       {"label": "Fast bowler", "role": ("bowler",), "style": "pace",
+                   "blurb": "Pace, up to four overs a match. The most injury-prone job."},
+    "spin":       {"label": "Spinner", "role": ("bowler",), "style": "spin",
+                   "blurb": "Spin, up to four overs a match, and fewer injuries than a quick."},
+    "allrounder": {"label": "All-rounder", "role": ("allrounder",),
+                   "blurb": "Bats, and bowls in about six matches in ten."},
 }
 
 # A33's floors: below them a season's numbers are noise, so it cannot be a template and

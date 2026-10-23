@@ -538,3 +538,44 @@ def test_a_seasons_notes_reach_the_page_with_one_mark_each(client):
     for s in d["seasons"]:
         assert len(s["note_tones"]) == len(s["notes"])
         assert [C.note_tone(n) for n in s["notes"]] == s["note_tones"]
+
+
+# --- [A219] tier 3: the role lines, and the milestones' kinds ----------------------------------
+
+def test_every_role_line_states_a_rule_the_game_has(client):
+    """Each create-screen line makes a claim; each claim is checked against the constant it
+    rests on, so retuning the rule without the words (or the words without the rule) fails."""
+    roles = {r["key"]: r for r in client.get("/api/career/options").json()["roles"]}
+    assert set(roles) == set(C.ROLES) and all(r["blurb"] for r in roles.values())
+    span = lambda slots: f"{min(slots)} to {max(slots)}"
+    assert span(C.TOP_SLOTS) in roles["opener"]["blurb"]
+    assert span(C.MIDDLE_SLOTS) in roles["middle"]["blurb"]
+    assert span(C.FINISHER_SLOTS) in roles["finisher"]["blurb"]
+    # "the hardest place to lose": the finisher's own bar is the most forgiving
+    assert "hardest place to lose" in roles["finisher"]["blurb"]
+    assert C.ROLES["finisher"]["poor_percentile"] < C.POOR_PERCENTILE
+    assert all(v.get("poor_percentile", C.POOR_PERCENTILE) >= C.ROLES["finisher"]["poor_percentile"]
+               for v in C.ROLES.values())
+    # "the most injury-prone job", and a spinner "fewer injuries than a quick"
+    assert "most injury-prone" in roles["pace"]["blurb"]
+    assert max(C.INJURY_RISK, key=C.INJURY_RISK.get) == "pace"
+    assert "fewer injuries than a quick" in roles["spin"]["blurb"]
+    assert C.INJURY_RISK["spin"] < C.INJURY_RISK["pace"]
+    # "bowls in about six matches in ten"
+    assert "six matches in ten" in roles["allrounder"]["blurb"]
+    assert round(C.ALLROUNDER_BOWL_SHARE * 10) == 6
+
+
+def test_the_career_cards_milestones_carry_their_kind(client, deck, model):
+    """The story timeline colours a milestone by its kind; the API's list must be the
+    summary's own (year, text), in order, each with the key its season recorded."""
+    d = _token(client, seed=11)
+    while d["pending"]:
+        d = client.post("/api/career/move", json={"token": d["token"],
+                                                  "move": _auto_move(d["pending"])}).json()
+    seed, setup, cp, _ = R.read_token(d["token"])
+    career = C.play_career(deck, model, seed, setup, [], resume=cp)
+    got = d["summary"]["milestones"]
+    assert [(m["year"], m["text"]) for m in got] == list(career.summary.milestones)
+    assert [m["key"] for m in got] == [m.key for r in career.seasons for m in r.milestones]
+    assert got and all(m["key"] for m in got)

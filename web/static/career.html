@@ -22,7 +22,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=aefd1a1a12">
+<link rel="stylesheet" href="/static/style.css?v=30233730c2">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -66,11 +66,11 @@
       <label class="cr-label" for="crName">Your name</label>
       <input id="crName" class="room-input" maxlength="30" autocomplete="off" placeholder="Name on the back of the shirt">
       <div class="cr-label">Your role</div>
-      <div class="room-choices" id="crRoles"></div>
+      <div class="room-choices cr-roles" id="crRoles"></div>
       <div class="cr-row">
         <div>
-          <label class="cr-label" for="crDebut">Debut season</label>
-          <select id="crDebut" class="room-input cr-select"></select>
+          <div class="cr-label">Debut season</div>
+          <div class="room-choices cr-years" id="crDebut"></div>
         </div>
         <div>
           <div class="cr-label">Passport</div>
@@ -94,6 +94,20 @@
   </section>
 
   <!-- any of your matches as a scorecard [A214], the solo season's own overlay -->
+  <!-- the career card as an image [A219], drawn on demand when a career ends -->
+  <div id="crCardOverlay" class="card-overlay hide" onclick="crHideCard(event)">
+    <div class="card-frame">
+      <div class="card-scroll">
+        <canvas id="crCanvas" width="1080" height="1350"></canvas>
+      </div>
+      <div class="card-actions">
+        <button class="act lead" id="crCardShare" onclick="crShareCard()">Share</button>
+        <a id="crCardDownload" class="act" download="career-card.png">Download</a>
+        <button class="act" onclick="crHideCard()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="scorecardOverlay" class="card-overlay hide" onclick="crCloseScorecard(event)">
     <div class="scorecard-shell">
       <div class="scorecard-frame">
@@ -220,6 +234,6 @@
 <script src="/static/reveal.js?v=67f5778dcf"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
-<script src="/static/career.js?v=28be1059cc"></script>
+<script src="/static/career.js?v=fed9b3139a"></script>
 </body>
 </html>

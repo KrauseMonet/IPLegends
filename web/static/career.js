@@ -82,8 +82,11 @@ function crShow(d, moment){
   CR.data = d;
   $('#crCreate').classList.add('hide');
   $('#crMain').classList.remove('hide');
-  crHead(d);
-  crTimeline(d);
+  // While a season is being told, the header and the chart stay where it began [A214]: the
+  // season's own grade and its effect on your Rating are the end of the story, not the start.
+  const hold = (moment === 'season' && !!d.season_play) || (d.season_play && !d.season_play.complete);
+  crHead(d, hold);
+  crTimeline(d, hold);
   if (moment === 'spin') return crSpin(d);
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
   if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
@@ -93,41 +96,89 @@ function crShow(d, moment){
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
 }
 
-function crHead(d){
+// [A214] The player card: your Rating (what the engine plays), how far it is from your
+// potential, and where you are now. The Season grade is each season's own mark, on the chart.
+function crTier(r){ return r >= 90 ? 'elite' : r >= 84 ? 'star' : r >= 77 ? 'good' : 'base'; }
+
+function crHead(d, hold){
+  if (hold && d.season_play && d.season_play.complete && d.seasons.length){
+    const r = d.seasons[d.seasons.length - 1];
+    d = {...d, seasons: d.seasons.slice(0, -1), rating: r.rating || d.rating, age: r.age || d.age,
+         pending: {kind: 'season', offers: [{franchise: r.franchise, crest: r.crest}]}};
+  }
   const s = d.seasons, last = s[s.length - 1];
+  const club = d.pending && d.pending.offers && d.pending.offers.length === 1 && d.pending.kind !== 'offer'
+    ? d.pending.offers[0] : null;
+  const crest = club ? club.crest : last ? last.crest : null;
+  const clubName = club ? club.franchise : last ? last.franchise : 'Unsigned';
+  const lo = d.start.card || 70, hi = d.potential || 99;
+  const pct = Math.max(4, Math.min(100, Math.round(100 * (d.rating - lo) / Math.max(1, hi - lo))));
   $('#crHead').innerHTML = `
-    <div class="cr-who"><b>${esc(d.name)}</b><span>${esc(d.role_label)}${d.overseas ? ' · overseas' : ''} · debut ${d.debut}</span></div>
-    <div class="cr-tot">${s.length ? `<span><b>${s.length}</b> season${s.length === 1 ? '' : 's'}</span>
-      <span><b>${crNum(s.reduce((a, r) => a + r.runs, 0))}</b> runs</span>
-      <span><b>${s.reduce((a, r) => a + r.wickets, 0)}</b> wkts</span>
-      <span><b>${s.filter(r => r.champion).length}</b> titles</span>
-      <span>card <b>${last.card}</b></span>` : ''}</div>`;
+    <div class="cr-pc">
+      <div class="cr-pc-rating ${crTier(d.rating)}"><b>${d.rating}</b><span>Rating</span></div>
+      <div class="cr-pc-who">
+        <b>${esc(d.name)}</b>
+        <span>${esc(d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''} · debut ${d.debut}</span>
+        <div class="cr-pot" title="From where you started (${lo}) to your potential (${hi})">
+          <div class="cr-pot-bar"><i style="width:${pct}%"></i></div>
+          <span>Potential <b>${hi}</b></span></div>
+      </div>
+      <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
+    </div>
+    ${s.length ? `<div class="cr-tot">
+      <span><b>${s.length}</b> season${s.length === 1 ? '' : 's'}</span>
+      <span><b>${crNum(s.reduce((a, r) => a + r.matches, 0))}</b> matches</span>
+      ${s.some(r => r.runs) ? `<span><b>${crNum(s.reduce((a, r) => a + r.runs, 0))}</b> runs</span>` : ''}
+      ${s.some(r => r.wickets) ? `<span><b>${s.reduce((a, r) => a + r.wickets, 0)}</b> wkts</span>` : ''}
+      <span><b>${s.filter(r => r.champion).length}</b> titles</span></div>` : ''}`;
 }
 
-function crTimeline(d){
-  $('#crTimeline').innerHTML = d.seasons.map(r => `
-    <div class="cr-tl${r.champion ? ' champ' : ''}${r.squad ? ' squad' : ''}" title="${r.year} ${esc(r.franchise)}">
-      ${crestImg(r.crest, 'cr-tl-crest')}<b>${r.card}</b><span>${String(r.year).slice(2)}</span>
-    </div>`).join('');
+// The path of a career [A214]: a bar per season for your Rating, a dot for that season's
+// grade, and your potential as a line. Rating moves with age and what happens to you; the
+// dots are the luck of each season around it.
+function crTimeline(d, hold){
+  const s = hold && d.season_play && d.season_play.complete ? d.seasons.slice(0, -1) : d.seasons;
+  if (!s.length){ $('#crTimeline').innerHTML = ''; return; }
+  const y = v => Math.max(0, Math.min(100, (v - 55) / (99 - 55) * 100));
+  $('#crTimeline').innerHTML = `
+    <div class="cr-path">
+      <div class="cr-path-key"><span><i class="bar"></i>Rating</span><span><i class="dot"></i>Season grade</span>
+        <span><i class="pot"></i>Potential ${d.potential}</span></div>
+      <div class="cr-path-plot">
+        ${s.map(r => { const rt = r.rating || r.card; return `
+        <div class="cr-path-col${r.champion ? ' champ' : ''}${r.squad ? ' squad' : ''}" title="${r.year} · ${esc(r.franchise)} · Rating ${rt} · grade ${r.card}">
+          <div class="cr-path-area">
+            <div class="cr-path-pot" style="bottom:${y(d.potential)}%"></div>
+            <div class="cr-path-bar ${crTier(rt)}" style="height:${y(rt)}%"><b>${rt}</b></div>
+            <div class="cr-path-dot${r.card >= rt + 3 ? ' hot' : r.card <= rt - 3 ? ' cold' : ''}" style="bottom:${y(r.card)}%"></div>
+          </div>
+          ${crestImg(r.crest, 'cr-path-crest')}<span>${r.champion ? '🏆' : String(r.year).slice(2)}</span>
+        </div>`; }).join('')}
+      </div>
+    </div>`;
+  const plot = document.querySelector('.cr-path-plot');
+  if (plot) plot.scrollLeft = plot.scrollWidth;
 }
 
-function crTemplateCard(label, t, cls){
+function crTemplateCard(label, t, cls, what){
   return `<div class="cr-spin-card ${cls}">
     <div class="cr-spin-label">${label}</div>
     ${crestImg(t.crest, 'cr-spin-crest')}
     <b class="cr-roll" data-final="${esc(t.name)}">${esc(t.name)}</b>
     <span>${t.year} · ${esc(t.franchise)}</span>
+    ${t.card ? `<div class="cr-spin-num"><b>${t.card}</b><i>${what}</i></div>` : ''}
   </div>`;
 }
 
 function crSpin(d){
   $('#crStage').innerHTML = `
     <div class="cr-spin">
-      ${crTemplateCard('You start like', d.start, 'start')}
-      ${crTemplateCard('Your ceiling', d.ceiling, 'ceiling')}
+      ${crTemplateCard('You start like', d.start, 'start', 'your Rating at 19')}
+      ${crTemplateCard('Your ceiling', d.ceiling, 'ceiling', 'your potential')}
     </div>
-    <p class="room-note">Your ability moves from the first toward the second as your career
-      grows, then falls away. How you play each season is down to the matches.</p>
+    <p class="room-note">Your Rating climbs from the first toward the second over your first
+      five or six seasons, then falls away with age. Coaches, mentors and injuries move it;
+      each season's grade is how the matches actually went.</p>
     <div class="foot-actions" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>
     </div>`;
@@ -145,9 +196,9 @@ function crRoll(){
     let delay = 40, steps = 0;
     const final = el.dataset.final;
     (function tick(){
-      if (steps++ > 14 + 6 * n){ el.textContent = final; el.classList.add('settled'); return; }
+      if (steps++ > 10 + 5 * n){ el.textContent = final; el.classList.add('settled'); return; }
       el.textContent = pool[Math.floor(Math.random() * pool.length)];
-      delay *= 1.16;
+      delay *= 1.13;
       setTimeout(tick, delay);
     })();
   });
@@ -331,16 +382,21 @@ function crEvent(d){
   const p = d.pending, e = p.event, o = p.offers[0];
   $('#crStage').innerHTML = `
     <div class="cr-step">
-      <div class="over-line">${p.year} · ${esc(o.franchise).toUpperCase()}</div>
-      <div class="cr-event">
+      <div class="over-line">${p.year} · ${esc(o.franchise).toUpperCase()} · BEFORE THE SEASON</div>
+      <div class="cr-event cr-event-${esc(e.key)}">
+        <div class="cr-event-icon">${CR_EVENT_ICON[e.key] || '◆'}</div>
         <h2 class="cr-h">${esc(e.title)}</h2>
         <p>${esc(e.text)}</p>
         <div class="cr-event-opts">${e.options.map((o, i) =>
-          `<div class="cr-opt"><button class="act${i ? '' : ' lead'}" onclick="crMove('e${i}')">${esc(o.label)}</button>
-            <span>${esc(o.hint)}</span></div>`).join('')}</div>
+          `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('e${i}')">
+            <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
+        <div class="cr-event-now">Your Rating going in: <b>${d.rating}</b></div>
       </div>
     </div>`;
 }
+
+const CR_EVENT_ICON = {quiet: '☀', form: '🔥', niggle: '🩹', captain: '©', coach: '🎓', injury: '🩹',
+  fracture: '🦴', mentor: '🤝', rivalry: '⚔', slump: '🌧', home_league: '✈', one_more: '⏳'};
 
 // --- the season as it happens [A202] ---------------------------------------------------------
 // Your matches arrive one at a time, the table and the cap race moving with them. Playoff
@@ -368,7 +424,8 @@ function crFeedMilestones(l){
 }
 
 function crFeedRow(l, n){
-  return `<li class="cr-fr ${l.result === 'W' ? 'won' : l.result === 'L' ? 'lost' : ''}${l.stage !== 'league' ? ' po' : ''}">
+  const open = l.card != null ? ` onclick="crScorecard(${l.card})" title="Open the scorecard"` : '';
+  return `<li class="cr-fr ${l.result === 'W' ? 'won' : l.result === 'L' ? 'lost' : ''}${l.stage !== 'league' ? ' po' : ''}${open ? ' open' : ''}"${open}>
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-res">${l.result}</span>
@@ -508,8 +565,8 @@ async function crCall(i){
     const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
     crSave({token: d.token});
     CR.data = d;
-    crHead(d);
-    crTimeline(d);
+    crHead(d, true);
+    crTimeline(d, true);
     crFeed(d);
   } catch(e){
     slip(e.message || 'That did not go through. Try again.');
@@ -539,6 +596,8 @@ function crFeedEnd(){
 function crAfterFeed(){
   const d = CR.after || CR.data;
   CR.after = null;
+  crHead(d);
+  crTimeline(d);
   crSeason(d, d.seasons[d.seasons.length - 1]);
   window.scrollTo({top: $('#crMain').offsetTop - 70, behavior: 'smooth'});
 }
@@ -546,6 +605,8 @@ function crAfterFeed(){
 // A playoff match ball by ball: the two innings in turn, as the daily plays its match.
 function crWatch(idx){
   const f = CR.feed, m = f.sp.watch[idx];
+  const line = f.sp.feed.find(l => l.watch === idx);
+  CR.watchCard = line ? line.card : null;
   MY_SIDE = {short: f.sp.your_short, name: f.sp.your_name, crest: f.sp.your_crest, kit: null};
   const side = (short, name, crest) => short === MY_SIDE.short ? {...MY_SIDE}
     : {short, name: name || short, crest: crest || null, kit: null};
@@ -577,7 +638,31 @@ function crWatchDone(){
   $('#career').classList.remove('hide');
   const list = $('#crFeedList');
   if (list && list.lastElementChild) list.lastElementChild.scrollIntoView({block: 'center'});
-  crFeedResume();
+  // A watched match ends on its scorecard [A214], as it would on a broadcast; the season
+  // waits behind it until it is closed.
+  const card = CR.watchCard;
+  CR.watchCard = null;
+  if (card == null) return crFeedResume();
+  $('#crFeedAction').innerHTML = `<button class="act" onclick="crFeedSkip()">Skip to the next decision</button>`;
+  CR.feed.paused = true;
+  crScorecard(card);
+}
+
+// [A214] Any of your matches, as the solo season's scorecard. Paused while it is open, so
+// the season does not run on behind it.
+function crScorecard(i){
+  const sp = (CR.feed && CR.feed.sp) || (CR.data && CR.data.season_play);
+  const r = sp && sp.cards && sp.cards[i];
+  if (!r) return;
+  MY_SIDE = {short: sp.your_short, name: sp.your_name, crest: sp.your_crest, kit: null};
+  renderScorecard(r);
+  if (CR.feed && CR.feed.timer){ crFeedStop(); CR.feed.paused = true; }
+}
+
+function crCloseScorecard(e){
+  if (e && e.target !== e.currentTarget) return;     // a click inside the card keeps it open
+  hideScorecard();
+  if (CR.feed && CR.feed.paused){ CR.feed.paused = false; crFeedStep(); }
 }
 
 function crBadge(on, cls, text){ return on ? `<span class="cr-badge ${cls}">${text}</span>` : ''; }
@@ -605,7 +690,10 @@ function crSeason(d, r){
           ${crestImg(r.crest, 'cr-season-crest')}
           <div><div class="over-line">${r.year} · ${esc(r.franchise).toUpperCase()}</div>
             <div class="cr-finish">${finish}</div></div>
-          <div class="cr-card${r.card >= 90 ? ' elite' : ''}"><b>${r.card}</b><span>season card</span></div>
+          <div class="cr-cards">
+            ${r.rating ? `<div class="cr-card rating ${crTier(r.rating)}"><b>${r.rating}</b><span>Rating</span></div>` : ''}
+            <div class="cr-card${r.card >= 90 ? ' elite' : ''}"><b>${r.card}</b><span>Season grade</span></div>
+          </div>
         </div>
         <div class="cr-badges">
           ${crBadge(r.champion, 'gold', '🏆 Champions')}
@@ -616,13 +704,15 @@ function crSeason(d, r){
           ${crBadge(r.squad, 'dim', 'Squad player')}
           ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}`)}
           ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
-          ${crBadge(r.card > r.form, 'dim', `Form ${r.form}, reputation held you at ${r.card}`)}
+          ${crBadge(r.card > r.form, 'dim', `Played to ${r.form}, reputation held the grade at ${r.card}`)}
           ${crBadge(!!r.mega, 'gold', esc(r.mega || ''))}
         </div>
         <div class="cr-lines">
           <div><b>${r.matches}</b> matches<span>${esc(r.price)}${r.stayed ? ' · stayed' : ''}</span></div>
           ${crBat(r)}${crBowl(r)}
         </div>
+        ${r.notes && r.notes.length ? `<div class="cr-notes"><div class="cr-label">What happened</div>
+          ${r.notes.map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''}
         ${r.plan && r.plan.length ? `<div class="cr-msl cr-plan-card"><div class="cr-label">Your bowling plan</div>
           <div>${r.plan.map(esc).join(' · ')}</div></div>` : ''}
         ${r.milestones && r.milestones.length ? `<div class="cr-msl"><div class="cr-label">Milestones</div>
@@ -634,8 +724,19 @@ function crSeason(d, r){
         ? 'Two poor seasons running, and no franchise came for you.' : 'That was the last season.'}</p>` : ''}
       <div class="foot-actions" style="justify-content:center">${next}${d.season_play && d.season_play.complete
         && d.season_play.analysis ? '<button class="act" id="crAnBtn" onclick="crAnalysis()">Season analysis</button>' : ''}</div>
+      ${crMatchList(d)}
       <div class="an-wrap hide" id="crAnHost"></div>
     </div>`;
+}
+
+// Your matches of the season just played, each opening its scorecard [A214]. Only in the
+// response that played it, as the feed is.
+function crMatchList(d){
+  const sp = d.season_play;
+  if (!sp || !sp.complete || !sp.cards || !sp.cards.length) return '';
+  let n = 0;
+  return `<details class="cr-matches"><summary>Your ${sp.feed.length} matches · tap one for its scorecard</summary>
+    <ol class="cr-feed-list">${sp.feed.map(l => crFeedRow(l, l.stage === 'league' ? ++n : n)).join('')}</ol></details>`;
 }
 
 // The season's charts [A211], the draft season's own (analysis.js), drawn under the card. Only
@@ -673,8 +774,11 @@ function crEnd(d){
           <div><b>${s.matches}</b> matches<span>${s.seasons} seasons, ${s.regular_seasons} as a regular</span></div>
           ${bat}${bowl}
           <div><b>${s.titles}</b> title${s.titles === 1 ? '' : 's'}<span>${s.finals} final${s.finals === 1 ? '' : 's'} · ${s.orange_caps} Orange, ${s.purple_caps} Purple Cap${s.orange_caps + s.purple_caps === 1 ? '' : 's'}</span></div>
-          <div><b>${s.peak_card}</b> peak card<span>${s.peak_year} · earned ${esc(s.earnings)}</span></div>
+          <div><b>${s.peak_rating || s.peak_card}</b> peak Rating<span>${s.peak_rating_year || s.peak_year} · best season grade ${s.peak_card} (${s.peak_year})</span></div>
+          <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
         </div>
+        ${d.injuries && d.injuries.length ? `<div class="cr-msl cr-msl-career cr-inj"><div class="cr-label">Injuries</div>
+          ${d.injuries.map(t => { const [y, w] = t.split(' · '); return `<div><span>${esc(y)}</span>${esc(w)}</div>`; }).join('')}</div>` : ''}
         ${s.milestones && s.milestones.length ? `<div class="cr-msl cr-msl-career"><div class="cr-label">Milestones</div>
           ${s.milestones.map(m => `<div><span>${m.year}</span>${esc(m.text)}</div>`).join('')}</div>` : ''}
       </div>

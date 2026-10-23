@@ -932,7 +932,7 @@ function renderSquad(d, you){
         onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
         <div class="auc-slot-top">${ICON[c.kind] || ''}${c.overseas === true ? '<em class="auc-slot-os">OS</em>' : ''}
           ${c.rating != null ? `<i class="auc-slot-rt">${c.rating}</i>` : ''}</div>
-        <span>${c.name}</span>${bandTag(c)}<b class="${tierOf(s.price)}">${cr(s.price)}${s.retained ? ' · kept' : ''}</b>
+        <span>${esc(c.name)}</span>${bandTag(c)}<b class="${tierOf(s.price)}">${s.legend ? 'Legend · free' : cr(s.price) + (s.retained ? ' · kept' : '')}</b>
       </div>`;
   });
   for (let i = 0; i < open; i++){

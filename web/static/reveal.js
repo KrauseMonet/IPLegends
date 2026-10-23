@@ -407,9 +407,9 @@ let MY_SIDE = null;
 
 // A side named in a result, resolved to what should be drawn for it. `kit` is supplied
 // by a room, where each drafted side's kit travels with the result.
-function resolveSide(short, crest, kit){
+function resolveSide(short, crest, kit, name){
   if (MY_SIDE && short === MY_SIDE.short) return {...MY_SIDE};
-  return {short, name: kit ? kit.name : short, crest: crest || null, kit: kit || null};
+  return {short, name: kit ? kit.name : (name || short), crest: crest || null, kit: kit || null};
 }
 
 // The small mark that sits before a side's name in a row or a caption.
@@ -423,8 +423,10 @@ function sideMark(side){
 
 function renderScorecard(r){
   if (!r || !r.home_innings || !r.away_innings) return;
-  const home = resolveSide(r.home, r.home_crest, r.home_kit);
-  const away = resolveSide(r.away, r.away_crest, r.away_kit);
+  // [A214] a full name where the result carries one (the solo season and a career do), so a
+  // scorecard reads "Kings XI Punjab win" rather than a short code
+  const home = resolveSide(r.home, r.home_crest, r.home_kit, r.home_name);
+  const away = resolveSide(r.away, r.away_crest, r.away_kit, r.away_name);
   const winner = r.winner === r.home ? home : (r.winner === r.away ? away : null);
   $('#scStage').textContent = r.stage;
   $('#scHeadline').textContent = winner ? `${winner.name} win` : 'Match tied';

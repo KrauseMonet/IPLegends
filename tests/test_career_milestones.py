@@ -86,7 +86,7 @@ def test_season_honours_count_from_the_career_before():
     assert [(m.key, m.text, m.match) for m in ms if m.match is None or m.key == "title"] == [
         ("title", "Third IPL title", 2), ("orange_cap", "Orange Cap: 701 runs", None)]
     first = C.career_milestones([], feed, _rec(champion=True, display=93, captain=True))
-    assert _texts(first) == ["IPL champions", "First 90+ season card: 93",
+    assert _texts(first) == ["IPL champions", "First 90+ season grade: 93",
                              "Captain of Mumbai Indians"]
 
 

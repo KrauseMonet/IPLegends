@@ -400,6 +400,7 @@ class Team:
     paid: list[int] = field(default_factory=list)
     retained: int = 0               # how many of `squad` were kept before the auction
     rtm: int = 0                    # Right to Match cards left
+    legend: Card | None = None      # [A215] a room seat's career legend, free in its squad
 
     @property
     def open_places(self) -> int:

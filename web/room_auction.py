@@ -50,6 +50,8 @@ same reasoning A119 applied to a room's version counter.
 
 from __future__ import annotations
 
+import dataclasses
+
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -200,6 +202,8 @@ class RoomAuctionReplay:
             errors.append(f"you have used your {TRADES_PER_TEAM} trades")
         if self.trades_used(b) >= TRADES_PER_TEAM:
             errors.append(f"{teams[b].short} has used its {TRADES_PER_TEAM} trades")
+        if is_legend(give) or is_legend(get):
+            errors.append("a career legend stays with the player who brought him")
         if give.person_id in self.arrived(a):
             errors.append(f"{give.name} arrived in a trade and cannot be traded on")
         if get.person_id in self.arrived(b):
@@ -218,6 +222,53 @@ _CACHE: "OrderedDict[tuple, RoomAuctionReplay]" = OrderedDict()
 _CACHE_SIZE = 64
 
 
+LEGEND_PREFIX = "legend:"
+
+
+def is_legend(card: Card) -> bool:
+    return card.person_id.startswith(LEGEND_PREFIX)
+
+
+def legend_name(raw) -> str:
+    """A legend's name as other people see it. A career saved before names were checked
+    could carry markup, and this name is drawn on every seat's screen, so it is cleaned
+    here whatever was stored (A152's rule)."""
+    name = "".join(ch for ch in str(raw) if ch not in "<>" and ord(ch) >= 32 and ord(ch) != 127)
+    return name.strip()[:30] or "Legend"
+
+
+def legend_cards(room) -> dict[str, Card]:
+    """[A215] Each person's career legend as a card: the saved card, with a person id of its
+    own (every legend was `career-you`) so two can share a squad list, a scorecard and the
+    caps without one being mistaken for the other."""
+    from tools.snapshot_deck import _card_from
+
+    out = {}
+    for pid, leg in (getattr(room, "legends", None) or {}).items():
+        p = room.players.get(pid)
+        if p is None or p.is_cpu or not leg:
+            continue
+        card = _card_from(leg["card"])
+        out[pid] = dataclasses.replace(card, person_id=LEGEND_PREFIX + pid,
+                                       name=legend_name(leg["name"]),
+                                       fs_id=0, franchise=None)
+    return out
+
+
+def legend_errors(team: au.Team, chosen: list[Card]) -> list[str]:
+    """[A215] Retentions must leave room for the legend: he takes a place and may be
+    overseas."""
+    if team.legend is None:
+        return []
+    errors = []
+    squad = chosen + [team.legend]
+    if sum(c.overseas is True for c in squad) > au.SQUAD_OVERSEAS_CAP:
+        errors.append("too many overseas players with your legend")
+    elif not au.twelve_feasible(squad, au.SQUAD_SIZE - len(squad)):
+        errors.append("no legal twelve could be built around them and your legend")
+    return errors
+
+
 def replay(room, deck: Deck) -> RoomAuctionReplay:
     """The room's auction as of its move log. Cached per (room, seed, moves so far): the
     log only ever grows, so that triple names one state exactly, and every seat polling
@@ -225,12 +276,15 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
     mega = room.game == "mega"
     trades = bool(getattr(room, "trades", False))
-    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, trades)
+    legends = legend_cards(room)
+    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, trades,
+           tuple(sorted((pid, c.person_id, c.display, c.bat_scoring, c.bowl_scoring)
+                        for pid, c in legends.items())))
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
         return hit
-    result = _replay(room.seed, humans, room.moves, deck, mega, trades)
+    result = _replay(room.seed, humans, room.moves, deck, mega, trades, legends)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
@@ -370,11 +424,15 @@ def _reserve(deck: Deck) -> list[Card]:
 
 
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
-            mega: bool = False, trades: bool = False) -> RoomAuctionReplay:
+            mega: bool = False, trades: bool = False,
+            legends: dict[str, Card] | None = None) -> RoomAuctionReplay:
     teams = au.make_teams(seed, humans=frozenset(humans.values()))
     by_short = {t.short: t.index for t in teams}
     team_of = {pid: by_short[short] for pid, short in humans.items()}
     human_idx = set(team_of.values())
+    for pid, card in (legends or {}).items():
+        if pid in team_of:
+            teams[team_of[pid]].legend = card
     pos = 0
 
     kept: set[str] = set()
@@ -398,7 +456,7 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             if any(not 0 <= i < len(pools[h]) for i in mv["picks"]):
                 raise AuctionRoomError("no such player to retain")
             chosen = [pools[h][i] for i in mv["picks"]]
-            errors = au.retention_errors(teams[h], chosen)
+            errors = au.retention_errors(teams[h], chosen) + legend_errors(teams[h], chosen)
             if errors:
                 raise AuctionRoomError("; ".join(errors))
             retained[h] = chosen
@@ -413,6 +471,12 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 au.retain(t, chosen)
                 kept |= {c.person_id for c in chosen}
 
+    # [A215] A career legend joins his player's squad before the bidding: free, outside the
+    # purse, one of the eighteen places. After retentions, which were checked to leave room.
+    for t in teams:
+        if t.legend is not None:
+            t.squad.append(t.legend)
+            t.paid.append(0)
     lots = au.build_catalogue(deck, seed, frozenset(kept))
     listed = {lot.card.person_id for lot in lots} | kept
     register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
@@ -949,6 +1013,8 @@ def retention_suggestion(r: RoomAuctionReplay, team_index: int) -> list[int]:
     team = r.auction.teams[team_index]
     pool = r.pools[team_index]
     chosen = au.cpu_retain(team, pool, set())      # sealed: nobody else's picks are known
+    while chosen and legend_errors(team, chosen):  # [A215] leave room for a legend
+        chosen.pop()
     return [pool.index(c) for c in chosen]
 
 

@@ -86,6 +86,7 @@ class TemplateOut(BaseModel):
     year: int
     franchise: str
     crest: str | None
+    card: int | None = None       # his real card that season: where your Rating starts or can peak (A214)
 
 
 class HighlightOut(BaseModel):
@@ -106,8 +107,11 @@ class SeasonOut(BaseModel):
     contract_year: int            # 1-3 on a three-year deal, 0 on a one-year
     event: str
     choice: str
-    card: int                     # the season's card, after the reputation floor
-    form: int                     # the season's own card
+    card: int                     # the Season grade, after the reputation floor
+    form: int                     # the season's own grade
+    rating: int | None = None     # your Rating that season (A214); None on an older token
+    age: int = 0                  # A214, shown only
+    notes: list[str] = []         # what happened, in words (A214)
     matches: int
     missed: int
     dropped: int = 0              # of those, dropped for form (A205)
@@ -258,6 +262,8 @@ class SummaryOut(BaseModel):
     earnings: str
     peak_card: int
     peak_year: int
+    peak_rating: int | None = None    # A214
+    peak_rating_year: int | None = None
     runs_rank: int | None
     wickets_rank: int | None
     ending: str                   # "retired" | "released" | "the end of the archive"
@@ -301,6 +307,7 @@ class MatchLineOut(BaseModel):
     dropped: bool = False         # left out for form
     form: list[str] = []          # your last five matches, oldest first
     form_word: str | None = None  # In form / Steady / Out of form
+    card: int | None = None       # index into `cards`: this match's scorecard (A214)
     milestones: list[str] = []    # career milestones reached in this match (A209)
 
 
@@ -322,6 +329,7 @@ class SeasonPlayOut(BaseModel):
     feed: list[MatchLineOut]
     table: list[TableRowOut]
     watch: list[dict]             # ResultOut, the solo season's own match shape, for reveal.js
+    cards: list[dict] = []        # every match of yours as a scorecard: ResultOut without the over log (A214)
     your_short: str
     your_name: str
     your_crest: str | None
@@ -344,11 +352,15 @@ class CareerOut(BaseModel):
     share: str | None
     season_play: SeasonPlayOut | None = None
     auction: AuctionOut | None = None
+    rating: int = 0               # your Rating now: going into the season pending, or the last (A214)
+    potential: int = 0            # the ceiling's card: the most your Rating can reach
+    age: int = 0
+    injuries: list[str] = []      # "2014 · Side strain (5 matches)"
 
 
 def _template(c) -> TemplateOut:
     return TemplateOut(name=c.name, year=c.season_year, franchise=c.franchise,
-                       crest=crests.crest_url(c.franchise, c.season_year))
+                       crest=crests.crest_url(c.franchise, c.season_year), card=c.display)
 
 
 def _season(r: C.SeasonRecord) -> SeasonOut:
@@ -356,7 +368,8 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
         year=r.year, franchise=r.franchise, short=r.short,
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
-        choice=r.choice, card=r.display,
+        choice=r.choice, card=r.display, rating=r.rating or None, age=C.DEBUT_AGE + r.k,
+        notes=list(r.notes),
         form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
@@ -372,19 +385,29 @@ def _season(r: C.SeasonRecord) -> SeasonOut:
 
 def option_hint(o: C.EventOption) -> str:
     """What an answer does, in words, derived from the numbers it applies -- never written
-    beside them, so the hint cannot say one thing while the option does another."""
+    beside them, so the hint cannot say one thing while the option does another. In Rating
+    points (A214), with the chances of each way it can turn out."""
     bits = []
     if o.season:
-        bits.append(("a lift this season" if o.season > 0 else "a dip this season"))
+        bits.append(f"{o.season:+d} Rating this season")
     if o.permanent:
-        bits.append("better from here on" if o.permanent > 0 else "a lasting cost")
+        bits.append(f"{o.permanent:+d} Rating for good")
     if o.captain:
         bits.append("you captain the side")
     if o.missed:
         bits.append(f"miss {o.missed} matches")
     if o.retire:
         bits.append("your career ends here")
-    return ", ".join(bits).capitalize() if bits else "No change"
+    for out in o.outcomes:
+        what = []
+        if out.permanent:
+            what.append(f"{out.permanent:+d} Rating for good")
+        if out.missed:
+            what.append(f"{out.missed} more matches out")
+        if what:
+            when = "next season" if out.next_season else "this season"
+            bits.append(f"{round(100 * out.chance)}% chance {when}: {', '.join(what)}")
+    return "; ".join(bits)[:1].upper() + "; ".join(bits)[1:] if bits else "No change"
 
 
 def _club_gone(career: C.Career) -> str | None:
@@ -463,6 +486,7 @@ def _summary(c: C.Career) -> SummaryOut:
         titles=s.titles, finals=s.finals, orange_caps=s.orange_caps,
         purple_caps=s.purple_caps, captaincies=s.captaincies, franchises=s.franchises,
         earnings=crore(s.earnings), peak_card=s.peak_display, peak_year=s.peak_year,
+        peak_rating=s.peak_rating or None, peak_rating_year=s.peak_rating_year or None,
         runs_rank=s.runs_rank, wickets_rank=s.wickets_rank, ending=ending,
         five_fors=s.five_fors, hat_tricks=s.hat_tricks,
         milestones=[MilestoneOut(year=y, text=t) for y, t in s.milestones])
@@ -484,18 +508,32 @@ def _season_play(detail: C.SeasonDetail,
         orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
-        form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i])
+        form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i],
+        card=l.card)
         for i, l in enumerate(detail.feed)]
     table = [TableRowOut(short=t.short, name=t.name, crest=crests.crest_url(t.franchise, t.year),
                          played=t.played, won=t.won, lost=t.lost, points=t.points, nrr=t.nrr,
                          you=t.you) for t in detail.table]
     watch = [_result_out(r, yours).model_dump() for r in detail.watch]
-    return SeasonPlayOut(feed=feed, table=table, watch=watch, your_short=you_row.short,
+    cards = [_scorecard(_result_out(r, yours).model_dump()) for r in detail.cards]
+    return SeasonPlayOut(feed=feed, table=table, watch=watch, cards=cards, your_short=you_row.short,
                          your_name=you_row.name,
                          your_crest=next(x.crest for x in table if x.you),
                          complete=detail.complete,
                          analysis=(_analysis_out(detail.analysis, detail.results).model_dump()
                                    if detail.analysis is not None else None))
+
+
+def _scorecard(r: dict) -> dict:
+    """A result as a scorecard alone: the over log is the reveal's, and is most of the size."""
+    for key in ("home_innings", "away_innings"):
+        if r.get(key):
+            r[key] = {**r[key], "over_log": [], "milestones": []}
+    for so in r.get("super_overs") or []:
+        for key in ("first_innings", "second_innings"):
+            if so.get(key):
+                so[key] = {**so[key], "over_log": [], "milestones": []}
+    return r
 
 
 def share_text(c: C.Career) -> str:
@@ -512,7 +550,7 @@ def share_text(c: C.Career) -> str:
         bits.append(f"{s.wickets} wickets")
     if s.titles:
         bits.append(f"{s.titles} title{'s' if s.titles != 1 else ''}")
-    bits.append(f"peak card {s.peak_display}")
+    bits.append(f"peak Rating {s.peak_rating}" if s.peak_rating else f"peak card {s.peak_display}")
     return (f"{SITE_NAME} · Build a Career\n{role}, debut {c.setup.debut}: "
             f"{', '.join(bits)}\n{marks}\n{SITE_HOST}/career")
 
@@ -530,7 +568,19 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         share=share_text(career) if career.summary else None,
         season_play=(_season_play(career.detail, career.live_milestones)
                      if career.detail else None),
-        auction=_auction(career.auction, _auction_year(career)) if career.auction else None)
+        auction=_auction(career.auction, _auction_year(career)) if career.auction else None,
+        rating=_rating_now(career), potential=career.ceiling.display,
+        age=C.DEBUT_AGE + (career.pending.k if career.pending else len(career.seasons) - 1),
+        injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])])
+
+
+def _rating_now(career: C.Career) -> int:
+    """Your Rating going into the season pending (before its event), or the last season's."""
+    if career.pending is None or career.checkpoint is None:
+        return career.seasons[-1].rating if career.seasons else 0
+    k = career.pending.k
+    return C.rating_at(career.start, career.ceiling,
+                       C.arc_point(k, career.checkpoint.permanent, 0.0))
 
 
 def _auction_year(career: C.Career) -> int:
@@ -678,12 +728,15 @@ class HallOut(BaseModel):
     titles: int
     peak_card: int
     peak_year: int
+    peak_rating: int | None = None    # A214
+    peak_rating_year: int | None = None
     ending: str
     runs_rank: int | None         # place on the real all-time list, derived when read
     wickets_rank: int | None
     crests: list[str | None]      # each club, in the order you joined it
     card: dict
     completed_at: str
+    legend: bool = False          # can be brought into a friends' auction (A215)
 
 
 @router.get("/api/career/hall")
@@ -707,6 +760,8 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             overseas=r["overseas"], seasons=r["seasons"], matches=r["matches"],
             runs=r["runs"], wickets=r["wickets"], titles=r["titles"],
             peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
+            peak_rating=r["card"].get("peak_rating"), peak_rating_year=r["card"].get("peak_rating_year"),
+            legend=bool(r["card"].get("legend")),
             runs_rank=C.all_time_rank(r["runs"], real_runs) if real_runs is not None else None,
             wickets_rank=(C.all_time_rank(r["wickets"], real_wkts)
                           if real_wkts is not None else None),

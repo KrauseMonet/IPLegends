@@ -100,7 +100,7 @@ def test_a_season_is_played_one_move_at_a_time(client, monkeypatch):
     beside the checkpoint until the answer arrives. Nobody is released here (form is not
     what this test is about, and an engine change once ended this career after two)."""
     monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
-    seed = next(s for s in range(1, 500) if len(C.draw_event(s, 0).options) > 1)
+    seed = next(s for s in range(1, 500) if len(C.draw_event(s, 0, role="opener").options) > 1)
     d = _token(client, seed=seed)
     asked = False
     seasons = 0
@@ -183,11 +183,15 @@ def test_every_event_options_hint_says_what_its_numbers_do():
     for e in C.EVENTS:
         for o in e.options:
             h = R.option_hint(o).lower()
-            assert ("lift this season" in h) == (o.season > 0)
-            assert ("dip this season" in h) == (o.season < 0)
-            assert ("better from here on" in h) == (o.permanent > 0)
-            assert ("lasting cost" in h) == (o.permanent < 0)
+            # [A214] the Rating points it applies, exactly, and every way it can turn out
+            own = [part for part in h.split("; ") if "% chance" not in part]
+            assert (f"{o.season:+d} rating this season" in own) == bool(o.season)
+            assert (f"{o.permanent:+d} rating for good" in own) == bool(o.permanent)
             assert ("captain" in h) == o.captain
+            assert (f"miss {o.missed} matches" in h) == bool(o.missed)
+            for out in o.outcomes:
+                if out.permanent or out.missed:
+                    assert f"{round(100 * out.chance)}% chance" in h
 
 
 def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
@@ -218,7 +222,7 @@ def test_hints_name_missed_matches_and_an_ending():
 
 
 def test_a_three_year_deal_through_the_api(client, deck):
-    seed = next(s for s in range(1, 2000) if all(len(C.draw_event(s, k).options) == 1 for k in range(2)))
+    seed = next(s for s in range(1, 2000) if all(len(C.draw_event(s, k, role="opener").options) == 1 for k in range(2)))
     # 2015 and 2016: a 2017 deal's second year would be 2018, a mega year that ends it (A212)
     d = _token(client, seed=seed, debut=2015)
     clubs_2016 = {C.canonical(deck.cards_by_fs[fs][0].franchise) for fs in C.year_fs_ids(deck, 2016)}
@@ -234,7 +238,7 @@ def test_a_three_year_deal_through_the_api(client, deck):
 
 
 def test_an_event_card_reaches_the_page_with_its_real_name(client, deck):
-    seed = next(s for s in range(1, 5000) if C.draw_event(s, 0).key == "mentor")
+    seed = next(s for s in range(1, 5000) if C.draw_event(s, 0, role="opener").key == "mentor")
     d = _token(client, seed=seed)
     d = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
     e = d["pending"]["event"]
@@ -245,7 +249,7 @@ def test_an_event_card_reaches_the_page_with_its_real_name(client, deck):
 
 def test_the_move_that_plays_a_season_carries_it_as_it_happened(client):
     """And only that move: a reload (view) and an offer that leads to an event carry none."""
-    seed = next(s for s in range(1, 2000) if len(C.draw_event(s, 0).options) > 1)
+    seed = next(s for s in range(1, 2000) if len(C.draw_event(s, 0, role="opener").options) > 1)
     d = _token(client, seed=seed)
     assert d["season_play"] is None
     d = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
@@ -268,6 +272,16 @@ def test_the_move_that_plays_a_season_carries_it_as_it_happened(client):
     assert v["season_play"] is None and v["seasons"] == d["seasons"]
 
 
+def _auto_move(p) -> str:
+    """Any pending decision answered as a plain automatic player would: the first offer or
+    answer, a balanced call, retention when offered, no bowling plan."""
+    if p["kind"] == "mega":
+        return "k" if p["mega"]["retain"] else f"b{p['mega']['suggested']}"
+    if p["kind"] == "plan":
+        return "p" + "0" * len(p["plan"])
+    return {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
+
+
 def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
     """Each key moment the API pauses at names its kind (A205), and a played match line
     carries the live form line the page draws."""
@@ -279,8 +293,7 @@ def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
         if p["kind"] == "moment":
             kinds.add(p["moment"]["kind"])
             forms += [l["form"] for l in d["season_play"]["feed"] if l["form"]]
-        move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
-        r = client.post("/api/career/move", json={"token": d["token"], "move": move})
+        r = client.post("/api/career/move", json={"token": d["token"], "move": _auto_move(p)})
         assert r.status_code == 200, r.text
         d = r.json()
     assert kinds <= {"must_win", "playoff", "make_or_break"}
@@ -291,14 +304,15 @@ def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
 def test_each_milestone_rides_on_the_feed_row_of_its_match(client):
     """A209: the API puts a season's milestones on the very rows the career recorded them
     against, and lists the season's honours on the season card. Played through the routes,
-    opener seed 7, until a season with a match milestone (its 1,000th run, in 2012)."""
+    opener seed 7, until the first season with a match milestone."""
     d = client.post("/api/career/start", json={"name": "Ms", "role": "opener", "debut": 2010,
                                                "seed": 7}).json()
     found = None
     for _ in range(40):
         p = d["pending"]
-        move = "o0" if p["kind"] == "offer" else "e0" if p["kind"] == "event" else "m1"
-        d = client.post("/api/career/move", json={"token": d["token"], "move": move}).json()
+        if p is None:
+            break
+        d = client.post("/api/career/move", json={"token": d["token"], "move": _auto_move(p)}).json()
         sp = d.get("season_play")
         if sp and sp["complete"] and any(l["milestones"] for l in sp["feed"]):
             found = d
@@ -332,3 +346,22 @@ def test_a_played_season_carries_its_analysis_with_your_side_tracked(client, dec
     assert a["your_total_runs"] == runs > 0
     again = client.post("/api/career/view", json={"token": d["token"]}).json()
     assert again["season_play"] is None
+
+
+def test_every_match_of_yours_opens_its_own_scorecard(client):
+    """[A214] Each feed line names its scorecard, every scorecard is that match (the two
+    sides and the score the line shows), and none carries the reveal's over log."""
+    d = _token(client, seed=4)
+    while not (d.get("season_play") and d["season_play"]["complete"]):
+        d = client.post("/api/career/move", json={"token": d["token"],
+                                                  "move": _auto_move(d["pending"])}).json()
+    sp = d["season_play"]
+    assert [l["card"] for l in sp["feed"]] == list(range(len(sp["cards"])))
+    for l in sp["feed"]:
+        card = sp["cards"][l["card"]]
+        assert sp["your_short"] in (card["home"], card["away"])
+        assert l["opp_short"] in (card["home"], card["away"])
+        mine = card["home_score"] if card["home"] == sp["your_short"] else card["away_score"]
+        assert mine.split("/")[0].split(" ")[0] == l["score_for"].split("/")[0].split(" ")[0]
+        assert card["home_innings"]["over_log"] == [] and card["away_innings"]["over_log"] == []
+        assert card["home_innings"]["batting"] and card["home_innings"]["bowling"]

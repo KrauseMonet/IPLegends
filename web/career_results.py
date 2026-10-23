@@ -29,10 +29,26 @@ def legacy(runs: int, wickets: int) -> int:
     return runs + 20 * wickets
 
 
+def legend(career: C.Career) -> dict | None:
+    """[A215] The best version of the player, kept so a friends' auction room can bring him
+    in: his best-Rating season as the engine played it. Stored, not re-derived, because a
+    later change to the career engine must not change a legend already saved."""
+    from tools.snapshot_deck import _card_doc
+
+    best = C.legend_card(career)
+    if best is None:
+        return None
+    r, c = best
+    return {"rating": r.rating, "year": r.year, "role": career.setup.role,
+            "role_label": C.ROLES[career.setup.role]["label"], "name": career.setup.name,
+            "card": _card_doc(c)}
+
+
 def card(career: C.Career) -> dict:
     """The career card beyond the ranked columns, as the page draws it."""
     s = career.summary
     return {
+        "legend": legend(career),
         "balls": s.balls, "outs": s.outs, "highest": s.highest, "fifties": s.fifties,
         "hundreds": s.hundreds, "bowl_balls": s.bowl_balls, "bowl_runs": s.bowl_runs,
         "five_fors": s.five_fors, "hat_tricks": s.hat_tricks, "finals": s.finals,
@@ -40,7 +56,9 @@ def card(career: C.Career) -> dict:
         "captaincies": s.captaincies, "regular_seasons": s.regular_seasons,
         "earnings": crore(s.earnings), "franchises": s.franchises,
         "milestones": [[y, t] for y, t in s.milestones],
-        "timeline": [{"year": r.year, "franchise": r.franchise, "card": r.display,
+        "peak_rating": s.peak_rating, "peak_rating_year": s.peak_rating_year,
+        "injuries": [list(i) for i in (career.checkpoint.injuries if career.checkpoint else [])],
+        "timeline": [{"year": r.year, "franchise": r.franchise, "card": r.display, "rating": r.rating,
                       "champion": r.champion, "squad": r.squad} for r in career.seasons],
     }
 
@@ -59,7 +77,8 @@ def save(conn, account_id: int, key: str, career: C.Career) -> bool:
         returning career_result_id
         """,
         (account_id, key, st.name, st.role, st.debut, st.overseas, s.seasons, s.matches,
-         s.runs, s.wickets, s.titles, s.peak_display, s.peak_year, ending, Jsonb(card(career))),
+         s.runs, s.wickets, s.titles, s.peak_rating or s.peak_display,
+         s.peak_rating_year or s.peak_year, ending, Jsonb(card(career))),
     ).fetchone()
     return row is not None
 
@@ -83,6 +102,14 @@ def hall(conn, account_id: int) -> list[dict]:
     # is stable, so equal careers stay newest first.
     out.sort(key=lambda r: -legacy(r["runs"], r["wickets"]))
     return out[:HALL_LIMIT]
+
+
+def legend_of(conn, account_id: int, key: str) -> dict | None:
+    """[A215] The legend of one of this account's own saved careers, or None."""
+    row = conn.execute(
+        "select card -> 'legend' from career_results where account_id = %s and natural_key = %s",
+        (account_id, key)).fetchone()
+    return row[0] if row and row[0] else None
 
 
 def count(conn, account_id: int) -> int:

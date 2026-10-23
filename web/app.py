@@ -39,6 +39,7 @@ from web.crests import all_crests, crest_url, unambiguous_crest
 from web import auction_session
 from web import room_auction
 from web import auth
+from web import career_results
 from web import bingo_routes
 from web import career_routes, ground_routes, puzzle_routes, trio_routes
 from web import guess_routes
@@ -835,6 +836,8 @@ class CreateRoomIn(BaseModel):
     trades: bool = Field(default=False, description="[A174] auction rooms: open a trade "
                          "window between the people after the fill round. The host may "
                          "change it in the lobby (POST /api/rooms/{code}/trades)")
+    legends: bool = Field(default=False, description="[A215] auction rooms: each signed-in "
+                          "player may bring a saved career's best season, free in their squad")
 
 
 class JoinRoomIn(BaseModel):
@@ -895,6 +898,9 @@ class RoomStateOut(BaseModel):
     game: str = Field(default="draft", description="'draft' or 'auction' [A139]")
     trades: bool = Field(default=False, description="[A174] an auction room's trade window "
                          "is on; locked once the auction starts")
+    legends_on: bool = Field(default=False, description="[A215] career legends are on")
+    legends: dict[str, "RoomLegendOut"] = Field(
+        default_factory=dict, description="[A215] player_id -> the legend that seat brings")
     auction: "AuctionOut | None" = Field(
         default=None, description="auction rooms only: the floor as the CALLER sees it")
     round: int = Field(description="len(moves) // seats -- which snake wave we're in")
@@ -944,6 +950,14 @@ class OpenRoomOut(BaseModel):
     host_name: str
     game: str = "draft"
     trades: bool = False
+
+
+class RoomLegendOut(BaseModel):
+    """[A215] A seat's career legend, as the lobby shows it."""
+    name: str
+    rating: int
+    year: int
+    role_label: str
 
 
 class CreatedRoomOut(BaseModel):
@@ -2212,6 +2226,7 @@ class AuctionSquadOut(BaseModel):
     card: CardOut
     price: int
     retained: bool = False
+    legend: bool = False           # [A215] a career legend the player brought, free
 
 
 class AuctionPoolOut(BaseModel):
@@ -2926,7 +2941,8 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
                               players=len(t.squad), overseas=t.overseas, human=t.human,
                               owner=owners.get(t.short), retained=t.retained, rtm=t.rtm)
                for t in a.teams],
-        squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained)
+        squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained,
+                               legend=c is you.legend)
                for i, (c, pr) in enumerate(zip(you.squad, you.paid))] if you else [],
         recent=[_sale_out(r, x) for x in a.sales[-25:]],
         sold=sum(1 for x in a.sales if x.winner is not None),
@@ -3089,7 +3105,11 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
         active_player_id=None, players=players, failure_reason=room.failure_reason,
         draft_mode=room.draft_mode, is_open=room.is_open, version=room.version,
         server_now=time.time(), turn_started_at=room.turn_started_at,
-        game=room.game, trades=room.trades, auction=auction_view)
+        game=room.game, trades=room.trades, auction=auction_view,
+        legends_on=room.legends is not None,
+        legends={pid: RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"], year=v["year"],
+                                    role_label=v["role_label"])
+                 for pid, v in (room.legends or {}).items() if pid in room.players})
 
 
 # --- the daily challenge ------------------------------------------------------------------
@@ -3603,7 +3623,7 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
                 body.is_open, body.game, body.kit.model_dump() if body.kit else None,
-                body.trades)
+                body.trades, body.legends)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -3888,6 +3908,47 @@ def room_auction_rtm(code: str, body: RoomRtmIn):
 class RoomTradesIn(BaseModel):
     player_id: str
     on: bool
+
+
+@app.post("/api/rooms/{code}/legends", response_model=RoomStateOut)
+def room_legends(code: str, body: RoomTradesIn) -> RoomStateOut:
+    """[A215] The host turns career legends on or off, in the lobby."""
+    with _db() as conn:
+        try:
+            room = rooms.set_legends(conn, code, body.player_id, body.on)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+class RoomLegendIn(BaseModel):
+    player_id: str
+    career: str | None = Field(default=None, pattern="^[0-9a-f]{64}$",
+                               description="a saved career's key (GET /api/career/hall), or "
+                                           "null to bring no legend")
+
+
+@app.post("/api/rooms/{code}/legend", response_model=RoomStateOut)
+def room_legend(code: str, body: RoomLegendIn, request: Request) -> RoomStateOut:
+    """[A215] Bring one of YOUR saved careers' best season into this room. The career is
+    read from your own Hall of Fame by the signed-in account, never sent by the page, so a
+    seat cannot bring a legend it did not earn."""
+    legend = None
+    with _db() as conn:
+        if body.career is not None:
+            token = request.cookies.get(auth.COOKIE_NAME)
+            account_id = auth.verify_session_cookie(token) if token is not None else None
+            if account_id is None:
+                raise HTTPException(status_code=401, detail="Sign in to bring a career legend.")
+            legend = career_results.legend_of(conn, account_id, body.career)
+            if legend is None:
+                raise HTTPException(status_code=400, detail="That career has no legend to bring "
+                                    "(it was saved before legends existed).")
+        try:
+            room = rooms.set_legend(conn, code, body.player_id, legend)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
 @app.post("/api/rooms/{code}/trades", response_model=RoomStateOut)

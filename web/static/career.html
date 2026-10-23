@@ -22,7 +22,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=44be5388cb">
+<link rel="stylesheet" href="/static/style.css?v=fc92e196f2">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -92,6 +92,24 @@
       <div class="cr-stage" id="crStage"></div>
     </div>
   </section>
+
+  <!-- any of your matches as a scorecard [A214], the solo season's own overlay -->
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="crCloseScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+        <div id="scSuperOver"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="crCloseScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
 
   <!-- a match watched ball by ball [A202]: the solo season's own scoreboard -->
   <section id="reveal" class="hide">
@@ -199,8 +217,8 @@
 <script src="/static/common.js?v=2875dd81ec"></script>
 <script src="/static/auth.js?v=cf87aaad5a"></script>
 <script src="/static/puzzle.js?v=2f9224f51f"></script>
-<script src="/static/reveal.js?v=fad22f4bbc"></script>
+<script src="/static/reveal.js?v=4c41bfa3ff"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
-<script src="/static/career.js?v=b71a016fbb"></script>
+<script src="/static/career.js?v=225d6f83fe"></script>
 </body>
 </html>

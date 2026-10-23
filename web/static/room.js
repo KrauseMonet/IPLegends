@@ -617,6 +617,8 @@ function renderRoomLobby(r){
   if (auction) renderLobbyFranchises(r);
   $('#lobbyTradesWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyTrades(r);
+  $('#lobbyLegendsWrap').classList.toggle('hide', !auction);
+  if (auction) renderLobbyLegends(r);
   const mine = r.players.find(p => p.player_id === MY_PID);
   $('#lobbyKitWrap').classList.toggle('hide', auction || !mine || !mine.kit);
   if (!auction && mine && mine.kit) $('#lobbyKit').innerHTML = roomKitStrip(mine);
@@ -737,6 +739,79 @@ async function setRoomTrades(on, ctrl){
       const room = await roomApi(`/api/rooms/${ROOM_CODE}/trades`, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({player_id: MY_PID, on})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// [A215] Career legends. The host switches them on or off; once on, each person may bring
+// one saved career's best season. The server reads the career from YOUR Hall of Fame by
+// your sign-in, so the page only names which one.
+let ROOM_HALL = null;          // your saved careers, fetched once when you need them
+
+function renderLobbyLegends(r){
+  const host = MY_PID === r.host_id;
+  const on = !!r.legends_on;
+  const toggle = host
+    ? `<div class="room-choices">
+         <button class="room-choice${on ? ' sel' : ''}" onclick="setRoomLegends(true, this)">Legends on</button>
+         <button class="room-choice${on ? '' : ' sel'}" onclick="setRoomLegends(false, this)">Legends off</button>
+       </div>`
+    : `<div class="note"><b>${on ? 'On' : 'Off'}</b></div>`;
+  if (!on){
+    $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">Off: every squad is bought at the auction.</div>`;
+    return;
+  }
+  const chosen = r.players.filter(p => !p.is_cpu && r.legends[p.player_id]).map(p => {
+    const l = r.legends[p.player_id];
+    return `<div class="lg-row"><span class="lg-rating">${l.rating}</span><b>${esc(l.name)}</b>
+      <i>${esc(l.role_label)} · ${l.year} · brought by ${esc(p.name)}</i></div>`;
+  }).join('');
+  const mineHtml = !ME || !ME.account_id
+    ? `<div class="note">Sign in to bring one of your saved careers. <button class="act" onclick="openAuthModal('login')">Sign in</button></div>`
+    : ROOM_HALL === null ? '<div class="note">Loading your Hall of Fame…</div>'
+    : !ROOM_HALL.length ? '<div class="note">You have no saved careers yet. Finish one in <a href="/career">Build a Career</a>.</div>'
+    : `<div class="lg-pick"><select id="lobbyLegendPick" class="room-input">
+         <option value="">No legend</option>
+         ${ROOM_HALL.filter(c => c.legend).map(c => `<option value="${c.key}"${r.legends[MY_PID] && r.legends[MY_PID].name === c.name && r.legends[MY_PID].rating === (c.peak_rating || c.peak_card) ? ' selected' : ''}>
+           ${esc(c.name)} · ${esc(c.role_label)} · Rating ${c.peak_rating || c.peak_card}</option>`).join('')}
+       </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>`;
+  $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
+    saved career's best season. He joins your squad free, takes one of the eighteen places and counts toward
+    the overseas limit.</div>${chosen ? `<div class="lg-list">${chosen}</div>` : ''}${mineHtml}`;
+  if (ME && ME.account_id && ROOM_HALL === null){
+    ROOM_HALL = [];
+    api('/api/career/hall').then(h => { ROOM_HALL = h; if (ROOM) renderLobbyLegends(ROOM); })
+      .catch(() => { ROOM_HALL = []; });
+  }
+}
+document.addEventListener('signedin', () => { ROOM_HALL = null; if (ROOM && ROOM.status === 'lobby') renderRoom(); });
+
+async function setRoomLegends(on, ctrl){
+  if (!ROOM || !!ROOM.legends_on === on) return;
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/legends`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, on})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+async function chooseRoomLegend(ctrl){
+  const career = $('#lobbyLegendPick').value || null;
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/legend`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, career})});
       if (myGen !== ROOM_GEN) return;
       applyRoom(room);
       renderRoom();

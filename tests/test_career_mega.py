@@ -16,10 +16,10 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 DOC = read_document()
 pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 
-# Found by search: a middle-order batter whose 2011 card of 76 cannot draw a ₹2 cr base, and
-# whose 2010 was NOT poor -- so the squad season the test sees is the late signing's alone.
-# It takes the armband in 2010, hence the (empty) bowling plan among its moves (A213).
-UNSOLD = (75, C.Setup("X", "middle", 2010, False), ["o0", "e0", "p000000", "m1", "m1"])
+# Found by search: a middle-order batter whose 2011 market value cannot draw a ₹2 cr base,
+# and whose 2010 was NOT poor -- so the squad season the test sees is the late signing's alone.
+# [A214] Re-found when clubs began pricing on your Rating blended with last season's grade.
+UNSOLD = (6, C.Setup("X", "middle", 2010, False), ["o0", "m1"])
 
 
 @pytest.fixture(scope="module")
@@ -110,7 +110,8 @@ def test_a_base_nobody_meets_is_unsold_and_a_squad_season(deck, model):
     assert before.pending.kind == "mega" and before.pending.mega.retain is None
     assert not before.pending.squad, "the fixture's 2010 must not have been poor"
     ceilings = C.mega_ceilings(deck, seed, before.pending.k, before.pending.year,
-                               before.checkpoint.current, before.checkpoint.last_display)
+                               before.checkpoint.current,
+                               C.market_for(before.start, before.ceiling, before.checkpoint))
     assert max(ceilings.values()) < 200, "the fixture must leave a ₹2 cr base unmet"
     moves = moves + ["b0"]
     car = C.play_career(deck, model, seed, setup, moves)

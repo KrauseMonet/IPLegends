@@ -109,7 +109,24 @@ def test_the_hall_of_fame_is_ordered_by_legacy_and_reads_back(pg, finished):
     assert [r["runs"] for r in rows] == [c.summary.runs for c in want]
     top = rows[0]
     assert top["card"]["milestones"] == [[y, t] for y, t in want[0].summary.milestones]
-    assert top["peak_card"] == want[0].summary.peak_display
+    # [A214] the peak column holds the career's best RATING (its best season grade rides
+    # in the card), since the Rating is the career's own number
+    assert top["peak_card"] == want[0].summary.peak_rating
+    assert top["card"]["peak_rating"] == want[0].summary.peak_rating
+
+
+@needs_pg
+def test_a_legend_is_read_only_from_its_own_accounts_careers(pg, finished):
+    """[A215] A room asks for a career by key, and the server reads it for the SIGNED-IN
+    account: another account's key gives nothing, so nobody brings a legend they did not earn."""
+    me, other = _account(pg, "legendowner"), _account(pg, "legendthief")
+    token = _token(finished["opener"])
+    CR.save(pg, me, CR.natural_key(token), finished["opener"][2])
+    legend = CR.legend_of(pg, me, CR.natural_key(token))
+    assert legend == CR.legend(finished["opener"][2])
+    assert legend["rating"] == finished["opener"][2].summary.peak_rating
+    assert CR.legend_of(pg, other, CR.natural_key(token)) is None
+    assert CR.legend_of(pg, me, "0" * 64) is None
 
 
 @needs_pg

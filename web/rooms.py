@@ -146,6 +146,9 @@ class Room:
     # migration 044 -- an auction room's trade window between its people [A174]. The host
     # may change it in the lobby (`set_trades`); it locks when the auction starts.
     trades: bool = False
+    # migration 050 -- career legends [A215]: None is off; otherwise {player_id: legend},
+    # the legend each seat chose (a copy of its saved card). Set in the lobby, like trades.
+    legends: dict | None = None
     # [A180] What `room_players` held when this room was READ, in `_seat_rows` form, so
     # `_save_room` can skip rewriting seats nothing changed -- one round trip on every
     # bid and pick. None for a room never read (just created), which always writes them.
@@ -267,7 +270,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                r.draft_mode, r.is_open, r.version,
                extract(epoch from (now() - r.updated_at)) as idle_seconds,
                p.player_id, p.name, p.is_cpu, r.game, p.franchise,
-               p.kit_name, p.kit_monogram, p.kit_colour, r.trades
+               p.kit_name, p.kit_monogram, p.kit_colour, r.trades, r.legends
           from rooms r
           left join room_players p on p.room_code = r.code
           {"cross join _lock_bound" if lock else ""}
@@ -293,7 +296,8 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                 moves=list(moves or []), match_moves=list(match_moves or []),
                 draft_mode=draft_mode, is_open=is_open, version=version,
                 idle_seconds=float(idle_seconds or 0.0), game=rows[0][17],
-                trades=bool(rows[0][22]))
+                trades=bool(rows[0][22]),
+                legends=dict(rows[0][23]) if rows[0][23] is not None else None)
     for row in rows:
         player_id, name, is_cpu, franchise = row[14], row[15], row[16], row[18]
         kit_name, kit_monogram, kit_colour = row[19], row[20], row[21]
@@ -335,12 +339,12 @@ def _save_room(conn, room: Room) -> None:
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode, is_open, version, game, trades)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
+                            draft_mode, is_open, version, game, trades, legends)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
-            -- [A174] the one setting the host may change after creation, in the lobby
-            trades = excluded.trades,
+            -- [A174, A215] the settings the host may change after creation, in the lobby
+            trades = excluded.trades, legends = excluded.legends,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
             match_moves = excluded.match_moves,
             version = rooms.version + 1,
@@ -352,7 +356,8 @@ def _save_room(conn, room: Room) -> None:
         """,
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
-         Json(room.match_moves), room.draft_mode, room.is_open, room.game, room.trades),
+         Json(room.match_moves), room.draft_mode, room.is_open, room.game, room.trades,
+         Json(room.legends) if room.legends is not None else None),
     ).fetchone()[0]
     # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
     # separate `conn.execute` per player, but every existing player's row is a guaranteed
@@ -416,7 +421,7 @@ def clean_player_name(raw: str) -> str:
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
                  game: str = "draft", kit: dict | None = None,
-                 trades: bool = False) -> tuple[Room, str]:
+                 trades: bool = False, legends: bool = False) -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
     if game != "draft" and fmt != "league":
@@ -434,7 +439,8 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
                 seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
-                game=game, trades=bool(trades) and game != "draft")
+                game=game, trades=bool(trades) and game != "draft",
+                legends={} if legends and game != "draft" else None)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     room.players[host_id].kit = _arriving_kit(room, host_id, kit)
     _save_room(conn, room)
@@ -561,6 +567,41 @@ def set_trades(conn, code: str, player_id: str, on: bool) -> Room:
     if room.status != "lobby":
         raise RoomError("the trade window is decided before the auction starts")
     room.trades = bool(on)
+    _save_room(conn, room)
+    return room
+
+
+def set_legends(conn, code: str, player_id: str, on: bool) -> Room:
+    """[A215] The host turns career legends on or off, in the lobby only, as `set_trades`.
+    Turning them off forgets every legend chosen."""
+    room = _load_room(conn, code)
+    if room.game == "draft":
+        raise RoomError("only an auction room has career legends")
+    if player_id != room.host_id:
+        raise RoomError("only the host can change career legends")
+    if room.status != "lobby":
+        raise RoomError("career legends are decided before the auction starts")
+    room.legends = ({} if room.legends is None else room.legends) if on else None
+    _save_room(conn, room)
+    return room
+
+
+def set_legend(conn, code: str, player_id: str, legend: dict | None) -> Room:
+    """[A215] A seat brings a legend (a copy of a saved career's best season), or none.
+    Who owns the career is the route's business: this only places it."""
+    room = _load_room(conn, code)
+    if room.legends is None:
+        raise RoomError("career legends are off in this room")
+    if player_id not in room.players or room.players[player_id].is_cpu:
+        raise RoomError("you are not in this room")
+    if room.status != "lobby":
+        raise RoomError("legends are chosen before the auction starts")
+    legends = dict(room.legends)
+    if legend is None:
+        legends.pop(player_id, None)
+    else:
+        legends[player_id] = legend
+    room.legends = legends
     _save_room(conn, room)
     return room
 

@@ -109,6 +109,9 @@ def test_ability_is_the_start_at_zero_and_the_ceiling_at_one(deck):
         a0, a1 = C.ability(start, ceiling, 0.0, **kw), C.ability(start, ceiling, 1.0, **kw)
         for half in ("bat_scoring", "bat_dismissal", "bowl_scoring", "bowl_dismissal"):
             s, c = getattr(start, half), getattr(ceiling, half)
+            if half.startswith("bowl") and C.ROLES[role].get("batting_only"):
+                assert getattr(a0, half) is None      # a batting-only role drops it
+                continue
             assert getattr(a0, half) == s
             if s is not None and c is not None:
                 assert getattr(a1, half) == pytest.approx(c, rel=1e-12)
@@ -324,8 +327,8 @@ def test_event_cards_never_repeat_back_to_back_or_pass_their_limits():
 # --- the move protocol and replay -----------------------------------------------------------
 
 
-def _event_seed(want_choice: bool) -> int:
-    return next(s for s in range(100) if (len(C.draw_event(s, 0).options) > 1) == want_choice)
+def _event_seed(want_choice: bool, role: str = "opener") -> int:
+    return next(s for s in range(100) if (len(C.draw_event(s, 0, role=role).options) > 1) == want_choice)
 
 
 def test_a_fresh_career_asks_for_a_franchise_first(deck, model):
@@ -348,7 +351,7 @@ def test_moves_that_do_not_fit_are_refused(deck, model, moves):
 
 
 def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k).options) == 1
+    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
                                              for k in range(2)))
     done = _play(deck, model, seed, _setup(), ["o0", "r"])
     assert done.complete and done.retired and len(done.seasons) == 1
@@ -360,7 +363,7 @@ def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
 def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
     """The season cache must never change a career: the first version read the next
     season's price from the blank record on a cache hit and priced you as a 70."""
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k).options) == 1
+    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
                                              for k in range(3)))
     moves = ["o1", "o2"]
     C._SEASON_CACHE.clear()
@@ -383,7 +386,7 @@ def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
 def test_a_season_is_a_pure_function_of_its_inputs(deck, model):
     """Each season draws from its own seeded stream (A93), so the same inputs give the same
     season, whatever else has drawn random numbers in between."""
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k).options) == 1
+    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
                                              for k in range(2)))
     start, ceiling = C.spin(deck, seed, "opener")
     fs = C.year_fs_ids(deck, 2013)[0]
@@ -499,13 +502,21 @@ def test_form_decides_your_place(squad, percentile, want):
     assert C.form_after(squad, percentile) == want
 
 
-def _quiet_seed(n):
-    return next(s for s in range(300) if all(len(C.draw_event(s, k).options) == 1
+def _no_patience(monkeypatch):
+    """These test the form rule itself (A198), so the youngster's patience and the star's
+    protection (A214), which would otherwise save him, are switched off."""
+    monkeypatch.setattr(C, "YOUTH_SEASONS", 0)
+    monkeypatch.setattr(C, "STAR_RATING", 100)
+
+
+def _quiet_seed(n, role="opener"):
+    return next(s for s in range(300) if all(len(C.draw_event(s, k, role=role).options) == 1
                                              for k in range(n)))
 
 
 def test_two_poor_seasons_end_a_career(deck, model, monkeypatch):
     """Every season poor: a regular season, a squad season, then nobody signs you."""
+    _no_patience(monkeypatch)
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = _quiet_seed(3)
     first = _play(deck, model, seed, _setup(), ["o0"])
@@ -663,6 +674,7 @@ def test_a_finisher_keeps_his_place_down_to_his_own_bar(deck, model, monkeypatch
     """The finisher's declared bar, not the general one, decides his place -- checked in a
     real career by setting the general bar so high that only the exception can save him."""
     assert C.poor_bar("finisher") < C.POOR_PERCENTILE == C.poor_bar("opener")
+    _no_patience(monkeypatch)
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     monkeypatch.setitem(C.ROLES["finisher"], "poor_percentile", 0.0)
     seed = _quiet_seed(3)
@@ -675,9 +687,10 @@ def test_a_finisher_keeps_his_place_down_to_his_own_bar(deck, model, monkeypatch
 def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
     """Every season poor, so the second is a squad season; with the captaincy card drawn for
     it, it must arrive as a quiet pre-season instead."""
+    _no_patience(monkeypatch)
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
-    seed = next(s for s in range(500) if C.draw_event(s, 1).key == "captain"
-                and len(C.draw_event(s, 0).options) == 1)
+    seed = next(s for s in range(500) if C.draw_event(s, 1, role="opener").key == "captain"
+                and len(C.draw_event(s, 0, role="opener").options) == 1)
     first = _play(deck, model, seed, _setup(), ["o0", "o0"])
     assert first.seasons[0].squad is False and first.complete      # released after two
     second = first.seasons[1]
@@ -687,8 +700,8 @@ def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
 # --- contracts, where you play, the new cards, real names (A200) ----------------------------
 
 
-def _seed_quiet(n, overseas=False):
-    return next(s for s in range(2000) if all(len(C.draw_event(s, k, overseas).options) == 1
+def _seed_quiet(n, overseas=False, role="opener"):
+    return next(s for s in range(2000) if all(len(C.draw_event(s, k, overseas, role).options) == 1
                                               for k in range(n)))
 
 
@@ -727,6 +740,7 @@ def test_a_signed_year_cannot_be_signed_again(deck, model):
 def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, monkeypatch):
     """Every season poor: a one-year player is released after two, a three-year one plays
     out his deal and goes after it ends."""
+    _no_patience(monkeypatch)
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = _seed_quiet(4)
     one = _play(deck, model, seed, _setup(debut=2015), ["o0", "o0"])
@@ -740,7 +754,7 @@ def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, mon
 def test_a_contract_lapses_when_the_club_has_no_team(deck, model):
     """Chennai have no team in 2016: a deal signed there in 2015 cannot carry over."""
     setup = C.Setup("Tester", "opener", 2015)
-    seed = next(s for s in range(2000) if len(C.draw_event(s, 0).options) == 1 and any(
+    seed = next(s for s in range(2000) if len(C.draw_event(s, 0, role="opener").options) == 1 and any(
         "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None)))
     i = next(n for n, o in enumerate(_play(deck, model, seed, setup, []).pending.offers)
              if "Chennai" in o.franchise)
@@ -753,7 +767,7 @@ def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
     """The position on the offer is the one the season then uses, for a batter and a
     bowler alike (no event, so the season's ability is the offer's)."""
     for role in ("opener", "pace"):
-        seed = _seed_quiet(1)
+        seed = _seed_quiet(1, role=role)
         c = _play(deck, model, seed, _setup(role), [])
         for o in c.pending.offers:
             assert 1 <= o.position <= 11
@@ -784,8 +798,8 @@ def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monke
     monkeypatch.setattr(C, "POOR_PERCENTILE", 0.0)
     setup = C.Setup("Tester", "opener", 2008)
     seed, k = next((s, k) for s in range(5000) for k in range(C.LATE_FROM, 14)
-                   if C.draw_event(s, k).key == "one_more"
-                   and all(len(C.draw_event(s, j).options) == 1 for j in range(k)))
+                   if C.draw_event(s, k, role="opener").key == "one_more"
+                   and all(len(C.draw_event(s, j, role="opener").options) == 1 for j in range(k)))
     moves = ["o0"] * k
     before = _play(deck, model, seed, setup, moves + ["o0"])
     assert before.pending.kind == "event" and before.pending.event.key == "one_more"
@@ -1006,16 +1020,17 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
     assert C.approach_card(batter, 2).bowl_scoring is None
 
 
-# Delhi Capitals 2019, seed 29: found by search because it exercises every moment rule at
+# Chennai Super Kings 2019, seed 1 (re-found for A214; Delhi 2019 seed 29 before): found by
+# search because it exercises every moment rule at
 # once -- two league matches that would be must-win without MUST_WIN_MAX, playoff matches,
 # and a called league match that is the SECOND meeting with its opponent. The first fixture
 # these tests used (the first franchise that paused) had no league moment and no repeat
 # meeting, so three rules could be broken without any test failing. These seasons are
 # pinned to the engine, so an engine change can move them (A208 moved every one of them,
 # Kings XI 2019 before this); re-find them by search rather than loosening a guard.
-MOMENT_FS = 50
-MOMENT_SEED = 29
-EDGE = (26, 29)   # Chennai 2019: see test_every_league_stop_and_only_those_is_a_close_race
+MOMENT_FS = 26
+MOMENT_SEED = 1
+EDGE = (26, 0)    # Chennai 2019: see test_every_league_stop_and_only_those_is_a_close_race
 
 
 def _moment_year(deck, model, role="opener", seed=None, fs_only=None):
@@ -1286,9 +1301,10 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
     assert book.games[("a_bowl", id(away))] == [(4, 2, 25, 24, True)]
 
 
-MOB_FS = {"dropped": 140, "kept": 50}   # 2019: Rajasthan, Delhi (found by search)
-MOB_SEED = {"dropped": 31, "kept": 1}
-SIXTH = (77, 33)   # Kolkata 2019: see test_a_make_or_break_is_failed_only_in_the_worst_sixth
+# 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
+MOB_FS = {"dropped": 140, "kept": 26}
+MOB_SEED = {"dropped": 31, "kept": 3}
+SIXTH = (26, 12)   # Chennai 2019: see test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
 
 def _mob_you(deck, fs, role="opener"):

@@ -1,4 +1,4 @@
-"""Stamp a content hash onto every CSS/JS reference in the HTML pages.
+"""Stamp a content hash onto every CSS, JS and brand-image reference in the HTML pages.
 
 WHY THIS EXISTS, from the bug that forced it. The pages are served with
 `must-revalidate` so a deploy is picked up immediately, but CSS and JS were cached for
@@ -15,6 +15,12 @@ changed script is a changed URL and the browser cannot serve the old one for a n
 That also lets `vercel.json` mark css/js `immutable` for a year instead of re-checking
 every ten minutes -- strictly faster AND strictly safer, which is the rare case where the
 cautious option is also the quick one.
+
+IMAGES NEED IT TOO, and the rename showed why. `vercel.json` caches images for 30 days under
+their own name, so replacing the logo in place would have left every returning visitor with the
+OLD shield until it expired. The nav emblem and the favicons are stamped like a script; the
+shared partials are stamped as well as the pages, since the emblem lives in `nav.html` and
+`tools.shell` copies a partial into every page verbatim.
 
 The stamped html is COMMITTED rather than generated at deploy time, because this project
 has no build pipeline and adding one to solve a caching bug would be the larger change.
@@ -36,10 +42,11 @@ import re
 import sys
 
 STATIC = pathlib.Path(__file__).resolve().parent.parent / "web" / "static"
+PARTIALS = STATIC.parent / "partials"
 
-# Matches src="/static/x.js" and href="/static/x.css", with or without an existing ?v=,
-# so re-running is idempotent rather than accumulating query strings.
-REF = re.compile(r'((?:src|href)="/static/([A-Za-z0-9_.\-/]+\.(?:js|css)))(\?v=[0-9a-f]+)?"')
+# Matches src="/static/x.js", href="/static/x.css" and the brand images (webp/png), with or
+# without an existing ?v=, so re-running is idempotent rather than accumulating query strings.
+REF = re.compile(r'((?:src|href)="/static/([A-Za-z0-9_.\-/]+\.(?:js|css|webp|png)))(\?v=[0-9a-f]+)?"')
 
 
 def _hash(path: pathlib.Path) -> str:
@@ -50,7 +57,8 @@ def stamp(check: bool = False) -> int:
     stale: list[str] = []
     changed: list[str] = []
 
-    for page in sorted(STATIC.glob("*.html")):
+    files = sorted(STATIC.glob("*.html")) + sorted(PARTIALS.glob("*.html"))
+    for page in files:
         text = page.read_text()
 
         def rewrite(m: re.Match) -> str:
@@ -73,7 +81,7 @@ def stamp(check: bool = False) -> int:
             print("stale asset stamps in: " + ", ".join(stale))
             print("run: uv run python -m tools.stamp_assets")
             return 1
-        print(f"all asset stamps current ({len(list(STATIC.glob('*.html')))} pages)")
+        print(f"all asset stamps current ({len(files)} files)")
         return 0
 
     print(f"stamped {len(changed)} page(s): {', '.join(changed) or '(already current)'}")

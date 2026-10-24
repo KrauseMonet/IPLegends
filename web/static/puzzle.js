@@ -8,7 +8,7 @@
 
 // A shared link has to work for whoever reads it, so it names the real site rather than
 // whatever host this page happens to be on (A129).
-const PZ_ORIGIN = 'https://iplegends.vercel.app';
+const PZ_ORIGIN = SITE_ORIGIN;
 const PZ_JSON = {'Content-Type': 'application/json'};
 
 // --- storage: one JSON object per game, in this browser only ------------------------------

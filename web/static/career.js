@@ -1201,9 +1201,9 @@ async function crDrawCard(d){
   ctx.strokeStyle = lineStrong; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(M, fy - 40); ctx.lineTo(W - M, fy - 40); ctx.stroke();
   ctx.fillStyle = ink; ctx.font = `400 30px ${CARD_DISPLAY}`;
-  ctx.fillText('THE LEGENDS', M, fy);
-  const lw = ctx.measureText('THE LEGENDS ').width;
-  ctx.fillStyle = gold; ctx.fillText('ALMANACK', M + lw, fy);
+  ctx.fillText('FINE LEG', M, fy);
+  const lw = ctx.measureText('FINE LEG ').width;
+  ctx.fillStyle = gold; ctx.fillText('XI', M + lw, fy);
   ctx.textAlign = 'right'; ctx.fillStyle = ink3; ctx.font = `700 18px ${CARD_FIGS}`;
   ctx.fillText('BUILD A CAREER', W - M, fy - 4);
   ctx.textAlign = 'left';

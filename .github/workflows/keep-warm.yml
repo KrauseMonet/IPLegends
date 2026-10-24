@@ -32,4 +32,4 @@ jobs:
           curl --silent --show-error --fail --max-time 30 \
             --output /dev/null \
             --write-out "status %{http_code} in %{time_total}s\n" \
-            https://iplegends.vercel.app/api/health
+            https://fineleg.app/api/health

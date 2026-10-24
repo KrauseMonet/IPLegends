@@ -127,3 +127,13 @@ def test_the_logo_and_favicons_are_stamped_so_a_returning_visitor_cannot_keep_th
             want = hashlib.sha256((STATIC / m.group(1)).read_bytes()).hexdigest()[:10]
             assert m.group(3) == want, f"{f.name}: {m.group(1)} carries a stale stamp"
     assert 'logo-emblem.webp?v=' in text(PARTIALS / "nav.html")
+
+
+ADSENSE_TAG = '<meta name="google-adsense-account" content="ca-pub-2624074910535553">'
+
+
+def test_every_page_carries_the_adsense_verification_tag_in_its_head():
+    """[A222] AdSense verifies ownership by this tag on each page; a page added later
+    without it would read as a page the account does not cover."""
+    missing = [p.name for p in PAGES if ADSENSE_TAG not in text(p).split("</head>", 1)[0]]
+    assert PAGES and not missing, missing

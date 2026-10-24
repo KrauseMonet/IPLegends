@@ -46,7 +46,13 @@ on the basis that this is a non-commercial fan site -- no advertising (Google Ad
 removed in the same change) and no betting -- having been told plainly that IPL/BCCI
 permission could not be confirmed and that each crest belongs to its franchise's owner.
 Fifteen come from Wikipedia's file pages and three were supplied by the owner; every one
-is listed with its source in `assets/crests/SOURCES.md`. The footer on every page says
+is listed with its source in `assets/crests/SOURCES.md`.
+
+**[Changed 2026-10-24 -- the "no advertising" basis above no longer holds.]** The owner
+chose to put Google AdSense back on the site while keeping the crests, having been told
+that ads take away the non-commercial basis described above and that AdSense's own review
+may object to pages built around other owners' logos. The crests are still unlicensed;
+the risk is accepted rather than resolved. The footer on every page says
 the site is unofficial and that team names and logos belong to their owners. If a
 rights-holder objects, removing them is one command: delete the entries in
 `web/crests.py` and every surface falls back to the old initials badge.

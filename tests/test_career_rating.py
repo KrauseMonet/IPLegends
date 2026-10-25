@@ -66,17 +66,20 @@ def test_a_youngster_starts_low_and_every_batting_template_batted_where_his_role
 def test_each_season_records_the_rating_it_was_played_at(deck, model):
     car, _ = C.auto_career(deck, model, 3, _setup("pace", 2010), "strength")
     for r in car.seasons:
-        assert r.rating == C.rating_at(car.start, car.ceiling, r.ability)
+        assert r.rating == C.rating_at(car.start, C.top_card(car.ceiling, car.legend, r.potential),
+                                       r.ability)
     assert car.summary.peak_rating == max(r.rating for r in car.seasons)
 
 
 def test_form_feeds_development_only_while_you_are_still_growing(deck, model):
     car, _ = C.auto_career(deck, model, 3, _setup("opener", 2008), "strength")
-    assert len(car.seasons) > C.DEV_SEASONS
-    for r in car.seasons:
-        want = round(2 * C.DEV_POINTS * (r.percentile - 0.5), 1) if r.k < C.DEV_SEASONS else 0.0
+    # [A224] "still growing" is the career's own shape, read at the clock it was played at
+    growing = [car.shape.growing(r.clock) for r in car.seasons]
+    assert True in growing and False in growing, "the fixture must live past its peak"
+    for r, g in zip(car.seasons, growing):
+        want = round(2 * C.DEV_POINTS * (r.percentile - 0.5), 1) if g else 0.0
         assert r.development == want
-    assert any(r.development for r in car.seasons[:C.DEV_SEASONS])
+    assert any(r.development for r, g in zip(car.seasons, growing) if g)
 
 
 def test_clubs_price_you_on_your_rating_and_your_last_season(deck, model):
@@ -84,9 +87,10 @@ def test_clubs_price_you_on_your_rating_and_your_last_season(deck, model):
     assert C.market_value(90, 70) == round(0.6 * 90 + 0.4 * 70)
     car = _play(deck, model, 1, _setup(), ["o0"])
     cp = car.checkpoint
-    want = C.market_value(C.rating_at(car.start, car.ceiling, C.arc_point(cp.k, cp.permanent, 0.0)),
+    want = C.market_value(C.rating_at(car.start, car.top,
+                                      C.arc_point(cp.clock, cp.permanent, 0.0, car.shape)),
                           cp.last_display)
-    assert C.market_for(car.start, car.ceiling, cp) == want
+    assert C.market_for(car.start, car.ceiling, cp, car.shape, car.legend) == want
 
 
 # --- a youngster gets time; a star always finds a club ----------------------------------------
@@ -147,8 +151,10 @@ def _event_seed(key, role="opener", k=0):
 
 def test_a_rebuild_costs_this_season_and_lands_the_next(deck, model):
     # a quiet second season, so nothing else moves its ability
+    # [A224] and a standard shape, so the second season's ability is the ARC's
     seed = next(s for s in range(5000) if C.draw_event(s, 0, role="opener").key == "coach"
-                and C.draw_event(s, 1, role="opener").key == "quiet")
+                and C.draw_event(s, 1, role="opener").key == "quiet"
+                and C.draw_shape(s) == C.STANDARD)
     coach = next(e for e in C.EVENTS if e.key == "coach")
     rebuild = coach.options[0]
     turned = C.draw_outcome(seed, 0, rebuild)
@@ -159,6 +165,7 @@ def test_a_rebuild_costs_this_season_and_lands_the_next(deck, model):
     assert any(turned.text in n and f"{turned.permanent:+d} Rating for good" in n
                for n in second.notes)
     # and the permanent change reached the ability the second season was played at
+    assert second.potential == 0, "the fixture must not raise its potential after season 1"
     dev = C.points_t(first.development, c.start, c.ceiling)
     assert second.ability == pytest.approx(C.arc_point(1, dev + C.points_t(turned.permanent, c.start, c.ceiling), 0.0))
 

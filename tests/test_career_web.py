@@ -506,6 +506,21 @@ def test_every_season_note_is_marked_the_way_it_points(deck):
     assert t(C.development_words(1.2)) == "up"
     assert t(C.development_words(-0.8)) == "down"
     assert t(C.absence_words("rested", 2, 5)) == ""                       # information, not a cost
+    # [A224] the potential, the clock and the shape's hints
+    assert t(C.potential_words(84, 85, 88)) == "up"
+    assert t(C.potential_words(84, 86, None)) == "up"
+    assert t(C.clock_words(C.CLOCK_SLOW)) == "up"
+    assert t(C.clock_words(C.CLOCK_FAST)) == "down"
+    assert t(C._effect_words("Fitness.", -1, 0, 0, -0.5)) == ""            # mixed
+    assert t(C._effect_words("Managed it.", 0, 0, 3, 0.5)) == "down"
+    hints = {sh: [C.shape_words(C.Shape(*sh), c / 2, c / 2 + 1, 25) for c in range(40)]
+             for sh in (("early", "gentle"), ("late", "steep"), ("standard", "standard"))}
+    marks = {h: t(h) for hs in hints.values() for h in hs if h}
+    assert marks == {"At 25 you are already close to your best.": "up",
+                     "Past your peak now, but your body is holding up well.": "up",
+                     "Still improving at 25: you are coming into your own late.": "up",
+                     "Past your peak now, and the years are catching up with you quickly.": "down",
+                     "Past your peak now.": ""}
     card = next(c for cs in deck.cards_by_fs.values() for c in cs
                 if c.bat_scoring is not None and c.bowl_scoring is not None and c.role == "allrounder")
     better_bat = dataclasses.replace(card, bat_scoring=card.bat_scoring + 0.08,

@@ -126,12 +126,13 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    # seed 4, found by search: a hat-trick, so the count has something to agree with
-    career, moves = C.auto_career(deck, model, 4, setup, "strength")
+    # seed 6, found by search (again after A224 reshaped careers): a hat-trick, so the count
+    # has something to agree with
+    career, moves = C.auto_career(deck, model, 6, setup, "strength")
     seasons, checked = career.seasons, 0
     assert sum(r.hat_tricks for r in seasons) >= 1, "the fixture must take a hat-trick"
     for k in range(len(seasons)):
-        played = C.play_career(deck, model, 4, setup, moves[:_moves_through(moves, k)])
+        played = C.play_career(deck, model, 6, setup, moves[:_moves_through(moves, k)])
         feed = played.detail.feed
         rec = played.checkpoint.seasons[k]
         for l in feed:

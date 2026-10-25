@@ -19,7 +19,8 @@ pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 # Found by search: a middle-order batter whose 2011 market value cannot draw a ₹2 cr base,
 # and whose 2010 was NOT poor -- so the squad season the test sees is the late signing's alone.
 # [A214] Re-found when clubs began pricing on your Rating blended with last season's grade.
-UNSOLD = (6, C.Setup("X", "middle", 2010, False), ["o0", "m1"])
+# [A224] seed 12, found by search again when the career shapes moved every curve
+UNSOLD = (12, C.Setup("X", "middle", 2010, False), ["o0", "m1"])
 
 
 @pytest.fixture(scope="module")
@@ -111,7 +112,8 @@ def test_a_base_nobody_meets_is_unsold_and_a_squad_season(deck, model):
     assert not before.pending.squad, "the fixture's 2010 must not have been poor"
     ceilings = C.mega_ceilings(deck, seed, before.pending.k, before.pending.year,
                                before.checkpoint.current,
-                               C.market_for(before.start, before.ceiling, before.checkpoint))
+                               C.market_for(before.start, before.ceiling, before.checkpoint,
+                                            before.shape, before.legend))
     assert max(ceilings.values()) < 200, "the fixture must leave a ₹2 cr base unmet"
     moves = moves + ["b0"]
     car = C.play_career(deck, model, seed, setup, moves)
@@ -122,7 +124,9 @@ def test_a_base_nobody_meets_is_unsold_and_a_squad_season(deck, model):
     rec = car.seasons[-1]
     assert rec.year == 2011 and rec.squad and rec.price == 200 and rec.mega.startswith("Unsold")
     # the late signing is not a poor season: next year's place depends on 2011's form alone
-    assert car.checkpoint.squad == C.form_after(False, rec.percentile, C.poor_bar("middle"))[0]
+    # (and, in a youngster's second season, not even on that: A214 gives him time)
+    assert car.checkpoint.squad == (C.form_after(False, rec.percentile, C.poor_bar("middle"))[0]
+                                    and rec.k >= C.YOUTH_SEASONS)
 
 
 def test_staying_needs_an_offer(deck, model):

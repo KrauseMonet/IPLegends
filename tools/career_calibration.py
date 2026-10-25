@@ -70,7 +70,21 @@ def _one(job: tuple[str, str, int]) -> dict:
         "regular": s.regular_seasons, "released": career.released,
         "bowled_every_season": all(r.bowl_balls > 0 for r in career.seasons),
         "start": career.start.display, "ceiling": career.ceiling.display,
+        # [A224] where the Rating peaked, as a share of the career, and the potential earned
+        "peak_pos": _peak_pos([r.rating for r in career.seasons]),
+        "peak_rating": s.peak_rating,
+        "pot_gain": round(getattr(career, "top", career.ceiling).display - career.ceiling.display),
+        "shape": str(getattr(career, "shape", "")),
     }
+
+
+def _peak_pos(xs: list[float]) -> float | None:
+    """Where a career peaked, 0 its first season and 1 its last, on a three-season average
+    so one season's luck does not decide it. None for a career too short to say."""
+    if len(xs) < 3:
+        return None
+    sm = [st.fmean(xs[max(0, i - 1):i + 2]) for i in range(len(xs))]
+    return max(range(len(sm)), key=lambda i: sm[i]) / (len(sm) - 1)
 
 
 def stat(kind: str, runs: int, wickets: int) -> int:
@@ -115,7 +129,8 @@ def real_side() -> tuple[dict, dict]:
             by_person[c.person_id].append(c)
     kind_of = {"batter": "batter", "keeper": "batter", "bowler": "bowler",
                "allrounder": "allrounder"}
-    real: dict[str, dict] = defaultdict(lambda: {"total": [], "peak": [], "yoy": [], "mean": []})
+    real: dict[str, dict] = defaultdict(lambda: {"total": [], "peak": [], "yoy": [], "mean": [],
+                                                 "peak_pos": []})
     for f in facts:
         cards = sorted(by_person.get(f.person_id, []), key=lambda c: c.season_year)
         if len({c.season_year for c in cards}) < 10:
@@ -126,6 +141,11 @@ def real_side() -> tuple[dict, dict]:
         real[kind]["peak"].append(max(ds))
         real[kind]["mean"].append(st.fmean(ds))
         real[kind]["yoy"] += [b - a for a, b in zip(ds, ds[1:])]
+        best = {}
+        for c in cards:
+            if c.display is not None:
+                best[c.season_year] = max(best.get(c.season_year, 0), c.display)
+        real[kind]["peak_pos"].append(_peak_pos([best[y] for y in sorted(best)]))
     alltime = {k: sorted((stat(k, f.runs, f.wickets) for f in facts), reverse=True)
                for k in ("batter", "bowler", "allrounder")}
     return real, alltime
@@ -163,7 +183,8 @@ def report(rows: list[dict], real: dict, alltime: dict) -> None:
                   f"top10 {sum(t >= top[9] for t in r['total']) / len(r['total']):4.0%} "
                   f"top25 {sum(t >= top[24] for t in r['total']) / len(r['total']):4.0%}  "
                   f"peak med {st.median(r['peak']):4.0f} p90 {_q(r['peak'], .9):3.0f}  "
-                  f"swing SD {st.pstdev(r['yoy']):4.1f}  mean card {st.median(r['mean']):4.1f}")
+                  f"swing SD {st.pstdev(r['yoy']):4.1f}  mean card {st.median(r['mean']):4.1f}  "
+                  f"peak at {_q(r['peak_pos'], .25):.2f}/{st.median(r['peak_pos']):.2f}/{_q(r['peak_pos'], .75):.2f}")
         groups = defaultdict(list)
         for x in mine:
             groups[(x["role"], x["policy"])].append(x)
@@ -186,7 +207,19 @@ def report(rows: list[dict], real: dict, alltime: dict) -> None:
                   f"released {sum(x['released'] for x in g) / len(g):3.0%})  "
                   f"{mps:4.1f} m/season (missed {sum(x['missed'] for x in g) / sum(x['seasons'] for x in g):.1f})  titles {st.mean(x['titles'] for x in g):.1f}"
                   + ("" if kind == "batter" else
-                     f"  bowled every season {sum(x['bowled_every_season'] for x in g)}/{len(g)}"))
+                     f"  bowled every season {sum(x['bowled_every_season'] for x in g)}/{len(g)}")
+                  + _shape_line(g))
+
+
+def _shape_line(g: list[dict]) -> str:
+    """[A224] Where Ratings peaked (quartiles of the share of the career), the peak Rating,
+    and the potential earned."""
+    pos = [x["peak_pos"] for x in g if x["peak_pos"] is not None]
+    gain = [x["pot_gain"] for x in g]
+    return (f"\n  {'':22s}        peak at {_q(pos, .25):.2f}/{st.median(pos):.2f}/{_q(pos, .75):.2f}  "
+            f"peak Rating med {st.median(x['peak_rating'] for x in g):4.0f}  "
+            f"potential +{st.median(gain):.0f} med, p90 +{_q(gain, .9):.0f}, "
+            f"{sum(v > 0 for v in gain) / len(gain):3.0%} raised")
 
 
 def main(argv: list[str] | None = None) -> int:

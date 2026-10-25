@@ -110,6 +110,7 @@ class SeasonOut(BaseModel):
     card: int                     # the Season grade, after the reputation floor
     form: int                     # the season's own grade
     rating: int | None = None     # your Rating that season (A214); None on an older token
+    potential: int = 0            # your potential that season, as it stood going in (A224)
     age: int = 0                  # A214, shown only
     notes: list[str] = []         # what happened, in words (A214)
     note_tones: list[str] = []    # 'up' | 'down' | '' per note, for the page's marks (A218)
@@ -369,7 +370,8 @@ class CareerOut(BaseModel):
     season_play: SeasonPlayOut | None = None
     auction: AuctionOut | None = None
     rating: int = 0               # your Rating now: going into the season pending, or the last (A214)
-    potential: int = 0            # the ceiling's card: the most your Rating can reach
+    potential: int = 0            # the most your Rating can reach now: the ceiling, plus what you earned (A224)
+    potential_start: int = 0      # the ceiling's own card, where the potential began
     age: int = 0
     injuries: list[str] = []      # "2014 · Side strain (5 matches)"
 
@@ -379,8 +381,9 @@ def _template(c) -> TemplateOut:
                        crest=crests.crest_url(c.franchise, c.season_year), card=c.display)
 
 
-def _season(r: C.SeasonRecord) -> SeasonOut:
+def _season(r: C.SeasonRecord, ceiling: int = 0) -> SeasonOut:
     return SeasonOut(
+        potential=round(ceiling + r.potential),
         year=r.year, franchise=r.franchise, short=r.short,
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
@@ -410,6 +413,8 @@ def option_hint(o: C.EventOption) -> str:
         bits.append(f"{o.permanent:+d} Rating for good")
     if o.captain:
         bits.append("you captain the side")
+    if o.age:
+        bits.append(C.age_words(o.age))
     if o.missed:
         bits.append(f"miss {o.missed} matches")
     if o.retire:
@@ -627,7 +632,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         start=_template(career.start), ceiling=_template(career.ceiling),
-        seasons=[_season(r) for r in career.seasons],
+        seasons=[_season(r, career.ceiling.display) for r in career.seasons],
         pending=(_pending(career.pending, st.role).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
@@ -635,7 +640,8 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         season_play=(_season_play(career.detail, career.live_milestones)
                      if career.detail else None),
         auction=_auction(career.auction, _auction_year(career)) if career.auction else None,
-        rating=_rating_now(career), potential=career.ceiling.display,
+        rating=_rating_now(career), potential=round(career.top.display),
+        potential_start=career.ceiling.display,
         age=C.DEBUT_AGE + (career.pending.k if career.pending else len(career.seasons) - 1),
         injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])])
 
@@ -644,9 +650,9 @@ def _rating_now(career: C.Career) -> int:
     """Your Rating going into the season pending (before its event), or the last season's."""
     if career.pending is None or career.checkpoint is None:
         return career.seasons[-1].rating if career.seasons else 0
-    k = career.pending.k
-    return C.rating_at(career.start, career.ceiling,
-                       C.arc_point(k, career.checkpoint.permanent, 0.0))
+    cp = career.checkpoint
+    return C.rating_at(career.start, career.top,
+                       C.arc_point(cp.clock, cp.permanent, 0.0, career.shape))
 
 
 def _auction_year(career: C.Career) -> int:

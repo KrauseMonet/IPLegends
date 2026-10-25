@@ -138,7 +138,32 @@ DEV_POINTS = 1.0
 # better. Counted every season it ran a consistently good player along the ceiling for nine
 # seasons, the decline held off by points banked from form.
 DEV_SEASONS = 6
-DEBUT_AGE = 19                       # shown only: a career's age is its debut age plus seasons
+# [A224] Your POTENTIAL grows, so a low ceiling is where a career starts rather than a verdict
+# on it. Measured before building, over 35 careers: 21% of seasons already graded above the
+# potential (38% under a potential of 85), most of it a season's luck, so the bar is a
+# MARGIN over the potential, read off the season's own grade before the reputation floor.
+# While you are still growing, a season that clears it adds a step; the bar then rises with
+# the potential, which is what stops it feeding on itself. Declared game design.
+POTENTIAL_MARGIN = 3                 # the season's own grade must beat your potential by this
+POTENTIAL_BIG = 8                    # ...and by this for the bigger step
+POTENTIAL_STEP = 1
+POTENTIAL_BIG_STEP = 2
+POTENTIAL_MAX = 8                    # Rating points of potential a career can earn
+# [A224] The SHAPE of a career: when it peaks and how fast it declines, drawn at the spin
+# from the seed and never shown. Real players with nine or more seasons peak anywhere from
+# their first season to their last (median 0.38 of the way through) and fall 1 to 10 points
+# from their peak, so one curve for everybody was the wrong model. Each shape stretches or
+# squeezes the standard ARC rather than replacing it: `standard` x `standard` IS the ARC.
+PEAK_SEASONS = {"early": 3, "standard": 5, "late": 7}         # seasons to the peak
+DECLINE_SPEED = {"gentle": 0.7, "standard": 1.0, "steep": 1.4}  # ARC seasons per season
+PEAK_WEIGHTS = {"early": 1, "standard": 2, "late": 1}
+DECLINE_WEIGHTS = {"gentle": 1, "standard": 2, "steep": 1}
+# [A224] ...and a CLOCK that form moves: past the peak, a season graded this far above your
+# Rating ages you half a season, and a poor one (POOR_PERCENTILE) a season and a half.
+CLOCK_MARGIN = 3
+CLOCK_SLOW = 0.5
+CLOCK_FAST = 1.5
+DEBUT_AGE = 19                      # shown only: a career's age is its debut age plus seasons
 # Franchises pay for what you are AND what you just did: an offer is priced on this blend.
 MARKET_FORM_WEIGHT = 0.4
 # A youngster's first two seasons cannot cost him his place (ratified with the lower start).
@@ -488,6 +513,7 @@ class EventOption:
     outcomes: tuple[Outcome, ...] = ()  # [A214]
     story: str = ""                     # [A214] what the season card says about the choice
     injury: str = ""                    # [A214] a line for the injury record
+    age: float = 0.0                    # [A224] seasons added to the career clock (minus: held back)
 
 
 @dataclass(frozen=True)
@@ -546,7 +572,7 @@ EVENTS: tuple[Event, ...] = (
           "the fast bowler's injury.", 2,
           (EventOption("Surgery and a long rehab", missed=9, injury="Back stress fracture, surgery (9 matches)",
                        story="You missed most of the league, but your action is intact."),
-           EventOption("Manage it and keep bowling", missed=3, permanent=-3,
+           EventOption("Manage it and keep bowling", missed=3, permanent=-3, age=0.5,
                        injury="Back stress fracture, managed (3 matches)",
                        story="You kept bowling through it and lost a yard of pace for good.")),
           when="pace", injury=True),
@@ -566,12 +592,19 @@ EVENTS: tuple[Event, ...] = (
            EventOption("Play there first", permanent=1, missed=4,
                        story="A month of cricket at home sharpened you, at the cost of four IPL matches.")),
           when="overseas"),
+    # [A224] A decision about how long you last, offered only to a senior player.
+    Event("fitness", "A fitness programme", "A fitness coach offers a punishing off-season "
+          "programme to keep you going for longer.", 1,
+          (EventOption("Commit to it", season=-1, age=-0.5,
+                       story="The off-season programme left you a little heavy-legged this year."),
+           EventOption("Not this year")), when="veteran"),
     Event("one_more", "One more season?", "You are past your best, and the franchise still wants you.", 3,
           (EventOption("One more year"),
            EventOption("Retire on a high", retire=True)), when="late"),
 )
 
 LATE_FROM = 10                       # "One more season?" from the eleventh season on
+VETERAN_FROM = 7                     # [A224] the fitness programme from the eighth
 
 # [A214] How injury-prone each role is: the weight of an injury card is multiplied by this.
 # Declared, since the archive records no injuries: fast bowlers break down far more often
@@ -586,7 +619,7 @@ NOT_IN_A_SQUAD_SEASON = frozenset({"captain"})
 
 # How often a card may come up in one career. Unlisted: no limit beyond no-repeats.
 EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 3, "injury": 2, "mentor": 2, "slump": 2,
-               "fracture": 1}
+               "fracture": 1, "fitness": 2}
 
 
 class CareerError(ValueError):
@@ -727,8 +760,92 @@ def ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
     )
 
 
-def arc_point(k: int, permanent: float, season: float) -> float:
-    return max(ABILITY_FLOOR, min(ABILITY_CAP, ARC[k] + permanent + season))
+@dataclass(frozen=True)
+class Shape:
+    """When a career peaks and how fast it declines [A224]. Read through a career clock,
+    which runs one season a season unless form moves it in the decline. The rise is the
+    ARC's first five seasons stretched to `PEAK_SEASONS`, then one season at the peak, then
+    the ARC's decline at `DECLINE_SPEED`: so the standard shape at clock k is ARC[k]."""
+
+    peak: str = "standard"
+    decline: str = "standard"
+
+    @property
+    def rise(self) -> int:
+        return PEAK_SEASONS[self.peak]
+
+    def arc_age(self, clock: float) -> float:
+        """Where on the standard ARC this clock stands."""
+        r = self.rise
+        if clock <= r:
+            return clock * 5 / r
+        if clock <= r + 1:
+            return 5 + (clock - r)
+        return 6 + (clock - r - 1) * DECLINE_SPEED[self.decline]
+
+    def arc(self, clock: float) -> float:
+        a = self.arc_age(clock)
+        if a >= len(ARC) - 1:
+            return ARC[-1]
+        i = int(a)
+        return ARC[i] + (ARC[i + 1] - ARC[i]) * (a - i)
+
+    def growing(self, clock: float) -> bool:
+        """Still rising or at the peak: development and potential can still grow."""
+        return clock < self.rise + 1
+
+    def declining(self, clock: float) -> bool:
+        return not self.growing(clock)
+
+
+STANDARD = Shape()
+
+
+def draw_shape(seed: int) -> Shape:
+    """A new career's shape, from the seed alone (never a choice), hidden from the player."""
+    rng = random.Random(f"{seed}:shape")
+    peak = rng.choices(list(PEAK_WEIGHTS), weights=list(PEAK_WEIGHTS.values()))[0]
+    decline = rng.choices(list(DECLINE_WEIGHTS), weights=list(DECLINE_WEIGHTS.values()))[0]
+    return Shape(peak, decline)
+
+
+def arc_point(k: float, permanent: float, season: float, shape: Shape = STANDARD) -> float:
+    """Ability `t` at career clock `k` (a season count for a career from before A224)."""
+    return max(ABILITY_FLOOR, min(ABILITY_CAP, shape.arc(k) + permanent + season))
+
+
+def potential_legend(deck: Deck, role: str, ceiling: Card) -> Card | None:
+    """Where a growing potential heads [A224]: the role's best real season that is better than
+    your ceiling both on the card and at the role's job. Raising the potential moves your top
+    card toward it, so every number you play with is still a mix of real players' (A197),
+    never an extrapolation past one. None when the ceiling is already the best there is."""
+    _, ceilings = template_pools(deck, role)
+    better = [c for c in ceilings if c.display > ceiling.display
+              and main_rating(c, role) >= main_rating(ceiling, role)]
+    return max(better, key=lambda c: (c.display, main_rating(c, role), c.season_year, c.person_id),
+               default=None)
+
+
+def potential_room(ceiling: Card, legend: Card | None) -> float:
+    """Rating points of potential this career can ever earn."""
+    if legend is None:
+        return 0.0
+    return float(max(0, min(POTENTIAL_MAX, min(99, legend.display) - ceiling.display)))
+
+
+def top_card(ceiling: Card, legend: Card | None, points: float) -> Card:
+    """Your top card with `points` of potential earned: the ceiling moved toward the legend
+    by that many card points, its numbers mixed as `ability` mixes them."""
+    if points <= 0 or legend is None or legend.display <= ceiling.display:
+        return ceiling
+    s = min(1.0, points / (legend.display - ceiling.display))
+    return dataclasses.replace(
+        ceiling, display=ceiling.display + points,
+        bat=_lin(ceiling.bat, legend.bat, s), bowl=_lin(ceiling.bowl, legend.bowl, s),
+        bat_scoring=_lin(ceiling.bat_scoring, legend.bat_scoring, s),
+        bat_dismissal=_geo(ceiling.bat_dismissal, legend.bat_dismissal, s),
+        bowl_scoring=_lin(ceiling.bowl_scoring, legend.bowl_scoring, s),
+        bowl_dismissal=_geo(ceiling.bowl_dismissal, legend.bowl_dismissal, s))
 
 
 def rating_at(start: Card, ceiling: Card, t: float) -> int:
@@ -738,9 +855,11 @@ def rating_at(start: Card, ceiling: Card, t: float) -> int:
     return max(RATING_FLOOR, min(99, round(r)))
 
 
-def market_for(start: Card, ceiling: Card, cp: "Checkpoint") -> int | None:
+def market_for(start: Card, ceiling: Card, cp: "Checkpoint", shape: Shape = STANDARD,
+               legend: Card | None = None) -> int | None:
     """What clubs price you on going into the season the checkpoint stands before."""
-    return market_value(rating_at(start, ceiling, arc_point(cp.k, cp.permanent, 0.0)),
+    top = top_card(ceiling, legend, cp.potential)
+    return market_value(rating_at(start, top, arc_point(cp.clock, cp.permanent, 0.0, shape)),
                         cp.last_display)
 
 
@@ -1310,6 +1429,7 @@ def event_sequence(seed: int, overseas: bool = False, role: str | None = None) -
                    if (not out or e.key == "quiet" or e is not out[-1])
                    and used.get(e.key, 0) < EVENT_LIMIT.get(e.key, MAX_SEASONS)
                    and (e.when != "late" or k >= LATE_FROM)
+                   and (e.when != "veteran" or k >= VETERAN_FROM)
                    and (e.when != "overseas" or overseas)
                    and (e.when != "pace" or role == "pace")]
         e = rng.choices(allowed, weights=[e.weight * (risk if e.injury else 1.0)
@@ -1352,6 +1472,36 @@ def absence_words(reason: str, missed: int, first: int) -> str:
     return f"You missed {missed} {plural} with {reason} ({span})."
 
 
+def potential_words(before: int, after: int, grade: int | None) -> str:
+    """The season card's line for a raised potential [A224]."""
+    if grade is not None:
+        return (f"A season graded {grade} against your potential of {before}: "
+                f"potential raised to {after}.")
+    return f"What you have added carried you past your potential: raised to {after}."
+
+
+def clock_words(step: float) -> str:
+    """The season card's line when form moves the career clock [A224]."""
+    if step < 1:
+        return "Form like that holds back the years: half a season of ageing saved."
+    return "A poor season this late in a career takes more out of you: half a season of extra ageing."
+
+
+def shape_words(shape: Shape, before: float, after: float, age: int) -> str | None:
+    """The hints that give a hidden career shape away as it happens [A224]: an early peak as it
+    arrives, a late bloomer still rising when most players have peaked, and how the body is
+    holding up as the decline begins."""
+    if shape.peak == "early" and before < shape.rise <= after:
+        return f"At {age} you are already close to your best."
+    if shape.peak == "late" and before < PEAK_SEASONS["standard"] <= after:
+        return f"Still improving at {age}: you are coming into your own late."
+    if before <= shape.rise + 1 < after:
+        return {"gentle": "Past your peak now, but your body is holding up well.",
+                "steep": "Past your peak now, and the years are catching up with you quickly.",
+                }.get(shape.decline, "Past your peak now.")
+    return None
+
+
 def development_words(dev: float) -> str:
     """The season card's line for a young player's development [A214]."""
     return (f"{'What you did this season' if dev > 0 else 'A hard season'} "
@@ -1359,13 +1509,23 @@ def development_words(dev: float) -> str:
             f"{'to' if dev > 0 else 'from'} next season.")
 
 
-def _effect_words(text: str, season: int, permanent: int, missed: int) -> str:
+def age_words(age: float) -> str:
+    """A change to the career clock in words [A224]."""
+    span = ("half a season" if abs(age) == 0.5 else "a season" if abs(age) == 1
+            else f"{abs(age):g} seasons")
+    return f"{span} of ageing held back" if age < 0 else f"{span} older"
+
+
+def _effect_words(text: str, season: int, permanent: int, missed: int,
+                  age: float = 0.0) -> str:
     """A sentence on the season card: the story, then what it did in numbers [A214]."""
     bits = []
     if season:
         bits.append(f"{season:+d} Rating this season")
     if permanent:
         bits.append(f"{permanent:+d} Rating for good")
+    if age:
+        bits.append(age_words(age))
     if missed:
         bits.append(f"{missed} match{'es' if missed != 1 else ''} missed")
     return text + (f" ({', '.join(bits)})" if bits else "")
@@ -1375,9 +1535,14 @@ def _effect_words(text: str, season: int, permanent: int, missed: int) -> str:
 # functions above and below produce, so it lives beside them: a change of wording that this
 # stops recognising fails `tests/test_career_web.py`, which feeds it each generator's output.
 _NOTE_UP = re.compile(r"\badds \d+ Rating to next season|more runs per 100 balls"
-                      r"|get out \d+% less often|fewer runs an over|take wickets \d+% more often")
+                      r"|get out \d+% less often|fewer runs an over|take wickets \d+% more often"
+                      r"|potential raised to|raised to \d+\.$|holds back the years"
+                      r"|of ageing held back|already close to your best|Still improving at"
+                      r"|holding up well")
 _NOTE_DOWN = re.compile(r"\btakes \d+ Rating from next season|fewer runs per 100 balls"
-                        r"|get out \d+% more often|more runs an over|take wickets \d+% less often")
+                        r"|get out \d+% more often|more runs an over|take wickets \d+% less often"
+                        r"|takes more out of you|catching up with you quickly|season older\b"
+                        r"|seasons older\b")
 
 
 def note_tone(text: str) -> str:
@@ -1502,6 +1667,8 @@ class SeasonRecord:
     absence: str = ""                  # why the season's absence happened (A216)
     absent_from: int = 0               # its first league match, 1-based; 0 = none
     tenure: int = 0                    # seasons in a row at this club before this one (A216)
+    potential: float = 0.0             # potential points earned before this season (A224)
+    clock: float | None = None         # the career clock this season was played at (A224)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -2305,6 +2472,17 @@ class Career:
     live_milestones: list[CareerMilestone] = field(default_factory=list)
     # A mega auction decided in THIS call (A212), for the page to play; None otherwise.
     auction: MegaResult | None = None
+    shape: Shape = STANDARD            # hidden (A224)
+    legend: Card | None = None         # where a growing potential heads (A224)
+
+    @property
+    def potential_points(self) -> float:
+        return self.checkpoint.potential if self.checkpoint else 0.0
+
+    @property
+    def top(self) -> Card:
+        """Your top card now: the ceiling, moved by the potential earned so far (A224)."""
+        return top_card(self.ceiling, self.legend, self.potential_points)
 
     @property
     def complete(self) -> bool:
@@ -2351,8 +2529,8 @@ def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
     if not rated:
         return None
     best = max(rated, key=lambda r: (r.rating, -r.year))
-    card = ability(career.start, career.ceiling, best.ability, setup=career.setup, fs_id=0,
-                   year=best.year, franchise=None)
+    card = ability(career.start, top_card(career.ceiling, career.legend, best.potential),
+                   best.ability, setup=career.setup, fs_id=0, year=best.year, franchise=None)
     return best, dataclasses.replace(card, display=best.rating)
 
 
@@ -2423,6 +2601,13 @@ class Checkpoint:
     # injuries of the career so far, [year, what].
     later: list[dict] = field(default_factory=list)
     injuries: list[list] = field(default_factory=list)
+    # [A224] The career clock (one season a season unless form moves it in the decline), the
+    # potential points earned, and whether the career has a drawn shape. A career from before
+    # A224 has none: its clock picks up at its season count and its shape stays standard, so
+    # its curve does not change shape halfway through.
+    clock: float = 0.0
+    potential: float = 0.0
+    shaped: bool = True
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -2441,7 +2626,42 @@ class Checkpoint:
                    last_display=d["last_display"], squad=d["squad"], seasons=seasons,
                    ended=d.get("ended"), contract=contract, captain=d.get("captain"),
                    plan=dict(d.get("plan") or {}), later=list(d.get("later") or []),
-                   injuries=[list(i) for i in d.get("injuries") or []])
+                   injuries=[list(i) for i in d.get("injuries") or []],
+                   clock=d.get("clock", float(d["k"])), potential=d.get("potential", 0.0),
+                   shaped=d.get("shaped", False))
+
+
+def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
+                   legend: Card | None, shape: Shape) -> str | None:
+    """Raise the potential after a season, if it earned a raise [A224], and say so.
+
+    Two ways, both only while you are still growing. A season whose own grade beats your
+    potential by `POTENTIAL_MARGIN` adds a step (two by `POTENTIAL_BIG`). And Rating points
+    for good that the potential would otherwise swallow -- next season's ability already at
+    the cap -- move into it, so a mentor's "+3 for good" is never wasted at your peak. What
+    stays as points for good is rescaled so it is still worth the same Rating points on the
+    bigger gap. `cp.clock` must already be next season's."""
+    if not growing:
+        return None
+    top = top_card(ceiling, legend, cp.potential)
+    before = round(top.display)
+    gain = 0
+    if grade >= before + POTENTIAL_MARGIN:
+        gain = POTENTIAL_BIG_STEP if grade >= before + POTENTIAL_BIG else POTENTIAL_STEP
+    gap = max(1, top.display - start.display)
+    spill = (max(0.0, min(cp.permanent, shape.arc(cp.clock) + cp.permanent - ABILITY_CAP))
+             if cp.permanent > 0 else 0.0)
+    total = max(0.0, min(gain + spill * gap, potential_room(ceiling, legend) - cp.potential))
+    if total <= 0:
+        return None
+    cp.permanent -= max(0.0, total - gain) / gap
+    cp.potential += total
+    new_gap = max(1, top_card(ceiling, legend, cp.potential).display - start.display)
+    cp.permanent *= gap / new_gap
+    after = round(top_card(ceiling, legend, cp.potential).display)
+    if after == before:
+        return None
+    return potential_words(before, after, grade if gain else None)
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -2456,8 +2676,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     setup.check()
     start, ceiling = spin(deck, seed, setup.role)
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
+    shape = draw_shape(seed) if cp.shaped else STANDARD
+    legend = potential_legend(deck, setup.role, ceiling)
     career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
-                    seasons=cp.seasons)
+                    seasons=cp.seasons, shape=shape, legend=legend)
     queue = list(moves)
 
     def nxt() -> str | None:
@@ -2482,9 +2704,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     career.retired, career.released = cp.ended == "retired", cp.ended == "released"
     while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
         k = cp.k
+        clock = cp.clock
+        top = top_card(ceiling, legend, cp.potential)
         year = setup.debut + k
         squad_now, mega_note = cp.squad, ""
-        market = market_for(start, ceiling, cp)
+        market = market_for(start, ceiling, cp, shape, legend)
         if year in MEGA_YEARS and k > 0:
             cp.contract = None                 # a mega auction ends every deal (A212)
             mo = mega_offer(deck, year, cp.current, market)
@@ -2492,7 +2716,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             move = nxt()
             if move is None:
                 if mo.retain is not None:
-                    here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
+                    here = ability(start, top, arc_point(clock, cp.permanent, 0.0, shape), setup=setup,
                                    fs_id=mo.retain.fs_id, year=year, franchise=mo.retain.franchise)
                     pos, rank = where_you_play(deck, here, mo.retain.fs_id)
                     mo = dataclasses.replace(mo, retain=dataclasses.replace(
@@ -2522,7 +2746,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             career.checkpoint = copy.deepcopy(cp)
             move = nxt()
             if move is None:
-                here = ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup,
+                here = ability(start, top, arc_point(clock, cp.permanent, 0.0, shape), setup=setup,
                                fs_id=offers[0].fs_id, year=year, franchise=offers[0].franchise)
                 placed = []
                 for o in offers:
@@ -2558,7 +2782,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if move is None:
                 text = event.text
                 if event.who:
-                    probe = ability(start, ceiling, 0.0, setup=setup, fs_id=offer.fs_id,
+                    probe = ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id,
                                     year=year, franchise=offer.franchise)
                     text = text.replace("{name}", event_name(deck, event, offer.fs_id, year,
                                                              probe) or "A senior player")
@@ -2574,7 +2798,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         perm_before = cp.permanent
         landed_missed = 0
         for lt in cp.later:
-            cp.permanent += points_t(lt["permanent"], start, ceiling)
+            cp.permanent += points_t(lt["permanent"], start, top)
             landed_missed += lt["missed"]
             notes.append(_effect_words(lt["text"], 0, lt["permanent"], lt["missed"]))
             if lt["injury"]:
@@ -2584,27 +2808,27 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         now = outcome if outcome is not None and not outcome.next_season else None
         if outcome is not None and outcome.next_season:
             cp.later.append(dataclasses.asdict(outcome))
-        cp.permanent += points_t(option.permanent, start, ceiling)
-        t = arc_point(k, cp.permanent, points_t(option.season, start, ceiling))
+        cp.permanent += points_t(option.permanent, start, top)
+        t = arc_point(clock, cp.permanent, points_t(option.season, start, top), shape)
         extra = option.missed + landed_missed + (now.missed if now else 0)
         for line in (option.injury, now.injury if now else ""):
             if line:
                 cp.injuries.append([year, line])
         if option.story:
             name = (event_name(deck, event, offer.fs_id, year,
-                               ability(start, ceiling, 0.0, setup=setup, fs_id=offer.fs_id,
+                               ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id,
                                        year=year, franchise=offer.franchise)) or "A senior player"
                     if event.who else "")
             notes.append(_effect_words(option.story.replace("{name}", name), option.season,
-                                       option.permanent, option.missed))
+                                       option.permanent, option.missed, option.age))
         if now is not None:
             notes.append(_effect_words(now.text, 0, now.permanent, now.missed))
         if outcome is not None and outcome.next_season and any(o.permanent > 0 for o in option.outcomes):
             notes.append("Whether it works, you will see next season.")
         skill = skill_words(
-            ability(start, ceiling, arc_point(k, perm_before, 0.0), setup=setup, fs_id=offer.fs_id,
+            ability(start, top, arc_point(clock, perm_before, 0.0, shape), setup=setup, fs_id=offer.fs_id,
                     year=year, franchise=offer.franchise),
-            ability(start, ceiling, arc_point(k, cp.permanent, 0.0), setup=setup, fs_id=offer.fs_id,
+            ability(start, top, arc_point(clock, cp.permanent, 0.0, shape), setup=setup, fs_id=offer.fs_id,
                     year=year, franchise=offer.franchise))
         if skill:
             notes.append(skill)
@@ -2613,7 +2837,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         absence_label = (event.title.lower() if option.injury or (now and now.missed) or
                          event.key in ("slump", "home_league") and extra else
                          "an injury that came back" if landed_missed else "")
-        you = ability(start, ceiling, t, setup=setup, fs_id=offer.fs_id, year=year,
+        you = ability(start, top, t, setup=setup, fs_id=offer.fs_id, year=year,
                       franchise=offer.franchise)
         captain_now = option.captain or (already and not squad_now)
         plan: tuple[tuple[str, str], ...] = ()
@@ -2635,7 +2859,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                               teams=0, squad=squad_now, extra_missed=option.missed, mega=mega_note,
                               contract_year=(CONTRACT_YEARS - cp.contract.left + 1
                                              if cp.contract else 0),
-                              rating=rating_at(start, ceiling, t), absence=absence_label,
+                              rating=rating_at(start, top, t), absence=absence_label,
                               tenure=tenure_at(cp.seasons, offer.franchise))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
@@ -2648,7 +2872,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 current = dict(a[1])
         try:
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
-                                                   (setup, start, ceiling, offer, option, t,
+                                                   (setup, start, top, offer, option, t,
                                                     squad_now, record.tenure), answers, plan)
         except _NeedMoment as need:
             # The season stops at a key moment: told up to here, waiting for your call.
@@ -2679,14 +2903,33 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if cp.squad:
                 notes.append(f"A poor season, but at {DEBUT_AGE + k} the franchise is giving you time.")
             cp.squad, released = False, False      # a youngster gets time (A214)
-        dev = round(2 * DEV_POINTS * (played.percentile - 0.5), 1) if k < DEV_SEASONS else 0.0
+        growing = shape.growing(clock)
+        dev = round(2 * DEV_POINTS * (played.percentile - 0.5), 1) if growing else 0.0
         played.development = dev
-        cp.permanent += points_t(dev, start, ceiling)
+        cp.permanent += points_t(dev, start, top)
         if abs(dev) >= 0.5:
             notes.append(development_words(dev))
         if played.absence and not played.extra_missed:
             notes.append(absence_words(played.absence, played.missed - played.dropped,
                                        played.absent_from))
+        # [A224] Set on the PLAYED record, never on `record` before the season: the season
+        # cache shares a record between careers that reach it with different clocks.
+        played.potential, played.clock = cp.potential, clock
+        step = 1.0 + option.age
+        if shape.declining(clock):
+            if played.form >= played.rating + CLOCK_MARGIN:
+                step += CLOCK_SLOW - 1.0
+                notes.append(clock_words(CLOCK_SLOW))
+            elif played.percentile < poor_bar(setup.role):
+                step += CLOCK_FAST - 1.0
+                notes.append(clock_words(CLOCK_FAST))
+        cp.clock = clock + step
+        hint = shape_words(shape, clock, cp.clock, DEBUT_AGE + k)
+        if hint:
+            notes.append(hint)
+        raised = grow_potential(cp, played.form, growing, start, ceiling, legend, shape)
+        if raised:
+            notes.append(raised)
         played.notes = notes
         cp.captain = next_captain(captain_now, cp.squad, canonical(offer.franchise))
         if bowlers:

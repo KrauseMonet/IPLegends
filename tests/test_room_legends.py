@@ -60,7 +60,8 @@ def test_the_legend_is_the_season_of_your_best_rating(career, legend):
     card = snapshot_deck._card_from(legend["card"])
     assert card.display == best.rating
     # the numbers the engine played that season, not the ceiling's
-    played = C.ability(career.start, career.ceiling, best.ability, setup=career.setup,
+    top = C.top_card(career.ceiling, career.legend, best.potential)       # that season's (A224)
+    played = C.ability(career.start, top, best.ability, setup=career.setup,
                        fs_id=0, year=best.year, franchise=None)
     assert card.bat_scoring == played.bat_scoring and card.bat_dismissal == played.bat_dismissal
     assert card.positions == career.start.positions

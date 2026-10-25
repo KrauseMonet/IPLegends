@@ -152,6 +152,7 @@ function crHead(d, hold){
   if (hold && d.season_play && d.season_play.complete && d.seasons.length){
     const r = d.seasons[d.seasons.length - 1];
     d = {...d, seasons: d.seasons.slice(0, -1), rating: r.rating || d.rating, age: r.age || d.age,
+         potential: r.potential || d.potential,
          pending: {kind: 'season', offers: [{franchise: r.franchise, crest: r.crest}]}};
   }
   const s = d.seasons, last = s[s.length - 1];
@@ -161,6 +162,9 @@ function crHead(d, hold){
   const clubName = club ? club.franchise : last ? last.franchise : 'Unsigned';
   const lo = d.start.card || 70, hi = d.potential || 99;
   const pct = Math.max(4, Math.min(100, Math.round(100 * (d.rating - lo) / Math.max(1, hi - lo))));
+  // [A224] What the potential has grown by, shown apart from what the spin gave you.
+  const was = Math.min(hi, d.potential_start || hi), earned = hi - was;
+  const from = Math.round(100 * (was - lo) / Math.max(1, hi - lo));
   const runs = s.reduce((a, r) => a + r.runs, 0), wkts = s.reduce((a, r) => a + r.wickets, 0);
   const tot = s.length ? `<div class="cr-tot">
       <span><b>${s.length}</b> season${s.length === 1 ? '' : 's'}</span>
@@ -176,9 +180,9 @@ function crHead(d, hold){
       </div>
       <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
       <div class="cr-pc-foot">
-        <div class="cr-pot" title="From where you started (${lo}) to your potential (${hi})">
-          <div class="cr-pot-bar"><i style="width:${pct}%"></i></div>
-          <span>Potential <b>${hi}</b></span></div>
+        <div class="cr-pot" title="From where you started (${lo}) to your potential (${hi})${earned ? `, ${earned} of it earned` : ''}">
+          <div class="cr-pot-bar"><i style="width:${pct}%"></i>${earned ? `<u style="left:${from}%"></u>` : ''}</div>
+          <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
       </div>
     </div>`;
@@ -188,8 +192,11 @@ function crHead(d, hold){
 // grade, and your potential as a line. Rating moves with age and what happens to you; the
 // dots are the luck of each season around it.
 function crTimeline(d, hold, open){
-  const s = hold && d.season_play && d.season_play.complete ? d.seasons.slice(0, -1) : d.seasons;
+  const held = hold && d.season_play && d.season_play.complete;
+  const s = held ? d.seasons.slice(0, -1) : d.seasons;
   if (!s.length){ $('#crTimeline').innerHTML = ''; return; }
+  // [A224] the potential as it stood: each season's own line, and the key the latest
+  const pot = held ? (d.seasons[d.seasons.length - 1].potential || d.potential) : d.potential;
   const y = v => Math.max(0, Math.min(100, (v - 55) / (99 - 55) * 100));
   const peak = Math.max(...s.map(r => r.rating || r.card));
   // Gridlines at 70, 80 and 90 across the whole plot, as a background that scrolls with it
@@ -206,14 +213,14 @@ function crTimeline(d, hold, open){
         <span class="cr-path-tiers" title="Rating bars by level">Rating <i class="t base"></i>&lt;77 <i class="t good"></i>77+
           <i class="t star"></i>84+ <i class="t elite"></i>90+</span>
         <span><i class="dot hot"></i>Grade 3+ above <i class="dot cold"></i>3+ below <i class="dot"></i>close</span>
-        <span><i class="pot"></i>Potential ${d.potential}</span>
+        <span><i class="pot"></i>Potential ${pot}</span>
         ${s.some(r => r.squad) ? '<span><i class="t good faded"></i>Squad season</span>' : ''}</div>
       <div class="cr-path-plot" style="background-image:${grid}">
         ${s.map((r, i) => { const rt = r.rating || r.card; return `
         <div class="cr-path-col${r.champion ? ' champ' : ''}${r.squad ? ' squad' : ''}" title="${r.year} · ${esc(r.franchise)} · Rating ${rt} · grade ${r.card}${r.champion ? ' · champions' : ''}">
           <div class="cr-path-area">
             ${i ? '' : [70, 80, 90].map(g => `<span class="cr-path-axis" style="bottom:${y(g)}%">${g}</span>`).join('')}
-            <div class="cr-path-pot" style="bottom:${y(d.potential)}%"></div>
+            <div class="cr-path-pot" style="bottom:${y(r.potential || d.potential)}%"></div>
             <div class="cr-path-bar ${crTier(rt)}" style="height:${y(rt)}%"><b>${rt}</b></div>
             ${r.champion ? `<div class="cr-path-cup" style="bottom:${y(rt)}%">🏆</div>` : ''}
             <div class="cr-path-dot${r.card >= rt + 3 ? ' hot' : r.card <= rt - 3 ? ' cold' : ''}" style="bottom:${y(r.card)}%"></div>
@@ -245,9 +252,11 @@ function crSpin(d){
       ${crTemplateCard('You start like', d.start, 'start', 'your Rating at 19')}
       ${crTemplateCard('Your ceiling', d.ceiling, 'ceiling', 'your potential')}
     </div>
-    <p class="room-note">Your Rating climbs from the first toward the second over your first
-      five or six seasons, then falls away with age. Coaches, mentors and injuries move it;
-      each season's grade is how the matches actually went.</p>
+    <p class="room-note">Your Rating climbs from the first toward the second, then falls away
+      with age. When you peak and how fast you fade are for you to find out. The second is not
+      a limit: a season graded well above it raises your potential while you are still growing,
+      and good form in your thirties slows the decline. Coaches, mentors and injuries move your
+      Rating; each season's grade is how the matches actually went.</p>
     <div class="foot-actions cr-held" id="crSpinGo" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>
     </div>`;

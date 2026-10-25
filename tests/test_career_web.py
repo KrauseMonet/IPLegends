@@ -621,3 +621,61 @@ def test_the_career_cards_bowling_rates_add_up_from_its_seasons(client):
                             type("S", (), {"bowl_balls": 6, "best": (3, 17)}),
                             type("S", (), {"bowl_balls": 6, "best": (2, 4)})]) == "3/17"
     assert R._best_bowling([type("S", (), {"bowl_balls": 0, "best": (0, 0)})]) is None
+
+
+# --- [A227] an admin rerolls the spins of a career that has not begun ---------------------------
+
+
+def _signed(client, account_id):
+    from web import auth
+    client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(account_id))
+
+
+def _payload(token):
+    body = token.rsplit(".", 1)[0]
+    return json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+
+
+@pytest.fixture
+def admins(monkeypatch):
+    monkeypatch.setenv("ADMIN_ACCOUNT_IDS", "7")
+    monkeypatch.delenv("DAILY_RESET_ACCOUNT_ID", raising=False)
+
+
+def test_only_an_admin_may_reroll(client, admins):
+    d = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,
+                                               "seed": 5}).json()
+    client.cookies.clear()
+    assert client.post("/api/career/reroll", json={"token": d["token"]}).status_code == 401
+    _signed(client, 8)
+    assert client.post("/api/career/reroll", json={"token": d["token"]}).status_code == 404
+    client.cookies.clear()
+
+
+def test_a_reroll_is_the_same_player_on_a_new_seed(client, admins):
+    d = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,
+                                               "overseas": True, "seed": 5}).json()
+    _signed(client, 7)
+    r = client.post("/api/career/reroll", json={"token": d["token"]})
+    client.cookies.clear()
+    assert r.status_code == 200
+    n = r.json()
+    old, new = _payload(d["token"]), _payload(n["token"])
+    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True]
+    assert new["seed"] != old["seed"]
+    # the spins are the new seed's, exactly as a fresh start on it would draw them
+    fresh = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,
+                                                   "overseas": True, "seed": new["seed"]}).json()
+    assert (n["start"], n["ceiling"]) == (fresh["start"], fresh["ceiling"])
+    assert not n["seasons"] and n["pending"]["kind"] == "offer"
+
+
+def test_a_career_that_has_begun_cannot_be_rerolled(client, admins):
+    d = client.post("/api/career/start", json={"name": "Rolly", "role": "opener", "debut": 2012,
+                                               "seed": 5}).json()
+    moved = client.post("/api/career/move", json={"token": d["token"], "move": "o0"}).json()
+    _signed(client, 7)
+    assert client.post("/api/career/reroll", json={"token": moved["token"]}).status_code == 409
+    forged = d["token"][:-4] + "abcd"
+    assert client.post("/api/career/reroll", json={"token": forged}).status_code == 400
+    client.cookies.clear()

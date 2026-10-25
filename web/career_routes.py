@@ -25,6 +25,7 @@ from game import career as C
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
+from web import admin as admin_lib
 from web import auth, bingo_routes, career_results, crests, db
 
 router = APIRouter()
@@ -711,6 +712,34 @@ def career_start(body: StartIn) -> CareerOut:
     deck, model = _state()
     career = C.play_career(deck, model, seed, setup, [], _facts())
     return _out(seed, career, [])
+
+
+class RerollIn(BaseModel):
+    token: str = Field(max_length=200_000)
+
+
+@router.post("/api/career/reroll")
+def career_reroll(body: RerollIn, request: Request, response: Response) -> CareerOut:
+    """[A227] An admin redraws both spins of a career that has not begun: the same player
+    (name, role, debut, passport) on a new seed, so a new start, a new ceiling and a new
+    career shape. Only before the first offer is answered -- nothing played can change.
+
+    404 to anybody who is not an admin, as every admin power answers (A154). A new seed is
+    no more than starting the same career again, which anybody can do; the route is a
+    shortcut, not a privilege over the game, and a non-admin is simply not offered it."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    if not admin_lib.is_admin(account_id):
+        raise HTTPException(status_code=404, detail="not found")
+    seed, setup, checkpoint, partial = read_token(body.token)
+    if checkpoint.k or checkpoint.seasons or partial:
+        raise HTTPException(409, "Only a career that has not begun can be rerolled.")
+    rng = random.SystemRandom()
+    new = rng.randint(1, 2 ** 31)
+    while new == seed:
+        new = rng.randint(1, 2 ** 31)
+    return career_start(StartIn(name=setup.name, role=setup.role, debut=setup.debut,
+                                overseas=setup.overseas, seed=new))
 
 
 class MoveIn(BaseModel):

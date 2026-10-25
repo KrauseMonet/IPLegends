@@ -90,6 +90,21 @@ async function crStart(btn){
   finally { CR.busy = false; btn.disabled = false; }
 }
 
+// [A227] An admin redraws both spins before the career begins: the same player on a new seed.
+// The button shows only for an admin; the server answers 404 to anybody else regardless.
+async function crReroll(btn){
+  if (CR.busy) return;
+  CR.busy = true; btn.disabled = true;
+  try {
+    const d = await api('/api/career/reroll', {method: 'POST', headers: CR_JSON,
+                                                body: JSON.stringify({token: CR.data.token})});
+    crSave({token: d.token});
+    CR.seen = 0;
+    crShow(d, 'spin');
+  } catch(e){ slip(e.message || 'Could not reroll.'); }
+  finally { CR.busy = false; btn.disabled = false; }
+}
+
 // --- one move ------------------------------------------------------------------------------
 
 async function crMove(move){
@@ -269,6 +284,8 @@ function crSpin(d){
       Rating; each season's grade is how the matches actually went.</p>
     <div class="foot-actions cr-held" id="crSpinGo" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>
+      ${typeof ME !== 'undefined' && ME && ME.is_admin
+        ? '<button class="act" onclick="crReroll(this)" title="Admin only">Reroll spins</button>' : ''}
     </div>`;
   crRoll(() => {
     $('#crHead').classList.remove('cr-held');

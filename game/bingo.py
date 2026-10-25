@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 
 GUESSES = 9
 MIN_ANSWERS = 3          # every cell has at least this many valid players
@@ -221,7 +221,7 @@ def reveal(grid: Grid, facts: Facts, per_cell: int = 6) -> list[dict]:
 
 # --- sharing ------------------------------------------------------------------------------
 
-SHARE_HOST = f"{SITE_HOST}/bingo"
+SHARE_HOST = f"{SITE_ORIGIN}/bingo"
 
 
 def share_text(grid: Grid, state: State, label: str, *, daily: bool) -> str:

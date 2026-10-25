@@ -33,7 +33,7 @@ from functools import cached_property
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.guess import pool
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
@@ -41,7 +41,7 @@ LIMIT_SECONDS = 90
 LIMIT_MS = LIMIT_SECONDS * 1000
 PICKS = 3
 MAX_SCORE = 1000              # an exact trio
-SHARE_HOST = f"{SITE_HOST}/trio"
+SHARE_HOST = f"{SITE_ORIGIN}/trio"
 
 
 @dataclass(frozen=True)

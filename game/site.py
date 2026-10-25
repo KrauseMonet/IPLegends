@@ -9,6 +9,9 @@ ever disagree.
 Share links name the REAL site rather than whatever host a page happens to be served from
 (A129's reasoning): a result pasted into a chat must work for whoever reads it, and a link
 built from the request would carry a preview deployment's address into other people's messages.
+
+A share line uses `SITE_ORIGIN`, never `SITE_HOST`: several chat apps do not turn a bare
+"fineleg.app/bingo" into a link, so a pasted result could not be tapped.
 """
 
 SITE_NAME = "Fine Leg XI"

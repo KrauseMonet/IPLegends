@@ -398,7 +398,7 @@ def test_the_share_line_is_the_rhythm_the_score_and_no_names(small):
     assert lines[0] == "Fine Leg XI · Common Ground · 9 Oct 2026"
     assert lines[1] == f"2/4 · {G.score(st).points} pts"
     assert lines[2] == "🟥🟩🟩⬛⬛"                           # miss, two finds, two never found
-    assert lines[-1] == "fineleg.app/common"
+    assert lines[-1] == "https://fineleg.app/common"
     text = "\n".join(lines)
     for person in people.values():
         assert person.name not in text

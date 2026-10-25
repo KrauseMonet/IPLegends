@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from game import career as C
 from etl.franchise_map import canonical
 from game.auction import crore
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 from web import auth, bingo_routes, career_results, crests, db
 
 router = APIRouter()
@@ -618,7 +618,7 @@ def share_text(c: C.Career) -> str:
         bits.append(f"{s.titles} title{'s' if s.titles != 1 else ''}")
     bits.append(f"peak Rating {s.peak_rating}" if s.peak_rating else f"peak card {s.peak_display}")
     return (f"{SITE_NAME} · Build a Career\n{role}, debut {c.setup.debut}: "
-            f"{', '.join(bits)}\n{marks}\n{SITE_HOST}/career")
+            f"{', '.join(bits)}\n{marks}\n{SITE_ORIGIN}/career")
 
 
 def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:

@@ -46,11 +46,23 @@ def test_the_scripts_that_build_links_use_the_shared_origin_not_their_own():
 
 
 def test_every_share_line_points_at_the_site_and_names_it():
-    from game import bingo, ground, guess, xi
+    """With the scheme: a bare "fineleg.app/bingo" is not made into a link by several chat
+    apps, so a pasted result could not be tapped."""
+    from game import bingo, ground, guess, trio, xi
     from web import daily
-    for module, path in ((bingo, "bingo"), (guess, "guess"), (ground, "common"), (xi, "xi")):
-        assert module.SHARE_HOST == f"{site.SITE_HOST}/{path}"
-    assert daily.SHARE_URL == f"{site.SITE_HOST}/daily"
+    for module, path in ((bingo, "bingo"), (guess, "guess"), (ground, "common"), (xi, "xi"),
+                         (trio, "trio")):
+        assert module.SHARE_HOST == f"https://{site.SITE_HOST}/{path}"
+    assert daily.SHARE_URL == f"https://{site.SITE_HOST}/daily"
+
+
+def test_no_share_line_is_built_from_the_bare_host():
+    """Every share line in the Python that builds them uses the full origin. `SITE_HOST` is
+    the address without its scheme and has no business in text a reader is meant to tap."""
+    for f in list((ROOT / "game").glob("*.py")) + list((ROOT / "web").glob("*.py")):
+        if f.name == "site.py":
+            continue
+        assert "SITE_HOST" not in text(f), f"{f.name} builds a link from the bare host"
 
 
 def test_nothing_user_facing_still_carries_the_old_name():

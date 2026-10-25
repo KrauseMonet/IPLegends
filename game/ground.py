@@ -38,7 +38,7 @@ from functools import cached_property
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.guess import pool
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
@@ -50,7 +50,7 @@ BONUS_PER_SECOND_LEFT = 1       # paid only for finding the whole set
 MIN_ANSWERS, MAX_ANSWERS = 4, 8
 MIN_KNOWN, KNOWN_PROMINENCE = 3, 300    # at least three answers a fan would place
 MAX_GUESSES = 60                # a bound on the replayed list, well past any real attempt
-SHARE_HOST = f"{SITE_HOST}/common"
+SHARE_HOST = f"{SITE_ORIGIN}/common"
 
 ONLY_A, ONLY_B, NEITHER = "only_a", "only_b", "neither"
 

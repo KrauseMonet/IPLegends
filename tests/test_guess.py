@@ -269,7 +269,7 @@ def test_the_share_line_is_squares_per_guess_and_names_nobody(players):
     assert len(lines) == 1 + 3 + 1
     assert all(len(r) == 8 and set(r) <= set("🟩🟨⬛") for r in lines[1:4])
     assert lines[3] == "🟩" * 8                         # the last row is the answer himself
-    assert lines[4] == "fineleg.app/guess"
+    assert lines[4] == "https://fineleg.app/guess"
     for p in players.values():
         assert p.name not in text                     # a spoiler is the whole failure here
 

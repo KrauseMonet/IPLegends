@@ -35,7 +35,7 @@ from game.scenarios import (
     choose_deck, daily_seed, evaluate, generate, overs_words, rank_key,
 )
 from game.season import Side
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 from game.simulator import Innings, Model, Player, play_innings
 from web import session as sess
 
@@ -467,7 +467,7 @@ def played_dates(conn, account_id: int) -> list:
 # result pasted into a chat has to work for whoever reads it, and a link built from
 # whatever host the submitter happened to use would carry a preview deployment's URL into
 # other people's messages.
-SHARE_URL = f"{SITE_HOST}/daily"
+SHARE_URL = f"{SITE_ORIGIN}/daily"
 
 
 def share_text(day: "Day", result: dict, rank: int | None = None,

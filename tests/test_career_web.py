@@ -131,6 +131,8 @@ def test_a_career_ends_with_a_summary_and_a_line_with_no_player_in_it(client):
     assert d["summary"]["ending"] in ("retired", "released")
     assert d["start"]["name"] not in d["share"] and d["ceiling"]["name"] not in d["share"]
     assert "Tester" not in d["share"]
+    # The full address, so a chat app makes it a link a reader can tap.
+    assert d["share"].splitlines()[-1] == "https://fineleg.app/career"
     after = client.post("/api/career/move", json={"token": d["token"], "move": "o0"})
     assert after.status_code == 409
 

@@ -310,7 +310,7 @@ def test_the_share_line_shows_the_shape_and_names_nobody(grid, facts):
     assert sum(r.count("⬛") for r in rows[1:4]) == 7
     assert sum(r.count("🟩") + r.count("🟪") for r in rows[1:4]) == 2
     assert rows[4] == f"2/9 · {st.score} pts"
-    assert rows[5] == "fineleg.app/bingo"
+    assert rows[5] == "https://fineleg.app/bingo"
     for p in facts.players.values():
         assert p.name not in text                    # a spoiler is the whole failure here
 

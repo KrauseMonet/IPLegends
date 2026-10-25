@@ -27,13 +27,13 @@ from dataclasses import dataclass, field
 
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.puzzle_facts import PlayerFacts, XiPlayer, XiSide
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
 MISTAKES = 5
 MAX_GUESSES = 40               # a bound on the replayed list: 13 found plus 5 wrong is the most
-SHARE_HOST = f"{SITE_HOST}/xi"
+SHARE_HOST = f"{SITE_ORIGIN}/xi"
 POINTS_PER_FIND = 100          # [A188] the leaderboard score: each man named
 PENALTY_PER_MISTAKE = 20       # ... each wrong name costs this much
 BONUS_PER_MISTAKE_LEFT = 20    # ... and a complete side earns this for every mistake not made

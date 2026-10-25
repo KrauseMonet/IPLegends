@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 from game.bingo import PRACTICE_SEED_FLOOR, daily_seed, new_seed
 from game.puzzle_facts import PlayerFacts
-from game.site import SITE_HOST, SITE_NAME
+from game.site import SITE_NAME, SITE_ORIGIN
 
 __all__ = ["daily_seed", "new_seed", "PRACTICE_SEED_FLOOR"]
 
@@ -47,7 +47,7 @@ CLOSE_RATIO = 0.25            # career runs or wickets within a quarter of the a
 CLOSE_RUNS_FLOOR = 100        # ... but never tighter than this many runs,
 CLOSE_WICKETS_FLOOR = 10      # ... or this many wickets: a tail-ender's 12 runs is not "far"
 CURRENT_SEASON = 2026         # "last played" of a man still in the league
-SHARE_HOST = f"{SITE_HOST}/guess"
+SHARE_HOST = f"{SITE_ORIGIN}/guess"
 POINTS_PER_GUESS_LEFT = 100   # [A188] the leaderboard score: 100 for each guess you did NOT need
 
 ROLE_LABEL = {"batter": "Batter", "bowler": "Bowler", "allrounder": "All-rounder",

@@ -469,6 +469,12 @@ class BatterCard:
     faced_any: bool = False
     fours: int = 0
     sixes: int = 0
+    # [A225] What the engine EXPECTED of his balls, summed from each ball's own outcome
+    # probabilities: runs off the bat, and dismissals. Against `runs` and `out` it measures
+    # a season's luck exactly, with no comparison to anybody else. Read off the distribution
+    # the draw already used, so no match result changes.
+    exp_runs: float = 0.0
+    exp_outs: float = 0.0
 
 
 @dataclass
@@ -482,6 +488,11 @@ class BowlerCard:
     # bowlers if one was hit for six fours and the other for four sixes.
     fours: int = 0
     sixes: int = 0
+    # [A225] Runs off the bat conceded (`runs` also holds wides), and what the engine
+    # expected of his balls: runs off the bat and wickets.
+    off_bat: int = 0
+    exp_runs: float = 0.0
+    exp_wickets: float = 0.0
 
     @property
     def overs(self) -> str:
@@ -720,11 +731,17 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
             probs, values = model.state(
                 over if state_over is None else state_over, innings.wickets)
-            outcome = draw(split_ball(
+            dist = split_ball(
                 probs, values,
                 striker.player.bat_scoring - bowler.player.bowl_scoring,
                 striker.player.bat_dismissal * bowler.player.bowl_dismissal,
-            ), rng)
+            )
+            outcome = draw(dist, rng)
+            expected = sum(q * v for q, v in zip(dist[1:], values[1:]))
+            striker.exp_runs += expected
+            striker.exp_outs += dist[0]
+            bowler.exp_runs += expected
+            bowler.exp_wickets += dist[0]
 
             innings.balls += 1
             striker.balls += 1
@@ -760,6 +777,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                             innings.balls, striker.runs, 0, striker.balls))
                 innings.runs += runs
                 bowler.runs += runs
+                bowler.off_bat += runs
                 # [A115] Tallied from the outcome the draw ALREADY made -- no extra rng
                 # draw and no second decision, so a seeded season replays to the identical
                 # match it did before this existed (A62). Every consumer of a boundary

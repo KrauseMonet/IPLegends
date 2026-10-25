@@ -996,6 +996,12 @@ class Line:
     four_fors: int = 0
     five_fors: int = 0
     best: tuple[int, int] = (0, 0)       # (wickets, runs) in one innings
+    # [A225] what the engine expected of his balls (`BatterCard`/`BowlerCard`)
+    exp_runs: float = 0.0
+    exp_outs: float = 0.0
+    bowl_off_bat: int = 0
+    bowl_exp_runs: float = 0.0
+    bowl_exp_wickets: float = 0.0
 
 
 def season_lines(results: list[Result],
@@ -1039,6 +1045,8 @@ def season_lines(results: list[Result],
                     ln.runs += b.runs
                     ln.balls += b.balls
                     ln.outs += b.out
+                    ln.exp_runs += b.exp_runs
+                    ln.exp_outs += b.exp_outs
                     ln.highest = max(ln.highest, b.runs)
                     ln.hundreds += b.runs >= 100
                     ln.fifties += 50 <= b.runs < 100
@@ -1051,6 +1059,9 @@ def season_lines(results: list[Result],
                 ln.bowl_balls += w.balls
                 ln.bowl_runs += w.runs
                 ln.wickets += w.wickets
+                ln.bowl_off_bat += w.off_bat
+                ln.bowl_exp_runs += w.exp_runs
+                ln.bowl_exp_wickets += w.exp_wickets
                 ln.four_fors += w.wickets >= 4
                 ln.five_fors += w.wickets >= 5
                 if (w.wickets, -w.runs) > (ln.best[0], -ln.best[1]):
@@ -1188,6 +1199,58 @@ def quantile(sorted_values: list[int], p: float) -> int:
 
 def season_display(deck: Deck, year: int, card: Card, percentile: float) -> int:
     return max(70, min(99, quantile(real_displays(deck, year, _kind(card)), percentile)))
+
+
+# [A225] A season measured like a real card. A real card's two engine numbers per discipline
+# come from what the player did that season against par, pulled in by k = 100 balls (A160,
+# A35). Here the par is exact: on every ball the engine knows the outcome probabilities it
+# drew from, for that batter against that bowler in that state, so a season's LUCK is simply
+# what happened minus what the engine expected (`BatterCard.exp_runs`, `exp_outs`). Your
+# numbers that season plus that luck, pulled in by the same 100 balls, is the season as a
+# card -- Kohli 2016's card is the season, not his average.
+#
+# Two ways of doing this were measured and rejected first, by replaying 42 careers' best
+# seasons. Comparing your rates with the pooled rates of the regulars you were graded
+# against, and pulling toward the pool's level as a real card is pulled toward its band
+# (A46): a good player's best season came out WEAKER than his ordinary self in 16 of 30
+# batting careers, because the pool sits below him. Pulling toward your own level instead
+# fixed batting, but bowling still compared a death bowler's economy with everybody's, and
+# death overs cost more whoever bowls them: the season card conceded MORE than the ordinary
+# one in 10 of 18 bowling careers. The engine's own expectation has neither problem.
+MEASURE_BALLS = 100
+
+
+def _measure(balls: int, outs: int, runs: float, exp_runs: float, exp_outs: float,
+             own: tuple[float | None, float | None], cheaper: bool
+             ) -> tuple[float | None, float | None]:
+    """(scoring, dismissal) for one discipline: your numbers `own` moved by the season's
+    luck, pulled in by `MEASURE_BALLS`. Scoring is runs per ball faced, as A160's scoring
+    half is; `cheaper` is bowling, where the scoring half counts runs saved."""
+    my_s, my_d = own
+    if balls <= 0 or exp_outs <= 0 or my_s is None or not my_d:
+        return None, None
+    w = balls / (balls + MEASURE_BALLS)
+    luck = (runs - exp_runs) / balls
+    scoring = my_s + w * (-luck if cheaper else luck)
+    rate = exp_outs / balls
+    dismissal = my_d * (outs + MEASURE_BALLS * rate) / (exp_outs + MEASURE_BALLS * rate)
+    return scoring, dismissal
+
+
+def measured_halves(lines: dict, you: tuple) -> list | None:
+    """This season's four engine numbers, measured from its figures [A225]: the disciplines
+    the season is graded on (a batter's batting, a bowler's bowling, an all-rounder's both)."""
+    me = lines[you]
+    kind = _kind(me.card)
+    out: list = [None, None, None, None]
+    if kind in ("batter", "allrounder"):
+        out[0], out[1] = _measure(me.balls, me.outs, me.runs, me.exp_runs, me.exp_outs,
+                                  (me.card.bat_scoring, me.card.bat_dismissal), cheaper=False)
+    if kind in ("bowler", "allrounder"):
+        out[2], out[3] = _measure(me.bowl_balls, me.wickets, me.bowl_off_bat, me.bowl_exp_runs,
+                                  me.bowl_exp_wickets, (me.card.bowl_scoring, me.card.bowl_dismissal),
+                                  cheaper=True)
+    return out if any(v is not None for v in out) else None
 
 
 # --- offers ---------------------------------------------------------------------------
@@ -1669,6 +1732,11 @@ class SeasonRecord:
     tenure: int = 0                    # seasons in a row at this club before this one (A216)
     potential: float = 0.0             # potential points earned before this season (A224)
     clock: float | None = None         # the career clock this season was played at (A224)
+    # [A225] The engine's four numbers as THIS season's figures measure them, the way a real
+    # card's are measured from its season: [bat scoring, bat dismissal, bowl scoring, bowl
+    # dismissal], None where the season is not judged on that discipline. None on a season
+    # played before A225.
+    measured: list | None = None
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -2303,6 +2371,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.teams = len(season.sides)
     record.percentile = season_percentile(lines, key)
     record.display = season_display(deck, you.season_year, you, record.percentile)
+    record.measured = measured_halves(lines, key)
     record.position = next(i for i, s in enumerate(season.table, 1) if s.side is yours)
     record.playoffs = record.position <= 4
     final = season.playoffs[-1]
@@ -2521,10 +2590,24 @@ def summarise(career: Career, real_runs: list[int] | None = None,
 
 
 def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
-    """The best version of you [A215]: the season of your highest Rating, as the card the
-    engine played that season (events in it included), rated at that Rating. What a friends'
-    auction room brings in when its career-legends setting is on. None for a career whose
-    seasons carry no Rating (a token from before A214)."""
+    """The best version of you: what a friends' auction room brings in when its career-legends
+    setting is on (A215).
+
+    [A225] Your BEST SEASON -- the highest Season grade, then the higher Rating, then the
+    earlier year -- carded the way a real season is: rated at its grade, playing the four
+    numbers its own figures measure (`measured_halves`). Seasons played before A225 carry no
+    measurement; a career with none falls back to A215's rule, the season of your highest
+    Rating, played and rated at that Rating. None for a career whose seasons carry no Rating
+    (a token from before A214)."""
+    measured = [r for r in career.seasons if r.measured]
+    if measured:
+        best = max(measured, key=lambda r: (r.display, r.rating, -r.year))
+        card = ability(career.start, top_card(career.ceiling, career.legend, best.potential),
+                       best.ability, setup=career.setup, fs_id=0, year=best.year, franchise=None)
+        fields = dict(zip(("bat_scoring", "bat_dismissal", "bowl_scoring", "bowl_dismissal"),
+                          best.measured))
+        return best, dataclasses.replace(card, display=best.display,
+                                         **{k: v for k, v in fields.items() if v is not None})
     rated = [r for r in career.seasons if r.rating]
     if not rated:
         return None

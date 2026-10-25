@@ -832,6 +832,8 @@ class HallOut(BaseModel):
     card: dict
     completed_at: str
     legend: bool = False          # can be brought into a friends' auction (A215)
+    honours: list[str] = []       # which induction honours it holds (A225)
+    inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
 
 
 @router.get("/api/career/hall")
@@ -849,7 +851,13 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
         for t in r["card"].get("timeline", []):
             if all(canonical(t["franchise"]) != canonical(c[0]) for c in clubs):
                 clubs.append((t["franchise"], t["year"]))
+        runs_rank = C.all_time_rank(r["runs"], real_runs) if real_runs is not None else None
+        wickets_rank = C.all_time_rank(r["wickets"], real_wkts) if real_wkts is not None else None
+        held = career_results.honours(r["peak_card"], r["titles"],
+                                      r["card"].get("orange_caps", 0) + r["card"].get("purple_caps", 0),
+                                      runs_rank, wickets_rank)
         out.append(HallOut(
+            honours=held, inducted=career_results.inducted(held),
             key=r["key"], name=r["name"], role=r["role"],
             role_label=C.ROLES.get(r["role"], {}).get("label", r["role"]), debut=r["debut"],
             overseas=r["overseas"], seasons=r["seasons"], matches=r["matches"],
@@ -857,9 +865,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
             peak_rating=r["card"].get("peak_rating"), peak_rating_year=r["card"].get("peak_rating_year"),
             legend=bool(r["card"].get("legend")),
-            runs_rank=C.all_time_rank(r["runs"], real_runs) if real_runs is not None else None,
-            wickets_rank=(C.all_time_rank(r["wickets"], real_wkts)
-                          if real_wkts is not None else None),
+            runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
             completed_at=r["completed_at"].isoformat()))
     return out

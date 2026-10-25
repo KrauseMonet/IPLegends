@@ -775,11 +775,14 @@ function renderLobbyLegends(r){
     : !ROOM_HALL.length ? '<div class="note">You have no saved careers yet. Finish one in <a href="/career">Build a Career</a>.</div>'
     : `<div class="lg-pick"><select id="lobbyLegendPick" class="room-input">
          <option value="">No legend</option>
-         ${ROOM_HALL.filter(c => c.legend).map(c => `<option value="${c.key}"${r.legends[MY_PID] && r.legends[MY_PID].name === c.name && r.legends[MY_PID].rating === (c.peak_rating || c.peak_card) ? ' selected' : ''}>
-           ${esc(c.name)} · ${esc(c.role_label)} · Rating ${c.peak_rating || c.peak_card}</option>`).join('')}
+         ${ROOM_HALL.filter(c => c.legend).map(c => { const l = c.card.legend || {};
+           // [A225] a legend is a season, so the season is what is named
+           const mine = r.legends[MY_PID];
+           return `<option value="${c.key}"${mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating ? ' selected' : ''}>
+           ${esc(c.name)} · ${esc(c.role_label)} · ${l.year} · ${l.rating}</option>`; }).join('')}
        </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
-    saved career's best season. He joins your squad free, takes one of the eighteen places and counts toward
+    saved career's best season, carded like a real one. He joins your squad free, takes one of the eighteen places and counts toward
     the overseas limit.</div>${chosen ? `<div class="lg-list">${chosen}</div>` : ''}${mineHtml}`;
   if (ME && ME.account_id && ROOM_HALL === null){
     ROOM_HALL = [];

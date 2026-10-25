@@ -54,18 +54,22 @@ def legend(career):
     return career_results.legend(career)
 
 
-def test_the_legend_is_the_season_of_your_best_rating(career, legend):
-    best = max(career.seasons, key=lambda r: (r.rating, -r.year))
-    assert legend["rating"] == best.rating and legend["year"] == best.year
+def test_the_legend_is_the_season_of_your_best_grade(career, legend):
+    """[A225] The best SEASON -- highest grade, then Rating, then the earlier year -- rated at
+    its grade and playing the numbers that season measured, not the career's peak Rating."""
+    best = max(career.seasons, key=lambda r: (r.display, r.rating, -r.year))
+    assert legend["rating"] == best.display and legend["year"] == best.year
+    assert legend["basis"] == "season"
     card = snapshot_deck._card_from(legend["card"])
-    assert card.display == best.rating
-    # the numbers the engine played that season, not the ceiling's
+    assert card.display == best.display
     top = C.top_card(career.ceiling, career.legend, best.potential)       # that season's (A224)
     played = C.ability(career.start, top, best.ability, setup=career.setup,
                        fs_id=0, year=best.year, franchise=None)
-    assert card.bat_scoring == played.bat_scoring and card.bat_dismissal == played.bat_dismissal
+    measured = dict(zip(("bat_scoring", "bat_dismissal", "bowl_scoring", "bowl_dismissal"),
+                        best.measured))
+    for f, v in measured.items():
+        assert getattr(card, f) == (v if v is not None else getattr(played, f))
     assert card.positions == career.start.positions
-
 
 def _legend_room(conn, deck, legend, game="auction", a="MI", b="CSK", start=True):
     room, host = rooms.create_room(conn, "league", 30, "Asha", game=game, legends=True)

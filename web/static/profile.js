@@ -145,6 +145,7 @@ function hofRow(c){
       <span class="hof-num"><b>${c.runs.toLocaleString()}</b> runs · <b>${c.wickets}</b> wkts</span>
       <span class="hof-num"><b>${c.titles}</b> title${c.titles === 1 ? '' : 's'} · peak <b>${c.peak_card}</b></span>
       ${rank(c.runs_rank, 'runs')}${rank(c.wickets_rank, 'wickets')}
+      ${c.inducted ? `<span class="hof-honours">${c.honours.map(h => `<i>${esc(h)}</i>`).join('')}</span>` : ''}
     </summary>
     ${ms ? `<ol class="hof-ms">${ms}</ol>` : '<p class="pf-empty">No milestones in this one.</p>'}
   </details>`;
@@ -155,9 +156,18 @@ function ordinal(n){
   return n + (t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th');
 }
 
+// [A225] Only careers holding two of the four honours are in the Hall of Fame; the rest
+// stay saved (and can still be brought into an auction room) but fold away beneath it.
+const HOF_RULE = 'two of: a peak Rating of 90+, two titles, an Orange or Purple Cap, a place in the all-time top 25';
+
 function renderHall(list){
   if (!list.length) return;
-  $('#hofList').innerHTML = list.map(hofRow).join('');
+  const inn = list.filter(c => c.inducted), rest = list.filter(c => !c.inducted);
+  $('#hofList').innerHTML =
+    (inn.length ? inn.map(hofRow).join('')
+                : `<p class="pf-empty">None of your careers has made it yet. It takes ${HOF_RULE}.</p>`)
+    + (rest.length ? `<details class="hof-rest"><summary>Other careers (${rest.length})</summary>
+        <p class="pf-empty">Into the Hall of Fame takes ${HOF_RULE}.</p>${rest.map(hofRow).join('')}</details>` : '');
 }
 
 async function boot(){

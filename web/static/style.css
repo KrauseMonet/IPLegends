@@ -4108,9 +4108,17 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .hof-ms{list-style:none;margin:0 0 12px;padding:0 2px}
 .hof-ms li{display:flex;gap:12px;padding:5px 0;font-size:14px;color:var(--gold-2)}
 .hof-ms span{font-family:var(--mono);font-size:12px;color:var(--ink-3);flex:0 0 38px}
+/* [A225] the honours that put a career in, and the careers that did not make it */
+.hof-honours{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:5px}
+.hof-honours i{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--gold-2);
+  border:1px solid rgba(245,184,61,.4);border-radius:999px;padding:1px 8px}
+.hof-rest{border-top:1px solid var(--line);margin-top:4px}
+.hof-rest>summary{cursor:pointer;padding:12px 2px;font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}
+.hof-rest .hof{opacity:.8}
 @media (max-width:560px){
-  .hof summary{grid-template-columns:auto 1fr;}
-  .hof-num{grid-column:2}
+  /* the crests on a line of their own: beside the name they took half a phone's width */
+  .hof summary{grid-template-columns:1fr}
+  .hof-crests,.hof-num,.hof-rank,.hof-honours{grid-column:1/-1}
 }
 
 /* a mega-auction year [A212] */

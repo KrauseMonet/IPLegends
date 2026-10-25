@@ -31,17 +31,50 @@ def legacy(runs: int, wickets: int) -> int:
 
 def legend(career: C.Career) -> dict | None:
     """[A215] The best version of the player, kept so a friends' auction room can bring him
-    in: his best-Rating season as the engine played it. Stored, not re-derived, because a
-    later change to the career engine must not change a legend already saved."""
+    in: since A225 his best season, carded like a real one (`C.legend_card`). Stored, not
+    re-derived, because a later change to the career engine must not change a legend already
+    saved. `rating` is the number on his card; `basis` says which rule made it."""
     from tools.snapshot_deck import _card_doc
 
     best = C.legend_card(career)
     if best is None:
         return None
     r, c = best
-    return {"rating": r.rating, "year": r.year, "role": career.setup.role,
+    return {"rating": round(c.display), "year": r.year, "role": career.setup.role,
+            "basis": "season" if r.measured else "rating",
             "role_label": C.ROLES[career.setup.role]["label"], "name": career.setup.name,
             "card": _card_doc(c)}
+
+
+# [A225] The Hall of Fame is for careers worth remembering, not every career you finish: two
+# of these four honours, ratified by the user after measuring 84 careers (two of four admits
+# 33% of careless careers and 55% of ones that always take the strongest offer; any one of
+# four admitted about 63%). Read when the profile is read, never stored, so a career saved
+# before the rule is placed by it at once and a change to the bar needs no migration.
+INDUCTION_RATING = 90        # a peak Rating of 90 or more
+INDUCTION_TITLES = 2         # two titles or more
+INDUCTION_RANK = 25          # in the real all-time top 25 for runs or for wickets
+INDUCTION_NEEDS = 2
+
+
+def honours(peak: int, titles: int, caps: int, runs_rank: int | None,
+            wickets_rank: int | None) -> list[str]:
+    """Which of the four induction honours a career holds, in words."""
+    out = []
+    if peak >= INDUCTION_RATING:
+        out.append(f"Peak Rating {peak}")
+    if titles >= INDUCTION_TITLES:
+        out.append(f"{titles} titles")
+    if caps:
+        out.append(f"{caps} cap{'s' if caps != 1 else ''}")
+    ranks = [r for r in (runs_rank, wickets_rank) if r is not None and r <= INDUCTION_RANK]
+    if ranks:
+        out.append(f"All-time top {INDUCTION_RANK}")
+    return out
+
+
+def inducted(held: list[str]) -> bool:
+    return len(held) >= INDUCTION_NEEDS
 
 
 def card(career: C.Career) -> dict:

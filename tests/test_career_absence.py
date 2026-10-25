@@ -71,10 +71,50 @@ def test_every_random_absence_has_a_reason_and_duty_sits_at_an_end():
             seen.add(reason)
         if reason == "international duty":
             assert block.start == 0 or block.stop == 14
-    assert "international duty" in seen and seen & set(C.INJURIES["spin"])
+    assert "international duty" in seen and seen & set(C.LEFT_OUT_OVERSEAS)
     for seed in range(200):
         _, reason = C.absence(seed, 1, 14, rating=80, overseas=False, role="spin")
         assert reason != "international duty"
+
+
+# [A226] What a random absence may be called, by how long it is and what kind of season.
+SELECTION = set(C.LEFT_OUT) | set(C.LEFT_OUT_OVERSEAS)
+PERSONAL = {"illness", "a family matter"}
+
+
+@pytest.mark.parametrize("overseas", [False, True])
+def test_a_random_absence_is_never_an_injury_and_illness_is_always_short(overseas):
+    """Injuries come from the injury cards alone. A long block is selection (or, overseas,
+    international duty); illness, a family matter and a rest are only ever a short one."""
+    seen = set()
+    for seed in range(1500):
+        for k in range(4):
+            block, reason = C.absence(seed, k, 14, rating=80, overseas=overseas, role="pace")
+            if not reason:
+                continue
+            seen.add(reason)
+            allowed = SELECTION | ({"international duty"} if overseas else set())
+            if len(block) <= C.SHORT_ABSENCE:
+                allowed |= PERSONAL | {"rested"}
+            assert reason in allowed, (len(block), reason)
+    assert PERSONAL <= seen and "rested" in seen and seen & SELECTION
+    # the overseas combination is an overseas player's reason, and only his
+    assert ("the overseas combination" in seen) == overseas
+
+
+def test_a_squad_seasons_absence_is_not_being_selected():
+    reasons = {C.absence(seed, 3, 14, squad=True, rating=80, overseas=o)[1]
+               for seed in range(300) for o in (False, True)}
+    assert reasons - {None} == {C.NOT_SELECTED}
+
+
+def test_every_label_reads_as_what_it_is():
+    assert C.absence_words(C.NOT_SELECTED, 5, 3) == "Not selected for 5 matches (matches 3-7)."
+    assert C.absence_words("rotation", 3, 4).startswith("Rotated out for 3 matches")
+    assert C.absence_words("team balance", 4, 1).startswith("Left out for 4 matches for team balance")
+    assert C.absence_words("illness", 1, 6) == "Illness kept you out of 1 match (match 6)."
+    for reason in (C.NOT_SELECTED, "rotation", "team balance", "the overseas combination", "illness"):
+        assert C.note_tone(C.absence_words(reason, 3, 2)) == ""          # information, not a cost
 
 
 def _rec(franchise):
@@ -129,3 +169,18 @@ def test_seasons_at_the_club_are_part_of_the_season_cache_key(deck, model, monke
     C.auto_career(deck, model, 6, C.Setup("Tester", "middle", 2010, True), "loyal")
     assert seen and all(key[-1] == tenure for tenure, key in seen)
     assert max(t for t, _ in seen) >= C.SETTLED_SEASONS
+
+
+INJURY_CARDS = {"niggle", "injury", "fracture"}
+
+
+@pytest.mark.parametrize("role,lo,hi,most", [("opener", 0.8, 1.1, 3), ("keeper", 0.8, 1.1, 3),
+                                             ("spin", 0.85, 1.15, 3), ("allrounder", 0.9, 1.2, 3),
+                                             ("pace", 2.0, 3.0, 4)])
+def test_about_one_injury_card_a_career_and_two_to_three_for_a_fast_bowler(role, lo, hi, most):
+    """[A226] Ratified by the user: injury cards in a twelve-season career average about one,
+    two to three for a fast bowler, never more than three (four for a fast bowler)."""
+    counts = [sum(e.key in INJURY_CARDS for e in C.event_sequence(s, False, role)[:12])
+              for s in range(2000)]
+    assert lo <= sum(counts) / len(counts) <= hi
+    assert max(counts) <= most

@@ -211,17 +211,20 @@ STAR_AVAILABILITY_RATING = 88
 STAR_MAX_ABSENCE = 0.25
 # [A216] Why you missed the matches you missed. Declared, since the archive records no
 # reasons: an overseas player's absence is international duty half the time (at the start of
-# the season or the end of it); otherwise it is an injury of your kind, an illness or a
-# family matter, and a short one may be a rest. Only a player new to his club has one.
+# the season or the end of it). Only a player new to his club, or a squad player, has one.
 OVERSEAS_DUTY = 0.5
-INJURIES = {
-    "pace": ("a side strain", "a hamstring strain", "a back spasm", "an ankle injury"),
-    "spin": ("a finger injury", "a shoulder strain", "a hamstring strain"),
-    "allrounder": ("a side strain", "a hamstring strain", "a calf strain", "a finger injury"),
-    "batter": ("a hamstring strain", "a broken finger", "a groin strain", "a back spasm"),
-}
-OTHER_ABSENCE = (("illness", 0.15), ("a family matter", 0.10))
-REST_AFTER = 2                       # an absence this short may be a rest
+# [A226] ...and otherwise it is SELECTION, which is what it measures: the block's length comes
+# from how many matches real regulars new to a club played, and real players miss those
+# mostly by being left out -- team balance, the overseas combination, rotation -- not by being
+# hurt. A216 labelled every block an injury, an illness or a family matter, which gave a
+# median of five "injuries" a career (up to twelve, 168 careers measured) and a fifteen-match
+# illness. Injuries now come from the injury cards alone. Illness and a family matter remain,
+# but only as the reason for a SHORT absence (`SHORT_ABSENCE` matches or fewer), as do rests.
+SHORT_ABSENCE = 2
+SHORT_REASONS = (("rested", 0.30), ("illness", 0.15), ("a family matter", 0.10))
+LEFT_OUT = ("team balance", "rotation")
+LEFT_OUT_OVERSEAS = ("the overseas combination", "team balance")
+NOT_SELECTED = "not selected"        # a squad season's absence: he is not in the eleven
 
 # [A198] Form decides whether you keep your place, ratified by the user: real careers are
 # rare because players lose it (real bowlers with ten or more seasons were regulars in a
@@ -609,8 +612,13 @@ VETERAN_FROM = 7                     # [A224] the fitness programme from the eig
 # [A214] How injury-prone each role is: the weight of an injury card is multiplied by this.
 # Declared, since the archive records no injuries: fast bowlers break down far more often
 # than anyone else, batters far less.
-INJURY_RISK = {"pace": 3.0, "allrounder": 1.0, "spin": 0.7, "keeper": 0.5,
-               "opener": 0.4, "middle": 0.4, "finisher": 0.4}
+# [A226] Cut, at the user's direction, to about one injury card in a twelve-season career for
+# everyone but a fast bowler and two to three for him (measured over 3,000 seeds' event
+# sequences: 0.92 batters, 0.97 keepers, 1.01 spinners, 1.04 all-rounders, 2.58 fast bowlers;
+# it was 1.07 / 1.29 / 1.68 / 2.16 / 4.67), with at most two hamstring niggles and one side
+# strain a career (EVENT_LIMIT; it was three and two). The order between roles is kept.
+INJURY_RISK = {"pace": 1.0, "allrounder": 0.42, "spin": 0.40, "keeper": 0.38,
+               "opener": 0.36, "middle": 0.36, "finisher": 0.36}
 
 
 # Cards that make no sense for a man who has lost his place: in a squad season they become
@@ -618,7 +626,7 @@ INJURY_RISK = {"pace": 3.0, "allrounder": 1.0, "spin": 0.7, "keeper": 0.5,
 NOT_IN_A_SQUAD_SEASON = frozenset({"captain"})
 
 # How often a card may come up in one career. Unlisted: no limit beyond no-repeats.
-EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 3, "injury": 2, "mentor": 2, "slump": 2,
+EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 2, "injury": 1, "mentor": 2, "slump": 2,
                "fracture": 1, "fitness": 2}
 
 
@@ -1532,7 +1540,11 @@ def absence_words(reason: str, missed: int, first: int) -> str:
         return f"Illness kept you out of {missed} {plural} ({span})."
     if reason == "a family matter":
         return f"You went home for a family matter and missed {missed} {plural} ({span})."
-    return f"You missed {missed} {plural} with {reason} ({span})."
+    if reason == NOT_SELECTED:
+        return f"Not selected for {missed} {plural} ({span})."
+    if reason == "rotation":
+        return f"Rotated out for {missed} {plural} ({span})."
+    return f"Left out for {missed} {plural} for {reason} ({span})."
 
 
 def potential_words(before: int, after: int, grade: int | None) -> str:
@@ -1853,20 +1865,21 @@ def tenure_at(seasons: list, franchise: str) -> int:
     return n
 
 
-def absence_reason(seed: int, k: int, missed: int, overseas: bool, role: str | None) -> str:
-    """Why the season's absence happened [A216], from its own stream."""
+def absence_reason(seed: int, k: int, missed: int, overseas: bool, squad: bool = False) -> str:
+    """Why the season's absence happened [A216, A226], from its own stream. Never an injury:
+    those are the injury cards' to give, and they name themselves."""
     rng = random.Random(f"{seed}:absence:{k}")
+    if squad:
+        return NOT_SELECTED
     if overseas and rng.random() < OVERSEAS_DUTY:
         return "international duty"
-    if missed <= REST_AFTER and rng.random() < 0.3:
-        return "rested"
-    roll = rng.random()
-    for what, p in OTHER_ABSENCE:
-        if roll < p:
-            return what
-        roll -= p
-    kind = role if role in INJURIES else "batter"
-    return rng.choice(INJURIES[kind])
+    if missed <= SHORT_ABSENCE:
+        roll = rng.random()
+        for what, p in SHORT_REASONS:
+            if roll < p:
+                return what
+            roll -= p
+    return rng.choice(LEFT_OUT_OVERSEAS if overseas else LEFT_OUT)
 
 
 def missed_block(seed: int, k: int, league_matches: int, squad: bool = False,
@@ -1910,7 +1923,7 @@ def absence(seed: int, k: int, league_matches: int, squad: bool = False,
         missed, reason = min(league_matches, extra), None
     else:
         missed = min(league_matches, base)
-        reason = absence_reason(seed, k, missed, overseas, role) if missed else None
+        reason = absence_reason(seed, k, missed, overseas, squad) if missed else None
     if reason == "international duty":
         # duty takes you away at the start of the season or the end of it
         start = 0 if rng.random() < 0.5 else league_matches - missed

@@ -146,6 +146,16 @@ function crShow(d, moment){
 
 // [A214] The player card: your Rating (what the engine plays), how far it is from your
 // potential, and where you are now. The Season grade is each season's own mark, on the chart.
+// [A226] A match you sat out says WHY in the words a fan would use: left out is selection,
+// out is illness, family or international duty. Injuries come only from the injury cards.
+function crAbsenceLabel(a){
+  if (a === 'rested') return 'Rested';
+  if (a === 'not selected') return 'Not selected';
+  if (a === 'rotation') return 'Rotated';
+  if (a === 'team balance' || a === 'the overseas combination') return 'Left out · ' + esc(a);
+  return 'Out · ' + esc(a);
+}
+
 function crTier(r){ return r >= 90 ? 'elite' : r >= 84 ? 'star' : r >= 77 ? 'good' : 'base'; }
 
 function crHead(d, hold){
@@ -576,7 +586,7 @@ function crBowlTone(l){
 function crFigures(l){
   if (l.dropped) return '<span class="cr-dnp drop">Dropped</span>';
   if (!l.played) return l.absence
-    ? `<span class="cr-dnp out">${l.absence === 'rested' ? 'Rested' : 'Out · ' + esc(l.absence)}</span>`
+    ? `<span class="cr-dnp out">${crAbsenceLabel(l.absence)}</span>`
     : '<span class="cr-dnp">Did not play</span>';
   const bat = l.batted ? `<span class="cr-fig ${crBatTone(l)}"><b>${l.runs}${l.out ? '' : '*'}</b> <i>(${l.balls})</i></span>` : null;
   const bowl = l.bowl_balls ? `<span class="cr-fig ${crBowlTone(l)}"><b>${l.wickets}/${l.bowl_runs}</b> <i>(${crOvers(l.bowl_balls)})</i></span>` : null;

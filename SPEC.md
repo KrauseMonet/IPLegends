@@ -2846,3 +2846,21 @@ awards went to a winner.
 At creation a player may also choose a shirt number, a home town, a celebration and up to three
 ambitions; none of it touches a match. When a career ends it asks once where the player went
 next (`w{i}`), the last clipping; a checkpoint from before A228 is never asked.
+
+
+## 21. Playing for your country [A229]
+
+After each IPL season of a career the selectors read it (`game/national.py`). An uncapped
+player may be called up, a player in the side keeps his place or is dropped, and a dropped
+one may be recalled, each at a rate MEASURED from the international archives against every
+real IPL season of a player in the deck, banded by the season's card (70-79, 80-84, 85+):
+for Indian players a first call-up 7 / 27 / 49%, keeping the place 65 / 86 / 97%, a recall
+9 / 25 / 46%; overseas players, picked mostly on home form, 31-50%, 87-92% and 22%.
+Internationals in the following window are drawn from the measured deciles. An Indian career
+plays for India; an overseas one for the country it chose at creation, and a career from
+before this has none. A cap is worth money: an uncapped player is retained at the real 2025
+uncapped price (Rs 4 cr) and valued at 0.8 of a capped player in offers and at a mega auction
+(the 0.8 declared). The verdict uses its own random stream and moves no match; at a mega
+auction the changed price can change which club buys you. Measured against the real record,
+54% of comparable real players were capped and 85-88% of simulated careers are, because
+simulated careers are longer and better than the real cohort; recorded, not tuned.

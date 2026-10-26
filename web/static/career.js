@@ -30,6 +30,8 @@ function crFigs(d, runs, wkts){
 function crPick(group, btn){
   document.querySelectorAll(`#${group} .room-choice`).forEach(b => b.classList.toggle('sel', b === btn));
   if (group === 'crRoles') crRoleNote();
+  // [A229] an overseas player picks a country to play for
+  if (group === 'crPassport') $('#crCountryWrap').classList.toggle('hide', btn.dataset.v !== '1');
 }
 
 // On a phone the role cards show only their names; the chosen role's line sits under them.
@@ -75,6 +77,8 @@ function crShowCreate(){
   // [A228] Who you are, for the papers: a celebration and up to three ambitions.
   $('#crCel').innerHTML = [{key: '', label: 'None'}, ...(o.celebrations || [])].map((c, i) =>
     `<button class="room-choice${i ? '' : ' sel'}" data-v="${c.key}" onclick="crPick('crCel', this)">${esc(c.label)}</button>`).join('');
+  $('#crCountry').innerHTML = (o.nations || []).map((n, i) =>
+    `<button class="room-choice${i ? '' : ' sel'}" data-v="${esc(n)}" onclick="crPick('crCountry', this)">${esc(n)}</button>`).join('');
   $('#crAmb').innerHTML = (o.ambitions || []).map(a =>
     `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
 }
@@ -100,7 +104,8 @@ async function crStart(btn){
       overseas: crChosen('crPassport').v === '1',
       number: num === '' ? null : Number(num), home: $('#crHome').value.trim(),
       celebration: (crChosen('crCel') || {}).v || '',
-      ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v)})});
+      ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v),
+      country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : ''})});
     crSave({token: d.token});
     CR.seen = 0;
     crShow(d, 'spin');
@@ -229,9 +234,19 @@ function crHead(d, hold){
           <div class="cr-pot-bar"><i style="width:${pct}%"></i>${earned ? `<u style="left:${from}%"></u>` : ''}</div>
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
+        ${crNationalChip(d)}
         ${crAmbitionChips(d)}
       </div>
     </div>`;
+}
+
+// [A229] Your country and your international record so far.
+function crNationalChip(d){
+  if (!d.country) return '';
+  const cls = d.in_side ? 'in' : d.caps ? 'out' : '';
+  const what = d.in_side ? `in the side · ${d.caps} international${d.caps === 1 ? '' : 's'}`
+    : d.caps ? `${d.caps} international${d.caps === 1 ? '' : 's'} · out of the side` : 'uncapped';
+  return `<div class="cr-nt ${cls}"><b>${esc(d.country)}</b> ${what}</div>`;
 }
 
 // [A228] The ambitions set on the first day, and how each stands.
@@ -928,6 +943,10 @@ function crSeason(d, r){
           </div>
         </div>
         <div class="cr-badges">
+          ${crBadge(r.national === 'debut', 'gold', `${esc(CR.data.country)} debut`)}
+          ${crBadge(r.national === 'recalled', 'gold', `Recalled by ${esc(CR.data.country)}`)}
+          ${crBadge(r.national === 'kept', '', `${esc(CR.data.country)} · ${r.caps_total} internationals`)}
+          ${crBadge(r.national === 'dropped', 'dim', `Dropped by ${esc(CR.data.country)}`)}
           ${crBadge(r.orange_cap, 'orange', 'Orange Cap')}
           ${crBadge(r.purple_cap, 'purple', 'Purple Cap')}
           ${crBadge(r.captain, '', 'Captain')}

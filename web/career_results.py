@@ -93,6 +93,8 @@ def card(career: C.Career) -> dict:
         # [A228] Player of the Match awards, where the player went after the game, and the
         # ambitions set on the first day with how each went.
         "poms": s.poms, "epilogue": s.epilogue, "number": career.setup.number,
+        "country": career.setup.nation,
+        "caps": int((career.checkpoint.national if career.checkpoint else {}).get("caps", 0)),
         "ambitions": [[k, *C.ambition_status(k, career.seasons)] for k in career.setup.ambitions],
         "injuries": [list(i) for i in (career.checkpoint.injuries if career.checkpoint else [])],
         "timeline": [{"year": r.year, "franchise": r.franchise, "card": r.display, "rating": r.rating,

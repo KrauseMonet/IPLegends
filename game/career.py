@@ -50,7 +50,7 @@ from game.auction import value_curve
 from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
-from game import press
+from game import national, press
 from game.simulator import Model
 
 # --- who you can be ------------------------------------------------------------------
@@ -649,6 +649,7 @@ AMBITIONS: dict[str, tuple[str, object]] = {
     "matches150": ("Play 150 IPL matches", lambda ss: sum(r.matches for r in ss) >= 150),
     "pom10": ("Ten Player of the Match awards", lambda ss: sum(r.poms for r in ss) >= 10),
     "one_club": ("Ten seasons at one club", lambda ss: len(ss) >= 10 and one_club(ss)),
+    "international": ("Play for your country", lambda ss: any(r.national == "debut" for r in ss)),
 }
 
 
@@ -688,6 +689,13 @@ class Setup:
     home: str = ""
     celebration: str = ""
     ambitions: tuple[str, ...] = ()
+    # [A229] The country an overseas career plays for, "" for none. An Indian career plays
+    # for India and leaves this empty.
+    country: str = ""
+
+    @property
+    def nation(self) -> str:
+        return national.nation(self.overseas, self.country)
 
     def check(self) -> None:
         if self.role not in ROLES:
@@ -712,6 +720,10 @@ class Setup:
         for a in self.ambitions:
             if a not in AMBITIONS:
                 raise CareerError(f"no such ambition {a!r}")
+        if self.country and (not self.overseas or self.country not in national.OVERSEAS_NATIONS):
+            raise CareerError(f"an overseas player picks a country from {', '.join(national.OVERSEAS_NATIONS)}")
+        if "international" in self.ambitions and not self.nation:
+            raise CareerError("pick a country to aim to play for it")
 
 
 def _regular(c: Card) -> bool:
@@ -1359,7 +1371,8 @@ class Offer:
 
 
 def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
-               last_display: int | None, contract: "Contract | None" = None) -> list[Offer]:
+               last_display: int | None, contract: "Contract | None" = None, *,
+               capped: bool) -> list[Offer]:
     """Your current franchise first (if it still exists this year), then OFFERS others.
     `current` is a CANONICAL franchise, so Delhi Daredevils and Delhi Capitals are one club
     and staying across the rename is staying. A debutant is uncapped and every offer is
@@ -1381,7 +1394,8 @@ def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
                           contract_year=CONTRACT_YEARS - contract.left + 1)]
     others = [fs for fs in fss if club[fs] != current]
     picked = sorted(rng.sample(others, min(OFFERS, len(others))))
-    value = DEBUT_PRICE if last_display is None else value_curve(last_display, mega=True)
+    value = (DEBUT_PRICE if last_display is None
+             else value_curve(last_display, mega=True) * (1 if capped else UNCAPPED_VALUE))
 
     def offer(fs: int, stay: bool) -> Offer:
         squad = deck.cards_by_fs[fs]
@@ -1413,6 +1427,13 @@ MEGA_YEARS = frozenset({2011, 2014, 2018, 2022, 2025})
 RETAIN_CARD = 85                         # below this card your club does not come to you
 RETAIN_TIERS = ((93, 1800), (89, 1400), (RETAIN_CARD, 1100))   # the real capped slabs, lakh
 BASE_PRICES = (200, 150, 125, 100, 75, 50, 40, 30)              # the real base-price choices
+# [A229] An uncapped player -- one who has not played for his country -- is retained at the
+# real 2025 rule's uncapped price, and clubs value him at UNCAPPED_VALUE of a capped player
+# with the same card in offers and at a mega auction. The capped price is the one the
+# offers were calibrated on (A212/A214), so being called up restores it; UNCAPPED_VALUE is
+# declared game design, like REPUTATION, since the archive holds no prices.
+UNCAPPED_RETAIN = 400
+UNCAPPED_VALUE = 0.8
 MEGA_SPREAD = 0.30                       # each club's view of you, a lognormal sigma
 
 
@@ -1435,8 +1456,11 @@ class MegaResult:
     bids: list[tuple[str, str, int]] = field(default_factory=list)   # (franchise, short, price)
 
 
-def retention_slab(last_display: int | None) -> int | None:
-    return next((price for floor, price in RETAIN_TIERS if (last_display or 0) >= floor), None)
+def retention_slab(last_display: int | None, *, capped: bool) -> int | None:
+    """What your club pays to keep you [A212]: a capped slab by your card, or the real 2025
+    rule's uncapped price (A229) for a player who has never played for his country."""
+    slab = next((price for floor, price in RETAIN_TIERS if (last_display or 0) >= floor), None)
+    return slab if slab is None or capped else UNCAPPED_RETAIN
 
 
 def _club_offer(deck: Deck, fs: int, year: int, price: int, stay: bool) -> Offer:
@@ -1449,11 +1473,12 @@ def _club_offer(deck: Deck, fs: int, year: int, price: int, stay: bool) -> Offer
                  team_rating(xi + ([impact] if impact else [])).overall, stay)
 
 
-def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | None) -> MegaOffer:
+def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | None, *,
+               capped: bool) -> MegaOffer:
     from game.auction import BASE_PRICE_TIERS
 
     retain = None
-    slab = retention_slab(last_display)
+    slab = retention_slab(last_display, capped=capped)
     if slab is not None and current is not None:
         mine = [fs for fs in year_fs_ids(deck, year)
                 if canonical(deck.cards_by_fs[fs][0].franchise) == current]
@@ -1465,12 +1490,12 @@ def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | N
 
 
 def mega_ceilings(deck: Deck, seed: int, k: int, year: int, current: str | None,
-                  last_display: int | None) -> dict[int, int]:
+                  last_display: int | None, *, capped: bool) -> dict[int, int]:
     """What each club that year will pay for you, lakh, by franchise-season: the auction's mega
     value for your card, each club's own view of it, and your old club's loyalty premium."""
     from game.auction import LOYALTY
 
-    value = value_curve(last_display, mega=True)
+    value = value_curve(last_display, mega=True) * (1 if capped else UNCAPPED_VALUE)
     out = {}
     for fs in year_fs_ids(deck, year):
         view = value * math.exp(random.Random(f"{seed}:mega:{k}:{fs}").gauss(0, MEGA_SPREAD))
@@ -1481,11 +1506,11 @@ def mega_ceilings(deck: Deck, seed: int, k: int, year: int, current: str | None,
 
 
 def mega_auction(deck: Deck, seed: int, k: int, year: int, current: str | None,
-                 last_display: int | None, base: int) -> MegaResult:
+                 last_display: int | None, base: int, *, capped: bool) -> MegaResult:
     from game.auction import Lot, bid_log
 
     fss = year_fs_ids(deck, year)
-    by_fs = mega_ceilings(deck, seed, k, year, current, last_display)
+    by_fs = mega_ceilings(deck, seed, k, year, current, last_display, capped=capped)
     ceilings = {i: by_fs[fs] for i, fs in enumerate(fss)}
     lot = Lot(index=k, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="", base=base)
     bids = bid_log(lot, ceilings, seed, 0)
@@ -1686,11 +1711,11 @@ _NOTE_UP = re.compile(r"\badds \d+ Rating to next season|more runs per 100 balls
                       r"|get out \d+% less often|fewer runs an over|take wickets \d+% more often"
                       r"|potential raised to|raised to \d+\.$|holds back the years"
                       r"|of ageing held back|already close to your best|Still improving at"
-                      r"|holding up well")
+                      r"|holding up well|^Called up by|^Recalled by|^Kept your place with")
 _NOTE_DOWN = re.compile(r"\btakes \d+ Rating from next season|fewer runs per 100 balls"
                         r"|get out \d+% more often|more runs an over|take wickets \d+% less often"
                         r"|takes more out of you|catching up with you quickly|season older\b"
-                        r"|seasons older\b")
+                        r"|seasons older\b|^Dropped by")
 
 
 def note_tone(text: str) -> str:
@@ -1826,6 +1851,11 @@ class SeasonRecord:
     # (game.press renders them into clippings each time a page asks). Empty on older tokens.
     poms: int = 0
     press: list[dict] = field(default_factory=list)
+    # [A229] What the selectors made of this season ("debut", "kept", "dropped", "recalled" or
+    # ""), the internationals played in the window after it, and the career total after them.
+    national: str = ""
+    caps: int = 0
+    caps_total: int = 0
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -2848,6 +2878,8 @@ class Checkpoint:
     # ends. None: not asked yet. "" on a checkpoint from before A228, which is never asked,
     # so a career already finished stays finished.
     epilogue: str | None = None
+    # [A229] The national record so far: {"capped", "in_side", "caps"}; empty is uncapped.
+    national: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -2868,7 +2900,8 @@ class Checkpoint:
                    plan=dict(d.get("plan") or {}), later=list(d.get("later") or []),
                    injuries=[list(i) for i in d.get("injuries") or []],
                    clock=d.get("clock", float(d["k"])), potential=d.get("potential", 0.0),
-                   shaped=d.get("shaped", False), epilogue=d.get("epilogue", ""))
+                   shaped=d.get("shaped", False), epilogue=d.get("epilogue", ""),
+                   national=dict(d.get("national") or {}))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -2980,7 +3013,12 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
         ambitions=[m.text.removeprefix("Ambition achieved: ") for m in played.milestones
                    if m.key == "ambition"],
         first_hundred=not any(r.hundreds for r in prev),
-        first_five_for=not any(r.five_fors for r in prev))
+        first_five_for=not any(r.five_fors for r in prev),
+        national=({"country": setup.nation, "event": played.national, "caps": played.caps,
+                   "total": played.caps_total, "grade": played.display}
+                  if setup.nation else None),
+        caps_marks=_marks(played.caps_total - played.caps, played.caps_total, national.CAP_MARK)
+        if played.caps else [])
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -3030,7 +3068,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         market = market_for(start, ceiling, cp, shape, legend)
         if year in MEGA_YEARS and k > 0:
             cp.contract = None                 # a mega auction ends every deal (A212)
-            mo = mega_offer(deck, year, cp.current, market)
+            capped = bool(cp.national.get("capped"))
+            mo = mega_offer(deck, year, cp.current, market, capped=capped)
             career.checkpoint = copy.deepcopy(cp)
             move = nxt()
             if move is None:
@@ -3054,12 +3093,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             else:
                 base = mo.bases[_index(move, "b", len(mo.bases))]
                 a = career.auction = mega_auction(deck, seed, k, year, cp.current,
-                                                  market, base)
+                                                  market, base, capped=capped)
                 offer = _club_offer(deck, a.fs_id, year, a.price, canonical(a.franchise) == cp.current)
                 squad_now = squad_now or not a.sold          # a late signing is a squad player
             mega_note = mega_text(career.auction)
         else:
-            offers = offers_for(deck, seed, k, year, cp.current, market, cp.contract)
+            offers = offers_for(deck, seed, k, year, cp.current, market, cp.contract,
+                                capped=bool(cp.national.get("capped")))
             if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
                 cp.contract = None                 # the club has no team this year: deal void
             career.checkpoint = copy.deepcopy(cp)
@@ -3209,6 +3249,19 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
         played.milestones = career_milestones(
             cp.seasons, career.detail.feed if career.detail else None, played)
+        # [A229] The selectors read the season; a new international is a milestone.
+        country = setup.nation
+        if country:
+            sel = national.select(cp.national, played.display, seed, k, setup.overseas)
+            played.national, played.caps, played.caps_total = sel.event, sel.caps, sel.total
+            cp.national = {"capped": sel.capped, "in_side": sel.in_side, "caps": sel.total}
+            if sel.event == "debut":
+                played.milestones.append(CareerMilestone("international", f"{country} debut"))
+            for m in _marks(sel.total - sel.caps, sel.total, national.CAP_MARK):
+                played.milestones.append(CareerMilestone("caps", f"{m} internationals for {country}"))
+            said = national.words(sel, country)
+            if said:
+                notes.append(said)
         for key in setup.ambitions:
             state, when = ambition_status(key, cp.seasons + [played])
             if state == "done" and when == year:

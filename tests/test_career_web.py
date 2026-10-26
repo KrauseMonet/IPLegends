@@ -206,7 +206,7 @@ def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
     """Chennai have no team in 2016: a 2015 Chennai career is told why it cannot stay. The
     seed is chosen so Chennai do offer a 2015 contract, so the test always has a case."""
     seed = next(s for s in range(1, 500)
-                if any("Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None)))
+                if any("Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None, capped=True)))
     d = _token(client, debut=2015, seed=seed)
     while not d["seasons"]:
         p = d["pending"]
@@ -511,6 +511,11 @@ def test_every_season_note_is_marked_the_way_it_points(deck):
     assert t(C._effect_words("Nothing.", 0, 0, 0)) == ""
     assert t(C.development_words(1.2)) == "up"
     assert t(C.development_words(-0.8)) == "down"
+    # [A229] the selectors' verdict, from national.words itself
+    from game import national as N
+    sel = lambda ev: N.Selection(ev, 5, 20, ev != "dropped", True)
+    assert [t(N.words(sel(ev), "India")) for ev in ("debut", "recalled", "kept", "dropped")] == [
+        "up", "up", "up", "down"]
     assert t(C.absence_words("rested", 2, 5)) == ""                       # information, not a cost
     # [A224] the potential, the clock and the shape's hints
     assert t(C.potential_words(84, 85, 88)) == "up"
@@ -667,7 +672,7 @@ def test_a_reroll_is_the_same_player_on_a_new_seed(client, admins):
     assert r.status_code == 200
     n = r.json()
     old, new = _payload(d["token"]), _payload(n["token"])
-    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True, None, "", "", []]
+    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True, None, "", "", [], ""]
     assert new["seed"] != old["seed"]
     # the spins are the new seed's, exactly as a fresh start on it would draw them
     fresh = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,

@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import career as C
-from game import press
+from game import national, press
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
@@ -56,7 +56,7 @@ def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) 
     body = json.dumps({"v": TOKEN_VERSION, "seed": seed,
                        "setup": [setup.name, setup.role, setup.debut, setup.overseas,
                                  setup.number, setup.home, setup.celebration,
-                                 list(setup.ambitions)],
+                                 list(setup.ambitions), setup.country],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -75,12 +75,13 @@ def read_token(token: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]:
         d = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if d.get("v") != TOKEN_VERSION:
             raise ValueError("old token")
-        # Four fields before A228; a token from then has no identity and no ambitions.
+        # Four fields before A228 (no identity, no ambitions), eight before A229 (no country).
         name, role, debut, overseas, *rest = d["setup"]
-        number, home, celebration, ambitions = (rest + [None, "", "", []])[:4] if len(rest) < 4 else rest
+        number, home, celebration, ambitions, country = (rest + [None, "", "", [], ""][len(rest):])[:5]
         return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
                                          None if number is None else int(number), str(home or ""),
-                                         str(celebration or ""), tuple(str(a) for a in ambitions or ())),
+                                         str(celebration or ""), tuple(str(a) for a in ambitions or ()),
+                                         str(country or "")),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -171,6 +172,9 @@ class SeasonOut(BaseModel):
     mega: str = ""                # how a mega-auction year went (A212)
     plan: list[str] = []          # "Name: Death", the plan the season began with (A213)
     poms: int = 0                 # Player of the Match awards (A228)
+    national: str = ""            # what the selectors made of the season (A229)
+    caps: int = 0                 # internationals in the window after it
+    caps_total: int = 0
     press: list[ClippingOut] = [] # the season in the papers, the biggest story first (A228)
     league: list[str] = []        # real news from around the league that year (A228)
 
@@ -424,6 +428,9 @@ class CareerOut(BaseModel):
     home: str = ""
     celebration: str = ""
     ambitions: list[AmbitionOut] = []
+    country: str = ""             # who you can play for: India, the chosen country, or "" (A229)
+    caps: int = 0
+    in_side: bool = False
 
 
 def _template(c) -> TemplateOut:
@@ -434,7 +441,7 @@ def _template(c) -> TemplateOut:
 def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = None) -> SeasonOut:
     deck, _ = _state()
     return SeasonOut(
-        poms=r.poms,
+        poms=r.poms, national=r.national, caps=r.caps, caps_total=r.caps_total,
         press=[_clip(c) for c in press.edition(r.press, voice)] if voice else [],
         league=press.league_news(r.year, C.clubs_by_year(deck), C.MEGA_YEARS),
         potential=round(ceiling + r.potential),
@@ -737,6 +744,9 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
     v = voice(seed, st)
     return CareerOut(
         number=st.number, home=st.home, celebration=st.celebration, ambitions=_ambitions(career),
+        country=st.nation,
+        caps=int((career.checkpoint.national if career.checkpoint else {}).get("caps", 0)),
+        in_side=bool((career.checkpoint.national if career.checkpoint else {}).get("in_side")),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         start=_template(career.start), ceiling=_template(career.ceiling),
@@ -798,6 +808,7 @@ class OptionsOut(BaseModel):
     celebrations: list[ChoiceOut] = []       # A228
     ambitions: list[ChoiceOut] = []
     ambitions_max: int = C.AMBITIONS_MAX
+    nations: list[str] = list(national.OVERSEAS_NATIONS)     # A229: an overseas player's choices
     home_max: int = C.HOME_MAX
     paper: str = press.PAPER
 
@@ -820,6 +831,7 @@ class StartIn(BaseModel):
     home: str = Field(default="", max_length=C.HOME_MAX)
     celebration: str = ""
     ambitions: list[str] = Field(default=[], max_length=C.AMBITIONS_MAX)
+    country: str = ""                                          # A229, overseas only
 
 
 @router.post("/api/career/start")
@@ -831,7 +843,7 @@ def career_start(body: StartIn) -> CareerOut:
     if any(ch in home for ch in "<>") or any(ord(ch) < 32 for ch in home):
         raise HTTPException(400, "Choose a plain home town.")
     setup = C.Setup(name, body.role, body.debut, body.overseas, body.number, home,
-                    body.celebration, tuple(body.ambitions))
+                    body.celebration, tuple(body.ambitions), body.country)
     try:
         setup.check()
     except C.CareerError as e:
@@ -869,7 +881,7 @@ def career_reroll(body: RerollIn, request: Request, response: Response) -> Caree
     return career_start(StartIn(name=setup.name, role=setup.role, debut=setup.debut,
                                 overseas=setup.overseas, seed=new, number=setup.number,
                                 home=setup.home, celebration=setup.celebration,
-                                ambitions=list(setup.ambitions)))
+                                ambitions=list(setup.ambitions), country=setup.country))
 
 
 class MoveIn(BaseModel):

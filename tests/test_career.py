@@ -281,7 +281,7 @@ def test_a_years_card_scale_is_that_years_real_regulars(deck):
 
 
 def test_a_debutant_is_offered_the_base_price_and_no_stay(deck):
-    offers = C.offers_for(deck, 1, 0, 2012, None, None)
+    offers = C.offers_for(deck, 1, 0, 2012, None, None, capped=True)
     assert len(offers) == C.OFFERS and not any(o.stay for o in offers)
     assert {o.price for o in offers} == {C.DEBUT_PRICE}
 
@@ -291,22 +291,22 @@ def test_staying_survives_a_rename_and_not_a_suspension(deck):
     since in the year of a rename the old and the new spelling can agree by accident."""
     delhi = canonical("Delhi Daredevils")
     assert any(o.stay and o.franchise == "Delhi Daredevils"
-               for o in C.offers_for(deck, 1, 3, 2015, delhi, 85))
+               for o in C.offers_for(deck, 1, 3, 2015, delhi, 85, capped=True))
     assert any(o.stay and o.franchise == "Delhi Capitals"
-               for o in C.offers_for(deck, 1, 3, 2019, delhi, 85))
+               for o in C.offers_for(deck, 1, 3, 2019, delhi, 85, capped=True))
     punjab = canonical("Kings XI Punjab")
-    assert any(o.stay for o in C.offers_for(deck, 1, 3, 2014, punjab, 85))
-    assert any(o.stay for o in C.offers_for(deck, 1, 3, 2024, punjab, 85))
+    assert any(o.stay for o in C.offers_for(deck, 1, 3, 2014, punjab, 85, capped=True))
+    assert any(o.stay for o in C.offers_for(deck, 1, 3, 2024, punjab, 85, capped=True))
     assert not any(o.stay for o in C.offers_for(deck, 1, 3, 2016,
-                                                canonical("Chennai Super Kings"), 85))
-    offers = C.offers_for(deck, 1, 3, 2019, delhi, 85)
+                                                canonical("Chennai Super Kings"), 85, capped=True))
+    offers = C.offers_for(deck, 1, 3, 2019, delhi, 85, capped=True)
     assert all(canonical(o.franchise) != delhi for o in offers if not o.stay)
 
 
 def test_offers_follow_last_seasons_card_and_never_pass_the_record(deck):
     for display in (72, 80, 88, 95, 99):
         value = value_curve(display, mega=True)
-        for o in C.offers_for(deck, 9, 4, 2020, None, display):
+        for o in C.offers_for(deck, 9, 4, 2020, None, display, capped=True):
             assert o.price <= C.PRICE_CAP
             assert o.price == min(C.PRICE_CAP, max(C.DEBUT_PRICE, o.price))
             if value * (1 + C.PRICE_NOISE) < C.PRICE_CAP:
@@ -759,7 +759,7 @@ def test_a_contract_lapses_when_the_club_has_no_team(deck, model):
     """Chennai have no team in 2016: a deal signed there in 2015 cannot carry over."""
     setup = C.Setup("Tester", "opener", 2015)
     seed = next(s for s in range(2000) if len(C.draw_event(s, 0, role="opener").options) == 1 and any(
-        "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None)))
+        "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None, capped=True)))
     i = next(n for n, o in enumerate(_play(deck, model, seed, setup, []).pending.offers)
              if "Chennai" in o.franchise)
     c = _play(deck, model, seed, setup, [f"c{i}"])

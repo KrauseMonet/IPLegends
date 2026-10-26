@@ -67,20 +67,20 @@ def test_a_mega_year_ends_a_three_year_deal(deck, model):
 
 
 def test_retention_slabs_and_who_offers(deck):
-    assert [C.retention_slab(c) for c in (84, 85, 88, 89, 92, 93, 99)] == [
+    assert [C.retention_slab(c, capped=True) for c in (84, 85, 88, 89, 92, 93, 99)] == [
         None, 1100, 1100, 1400, 1400, 1800, 1800]
     csk = canonical("Chennai Super Kings")
-    offer = C.mega_offer(deck, 2014, csk, 90)
+    offer = C.mega_offer(deck, 2014, csk, 90, capped=True)
     assert offer.retain.price == 1400 and canonical(offer.retain.franchise) == csk
-    assert C.mega_offer(deck, 2014, csk, 84).retain is None
-    assert C.mega_offer(deck, 2016, csk, 95).retain is None      # no Chennai in 2016
+    assert C.mega_offer(deck, 2014, csk, 84, capped=True).retain is None
+    assert C.mega_offer(deck, 2016, csk, 95, capped=True).retain is None      # no Chennai in 2016
     assert offer.bases[offer.suggested] == 150                    # the auction's base for a 90
 
 
 def test_your_old_club_pays_the_loyalty_premium(deck):
     csk = canonical("Chennai Super Kings")
-    mine = C.mega_ceilings(deck, 5, 3, 2014, csk, 88)
-    nobody = C.mega_ceilings(deck, 5, 3, 2014, None, 88)
+    mine = C.mega_ceilings(deck, 5, 3, 2014, csk, 88, capped=True)
+    nobody = C.mega_ceilings(deck, 5, 3, 2014, None, 88, capped=True)
     for fs in mine:
         if canonical(deck.cards_by_fs[fs][0].franchise) == csk:
             # both are truncated to whole lakh, so the premium is checked to within that
@@ -94,8 +94,8 @@ def test_your_old_club_pays_the_loyalty_premium(deck):
 def test_the_bidding_climbs_the_ladder_to_the_second_best_ceiling(deck, card, base):
     """The winner could pay the price; nobody else could pay the next step up."""
     year, k, seed = 2018, 5, 11
-    res = C.mega_auction(deck, seed, k, year, None, card, base)
-    ceilings = C.mega_ceilings(deck, seed, k, year, None, card)
+    res = C.mega_auction(deck, seed, k, year, None, card, base, capped=True)
+    ceilings = C.mega_ceilings(deck, seed, k, year, None, card, capped=True)
     by_club = {deck.cards_by_fs[fs][0].franchise: c for fs, c in ceilings.items()}
     assert res.sold
     prices = [p for _, _, p in res.bids]
@@ -113,7 +113,8 @@ def test_a_base_nobody_meets_is_unsold_and_a_squad_season(deck, model):
     ceilings = C.mega_ceilings(deck, seed, before.pending.k, before.pending.year,
                                before.checkpoint.current,
                                C.market_for(before.start, before.ceiling, before.checkpoint,
-                                            before.shape, before.legend))
+                                            before.shape, before.legend),
+                               capped=bool(before.checkpoint.national.get("capped")))
     assert max(ceilings.values()) < 200, "the fixture must leave a ₹2 cr base unmet"
     moves = moves + ["b0"]
     car = C.play_career(deck, model, seed, setup, moves)

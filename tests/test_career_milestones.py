@@ -126,13 +126,13 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    # seed 6, found by search (again after A224 reshaped careers): a hat-trick, so the count
-    # has something to agree with
-    career, moves = C.auto_career(deck, model, 6, setup, "strength")
+    # seed 1, found by search (again after A229 priced uncapped players lower, which moved
+    # the mega auctions): a hat-trick, so the count has something to agree with
+    career, moves = C.auto_career(deck, model, 1, setup, "strength")
     seasons, checked = career.seasons, 0
     assert sum(r.hat_tricks for r in seasons) >= 1, "the fixture must take a hat-trick"
     for k in range(len(seasons)):
-        played = C.play_career(deck, model, 6, setup, moves[:_moves_through(moves, k)])
+        played = C.play_career(deck, model, 1, setup, moves[:_moves_through(moves, k)])
         feed = played.detail.feed
         rec = played.checkpoint.seasons[k]
         for l in feed:
@@ -140,7 +140,10 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
             assert ("four_for" in l.landmarks) == (4 <= l.wickets < 5)
         assert rec.five_fors == sum(l.wickets >= 5 for l in feed)
         assert rec.hat_tricks == sum("hattrick" in l.landmarks for l in feed)
-        assert rec.milestones == C.career_milestones(seasons[:k], feed, rec)
+        # The selectors' milestones (A229) and an ambition's (A228) come from outside the
+        # feed and are checked by their own tests.
+        own = [m for m in rec.milestones if m.key not in ("international", "caps", "ambition")]
+        assert own == C.career_milestones(seasons[:k], feed, rec)
         checked += 1
     assert checked == len(seasons) >= 3
     assert career.summary.milestones == [(r.year, m.text) for r in seasons for m in r.milestones]

@@ -535,11 +535,55 @@ def _ambition(f: dict, v: Voice) -> Clipping:
     return Clipping("ambition", f["y"], "SPORT", head, f["label"], "", body, "", 40, None, f.get("club"))
 
 
+def _nt_debut(f: dict, v: Voice) -> Clipping:
+    sur, country = v.sur, f["country"]
+    noun = ROLE_NOUN.get(v.role, "player")
+    head = _pick(v, f, [f"{sur} called up by {country}", f"{country} come calling for {sur}",
+                        f"International honours for {sur}"])
+    body = [f"{_who(v, f)} has been picked for {country} after an IPL season graded {f['grade']}.",
+            f"The {noun} played {_plural(f['caps'], 'international')} in the months that followed.",
+            _pick(v, f, ["The selectors had been watching all season.",
+                         "Few doubted the call once the season was over.",
+                         "It is the reward for a season nobody could ignore."], "colour")]
+    quote = _quote(v, f, [f"Pulling on the {country} shirt is all I ever wanted.",
+                          "I could not speak when the call came.",
+                          "This one is for my family."])
+    return Clipping("nt_debut", f["y"], "FRONT PAGE", head, f"{country} cap", "", body, quote, 88,
+                    None, None, "gold")
+
+
+def _nt_recalled(f: dict, v: Voice) -> Clipping:
+    sur, country = v.sur, f["country"]
+    head = _pick(v, f, [f"{sur} back in the {country} side", f"Recall for {sur}"])
+    body = [f"{_who(v, f)} has been recalled by {country} after an IPL season graded {f['grade']}.",
+            f"{_plural(f['caps'], 'international')} followed, taking the total to {f['total']}."]
+    quote = _quote(v, f, ["I never stopped believing I would get another chance.",
+                          "It is good to be back."])
+    return Clipping("nt_recalled", f["y"], "SPORT", head, f"{country} recall", "", body, quote, 55)
+
+
+def _nt_dropped(f: dict, v: Voice) -> Clipping:
+    sur, country = v.sur, f["country"]
+    head = _pick(v, f, [f"{country} leave out {sur}", f"Selectors axe {sur}"])
+    body = [f"{_who(v, f)} has lost a place in the {country} side after an IPL season graded {f['grade']}.",
+            f"The international career stands at {_plural(f['total'], 'match', 'matches')} for now."]
+    return Clipping("nt_dropped", f["y"], "SPORT", head, "Dropped", "", body, "", 45, tone="red")
+
+
+def _nt_caps(f: dict, v: Voice) -> Clipping:
+    sur, country = v.sur, f["country"]
+    head = f"{f['mark']} not out: {sur}'s {country} milestone"
+    body = [f"{_who(v, f)} has now played {f['mark']} internationals for {country}."]
+    return Clipping("nt_caps", f["y"], "SPORT", head, f"{f['mark']} internationals", "", body, "", 50,
+                    None, None, "gold")
+
+
 RENDER = {"hundred": _hundred, "blitz": _blitz, "five_for": _five_for, "hattrick": _hattrick,
           "final_star": _final_star, "playoff_hero": _playoff_hero, "debut": _debut,
           "move": _move, "mega": _mega, "title": _title, "final_lost": _final_lost, "cap": _cap,
           "captain": _captain, "injury": _injury, "mate_last": _mate_last, "elite": _elite,
-          "ambition": _ambition}
+          "ambition": _ambition, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
+          "nt_dropped": _nt_dropped, "nt_caps": _nt_caps}
 
 
 def render(fact: dict, v: Voice) -> Clipping | None:
@@ -631,6 +675,8 @@ class SeasonFacts:
     ambitions: list[str] = field(default_factory=list)   # labels achieved this season
     first_hundred: bool = False        # the season's first hundred is the career's first
     first_five_for: bool = False
+    national: dict | None = None       # [A229] {"country", "event", "caps", "total", "grade"}
+    caps_marks: list[int] = field(default_factory=list)   # every 50 internationals crossed
 
 
 def season_facts(s: SeasonFacts, feed) -> list[dict]:
@@ -676,6 +722,12 @@ def season_facts(s: SeasonFacts, feed) -> list[dict]:
         out.append({"k": "elite", "y": y, "club": club, "grade": s.first_elite})
     for label in s.ambitions:
         out.append({"k": "ambition", "y": y, "club": club, "label": label})
+    nt = s.national
+    if nt and nt.get("event") in ("debut", "recalled", "dropped"):
+        out.append({"k": f"nt_{nt['event']}", "y": y, "country": nt["country"], "caps": nt["caps"],
+                    "total": nt["total"], "grade": nt["grade"]})
+    for mark in s.caps_marks:
+        out.append({"k": "nt_caps", "y": y, "country": nt["country"] if nt else "", "mark": mark})
     return out
 
 

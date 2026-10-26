@@ -23,7 +23,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=2c1c354de4">
+<link rel="stylesheet" href="/static/style.css?v=213ae32e2a">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -81,6 +81,24 @@
           </div>
         </div>
       </div>
+      <!-- [A228] who you are, for the papers: none of it touches a match -->
+      <details class="cr-you">
+        <summary>Make it yours <span>shirt number, home town, celebration, ambitions · optional</span></summary>
+        <div class="cr-row">
+          <div>
+            <label class="cr-label" for="crNumber">Shirt number</label>
+            <input id="crNumber" class="room-input" type="number" min="0" max="99" inputmode="numeric" placeholder="0 to 99">
+          </div>
+          <div>
+            <label class="cr-label" for="crHome">Home town</label>
+            <input id="crHome" class="room-input" maxlength="24" autocomplete="off" placeholder="Where you grew up">
+          </div>
+        </div>
+        <div class="cr-label">Celebration</div>
+        <div class="room-choices cr-cels" id="crCel"></div>
+        <div class="cr-label">Ambitions <span class="cr-label-note">up to three; the career card keeps score</span></div>
+        <div class="room-choices cr-ambs-pick" id="crAmb"></div>
+      </details>
       <div class="foot-actions" style="justify-content:flex-start;padding-left:0">
         <button class="act lead" id="crGo" onclick="crStart(this)">Spin your talent</button>
       </div>
@@ -235,6 +253,6 @@
 <script src="/static/reveal.js?v=73e8407a59"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
-<script src="/static/career.js?v=0f90d7c98f"></script>
+<script src="/static/career.js?v=8472fc892c"></script>
 </body>
 </html>

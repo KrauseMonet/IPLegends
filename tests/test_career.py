@@ -353,11 +353,15 @@ def test_moves_that_do_not_fit_are_refused(deck, model, moves):
 def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
     seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
                                              for k in range(2)))
-    done = _play(deck, model, seed, _setup(), ["o0", "r"])
+    asked = _play(deck, model, seed, _setup(), ["o0", "r"])
+    assert asked.retired and asked.pending.kind == "epilogue"     # where next? (A228)
+    done = _play(deck, model, seed, _setup(), ["o0", "r", "w0"])
     assert done.complete and done.retired and len(done.seasons) == 1
     assert done.summary.runs == done.seasons[0].runs
     with pytest.raises(C.CareerError):
         _play(deck, model, seed, _setup(), ["o0", "r", "o0"])
+    with pytest.raises(C.CareerError):
+        _play(deck, model, seed, _setup(), ["o0", "r", "w0", "o0"])
 
 
 def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
@@ -521,7 +525,7 @@ def test_two_poor_seasons_end_a_career(deck, model, monkeypatch):
     seed = _quiet_seed(3)
     first = _play(deck, model, seed, _setup(), ["o0"])
     assert first.pending.kind == "offer" and first.pending.squad
-    done = _play(deck, model, seed, _setup(), ["o0", "o0"])
+    done = _play(deck, model, seed, _setup(), ["o0", "o0", "w0"])
     assert done.complete and done.released and not done.retired
     assert [r.squad for r in done.seasons] == [False, True]
     assert done.summary.regular_seasons == 1
@@ -691,7 +695,7 @@ def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = next(s for s in range(500) if C.draw_event(s, 1, role="opener").key == "captain"
                 and len(C.draw_event(s, 0, role="opener").options) == 1)
-    first = _play(deck, model, seed, _setup(), ["o0", "o0"])
+    first = _play(deck, model, seed, _setup(), ["o0", "o0", "w0"])
     assert first.seasons[0].squad is False and first.complete      # released after two
     second = first.seasons[1]
     assert second.squad and not second.captain and second.event == "quiet"
@@ -803,7 +807,7 @@ def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monke
     moves = ["o0"] * k
     before = _play(deck, model, seed, setup, moves + ["o0"])
     assert before.pending.kind == "event" and before.pending.event.key == "one_more"
-    done = _play(deck, model, seed, setup, moves + ["o0", "e1"])
+    done = _play(deck, model, seed, setup, moves + ["o0", "e1", "w0"])
     assert done.retired and done.complete and len(done.seasons) == k
 
 

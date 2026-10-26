@@ -2815,3 +2815,34 @@ site rather than the host a page is served from. The logo is one transparent mas
 served brand image (emblem, full logo, favicons, install icons, maskable icon, link-preview image) is built from
 it by `tools.build_brand`, and `--check` is a deploy gate. Brand images are content-stamped in the pages like
 scripts, because they are cached for 30 days under their own name.
+
+
+## 20. Build a Career in the papers [A228]
+
+A career is told in newspaper clippings from a made-up paper, *The Fine Leg Gazette*
+(`game/press.py`). Each season records its newsworthy FACTS (`SeasonRecord.press`: numbers and
+names, never words), and a fact becomes a clipping each time a page asks, so better wording
+improves every career already played. A match makes the papers for a hundred, a hat-trick, a
+five-wicket haul, 70 or more at a strike rate of 200, 50 runs or three wickets in a final, or a
+playoff won as Player of the Match; a season for a debut, a move, a mega auction, a title or a
+lost final, a cap, a first captaincy, an injury, a first 90+ grade, an ambition reached, and the
+last IPL season of a real long-serving teammate (the archive's own last season for him, never
+within two seasons of the archive's end). An edition is at most five clippings, the most
+newsworthy first. Real news from around the league (new, returning, absent and renamed
+franchises, seasons played abroad, mega auctions) is read off which franchises the archive has
+each year and never names a champion, since the season you play is simulated.
+
+Rules the clippings keep: only your own player is quoted; a real player is named only for what
+the scorecard shows; your player is never given a pronoun; templates are chosen by hashing the
+seed with the fact, so no random stream is touched and no match result can change; no AI call.
+A final is datelined at the real final's city; a league clipping at the home city of the side
+that batted first, and at none in a season played away from home grounds.
+
+Player of the Match is the winning side's best by runs, strike against par, wickets at 20 runs
+and overs under par (both sides when a match stays level after the super overs). On the archive's
+own scorecards this rule picks the real award in 68% of 1,218 decided matches; 97.6% of real
+awards went to a winner.
+
+At creation a player may also choose a shirt number, a home town, a celebration and up to three
+ambitions; none of it touches a match. When a career ends it asks once where the player went
+next (`w{i}`), the last clipping; a checkpoint from before A228 is never asked.

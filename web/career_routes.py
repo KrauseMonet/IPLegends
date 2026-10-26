@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import career as C
+from game import press
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
@@ -53,7 +54,9 @@ def _sign(payload: str) -> str:
 
 def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) -> str:
     body = json.dumps({"v": TOKEN_VERSION, "seed": seed,
-                       "setup": [setup.name, setup.role, setup.debut, setup.overseas],
+                       "setup": [setup.name, setup.role, setup.debut, setup.overseas,
+                                 setup.number, setup.home, setup.celebration,
+                                 list(setup.ambitions)],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -72,8 +75,12 @@ def read_token(token: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]:
         d = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if d.get("v") != TOKEN_VERSION:
             raise ValueError("old token")
-        name, role, debut, overseas = d["setup"]
-        return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas)),
+        # Four fields before A228; a token from then has no identity and no ambitions.
+        name, role, debut, overseas, *rest = d["setup"]
+        number, home, celebration, ambitions = (rest + [None, "", "", []])[:4] if len(rest) < 4 else rest
+        return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
+                                         None if number is None else int(number), str(home or ""),
+                                         str(celebration or ""), tuple(str(a) for a in ambitions or ())),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -94,6 +101,28 @@ class HighlightOut(BaseModel):
     stage: str
     opponent: str
     text: str
+
+
+class ClippingOut(BaseModel):
+    """[A228] A newspaper clipping, as the page draws it. Plain text: the page escapes it."""
+    key: str
+    year: int
+    section: str
+    headline: str
+    dek: str
+    dateline: str
+    body: list[str]
+    quote: str = ""
+    match: int | None = None
+    crest: str | None = None
+    tone: str = ""
+
+
+def _clip(c: press.Clipping) -> ClippingOut:
+    return ClippingOut(key=c.key, year=c.year, section=c.section, headline=c.headline, dek=c.dek,
+                       dateline=c.dateline, body=c.body, quote=c.quote, match=c.match,
+                       crest=crests.crest_url(c.franchise, c.year) if c.franchise else None,
+                       tone=c.tone)
 
 
 class SeasonOut(BaseModel):
@@ -141,6 +170,9 @@ class SeasonOut(BaseModel):
     milestones: list[str] = []    # A209
     mega: str = ""                # how a mega-auction year went (A212)
     plan: list[str] = []          # "Name: Death", the plan the season began with (A213)
+    poms: int = 0                 # Player of the Match awards (A228)
+    press: list[ClippingOut] = [] # the season in the papers, the biggest story first (A228)
+    league: list[str] = []        # real news from around the league that year (A228)
 
 
 class OfferOut(BaseModel):
@@ -239,6 +271,7 @@ class PendingOut(BaseModel):
     moment: MomentOut | None = None
     mega: MegaOut | None = None
     plan: list[PlanBowlerOut] | None = None    # a captain's side: set it, or change it here (A213)
+    epilogue: list[str] = []                    # a finished career: where next? `w{i}` (A228)
 
 
 class MilestoneOut(BaseModel):
@@ -279,6 +312,9 @@ class SummaryOut(BaseModel):
     five_fors: int = 0
     hat_tricks: int = 0
     milestones: list[MilestoneOut] = []       # A209, the career's in order
+    poms: int = 0                             # A228
+    farewell: ClippingOut | None = None       # the papers on the career's end (A228)
+    epilogue: ClippingOut | None = None       # where the player went after the game (A228)
 
 
 class MatchLineOut(BaseModel):
@@ -319,6 +355,7 @@ class MatchLineOut(BaseModel):
     card: int | None = None       # index into `cards`: this match's scorecard (A214)
     absence: str | None = None    # why you missed this match (A216)
     milestones: list[str] = []    # career milestones reached in this match (A209)
+    pom: bool = False             # Player of the Match (A228)
 
 
 class TableRowOut(BaseModel):
@@ -353,6 +390,14 @@ class SeasonPlayOut(BaseModel):
     your_crest: str | None
     complete: bool = True
     analysis: dict | None = None  # AnalysisOut, the solo season's own shape, for analysis.js (A211)
+    press: list[ClippingOut] = [] # the clippings this season's matches made, each on its match (A228)
+
+
+class AmbitionOut(BaseModel):
+    key: str
+    label: str
+    state: str                    # "done" | "open" | "broken"
+    year: int | None = None
 
 
 class CareerOut(BaseModel):
@@ -375,6 +420,10 @@ class CareerOut(BaseModel):
     potential_start: int = 0      # the ceiling's own card, where the potential began
     age: int = 0
     injuries: list[str] = []      # "2014 · Side strain (5 matches)"
+    number: int | None = None     # A228: who you are, for the papers
+    home: str = ""
+    celebration: str = ""
+    ambitions: list[AmbitionOut] = []
 
 
 def _template(c) -> TemplateOut:
@@ -382,8 +431,12 @@ def _template(c) -> TemplateOut:
                        crest=crests.crest_url(c.franchise, c.season_year), card=c.display)
 
 
-def _season(r: C.SeasonRecord, ceiling: int = 0) -> SeasonOut:
+def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = None) -> SeasonOut:
+    deck, _ = _state()
     return SeasonOut(
+        poms=r.poms,
+        press=[_clip(c) for c in press.edition(r.press, voice)] if voice else [],
+        league=press.league_news(r.year, C.clubs_by_year(deck), C.MEGA_YEARS),
         potential=round(ceiling + r.potential),
         year=r.year, franchise=r.franchise, short=r.short,
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
@@ -476,7 +529,8 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
         offers=[_offer(o, p.year) for o in p.offers],
         event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
-        mega=mega, plan=plan)
+        mega=mega, plan=plan,
+        epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [])
 
 
 def _offer(o: C.Offer, year: int) -> OfferOut:
@@ -508,10 +562,38 @@ def _best_bowling(seasons) -> str | None:
     return f"{w}/{runs}"
 
 
+def voice(seed: int, st: C.Setup) -> press.Voice:
+    return press.Voice(st.name, st.role, seed, st.number, st.home, st.celebration)
+
+
+def main_club(seasons) -> str | None:
+    """The club a career is remembered at: the most seasons, the latest name it played under."""
+    if not seasons:
+        return None
+    n: dict[str, int] = {}
+    for r in seasons:
+        n[canonical(r.franchise)] = n.get(canonical(r.franchise), 0) + 1
+    best = max(n, key=lambda k: (n[k], max(r.year for r in seasons if canonical(r.franchise) == k)))
+    return next(r.franchise for r in reversed(seasons) if canonical(r.franchise) == best)
+
+
+def _ending_clips(c: C.Career) -> tuple[press.Clipping, press.Clipping | None]:
+    s, v = c.summary, voice(c.seed, c.setup)
+    ending = "retired" if c.retired else "released" if c.released else "archive"
+    club = main_club(c.seasons)
+    last = c.seasons[-1].year
+    fare = press.farewell(v, ending, s.seasons, s.runs, s.wickets, s.titles, club, last,
+                          s.runs_rank, s.wickets_rank)
+    epi = press.epilogue(s.epilogue, v, club, last) if s.epilogue in press.EPILOGUES else None
+    return fare, epi
+
+
 def _summary(c: C.Career) -> SummaryOut:
     s = c.summary
     ending = "retired" if c.retired else "released" if c.released else "the end of the archive"
+    fare, epi = _ending_clips(c)
     return SummaryOut(
+        poms=s.poms, farewell=_clip(fare), epilogue=_clip(epi) if epi else None,
         seasons=s.seasons, regular_seasons=s.regular_seasons, matches=s.matches, runs=s.runs,
         strike_rate=round(100 * s.runs / s.balls, 1) if s.balls else None,
         average=round(s.runs / s.outs, 1) if s.outs else None, highest=s.highest,
@@ -533,7 +615,8 @@ def _summary(c: C.Career) -> SummaryOut:
 
 
 def _season_play(detail: C.SeasonDetail,
-                 milestones: list[C.CareerMilestone] = ()) -> SeasonPlayOut:
+                 milestones: list[C.CareerMilestone] = (),
+                 clips: list[press.Clipping] = ()) -> SeasonPlayOut:
     from web.app import _analysis_out, _result_out      # the solo season's own shapes
 
     yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
@@ -548,7 +631,7 @@ def _season_play(detail: C.SeasonDetail,
         orange=l.orange[0], orange_n=l.orange[1], orange_you=l.orange[2],
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
-        form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i],
+        form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i], pom=l.pom,
         card=l.card, absence=l.absence)
         for i, l in enumerate(detail.feed)]
     table = [TableRowOut(pos=i, short=t.short, name=t.name,
@@ -563,6 +646,7 @@ def _season_play(detail: C.SeasonDetail,
                          your_name=you_row.name,
                          your_crest=next(x.crest for x in table if x.you),
                          complete=detail.complete,
+                         press=[_clip(c) for c in clips if c.match is not None],
                          analysis=(_analysis_out(detail.analysis, detail.results).model_dump()
                                    if detail.analysis is not None else None))
 
@@ -627,18 +711,41 @@ def share_text(c: C.Career) -> str:
             f"{', '.join(bits)}\n{marks}\n{SITE_ORIGIN}/career")
 
 
+def _live_clips(seed: int, career: C.Career) -> list[press.Clipping]:
+    """The clippings of the season told in this response, each on its match: the played
+    season's own edition, or, for a season paused at a key moment, its matches so far."""
+    v, d = voice(seed, career.setup), career.detail
+    if d is None:
+        return []
+    if d.complete and career.seasons:
+        return press.edition(career.seasons[-1].press, v)
+    club = career.pending.offers[0].franchise if career.pending and career.pending.offers else ""
+    year = career.pending.year if career.pending else 0
+    return press.edition(press.match_facts(d.feed, year, club), v)
+
+
+def _ambitions(career: C.Career) -> list[AmbitionOut]:
+    out = []
+    for key in career.setup.ambitions:
+        state, year = C.ambition_status(key, career.seasons)
+        out.append(AmbitionOut(key=key, label=C.AMBITIONS[key][0], state=state, year=year))
+    return out
+
+
 def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
     st = career.setup
+    v = voice(seed, st)
     return CareerOut(
+        number=st.number, home=st.home, celebration=st.celebration, ambitions=_ambitions(career),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         start=_template(career.start), ceiling=_template(career.ceiling),
-        seasons=[_season(r, career.ceiling.display) for r in career.seasons],
+        seasons=[_season(r, career.ceiling.display, v) for r in career.seasons],
         pending=(_pending(career.pending, st.role).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
-        season_play=(_season_play(career.detail, career.live_milestones)
+        season_play=(_season_play(career.detail, career.live_milestones, _live_clips(seed, career))
                      if career.detail else None),
         auction=_auction(career.auction, _auction_year(career)) if career.auction else None,
         rating=_rating_now(career), potential=round(career.top.display),
@@ -649,7 +756,8 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
 
 def _rating_now(career: C.Career) -> int:
     """Your Rating going into the season pending (before its event), or the last season's."""
-    if career.pending is None or career.checkpoint is None:
+    if (career.pending is None or career.checkpoint is None
+            or career.pending.kind == "epilogue"):
         return career.seasons[-1].rating if career.seasons else 0
     cp = career.checkpoint
     return C.rating_at(career.start, career.top,
@@ -678,16 +786,28 @@ class RoleOut(BaseModel):
     blurb: str = ""
 
 
+class ChoiceOut(BaseModel):
+    key: str
+    label: str
+
+
 class OptionsOut(BaseModel):
     roles: list[RoleOut]
     first_debut: int
     last_debut: int
+    celebrations: list[ChoiceOut] = []       # A228
+    ambitions: list[ChoiceOut] = []
+    ambitions_max: int = C.AMBITIONS_MAX
+    home_max: int = C.HOME_MAX
+    paper: str = press.PAPER
 
 
 @router.get("/api/career/options")
 def career_options() -> OptionsOut:
     return OptionsOut(roles=[RoleOut(key=k, label=v["label"], blurb=v["blurb"]) for k, v in C.ROLES.items()],
-                      first_debut=C.FIRST_DEBUT, last_debut=C.LAST_DEBUT)
+                      first_debut=C.FIRST_DEBUT, last_debut=C.LAST_DEBUT,
+                      celebrations=[ChoiceOut(key=k, label=v[0]) for k, v in press.CELEBRATIONS.items()],
+                      ambitions=[ChoiceOut(key=k, label=v[0]) for k, v in C.AMBITIONS.items()])
 
 
 class StartIn(BaseModel):
@@ -696,6 +816,10 @@ class StartIn(BaseModel):
     debut: int
     overseas: bool = False
     seed: int | None = Field(default=None, ge=1, le=2 ** 31)
+    number: int | None = Field(default=None, ge=0, le=99)      # A228
+    home: str = Field(default="", max_length=C.HOME_MAX)
+    celebration: str = ""
+    ambitions: list[str] = Field(default=[], max_length=C.AMBITIONS_MAX)
 
 
 @router.post("/api/career/start")
@@ -703,7 +827,11 @@ def career_start(body: StartIn) -> CareerOut:
     name = " ".join(body.name.split())
     if not name or any(ch in name for ch in "<>") or any(ord(ch) < 32 for ch in name):
         raise HTTPException(400, "Choose a plain name.")
-    setup = C.Setup(name, body.role, body.debut, body.overseas)
+    home = " ".join(body.home.split())
+    if any(ch in home for ch in "<>") or any(ord(ch) < 32 for ch in home):
+        raise HTTPException(400, "Choose a plain home town.")
+    setup = C.Setup(name, body.role, body.debut, body.overseas, body.number, home,
+                    body.celebration, tuple(body.ambitions))
     try:
         setup.check()
     except C.CareerError as e:
@@ -739,7 +867,9 @@ def career_reroll(body: RerollIn, request: Request, response: Response) -> Caree
     while new == seed:
         new = rng.randint(1, 2 ** 31)
     return career_start(StartIn(name=setup.name, role=setup.role, debut=setup.debut,
-                                overseas=setup.overseas, seed=new))
+                                overseas=setup.overseas, seed=new, number=setup.number,
+                                home=setup.home, celebration=setup.celebration,
+                                ambitions=list(setup.ambitions)))
 
 
 class MoveIn(BaseModel):

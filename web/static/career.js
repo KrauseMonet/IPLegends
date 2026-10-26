@@ -72,6 +72,20 @@ function crShowCreate(){
   for (let y = o.first_debut; y <= o.last_debut; y++) years.push(y);
   $('#crDebut').innerHTML = years.map(y =>
     `<button class="room-choice${y === 2012 ? ' sel' : ''}" data-v="${y}" onclick="crPick('crDebut', this)">${y}</button>`).join('');
+  // [A228] Who you are, for the papers: a celebration and up to three ambitions.
+  $('#crCel').innerHTML = [{key: '', label: 'None'}, ...(o.celebrations || [])].map((c, i) =>
+    `<button class="room-choice${i ? '' : ' sel'}" data-v="${c.key}" onclick="crPick('crCel', this)">${esc(c.label)}</button>`).join('');
+  $('#crAmb').innerHTML = (o.ambitions || []).map(a =>
+    `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
+}
+
+function crAmbition(btn){
+  const on = document.querySelectorAll('#crAmb .room-choice.sel').length;
+  if (!btn.classList.contains('sel') && on >= (CR.options.ambitions_max || 3)){
+    slip(`Up to ${CR.options.ambitions_max || 3} ambitions.`);
+    return;
+  }
+  btn.classList.toggle('sel');
 }
 
 async function crStart(btn){
@@ -80,9 +94,13 @@ async function crStart(btn){
   if (!name){ slip('Give your player a name.'); $('#crName').focus(); return; }
   CR.busy = true; btn.disabled = true;
   try {
+    const num = $('#crNumber').value.trim();
     const d = await api('/api/career/start', {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify({
       name, role: crChosen('crRoles').v, debut: Number(crChosen('crDebut').v),
-      overseas: crChosen('crPassport').v === '1'})});
+      overseas: crChosen('crPassport').v === '1',
+      number: num === '' ? null : Number(num), home: $('#crHome').value.trim(),
+      celebration: (crChosen('crCel') || {}).v || '',
+      ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v)})});
     crSave({token: d.token});
     CR.seen = 0;
     crShow(d, 'spin');
@@ -112,7 +130,8 @@ async function crMove(move){
   CR.busy = true;
   const before = CR.data.seasons.length;
   const mega = move === 'k' || move[0] === 'b';
-  if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
+  if (move[0] === 'w') crLoading('The papers go to print…', 'Your career, as the papers tell it.');
+  else if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
     const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
     crSave({token: d.token});
@@ -125,9 +144,9 @@ async function crMove(move){
   } finally { CR.busy = false; }
 }
 
-function crLoading(text){
+function crLoading(text, sub){
   $('#crStage').innerHTML = `<div class="cr-loading"><div class="cr-ball"></div><b>${esc(text)}</b>
-    <span>Every match of the season, ball by ball.</span></div>`;
+    <span>${esc(sub || 'Every match of the season, ball by ball.')}</span></div>`;
 }
 
 // --- drawing -------------------------------------------------------------------------------
@@ -154,6 +173,7 @@ function crShow(d, moment){
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
   if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
   if (!d.pending) return crEnd(d);
+  if (d.pending.kind === 'epilogue') return crEpilogue(d);
   if (d.pending.kind === 'mega') return crMega(d);
   if (d.pending.kind === 'plan') return crPlan(d);
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
@@ -201,7 +221,7 @@ function crHead(d, hold){
       <div class="cr-pc-rating ${crTier(d.rating)}"><b>${d.rating}</b><span>Rating</span></div>
       <div class="cr-pc-who">
         <b>${esc(d.name)}</b>
-        <span>${esc(d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''} · debut ${d.debut}</span>
+        <span>${d.number != null ? `No. ${d.number} · ` : ''}${esc(d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''}${d.home ? ` · ${esc(d.home)}` : ''} · debut ${d.debut}</span>
       </div>
       <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
       <div class="cr-pc-foot">
@@ -209,8 +229,16 @@ function crHead(d, hold){
           <div class="cr-pot-bar"><i style="width:${pct}%"></i>${earned ? `<u style="left:${from}%"></u>` : ''}</div>
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
+        ${crAmbitionChips(d)}
       </div>
     </div>`;
+}
+
+// [A228] The ambitions set on the first day, and how each stands.
+function crAmbitionChips(d){
+  if (!d.ambitions || !d.ambitions.length) return '';
+  return `<div class="cr-ambs">${d.ambitions.map(a =>
+    `<span class="cr-amb ${a.state}" title="${a.state === 'done' ? 'Done in ' + a.year : a.state === 'broken' ? 'Out of reach since ' + a.year : 'Still to do'}">${a.state === 'done' ? '✓' : a.state === 'broken' ? '✕' : '○'} ${esc(a.label)}</span>`).join('')}</div>`;
 }
 
 // The path of a career [A214]: a bar per season for your Rating, a dot for that season's
@@ -625,7 +653,7 @@ function crFeedRow(l, n){
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
     <span class="cr-fr-res">${l.result}</span>
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
-    <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}</span>
+    <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}${l.pom ? ' <em class="cr-pom" title="Player of the Match">PoM</em>' : ''}</span>
     <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
   </li>`;
 }
@@ -692,9 +720,13 @@ function crFeedStop(){
 }
 
 function crFeedAppend(){
-  const f = CR.feed, l = f.sp.feed[f.i++];
+  const f = CR.feed, idx = f.i, l = f.sp.feed[f.i++];
   if (l.stage === 'league') f.n += 1;
-  $('#crFeedList').insertAdjacentHTML('beforeend', crFeedRow(l, f.n) + crFeedMilestones(l));
+  // [A228] A match that made the papers carries its clipping under it.
+  const clips = (f.sp.press || []).filter(c => c.match === idx);
+  l.clipped = clips.length > 0;
+  $('#crFeedList').insertAdjacentHTML('beforeend', crFeedRow(l, f.n) + crFeedMilestones(l)
+    + clips.map(c => `<li class="cr-np-li">${crClip(c, 'mini')}</li>`).join(''));
   crFeedPanel(l);
   return l;
 }
@@ -714,7 +746,8 @@ function crFeedStep(){
       <button class="act" onclick="crFeedResume()">Skip it</button>`;
     return;
   }
-  f.timer = setTimeout(crFeedStep, l.milestones && l.milestones.length ? CR_FEED_MS * 4 : CR_FEED_MS);
+  f.timer = setTimeout(crFeedStep, l.clipped ? CR_FEED_MS * 7
+    : l.milestones && l.milestones.length ? CR_FEED_MS * 4 : CR_FEED_MS);
 }
 
 function crFeedResume(){
@@ -874,7 +907,7 @@ function crBowl(r){
 function crSeason(d, r){
   const finish = r.champion ? 'Champions' : r.finalist ? 'Runners-up'
     : `${crOrd(r.position)} of ${r.teams}${r.playoffs ? ' · playoffs' : ''}`;
-  const next = d.pending ? `<button class="act lead" onclick="crShow(CR.data, null)">Next season</button>`
+  const next = d.pending ? `<button class="act lead" onclick="crShow(CR.data, null)">${d.pending.kind === 'epilogue' ? 'What next?' : 'Next season'}</button>`
                          : `<button class="act lead" onclick="crEnd(CR.data)">See your career</button>`;
   // The bar above already shows next season's Rating; say so here, beside this season's.
   const last = r === d.seasons[d.seasons.length - 1];
@@ -912,10 +945,9 @@ function crSeason(d, r){
         ${r.notes && r.notes.length ? `<div class="cr-notes"><div class="cr-label">What happened</div>
           <div class="cr-note-list">${r.notes.map((t, i) => { const tone = (r.note_tones || [])[i] || '';
             return `<p class="cr-note ${tone}"><i>${tone === 'up' ? '▲' : tone === 'down' ? '▼' : '•'}</i>${esc(t)}</p>`; }).join('')}</div></div>` : ''}
+        ${crPapers(r)}
         ${r.plan && r.plan.length ? `<div class="cr-msl cr-plan-card"><div class="cr-label">Your bowling plan</div>
           <div>${r.plan.map(esc).join(' · ')}</div></div>` : ''}
-        ${r.milestones && r.milestones.length ? `<div class="cr-msl"><div class="cr-label">Milestones</div>
-          ${r.milestones.map(t => `<div>★ ${esc(t)}</div>`).join('')}</div>` : ''}
         ${r.highlights.length ? `<div class="cr-hl"><div class="cr-label">Highlights</div>
           ${r.highlights.map(h => `<div><span>${esc(h.stage === 'league' ? 'League' : h.stage)} v ${esc(h.opponent)}</span><b>${esc(h.text)}</b></div>`).join('')}</div>` : ''}
       </div>
@@ -980,18 +1012,145 @@ function crEnd(d){
           <div><b>${s.titles}</b> title${s.titles === 1 ? '' : 's'}<span>${s.finals} final${s.finals === 1 ? '' : 's'} · ${s.orange_caps} Orange, ${s.purple_caps} Purple Cap${s.orange_caps + s.purple_caps === 1 ? '' : 's'}</span></div>
           <div><b>${s.peak_rating || s.peak_card}</b> peak Rating<span>${s.peak_rating_year || s.peak_year} · best season grade ${s.peak_card} (${s.peak_year})</span></div>
           <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
+          ${s.poms ? `<div><b>${s.poms}</b> Player of the Match<span>award${s.poms === 1 ? '' : 's'}</span></div>` : ''}
         </div>
+        ${crAmbitionList(d)}
         ${crStory(d)}
       </div>
+      ${crEndPapers(d)}
       <div class="cr-keep" id="crKeep"></div>
       <div class="foot-actions" style="justify-content:center">
-        <button class="act lead" onclick="crShowCard()">Your career card</button>
+        ${crReelItems(d).length > 2 ? '<button class="act lead" onclick="crReel()">Play the reel</button>' : ''}
+        <button class="act${crReelItems(d).length > 2 ? '' : ' lead'}" onclick="crShowCard()">Your career card</button>
         <button class="act" onclick="pzShare(CR.data.share, 'Career copied. No names in it.')">Share as text</button>
         <button class="act" onclick="crNew()">Start a new career</button>
       </div>
     </div>`;
   crKeep(d);
 }
+
+// --- the papers [A228] ------------------------------------------------------------------------
+// Every clipping is plain text from the server (game.press), escaped here. Three sizes: the
+// lead story of a season, a smaller one beside it, and a mini under a match in the feed.
+
+function crClip(c, size){
+  const paper = (CR.options && CR.options.paper) || 'The Fine Leg Gazette';
+  const full = size !== 'mini';
+  return `<article class="np np-${size}${c.tone ? ' np-' + c.tone : ''}"${full ? '' : ' onclick="this.classList.toggle(\'open\')"'}>
+    <header class="np-mast"><span>${esc(paper)}</span><span>IPL ${c.year} · ${esc(c.section)}</span></header>
+    ${c.crest && size === 'lead' ? `<div class="np-photo">${crestImg(c.crest, 'np-crest')}</div>` : ''}
+    <h3 class="np-head">${esc(c.headline)}</h3>
+    ${c.dek ? `<p class="np-dek">${esc(c.dek)}</p>` : ''}
+    <div class="np-body"><p>${c.dateline ? `<b>${esc(c.dateline)}:</b> ` : '<b>From our correspondent.</b> '}${c.body.map(esc).join(' ')}</p>
+      ${c.quote ? `<p class="np-quote">${esc(c.quote)}</p>` : ''}</div>
+  </article>`;
+}
+
+// A season in the papers: the biggest story, the rest beside it, the league's real news and
+// the season's milestones in brief.
+function crPapers(r){
+  const clips = r.press || [], league = r.league || [], brief = r.milestones || [];
+  if (!clips.length && !league.length && !brief.length) return '';
+  return `<div class="cr-papers"><div class="cr-label">In the papers</div>
+    ${clips.length ? crClip(clips[0], 'lead') : ''}
+    ${clips.length > 1 ? `<div class="np-grid">${clips.slice(1).map(c => crClip(c, 'small')).join('')}</div>` : ''}
+    <div class="np-cols">
+      ${league.length ? `<aside class="np-side"><b>Around the league</b>${league.map(t => `<p>${esc(t)}</p>`).join('')}</aside>` : ''}
+      ${brief.length ? `<aside class="np-side"><b>In brief</b>${brief.map(t => `<p>${esc(t)}</p>`).join('')}</aside>` : ''}
+    </div></div>`;
+}
+
+// The career is over: where does the player go? [A228] One choice, for the last clipping.
+function crEpilogue(d){
+  const p = d.pending;
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · THE END OF THE ROAD</div>
+      <div class="cr-event">
+        <div class="cr-event-icon">📰</div>
+        <h2 class="cr-h">Where are you now?</h2>
+        <p>The last season is behind you. Years from now, the papers come looking. What do they find?</p>
+        <div class="cr-event-opts">${p.epilogue.map((t, i) =>
+          `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('w${i}')"><b>${esc(t)}</b></button>`).join('')}</div>
+      </div>
+    </div>`;
+}
+
+function crAmbitionList(d){
+  if (!d.ambitions || !d.ambitions.length) return '';
+  const done = d.ambitions.filter(a => a.state === 'done').length;
+  return `<div class="cr-msl cr-amb-list"><div class="cr-label">Ambitions · ${done} of ${d.ambitions.length}</div>
+    ${d.ambitions.map(a => `<div class="cr-amb ${a.state}">${a.state === 'done' ? '✓' : a.state === 'broken' ? '✕' : '○'}
+      ${esc(a.label)}${a.year ? `<span>${a.state === 'done' ? 'done' : 'gone'} ${a.year}</span>` : ''}</div>`).join('')}</div>`;
+}
+
+// The end of a career in the papers, and every clipping it ever made, folded away by year.
+function crEndPapers(d){
+  const s = d.summary, all = d.seasons.flatMap(r => r.press || []);
+  return `<div class="cr-papers">
+    ${s.farewell ? crClip(s.farewell, 'lead') : ''}
+    ${s.epilogue ? crClip(s.epilogue, 'small') : ''}
+    ${all.length ? `<details class="cr-cuttings"><summary>Press cuttings · ${all.length}</summary>
+      <div class="np-grid">${all.map(c => crClip(c, 'small')).join('')}</div></details>` : ''}
+  </div>`;
+}
+
+// --- the reel: a career in its headlines, one season at a time ------------------------------
+
+function crReelItems(d){
+  if (!d || !d.summary) return [];
+  const items = d.seasons.filter(r => r.press && r.press.length).map(r => r.press[0]);
+  if (d.summary.farewell) items.push(d.summary.farewell);
+  if (d.summary.epilogue) items.push(d.summary.epilogue);
+  return items;
+}
+
+const CR_REEL_MS = 4200;
+
+function crReel(){
+  const items = crReelItems(CR.data);
+  if (!items.length) return;
+  let box = document.getElementById('crReel');
+  if (!box){
+    box = document.createElement('div');
+    box.id = 'crReel';
+    box.className = 'cr-reel';
+    document.body.appendChild(box);
+  }
+  CR.reel = {items, i: 0, timer: null};
+  box.classList.remove('hide');
+  crReelShow();
+}
+
+function crReelShow(){
+  const r = CR.reel, box = document.getElementById('crReel');
+  if (!r || !box) return;
+  clearTimeout(r.timer);
+  if (r.i >= r.items.length) return crReelClose();
+  const c = r.items[r.i];
+  box.innerHTML = `
+    <div class="cr-reel-year">${c.year}</div>
+    <div class="cr-reel-clip" onclick="crReelNext()">${crClip(c, 'lead')}</div>
+    <div class="cr-reel-bar"><i style="animation-duration:${CR_REEL_MS}ms"></i></div>
+    <div class="cr-reel-foot"><span>${r.i + 1} / ${r.items.length}</span>
+      <button class="act" onclick="crReelNext()">Next</button>
+      <button class="act" onclick="crReelClose()">Close</button></div>`;
+  r.timer = setTimeout(crReelNext, CR_REEL_MS);
+}
+
+function crReelNext(){ if (CR.reel){ CR.reel.i += 1; crReelShow(); } }
+
+function crReelClose(){
+  if (CR.reel) clearTimeout(CR.reel.timer);
+  CR.reel = null;
+  const box = document.getElementById('crReel');
+  if (box) box.classList.add('hide');
+}
+document.addEventListener('keydown', e => {
+  if (!CR.reel) return;
+  if (e.key === 'Escape') crReelClose();
+  else if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); crReelNext(); }
+});
 
 // The career's milestones and injuries as one timeline, a row per year with that season's
 // club [A219]. Coloured by the milestone's own kind, which the server sends (`key`), so a

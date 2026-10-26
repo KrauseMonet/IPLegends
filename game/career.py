@@ -50,6 +50,7 @@ from game.auction import value_curve
 from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
+from game import press
 from game.simulator import Model
 
 # --- who you can be ------------------------------------------------------------------
@@ -630,6 +631,44 @@ EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 2, "injury": 1, "mentor": 2, 
                "fracture": 1, "fitness": 2}
 
 
+HOME_MAX = 24
+AMBITIONS_MAX = 3
+# [A228] What a career can set out to do, each checked against the season records alone.
+# key -> (label, check over the seasons so far). A target reached is a milestone and a
+# clipping in the season it falls; `one_club` can also be broken, by a move.
+AMBITIONS: dict[str, tuple[str, object]] = {
+    "title": ("Win the IPL", lambda ss: any(r.champion for r in ss)),
+    "titles3": ("Win three IPL titles", lambda ss: sum(r.champion for r in ss) >= 3),
+    "orange": ("Win the Orange Cap", lambda ss: any(r.orange_cap for r in ss)),
+    "purple": ("Win the Purple Cap", lambda ss: any(r.purple_cap for r in ss)),
+    "captain": ("Captain your franchise", lambda ss: any(r.captain for r in ss)),
+    "hundred": ("Score an IPL hundred", lambda ss: any(r.hundreds for r in ss)),
+    "five_for": ("Take a five-wicket haul", lambda ss: any(r.five_fors for r in ss)),
+    "runs4000": ("Score 4,000 IPL runs", lambda ss: sum(r.runs for r in ss) >= 4000),
+    "wickets150": ("Take 150 IPL wickets", lambda ss: sum(r.wickets for r in ss) >= 150),
+    "matches150": ("Play 150 IPL matches", lambda ss: sum(r.matches for r in ss) >= 150),
+    "pom10": ("Ten Player of the Match awards", lambda ss: sum(r.poms for r in ss) >= 10),
+    "one_club": ("Ten seasons at one club", lambda ss: len(ss) >= 10 and one_club(ss)),
+}
+
+
+def one_club(seasons: list) -> bool:
+    return len({canonical(r.franchise) for r in seasons}) <= 1
+
+
+def ambition_status(key: str, seasons: list) -> tuple[str, int | None]:
+    """("done", the year it was reached) | ("broken", the year it was lost) | ("open", None)."""
+    check = AMBITIONS[key][1]
+    for i in range(len(seasons)):
+        if check(seasons[:i + 1]):
+            return "done", seasons[i].year
+    if key == "one_club":
+        for i in range(len(seasons)):
+            if not one_club(seasons[:i + 1]):
+                return "broken", seasons[i].year
+    return "open", None
+
+
 class CareerError(ValueError):
     """A setup or a move that does not describe a playable career."""
 
@@ -643,6 +682,12 @@ class Setup:
     role: str
     debut: int
     overseas: bool = False
+    # [A228] Who you are, for the papers only: a shirt number, a home town, a celebration,
+    # and up to three ambitions the career card keeps score of. None of it touches a match.
+    number: int | None = None
+    home: str = ""
+    celebration: str = ""
+    ambitions: tuple[str, ...] = ()
 
     def check(self) -> None:
         if self.role not in ROLES:
@@ -653,8 +698,20 @@ class Setup:
             raise CareerError("a player needs a name")
         # [A215] A legend's name reaches other people's screens in a friends' room (A152's
         # rule for room names): no angle brackets, no control characters.
-        if any(ch in "<>" or ord(ch) < 32 or ord(ch) == 127 for ch in self.name):
-            raise CareerError("a name cannot contain < or > or control characters")
+        for text in (self.name, self.home):
+            if any(ch in "<>" or ord(ch) < 32 or ord(ch) == 127 for ch in text):
+                raise CareerError("a name cannot contain < or > or control characters")
+        if self.number is not None and not 0 <= self.number <= 99:
+            raise CareerError("a shirt number is 0 to 99")
+        if len(self.home) > HOME_MAX:
+            raise CareerError(f"a home town is at most {HOME_MAX} characters")
+        if self.celebration and self.celebration not in press.CELEBRATIONS:
+            raise CareerError(f"no such celebration {self.celebration!r}")
+        if len(self.ambitions) > AMBITIONS_MAX or len(set(self.ambitions)) != len(self.ambitions):
+            raise CareerError(f"choose up to {AMBITIONS_MAX} different ambitions")
+        for a in self.ambitions:
+            if a not in AMBITIONS:
+                raise CareerError(f"no such ambition {a!r}")
 
 
 def _regular(c: Card) -> bool:
@@ -880,6 +937,22 @@ def market_value(rating: int, last_grade: int | None) -> int | None:
 
 
 # --- a real year's league ----------------------------------------------------------------
+
+
+_CLUBS: dict[int, dict] = {}
+
+
+def clubs_by_year(deck: Deck) -> dict[int, dict[str, str]]:
+    """year -> {canonical franchise: the name it played under}, from the deck (A228's league
+    news). Once per deck."""
+    hit = _CLUBS.get(id(deck))
+    if hit is None:
+        hit = defaultdict(dict)
+        for cards in deck.cards_by_fs.values():
+            if cards:
+                hit[cards[0].season_year][canonical(cards[0].franchise)] = cards[0].franchise
+        hit = _CLUBS[id(deck)] = dict(hit)
+    return hit
 
 
 def year_fs_ids(deck: Deck, year: int) -> list[int]:
@@ -1749,6 +1822,10 @@ class SeasonRecord:
     # dismissal], None where the season is not judged on that discipline. None on a season
     # played before A225.
     measured: list | None = None
+    # [A228] Player of the Match awards this season, and the season's newsworthy facts
+    # (game.press renders them into clippings each time a page asks). Empty on older tokens.
+    poms: int = 0
+    press: list[dict] = field(default_factory=list)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -2177,6 +2254,14 @@ class MatchLine:
     # This match's own landmarks for you: "fifty"|"hundred", "four_for"|"five_for", "hattrick"
     # (A209). Whether one is a career FIRST is the career's business (`career_milestones`).
     landmarks: list[str] = field(default_factory=list)
+    # [A228] What the papers need: your boundaries, whether you chased, the side's best other
+    # batter that day ("KP Pietersen 39", off the scorecard), and Player of the Match.
+    fours: int = 0
+    sixes: int = 0
+    chasing: bool = False
+    mate: str | None = None
+    mate_runs: int = 0
+    pom: bool = False
 
 
 @dataclass
@@ -2237,6 +2322,42 @@ def _landmarks(line: MatchLine, theirs) -> list[str]:
            for m in (theirs.milestones if theirs else [])):
         out.append("hattrick")
     return out
+
+
+# [A228] Player of the Match, decided the way a match is usually read: the winning side's
+# best day (97.6% of the archive's 1,218 decided matches gave it to a winner), scored as
+# runs, plus strike against par, plus wickets at FORM_WICKET_RUNS and overs under par --
+# the form score's own pieces (A205). Measured against the real awards on the archive's own
+# scorecards, this picks the real Player of the Match in 68% of matches (runs and wickets
+# alone: 66%). A match level after the super overs looks at both sides.
+POM_STRIKE_WEIGHT = 0.5
+
+
+def pom_score(runs: int, balls: int, wickets: int, bowl_balls: int, bowl_runs: int) -> float:
+    return (runs + POM_STRIKE_WEIGHT * (runs - FORM_PAR_PER_BALL * balls)
+            + FORM_WICKET_RUNS * wickets + (FORM_PAR_PER_BALL * bowl_balls - bowl_runs))
+
+
+def player_of_match(r: Result) -> str | None:
+    """The person id of the match's Player of the Match, or None for a match with no cards."""
+    if r.home_innings is None or r.away_innings is None:
+        return None
+    sides = [r.winner] if r.winner is not None else [r.home, r.away]
+    best: tuple | None = None
+    for side in sides:
+        bat = r.home_innings if side is r.home else r.away_innings
+        bowled = r.away_innings if side is r.home else r.home_innings
+        figs: dict[str, list[int]] = {}
+        for b in bat.batting:
+            figs.setdefault(b.player.person_id, [0, 0, 0, 0, 0])[:2] = [b.runs, b.balls]
+        for w in bowled.bowling:
+            f = figs.setdefault(w.player.person_id, [0, 0, 0, 0, 0])
+            f[2:] = [w.wickets, w.balls, w.runs]
+        for pid, f in figs.items():
+            key = (pom_score(*f), pid)
+            if best is None or key > best:
+                best = key
+    return best[1] if best else None
 
 
 def _score(runs: int, wickets: int) -> str:
@@ -2318,6 +2439,12 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
                 line.played = True
                 line.batted = b.faced_any or b.out
                 line.runs, line.balls, line.out = b.runs, b.balls, b.out
+                line.fours, line.sixes = b.fours, b.sixes
+        line.chasing = not home                # the engine's home side bats first
+        mate = _best_bat(mine)
+        line.mate = _bat_line(mate) if mate else None
+        line.mate_runs = mate.runs if mate else 0
+        line.pom = player_of_match(r) == YOU_ID
         for w in (theirs.bowling if theirs else []):
             if w.player.person_id == YOU_ID and w.balls:
                 line.played = True
@@ -2396,6 +2523,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.highlights = _highlights(results, yours)
     detail = season_detail(year)
     record.hat_tricks = sum("hattrick" in l.landmarks for l in detail.feed)
+    record.poms = sum(l.pom for l in detail.feed)
     detail.analysis = season_analysis(results, track=yours)
     detail.results = results
     return record, detail
@@ -2409,6 +2537,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
 RUN_MARK = 1000           # every thousand career runs
 WICKET_MARK = 50          # every fifty career wickets
 MATCH_MARK = 50           # every fifty matches
+POM_MARK = 10             # every ten Player of the Match awards (A228)
 _NTH = {2: "Second", 3: "Third", 4: "Fourth", 5: "Fifth", 6: "Sixth", 7: "Seventh",
         8: "Eighth", 9: "Ninth", 10: "Tenth"}
 
@@ -2433,6 +2562,7 @@ def career_milestones(previous: list[SeasonRecord], feed: list[MatchLine] | None
     matches, runs, wickets = prior("matches"), prior("runs"), prior("wickets")
     fifty_plus, hundreds = prior("fifties") + prior("hundreds"), prior("hundreds")
     four_plus, five_plus = prior("four_fors"), prior("five_fors")
+    poms = prior("poms")
     out: list[CareerMilestone] = []
     for i, l in enumerate(feed or []):
         if not l.played:
@@ -2466,6 +2596,12 @@ def career_milestones(previous: list[SeasonRecord], feed: list[MatchLine] | None
             wickets += l.wickets
         if "hattrick" in l.landmarks:
             add("hattrick", f"Hat-trick v {opp}")
+        if l.pom:
+            poms += 1
+            if poms == 1:
+                add("pom", f"First Player of the Match award, v {opp}")
+            elif poms % POM_MARK == 0:
+                add("pom", f"{poms} Player of the Match awards")
     if record is None:
         return out
     if record.champion:
@@ -2532,6 +2668,8 @@ class Summary:
     milestones: list[tuple[int, str]] = field(default_factory=list)   # (year, text), A209
     peak_rating: int = 0               # your best Rating (A214)
     peak_rating_year: int = 0
+    poms: int = 0                      # Player of the Match awards (A228)
+    epilogue: str = ""                 # where the player went after the game (A228)
 
 
 @dataclass
@@ -2595,6 +2733,8 @@ def summarise(career: Career, real_runs: list[int] | None = None,
         milestones=[(r.year, m.text) for r in s for m in r.milestones])
     best = max(s, key=lambda r: (r.rating, -r.year))
     total.peak_rating, total.peak_rating_year = best.rating, best.year
+    total.poms = sum(r.poms for r in s)
+    total.epilogue = career.checkpoint.epilogue or "" if career.checkpoint else ""
     if real_runs is not None:
         total.runs_rank = all_time_rank(total.runs, real_runs)
     if real_wickets is not None:
@@ -2704,6 +2844,10 @@ class Checkpoint:
     clock: float = 0.0
     potential: float = 0.0
     shaped: bool = True
+    # [A228] Where the player went after the game: an `EPILOGUES` key, chosen once the career
+    # ends. None: not asked yet. "" on a checkpoint from before A228, which is never asked,
+    # so a career already finished stays finished.
+    epilogue: str | None = None
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -2724,7 +2868,7 @@ class Checkpoint:
                    plan=dict(d.get("plan") or {}), later=list(d.get("later") or []),
                    injuries=[list(i) for i in d.get("injuries") or []],
                    clock=d.get("clock", float(d["k"])), potential=d.get("potential", 0.0),
-                   shaped=d.get("shaped", False))
+                   shaped=d.get("shaped", False), epilogue=d.get("epilogue", ""))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -2758,6 +2902,85 @@ def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceili
     if after == before:
         return None
     return potential_words(before, after, grade if gain else None)
+
+
+# --- the papers [A228] -------------------------------------------------------------------------
+# A real teammate's last IPL season: told only where the archive is sure it was the last --
+# MATE_LAST_BEFORE leaves two seasons of room, since a man missing from 2025 and 2026 may
+# yet come back -- and only for a player with MATE_MIN_SEASONS in the league.
+MATE_MIN_SEASONS = 6
+MATE_LONG_SEASONS = 10                 # ...or ten, to be news when you shared only this one
+MATE_LAST_BEFORE = LAST_YEAR - 1
+_INDEX: dict[int, tuple] = {}
+
+
+def _deck_index(deck: Deck) -> tuple[dict, dict]:
+    """((franchise, year) -> fs_id, person -> his seasons in the archive), once per deck."""
+    hit = _INDEX.get(id(deck))
+    if hit is None:
+        fs_of, years = {}, defaultdict(set)
+        for fs, cards in deck.cards_by_fs.items():
+            if not cards:
+                continue
+            fs_of[(cards[0].franchise, cards[0].season_year)] = fs
+            for c in cards:
+                years[c.person_id].add(c.season_year)
+        hit = _INDEX[id(deck)] = (fs_of, dict(years))
+    return hit
+
+
+def mate_farewell(deck: Deck, year: int, fs_id: int, previous: list) -> dict | None:
+    """The most-travelled real teammate in your squad this year for whom it was his last
+    IPL season: {"name", "seasons", "together"}, or None."""
+    if year > MATE_LAST_BEFORE:
+        return None
+    fs_of, years = _deck_index(deck)
+    squads = [{c.person_id for c in deck.cards_by_fs.get(fs_of.get((r.franchise, r.year)), [])}
+              for r in previous]
+    best = None
+    for c in deck.cards_by_fs.get(fs_id, []):
+        ys = years.get(c.person_id, set())
+        if c.person_id == YOU_ID or max(ys, default=0) != year or len(ys) < MATE_MIN_SEASONS:
+            continue
+        together = 1 + sum(c.person_id in sq for sq in squads)
+        if together < 2 and len(ys) < MATE_LONG_SEASONS:
+            continue                       # a near-stranger: only a long career makes news
+        key = (len(ys), together, c.name)
+        if best is None or key > best[0]:
+            best = (key, {"name": c.name, "seasons": len(ys), "together": together})
+    return best[1] if best else None
+
+
+def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offer, k: int,
+                 year: int, auction: "MegaResult | None", setup: Setup) -> "press.SeasonFacts":
+    prev = cp.seasons
+    last = prev[-1] if prev else None
+    mega = None
+    if auction is not None and year in MEGA_YEARS and k > 0:
+        rivals = []
+        for f, _short, _price in reversed(auction.bids):
+            if canonical(f) != canonical(auction.franchise) and f not in rivals:
+                rivals.append(f)
+        mega = {"retained": auction.retained, "sold": auction.sold, "price": auction.price,
+                "base": auction.base, "bids": len(auction.bids), "rivals": rivals[:2]}
+    moved = (last.franchise if last is not None and mega is None
+             and canonical(last.franchise) != canonical(offer.franchise) else None)
+    return press.SeasonFacts(
+        k=k, year=year, club=offer.franchise, price=played.price, age=DEBUT_AGE + k,
+        moved_from=moved, contract=played.contract_year == 1, mega=mega,
+        champion=played.champion, finalist=played.finalist,
+        title_number=sum(r.champion for r in prev) + 1,
+        orange=played.runs if played.orange_cap else None,
+        purple=played.wickets if played.purple_cap else None,
+        first_captaincy=played.captain and not any(r.captain for r in prev),
+        injuries=[t for y, t in cp.injuries if y == year],
+        mate=mate_farewell(deck, year, offer.fs_id, prev),
+        first_elite=(played.display if played.display >= 90 and all(r.display < 90 for r in prev)
+                     else None),
+        ambitions=[m.text.removeprefix("Ambition achieved: ") for m in played.milestones
+                   if m.key == "ambition"],
+        first_hundred=not any(r.hundreds for r in prev),
+        first_five_for=not any(r.five_fors for r in prev))
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -2986,7 +3209,15 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
         played.milestones = career_milestones(
             cp.seasons, career.detail.feed if career.detail else None, played)
+        for key in setup.ambitions:
+            state, when = ambition_status(key, cp.seasons + [played])
+            if state == "done" and when == year:
+                played.milestones.append(CareerMilestone(
+                    "ambition", f"Ambition achieved: {AMBITIONS[key][0]}"))
         career.live_milestones = played.milestones
+        played.press = press.season_facts(_press_facts(deck, cp, played, offer, k, year,
+                                                        career.auction, setup),
+                                          career.detail.feed if career.detail else None)
         cp.seasons.append(played)
         cp.current, cp.last_display = canonical(offer.franchise), played.display
         cp.k += 1
@@ -3038,6 +3269,16 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if released:
             career.released, cp.ended = True, "released"
             break
+    # [A228] Where did the player go after the game? Asked once, when the career ends; a
+    # checkpoint from before A228 carries "" and is never asked.
+    if cp.epilogue is None:
+        move = nxt()
+        if move is None:
+            last = max(cp.k - 1, 0)
+            career.checkpoint = copy.deepcopy(cp)
+            career.pending = Pending("epilogue", setup.debut + last, last)
+            return career
+        cp.epilogue = list(press.EPILOGUES)[_index(move, "w", len(press.EPILOGUES))]
     if nxt() is not None:
         raise CareerError("moves left over after the career ended")
     career.checkpoint = copy.deepcopy(cp)
@@ -3051,7 +3292,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
 def _index(move: str, kind: str, n: int) -> int:
     if not isinstance(move, str) or not move.startswith(kind) or not move[1:].isdigit():
         what = {"o": "an offer", "c": "an offer", "e": "an event answer", "m": "a key-moment call",
-                "b": "a base price"}.get(kind, "a")
+                "b": "a base price", "w": "a where-are-they-now"}.get(kind, "a")
         raise CareerError(f"expected {what} move, got {move!r}")
     i = int(move[1:])
     if not 0 <= i < n:
@@ -3064,6 +3305,8 @@ def _index(move: str, kind: str, n: int) -> int:
 
 def policy_move(career: Career, policy: str, rng: random.Random) -> str:
     p = career.pending
+    if p.kind == "epilogue":                   # A228
+        return f"w{rng.randrange(len(press.EPILOGUES)) if policy == 'random' else 0}"
     if p.kind == "plan":                       # A213: the automatic players set none
         return "p" + "0" * len(p.plan_bowlers)
     if p.kind == "mega":                       # A212

@@ -90,6 +90,10 @@ def card(career: C.Career) -> dict:
         "earnings": crore(s.earnings), "franchises": s.franchises,
         "milestones": [[y, t] for y, t in s.milestones],
         "peak_rating": s.peak_rating, "peak_rating_year": s.peak_rating_year,
+        # [A228] Player of the Match awards, where the player went after the game, and the
+        # ambitions set on the first day with how each went.
+        "poms": s.poms, "epilogue": s.epilogue, "number": career.setup.number,
+        "ambitions": [[k, *C.ambition_status(k, career.seasons)] for k in career.setup.ambitions],
         "injuries": [list(i) for i in (career.checkpoint.injuries if career.checkpoint else [])],
         "timeline": [{"year": r.year, "franchise": r.franchise, "card": r.display, "rating": r.rating,
                       "champion": r.champion, "squad": r.squad} for r in career.seasons],

@@ -4207,3 +4207,102 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .lg-row i{font-style:normal;font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
 .lg-pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .lg-pick select{flex:1;min-width:200px;appearance:auto}
+
+/* --- Build a Career: the papers [A228] -------------------------------------------------------
+   Newsprint stays newsprint in both themes: a clipping is a piece of paper on the desk. The
+   serif is the system's own (Georgia and its kin), so nothing extra is downloaded. */
+.np{--paper:#f2ead8;--paper-ink:#1f1b14;--paper-ink-2:#4a4235;--paper-rule:#b9ac91;
+  background:var(--paper);color:var(--paper-ink);font-family:Georgia,"Times New Roman",Times,serif;
+  padding:14px 16px 16px;border-radius:2px;box-shadow:0 10px 26px rgba(0,0,0,.35);
+  position:relative;text-align:left;
+  background-image:radial-gradient(rgba(60,45,20,.06) 1px,transparent 1px);background-size:3px 3px}
+.np::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:7px;background:var(--paper);
+  clip-path:polygon(0 0,4% 70%,9% 10%,14% 80%,20% 20%,26% 90%,31% 15%,37% 75%,43% 5%,49% 85%,55% 20%,
+  61% 70%,67% 10%,73% 90%,79% 25%,85% 80%,91% 15%,96% 70%,100% 0)}
+.np-mast{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--paper-ink-2);
+  border-bottom:3px double var(--paper-rule);padding-bottom:5px;margin-bottom:9px}
+.np-mast span:first-child{font-family:Georgia,serif;font-weight:700;font-style:italic;letter-spacing:.02em;
+  text-transform:none;font-size:12px;color:var(--paper-ink)}
+.np-head{font-family:Georgia,"Times New Roman",serif;font-weight:700;font-size:20px;line-height:1.15;
+  margin:0 0 6px;color:var(--paper-ink);letter-spacing:-.01em}
+.np-dek{font-style:italic;font-size:14px;margin:0 0 9px;color:var(--paper-ink-2)}
+.np-body p{font-size:14.5px;line-height:1.55;margin:0 0 8px;color:var(--paper-ink);text-align:justify;hyphens:auto}
+.np-body b{font-weight:700;letter-spacing:.04em}
+.np-quote{font-style:italic;border-left:3px solid var(--paper-rule);padding-left:10px}
+.np-photo{float:right;width:96px;height:96px;margin:2px 0 8px 14px;background:#d9cfb7;
+  display:grid;place-items:center;border:1px solid var(--paper-rule);
+  filter:grayscale(1) contrast(1.15);position:relative}
+.np-photo::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(rgba(0,0,0,.18) 1px,transparent 1.3px);background-size:4px 4px}
+.np-crest{width:74px;height:74px;object-fit:contain}
+.np-lead{transform:rotate(-.6deg);margin:6px 0 18px}
+.np-lead .np-head{font-size:clamp(22px,3.4vw,30px)}
+.np-small .np-head{font-size:17px}
+.np-small .np-body p{font-size:13.5px}
+.np-small:nth-child(even){transform:rotate(.5deg)}
+.np-small:nth-child(odd){transform:rotate(-.35deg)}
+.np-gold .np-head{text-decoration:underline;text-decoration-color:#b8862b;text-decoration-thickness:3px;text-underline-offset:4px}
+.np-red .np-head{color:#7c1d10}
+.np-orange .np-mast{border-bottom-color:#d77a35}
+.np-purple .np-mast{border-bottom-color:#8a5cc2}
+.np-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:20px;margin:6px 0 16px}
+.np-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:4px}
+.np-side{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px;color:var(--ink-2)}
+.np-side b{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:6px}
+.np-side p{margin:0;padding:5px 0;border-top:1px solid var(--line)}
+.cr-papers{margin-top:18px}
+/* in the feed: the headline only, until tapped */
+.cr-np-li{list-style:none;padding:6px 4px 12px}
+.np-mini{cursor:pointer;padding:9px 12px 10px;transform:rotate(-.4deg);animation:np-in .45s ease-out}
+.np-mini .np-head{font-size:16px;margin:0}
+.np-mini .np-dek{font-size:13px;margin:4px 0 0}
+.np-mini .np-body{display:none;margin-top:8px}
+.np-mini.open .np-body{display:block}
+.np-mini .np-mast{font-size:9px;margin-bottom:6px}
+@keyframes np-in{from{opacity:0;transform:translateY(-6px) rotate(-3deg) scale(.97)}to{opacity:1}}
+.cr-pom{font-style:normal;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:#1a1204;
+  background:var(--gold);border-radius:4px;padding:1px 5px}
+.cr-cuttings{margin-top:10px}
+.cr-cuttings summary{cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-2);padding:10px 0}
+.cr-cuttings .np-grid{margin-top:10px}
+/* ambitions: on the player bar and the career card */
+.cr-ambs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cr-amb{font-size:12px;color:var(--ink-3)}
+.cr-ambs .cr-amb{border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.cr-amb.done{color:var(--mint)}
+.cr-ambs .cr-amb.done{border-color:rgba(61,220,151,.4)}
+.cr-amb.broken{color:var(--ink-3);text-decoration:line-through}
+.cr-amb-list .cr-amb{display:flex;justify-content:space-between;gap:10px;padding:7px 0;
+  border-top:1px solid var(--line);font-size:14.5px}
+.cr-amb-list .cr-amb span{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+/* creation: make it yours */
+.cr-you{margin:18px 0 6px;border:1px solid var(--line);border-radius:12px;padding:4px 14px 12px}
+.cr-you summary{cursor:pointer;padding:10px 0;font-weight:700}
+.cr-you summary span{font-weight:400;font-size:13px;color:var(--ink-3);margin-left:6px}
+.cr-label-note{font-family:var(--sans);letter-spacing:0;text-transform:none;color:var(--ink-3);margin-left:6px}
+.cr-cels,.cr-ambs-pick{display:flex;flex-wrap:wrap;gap:6px}
+.cr-cels .room-choice,.cr-ambs-pick .room-choice{flex:0 0 auto;font-size:13px;padding:7px 11px}
+/* the reel */
+.cr-reel{position:fixed;inset:0;z-index:80;background:rgba(3,7,17,.97);backdrop-filter:blur(6px);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;padding:20px 16px;overflow-y:auto}
+.cr-reel-year{font-family:var(--display);font-size:clamp(40px,9vw,84px);color:var(--gold);line-height:1;
+  animation:np-in .5s ease-out}
+.cr-reel-clip{width:min(620px,100%);cursor:pointer}
+.cr-reel-clip .np{animation:reel-in .6s cubic-bezier(.2,.8,.2,1)}
+@keyframes reel-in{from{opacity:0;transform:translateY(24px) rotate(-4deg) scale(.94)}to{opacity:1}}
+.cr-reel-bar{width:min(620px,100%);height:3px;background:var(--line)}
+.cr-reel-bar i{display:block;height:100%;background:var(--gold);width:0;animation:reel-bar linear forwards}
+@keyframes reel-bar{to{width:100%}}
+.cr-reel-foot{display:flex;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){
+  .np-mini,.cr-reel-clip .np,.cr-reel-year{animation:none}
+  .cr-reel-bar i{animation:none;width:100%}
+}
+@media (max-width:560px){
+  .np-photo{width:72px;height:72px}.np-crest{width:56px;height:56px}
+  .np-body p{text-align:left}
+  .np-lead{transform:none}
+}

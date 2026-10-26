@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from game import career as C
 from tools.snapshot_deck import deck_from, model_from, read_document
+from game import press as P
 from web import career_routes as R
 
 DOC = read_document()
@@ -125,9 +126,14 @@ def test_a_career_ends_with_a_summary_and_a_line_with_no_player_in_it(client):
         p = d["pending"]
         move = {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
         d = client.post("/api/career/move", json={"token": d["token"], "move": move}).json()
-    if d["pending"]:
+    if d["pending"] and d["pending"]["kind"] != "epilogue":
         d = client.post("/api/career/move", json={"token": d["token"], "move": "r"}).json()
+    # Where next? (A228): asked once the career ends, before the summary.
+    assert d["pending"]["kind"] == "epilogue" and d["summary"] is None
+    assert d["pending"]["epilogue"] == list(P.EPILOGUES.values())
+    d = client.post("/api/career/move", json={"token": d["token"], "move": "w3"}).json()
     assert d["summary"]["seasons"] == 1 and d["pending"] is None
+    assert d["summary"]["epilogue"]["key"] == "epilogue" and d["summary"]["farewell"]
     assert d["summary"]["ending"] in ("retired", "released")
     assert d["start"]["name"] not in d["share"] and d["ceiling"]["name"] not in d["share"]
     assert "Tester" not in d["share"]
@@ -281,7 +287,7 @@ def _auto_move(p) -> str:
         return "k" if p["mega"]["retain"] else f"b{p['mega']['suggested']}"
     if p["kind"] == "plan":
         return "p" + "0" * len(p["plan"])
-    return {"offer": "o0", "event": "e0"}.get(p["kind"], "m1")
+    return {"offer": "o0", "event": "e0", "epilogue": "w0"}.get(p["kind"], "m1")
 
 
 def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
@@ -661,7 +667,7 @@ def test_a_reroll_is_the_same_player_on_a_new_seed(client, admins):
     assert r.status_code == 200
     n = r.json()
     old, new = _payload(d["token"]), _payload(n["token"])
-    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True]
+    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True, None, "", "", []]
     assert new["seed"] != old["seed"]
     # the spins are the new seed's, exactly as a fresh start on it would draw them
     fresh = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,

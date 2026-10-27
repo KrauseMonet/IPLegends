@@ -78,12 +78,12 @@ function failSave(q){
 function failPath(path){
   return String(path).split('?')[0].replace(/\/[^/]{25,}/g, '/:state').slice(0, 200);
 }
-function noteFailure(kind, method, path, status, started){
+function noteFailure(kind, method, path, status, started, extra){
   const q = failQueue();
   q.push({t: Date.now(), kind, method, path: failPath(path), status: status || null,
           ms: Math.round(Date.now() - started), online: navigator.onLine,
           net: (navigator.connection && navigator.connection.effectiveType) || null,
-          visible: document.visibilityState === 'visible'});
+          visible: document.visibilityState === 'visible', ...(extra || {})});
   failSave(q);
 }
 function noteSuccess(){
@@ -112,14 +112,40 @@ function sendFailures(closing){
 }
 addEventListener('pagehide', () => sendFailures(true));
 
+function timeoutError(){
+  const err = new Error('That took too long to respond -- the server may be busy. Try again.');
+  err.timeout = true;
+  return err;
+}
+// fetch rejects (rather than resolving with an error status) only when no response
+// arrived at all -- a dropped connection, a phone between networks. Each browser words
+// it differently ("Failed to fetch", "Load failed", "NetworkError when..."), and none
+// of them means anything to a player, so it is said plainly instead.
+function networkError(){
+  const err = new Error("Couldn't reach the server -- check your connection and try again.");
+  err.network = true;
+  return err;
+}
+// `.status` carried on the thrown Error, not just the message text -- lets a caller
+// (room-session resume, elsewhere) tell "this is genuinely gone" (404) apart from "the
+// server is busy" or a transient network blip, without parsing prose. The whole body
+// too: a room's 409 carries the room as it now is [A146].
+function statusError(r, body){
+  const err = new Error(body.detail || r.statusText);
+  err.status = r.status;
+  err.body = body;
+  return err;
+}
+
 async function apiOnce(path, opts){
+  if (opts && opts.hedge && hedgeSecondOrigin()) return apiHedged(path, opts);
   const started = Date.now();
   const method = ((opts && opts.method) || 'GET').toUpperCase();
   const ctrl = new AbortController();
   // `timeoutMs` lets a live move (a bid, a pick) give up sooner than a page load would,
   // so it can be retried while its clock is still running [A146].
   const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || API_TIMEOUT_MS);
-  const {retry, timeoutMs, ...fetchOpts} = opts || {};
+  const {retry, timeoutMs, hedge, ...fetchOpts} = opts || {};
   let r;
   try {
     r = await fetch(path, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
@@ -127,36 +153,119 @@ async function apiOnce(path, opts){
   } catch(e){
     if (e.name === 'AbortError'){
       noteFailure('timeout', method, path, null, started);
-      const err = new Error('That took too long to respond -- the server may be busy. Try again.');
-      err.timeout = true;
-      throw err;
+      throw timeoutError();
     }
-    // fetch rejects (rather than resolving with an error status) only when no response
-    // arrived at all -- a dropped connection, a phone between networks. Each browser words
-    // it differently ("Failed to fetch", "Load failed", "NetworkError when..."), and none
-    // of them means anything to a player, so it is said plainly instead.
     noteFailure('network', method, path, null, started);
-    const err = new Error("Couldn't reach the server -- check your connection and try again.");
-    err.network = true;
-    throw err;
+    throw networkError();
   } finally {
     clearTimeout(timer);
   }
   const body = await r.json().catch(() => ({}));
   if (r.status >= 500) noteFailure('server', method, path, r.status, started);
-  if (!r.ok) {
-    // `.status` carried on the thrown Error, not just the message text -- lets a
-    // caller (room-session resume, elsewhere) tell "this is genuinely gone" (404) apart
-    // from "the server is busy" or a transient network blip, without parsing prose.
-    const err = new Error(body.detail || r.statusText);
-    err.status = r.status;
-    // The whole body too: a room's 409 carries the room as it now is [A146].
-    err.body = body;
-    throw err;
-  }
+  if (!r.ok) throw statusError(r, body);
   noteSuccess();
   return body;
 }
+
+// --- hedged requests [A231] -----------------------------------------------------------
+//
+// Measured on production on 2026-10-27: a connection to Vercel's Mumbai edge that is
+// kept open freezes for 15 seconds or more every minute or two, on every Vercel address,
+// even for a plain static file -- while a FRESH connection made during the freeze mostly
+// gets through (6 of 8 times), and vercel.com and Google on the same network never froze.
+// A room page keeps one connection open and polls on it every second, which is the worst
+// case: players sat through two 8-second timeouts in a row, about every couple of minutes,
+// and missed the lot they were bidding on.
+//
+// A page cannot ask the browser for a new connection to the same site. It CAN get one by
+// asking a different hostname, so a request that has had no answer for HEDGE_AFTER_MS is
+// sent again through the second hostname and whichever answer comes first is used. It
+// must be a hostname the browser cannot fold onto the frozen connection: any
+// `*.fineleg.app` name is covered by the same certificate and would be, so it is the
+// project's `vercel.app` address.
+//
+// Only for requests that are safe to send twice: polls, and the moves that name what they
+// are about (a pick its pick count, a bid its lot and price), whose repeat the server
+// refuses or ignores [A146]. Callers opt in with `hedge: true`.
+const HEDGE_AFTER_MS = 2000;
+const HEDGE_SECOND = {'fineleg.app': 'https://iplegends.vercel.app'};
+// If the second hostname cannot be reached at all (blocked by a network, or a server not
+// yet answering it), stop trying it for this page after this many failures in a row.
+const HEDGE_GIVE_UP_AFTER = 2;
+let HEDGE_PREFER_SECOND = false;  // the last hedge was won by the second hostname
+let HEDGE_SECOND_FAILS = 0;
+
+function hedgeSecondOrigin(){
+  // A test or a local check may point the second hostname somewhere else.
+  const second = (typeof window !== 'undefined' && window.HEDGE_SECOND_ORIGIN !== undefined)
+    ? window.HEDGE_SECOND_ORIGIN : HEDGE_SECOND[location.host];
+  if (!second || HEDGE_SECOND_FAILS >= HEDGE_GIVE_UP_AFTER) return null;
+  return second;
+}
+
+function apiHedged(path, opts){
+  const started = Date.now();
+  const method = ((opts && opts.method) || 'GET').toUpperCase();
+  const {retry, timeoutMs, hedge, ...fetchOpts} = opts || {};
+  const second = hedgeSecondOrigin();
+  // Start where the last hedge was won, so a frozen connection is not asked first again.
+  const tries = HEDGE_PREFER_SECOND
+    ? [{url: second + path, second: true}, {url: path, second: false}]
+    : [{url: path, second: false}, {url: second + path, second: true}];
+  return new Promise((resolve, reject) => {
+    let done = false, live = 0;
+    const ctrls = [];
+    const finish = (ok, value, winner) => {
+      if (done) return;
+      done = true;
+      clearTimeout(hedgeTimer);
+      clearTimeout(limit);
+      ctrls.forEach(c => c && c.abort());
+      if (ctrls[1]) noteFailure('hedge', method, path, null, started,
+                                {won: winner ? (winner.second ? 'second' : 'first') : 'none'});
+      if (winner && winner === tries[1]) HEDGE_PREFER_SECOND = winner.second;
+      (ok ? resolve : reject)(value);
+    };
+    const failed = (i, err) => {
+      live--;
+      if (!ctrls[1]) return launch(1);      // the first failed before the hedge: go now
+      if (live === 0){
+        if (err.status) noteFailure('server', method, path, err.status, started);
+        else noteFailure('network', method, path, null, started);
+        finish(false, err, null);
+      }
+    };
+    const launch = (i) => {
+      if (done || ctrls[i]) return;
+      const t = tries[i];
+      const ctrl = new AbortController();
+      ctrls[i] = ctrl;
+      live++;
+      fetch(t.url, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
+                    signal: ctrl.signal})
+        .then(async r => ({r, body: await r.json().catch(() => ({}))}))
+        .then(({r, body}) => {
+          if (done) return;
+          if (t.second) HEDGE_SECOND_FAILS = 0;
+          if (r.status >= 500) return failed(i, statusError(r, body));
+          if (!r.ok) return finish(false, statusError(r, body), t);
+          noteSuccess();
+          finish(true, body, t);
+        }, () => {
+          if (done) return;
+          if (t.second) HEDGE_SECOND_FAILS++;
+          failed(i, networkError());
+        });
+    };
+    const hedgeTimer = setTimeout(() => launch(1), HEDGE_AFTER_MS);
+    const limit = setTimeout(() => {
+      noteFailure('timeout', method, path, null, started);
+      finish(false, timeoutError(), null);
+    }, timeoutMs || API_TIMEOUT_MS);
+    launch(0);
+  });
+}
+// --- end hedged requests
 
 // [A136] A season can come from a draft ('7-3:4.0:12') or an auction ('A662026-KKR-...');
 // the season, journey card and copy-link all label and link it by where it came from.

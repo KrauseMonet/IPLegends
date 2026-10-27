@@ -38,11 +38,26 @@ def test_the_browser_and_python_agree_on_the_address():
     assert js == site.SITE_ORIGIN
 
 
+# [A231] The one place a script may name the `vercel.app` address: the second hostname a
+# stuck room request is sent again through. It is a transport address the page fetches
+# from and never shows, links to or shares, so it is not the old name coming back -- and it
+# is allowed on this exact line only, so a link or share line naming it still fails.
+HEDGE_LINE = "const HEDGE_SECOND = {'fineleg.app': 'https://iplegends.vercel.app'};"
+
+
+def visible_text(f: pathlib.Path) -> str:
+    body = text(f)
+    if f.name == "common.js":
+        assert body.count(HEDGE_LINE) == 1, "the second hostname moved off its one line"
+        body = body.replace(HEDGE_LINE, "")
+    return body
+
+
 def test_the_scripts_that_build_links_use_the_shared_origin_not_their_own():
     assert "const PZ_ORIGIN = SITE_ORIGIN;" in text(STATIC / "puzzle.js")
     assert "const QZ_SHARE_ORIGIN = SITE_ORIGIN;" in text(STATIC / "flashback.js")
     for js in STATIC.glob("*.js"):
-        assert not re.search(r"https?://[a-z0-9.-]*vercel\.app", text(js)), js.name
+        assert not re.search(r"https?://[a-z0-9.-]*vercel\.app", visible_text(js)), js.name
 
 
 def test_every_share_line_points_at_the_site_and_names_it():
@@ -73,7 +88,7 @@ def test_nothing_user_facing_still_carries_the_old_name():
              + list(PARTIALS.glob("*.html")) + list((ROOT / "game").glob("*.py"))
              + list((ROOT / "web").glob("*.py")))
     for f in files:
-        body = text(f)
+        body = visible_text(f)
         assert not re.search(r"almanack", body, re.I), f"{f.name} still says Almanack"
         assert "iplegends.vercel.app" not in body, f"{f.name} still names the old address"
 

@@ -115,6 +115,10 @@ class RoomAuctionReplay:
     offers: list["Offer"] = field(default_factory=list)
     trades: list["Trade"] = field(default_factory=list)
     trade_ready: set[int] = field(default_factory=set)
+    # [A231] Answers derived from this state, kept with it so a poll does not recompute
+    # them. A replay is cached per move count and never changed once built, so whatever
+    # is worked out from it stays right until the next move makes a new replay.
+    memo: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def pid_of(self) -> dict[int, str]:
@@ -747,6 +751,25 @@ def suggestion(auction: au.Auction, team_index: int) -> tuple[list[int], int] | 
     return [pos[id(c)] for c in arranged[0]], pos[id(arranged[1])]
 
 
+def suggestion_for(r: RoomAuctionReplay, team_index: int) -> tuple[list[int], int] | None:
+    """`suggestion` for one replay, worked out once [A231]. In the twelve phase every
+    seat's poll asks for its suggestion each second, and a best twelve costs ~30 ms."""
+    key = ("suggestion", team_index)
+    if key not in r.memo:
+        r.memo[key] = suggestion(r.auction, team_index)
+    return r.memo[key]
+
+
+def best_twelve_for(r: RoomAuctionReplay, team: au.Team):
+    """A computer team's best twelve for one replay, worked out once [A231]. A finished
+    auction's every poll needed all of them, ~80 ms of CPU each time even when warm,
+    which at one poll a second per seat was what made the end of an auction slow."""
+    key = ("twelve", team.index)
+    if key not in r.memo:
+        r.memo[key] = r.auction.twelve(team)
+    return r.memo[key]
+
+
 # --- moves ---------------------------------------------------------------------------------
 
 
@@ -1116,7 +1139,7 @@ def room_sides(room, deck: Deck):
             order, impact = r.twelves[pid]
             name = f"{p.name} ({team.short})"
         else:
-            order, impact = r.auction.twelve(team)
+            order, impact = best_twelve_for(r, team)
             name = team.franchise
         out.append((pid, RoomPlayer(p.player_id, name, p.is_cpu, p.franchise),
                     list(order), impact))

@@ -27,8 +27,10 @@ def main() -> None:
         s = summary(conn, args.hours)
     print(f"last {s['hours']}h: {s['failures']} failed requests, {s['ok']} succeeded "
           f"({s['rate']:.2%} failed), from {s['reports']} reports")
+    print(f"resent on a fresh connection [A231]: {s['hedges']}")
     for title, key in (("by kind", "by_kind"), ("by request", "by_path"),
-                       ("by page", "by_page"), ("browser's own network flag", "offline_flag")):
+                       ("by page", "by_page"), ("browser's own network flag", "offline_flag"),
+                       ("which copy of a resent request answered", "hedge_won")):
         if s[key]:
             print(f"\n{title}:")
             for k, n, avg_ms in s[key]:

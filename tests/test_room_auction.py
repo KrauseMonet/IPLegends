@@ -1018,3 +1018,52 @@ def test_a_swap_that_leaves_either_squad_without_a_legal_twelve_is_refused(deck,
     assert bad is not None, "no swap in this room breaks only the twelve; pick another seed"
     with pytest.raises(ra.AuctionRoomError, match="legal twelve"):
         ra.submit(conn, code, deck, ra.offer, host, guest, bad[0].person_id, bad[1].person_id)
+
+
+# --- [A231] a finished auction is not worked out again on every poll ----------------------
+
+def test_a_finished_room_works_out_each_computer_twelve_once_per_state(deck, clock, monkeypatch):
+    """A finished auction's poll used to pick every computer team's best twelve again each
+    time, ~80 ms of CPU even when warm, every second for every seat. It is kept with the
+    replay, so a second poll of the same state picks none, and a different state (here the
+    log one move shorter) works its own out rather than borrowing these."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    room = run_to_the_end(conn, code, deck, clock)
+    picked = []
+    real = au.Auction.twelve
+    monkeypatch.setattr(au.Auction, "twelve",
+                        lambda self, team: picked.append(team.index) or real(self, team))
+    first = rooms.room_sides(room, deck)
+    once = len(picked)
+    assert once >= 8                                   # the eight computer franchises
+    again = rooms.room_sides(room, deck)
+    assert len(picked) == once
+    assert [(s[0], s[2], s[3]) for s in again] == [(s[0], s[2], s[3]) for s in first]
+    shorter = load(conn, code)
+    shorter.moves = shorter.moves[:-1]
+    rooms.room_sides(shorter, deck)
+    assert set(picked[once:]) >= set(picked[:once])  # every team worked out afresh
+
+
+def test_a_seat_s_suggested_twelve_is_worked_out_once_per_state(deck, clock, monkeypatch):
+    """In the twelve phase every seat's poll carries its suggested twelve; the poll that
+    builds the floor must ask the replay's kept answer, not work it out again."""
+    from web import app as web_app
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    skip_to_end(conn, code, deck)
+    for _ in range(80):
+        room = load(conn, code)
+        if ra.replay(room, deck).phase == "twelve":
+            break
+        clock.now = room.turn_started_at + rooms.CLOCK_GRACE_S + 1
+        rooms.room_state(conn, code, deck)
+    assert ra.replay(room, deck).phase == "twelve"
+    asked = []
+    real = ra.suggestion
+    monkeypatch.setattr(ra, "suggestion", lambda a, i: asked.append(i) or real(a, i))
+    out1 = web_app._room_state_out(room, deck, caller_id=host)
+    out2 = web_app._room_state_out(room, deck, caller_id=host)
+    assert asked == [ra.replay(room, deck).team_of[host]]
+    assert out1.auction.suggestion == out2.auction.suggestion is not None

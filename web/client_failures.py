@@ -13,6 +13,10 @@ import json
 from psycopg.types.json import Json
 
 KINDS = ("timeout", "network", "server")
+# [A231] Not a failure: a request sent again on a fresh connection because the first had
+# no answer after HEDGE_AFTER_MS. Stored beside the failures (it comes from the same queue
+# on the device) and counted apart from them, with `won` saying which copy answered.
+HEDGE = "hedge"
 MAX_PER_REPORT = 50
 # Spam guard for an anonymous endpoint: past this many reports in the last hour, new ones
 # are dropped. Far above anything real -- a full ten-seat room failing constantly would
@@ -44,28 +48,35 @@ def record(conn, page: str, ok_count: int, failures: list[dict]) -> bool:
 
 def summary(conn, hours: int = 24) -> dict:
     """Failures over the last `hours`: totals, the rate against successful requests, and
-    breakdowns by kind, by request path and by page."""
-    reports, ok, n = conn.execute(
-        """select count(*), coalesce(sum(ok_count), 0),
-                  coalesce(sum(jsonb_array_length(failures)), 0)
-             from client_failure_reports
+    breakdowns by kind, by request path and by page. Resends [A231] are not failures:
+    they are left out of every failure figure and counted on their own, by which copy
+    answered -- "second" is a request the frozen connection would have lost."""
+    reports, ok = conn.execute(
+        """select count(*), coalesce(sum(ok_count), 0) from client_failure_reports
             where received_at > now() - make_interval(hours => %s)""", (hours,)).fetchone()
+    n, hedges = conn.execute(
+        """select count(*) filter (where f->>'kind' <> %s), count(*) filter (where f->>'kind' = %s)
+             from client_failure_reports r, jsonb_array_elements(r.failures) f
+            where r.received_at > now() - make_interval(hours => %s)""",
+        (HEDGE, HEDGE, hours)).fetchone()
 
-    def breakdown(expr: str) -> list[tuple]:
+    def breakdown(expr: str, kinds: str = "<>") -> list[tuple]:
         return conn.execute(
             f"""select {expr} as k, count(*), round(avg((f->>'ms')::numeric))
                   from client_failure_reports r, jsonb_array_elements(r.failures) f
                  where r.received_at > now() - make_interval(hours => %s)
-                 group by 1 order by 2 desc limit 15""", (hours,)).fetchall()
+                   and f->>'kind' {kinds} %s
+                 group by 1 order by 2 desc limit 15""", (hours, HEDGE)).fetchall()
 
     return {
-        "hours": hours, "reports": reports, "ok": ok, "failures": n,
+        "hours": hours, "reports": reports, "ok": ok, "failures": n, "hedges": hedges,
         "rate": n / (n + ok) if n + ok else 0.0,
         "by_kind": breakdown("f->>'kind'"),
         "by_path": breakdown("(f->>'method') || ' ' || (f->>'path')"),
         "by_page": breakdown("r.page"),
         "offline_flag": breakdown("case when (f->>'online')::boolean then 'online' "
                                   "else 'browser said offline' end"),
+        "hedge_won": breakdown("coalesce(f->>'won', '?')", "="),
     }
 
 

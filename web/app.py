@@ -22,6 +22,7 @@ from typing import Literal
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -155,6 +156,22 @@ def _load_unrated(conn) -> dict[int, list]:
 
 
 app = FastAPI(title=SITE_NAME, version="0.1.0", lifespan=lifespan)
+
+# [A231] A room page that has waited HEDGE_AFTER_MS for an answer sends the same request
+# again through the project's `vercel.app` address, because only a different hostname gets
+# the browser a fresh connection past one that Vercel's edge has frozen (common.js has the
+# measurements). That makes the request cross-origin, so the API says the site may make it.
+# No credentials: a room is identified by the player_id in the request, never by a cookie,
+# so nothing here lets one site act as a signed-in player. Local addresses are allowed so
+# the same path can be tried on a developer's machine (localhost against 127.0.0.1).
+CORS_ORIGIN_REGEX = r"https://fineleg\.app|http://(localhost|127\.0\.0\.1)(:\d+)?"
+# How long a browser may reuse its answer to the pre-check before a cross-origin POST, so
+# a hedged move pays that extra round trip once a session rather than every time. Browsers
+# cap it lower (Chrome at two hours), which is fine.
+CORS_MAX_AGE_S = 7200
+app.add_middleware(CORSMiddleware, allow_origin_regex=CORS_ORIGIN_REGEX,
+                   allow_methods=["GET", "POST"], allow_headers=["Content-Type"],
+                   allow_credentials=False, max_age=CORS_MAX_AGE_S)
 app.include_router(bingo_routes.router)
 app.include_router(ground_routes.router)
 app.include_router(puzzle_routes.router)
@@ -1479,7 +1496,10 @@ def health() -> dict:
 
 class ClientFailureIn(BaseModel):
     t: float = Field(description="when, epoch ms, by the browser's clock")
-    kind: Literal["timeout", "network", "server"]
+    # [A231] "hedge" is not a failure: a request was sent again on a fresh connection
+    # after HEDGE_AFTER_MS without an answer, and `won` says which copy answered.
+    kind: Literal["timeout", "network", "server", "hedge"]
+    won: Literal["first", "second", "none"] | None = None
     method: str = Field(max_length=8)
     path: str = Field(max_length=200)
     status: int | None = None
@@ -2991,7 +3011,7 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
     elif phase == "fill":
         out.fill_options = [_card(c) for c in r.fill_options[:FILL_OPTIONS_SHOWN]]
     elif phase == "twelve":
-        sug = room_auction.suggestion(a, you_idx)
+        sug = room_auction.suggestion_for(r, you_idx)
         out.suggestion = (sug[0] + [sug[1]]) if sug else None
     elif phase == "trade":
         out.trade = _trade_window_out(room, r, you_idx)

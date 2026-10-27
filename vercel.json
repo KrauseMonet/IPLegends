@@ -13,6 +13,8 @@
     { "src": "web/static/**", "use": "@vercel/static" }
   ],
   "routes": [
+    { "src": "/api/(.*)", "has": [{ "type": "host", "value": "iplegends.vercel.app" }], "dest": "api/index.py" },
+    { "src": "/(.*)", "has": [{ "type": "host", "value": "iplegends.vercel.app" }], "status": 308, "headers": { "Location": "https://fineleg.app/$1" } },
     {
       "src": "/static/fonts/(.*)",
       "dest": "/web/static/fonts/$1",

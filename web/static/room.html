@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=29f3208c6b">
+<link rel="stylesheet" href="/static/style.css?v=b8d1737975">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -117,6 +117,19 @@
       <div id="roomOffline" class="room-offline hide">
         Reconnecting… your place in the room is safe.
       </div>
+      <!-- [A233] On a phone the columns stack and the countdown in the second one sat two
+           screens below the deal list, out of sight while the player chose. This bar
+           carries the clock and what the twelve still needs, held under the nav; it is
+           hidden above the stacked breakpoint, where the columns show both already. -->
+      <div id="roomTurnBar" class="room-turnbar">
+        <div class="rtb-top">
+          <b id="roomTurnClock">–</b>
+          <span class="rtb-who" id="roomTurnWho"></span>
+          <span class="rtb-round" id="roomTurnRound"></span>
+        </div>
+        <div class="gauge timer-gauge rtb-gauge"><i id="roomTurnClockBar" style="width:100%"></i></div>
+        <div class="rtb-needs" id="roomTurnNeeds"></div>
+      </div>
       <div class="folio">
         <div class="col">
           <div class="col-head"><span id="roomDealLabel">Dealt to you</span></div>
@@ -132,19 +145,25 @@
           <div class="col-head"><span id="roomOrderLabel">Batting order</span>
             <button id="roomViewToggle" class="col-head-toggle hide" onclick="toggleRoomView()"></button>
           </div>
-          <div class="tally">
+          <div class="tally room-tally">
             <div class="n" id="roomTimer">–</div>
             <div class="of">seconds left<br><span id="roomRoundNow">round –/12</span></div>
           </div>
-          <div class="gauge timer-gauge"><i id="roomTimerBar" style="width:100%"></i></div>
+          <div class="gauge timer-gauge room-tally"><i id="roomTimerBar" style="width:100%"></i></div>
           <div id="roomOrderSheet" class="col-scroll"></div>
         </div>
 
         <div class="col">
+          <div class="room-needs-box">
+            <div class="col-head"><span>Your twelve</span><em id="roomNeedsCount"></em></div>
+            <div id="roomNeeds" class="room-needs"></div>
+          </div>
           <div class="col-head"><span>Other players</span></div>
           <div id="roomOthers" class="col-scroll"></div>
           <div class="foot-actions">
             <button class="act" onclick="leaveRoomAndGoHome()">Leave</button>
+            <button class="act" id="roomSoundBtn" onclick="toggleRoomSound()"
+              title="A chime when your pick comes round">Sound on</button>
             <span class="stamp" id="roomCodeStamp"></span>
           </div>
         </div>
@@ -330,11 +349,13 @@
         <div class="rs-title">Draft stranded</div>
         <p class="rs-note">One seat's earlier picks left no legal candidate for a slot that still
           needed filling. This is a rare, genuine dead end in the archive rather than a bug in
-          your play. The room cannot recover from here.</p>
+          your play. This draft cannot go on, but the
+          same room can start again: anyone seated may press Play again.</p>
         <p class="rs-note rs-reason" id="roomFailedReason"></p>
       </div>
       <div class="foot-actions" style="justify-content:center;padding:26px 0 30px">
-        <button class="act lead" onclick="leaveRoomAndGoHome()">Done</button>
+        <button class="act lead" onclick="roomPlayAgain(this)">Play again</button>
+        <button class="act" onclick="leaveRoomAndGoHome()">Done</button>
       </div>
     </div>
   </section>
@@ -527,7 +548,7 @@
 <script src="/static/reveal.js?v=73e8407a59"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=22a315a7c3"></script>
+<script src="/static/room.js?v=06abfae208"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
 <script src="/static/auction_report.js?v=26ea24b6dc"></script>
 <script src="/static/auction.js?v=ef7ed1ae4c"></script>

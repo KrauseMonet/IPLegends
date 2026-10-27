@@ -27,7 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
+from etl.feasibility import (BOWLERS_IN_TWELVE, OVERSEAS_CAP, REROLL_KINDS, TWELVE_SIZE,
+                             XI_SIZE, Card, team_rating)
 from game import analysis, auction, auction_report, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
@@ -881,6 +882,17 @@ class RoomPickIn(BaseModel):
         default=None, description="this seat's pick count when the choice was made [A146]")
 
 
+class RoomNeedsOut(BaseModel):
+    """What a drafting seat's twelve has so far against what it must have [A233] --
+    solo's legality panel, for a room. Read off the dealer's own running counts
+    (`rooms.SeatProgress`), so the panel and the forward check cannot disagree."""
+    keeper: bool = Field(description="a wicketkeeper (A77: a career keeper counts) is in")
+    bowling: int = Field(description="bowling options picked so far")
+    bowling_needed: int = BOWLERS_IN_TWELVE
+    overseas: int = Field(description="overseas players picked so far")
+    overseas_cap: int = OVERSEAS_CAP
+
+
 class RoomPlayerOut(BaseModel):
     player_id: str
     name: str
@@ -899,6 +911,9 @@ class RoomPlayerOut(BaseModel):
                      "everyone else sees franchise/season_year with options=[]")
     order: list[CardOut | None]
     impact: CardOut | None
+    needs: RoomNeedsOut | None = Field(
+        default=None, description="[A233] a draft room's drafting seat only; null for "
+                                  "historical fillers and auction seats")
     # Populated only once `done` -- the squad-review screen's own three numbers
     # (etl.feasibility.team_rating), same as solo's SessionOut fields of the same name.
     overall_rating: int | None = None
@@ -3102,6 +3117,8 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
         deal=deal,
         order=[None if c is None else _card(c) for c in seat.order],
         impact=None if seat.impact is None else _card(seat.impact),
+        needs=None if player.is_cpu else RoomNeedsOut(
+            keeper=seat.keeper_have, bowling=seat.bowl_have, overseas=seat.overseas_taken),
         overall_rating=rating.overall if rating else None,
         batting_rating=rating.batting if rating else None,
         bowling_rating=rating.bowling if rating else None,
@@ -3272,7 +3289,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
             )
             for pid, p in room.players.items()
         ],
-        failure_reason=room.failure_reason,
+        failure_reason=rooms.public_failure_reason(room),
         draft_mode=room.draft_mode,
         is_open=room.is_open,
         version=room.version,
@@ -3310,7 +3327,7 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
         timer_seconds=room.timer_seconds, host_id=room.host_id, status=room.status,
         round=0, seconds_remaining=max(0, round(room.turn_started_at - time.time()))
         if room.status == "auctioning" else 0,
-        active_player_id=None, players=players, failure_reason=room.failure_reason,
+        active_player_id=None, players=players, failure_reason=rooms.public_failure_reason(room),
         draft_mode=room.draft_mode, is_open=room.is_open, version=room.version,
         server_now=time.time(), turn_started_at=room.turn_started_at,
         game=room.game, trades=room.trades, auction=auction_view,

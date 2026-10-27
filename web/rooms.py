@@ -974,6 +974,32 @@ def _draft_state(seat: SeatProgress) -> DraftState:
     )
 
 
+def stranded_reason(room: Room, pid: str) -> str:
+    """Why a draft room stranded, in words every seat may read. [A233]
+
+    It names the PLAYER, never the seat id: a seat id is the only thing that proves who
+    owns a seat (A231 -- no cookie), and this text is sent to every seat. It used to read
+    "stranded on seat {player_id}'s turn", which handed every player in the room the id
+    they would need to act as that player after "Play again" (A84 keeps the seats).
+    """
+    seat = room.players.get(pid)
+    return f"stranded on {seat.name if seat else 'a player'}'s turn"
+
+
+def public_failure_reason(room: Room) -> str | None:
+    """`room.failure_reason` with any seat id replaced by that seat's name. [A233]
+
+    `stranded_reason` no longer writes an id, but a room that stranded before it did,
+    and a room lives 24 hours (ROOM_TTL_HOURS), so the stored text is cleaned on the way
+    out as well rather than trusted to be new."""
+    reason = room.failure_reason
+    if not reason:
+        return reason
+    for pid, p in room.players.items():
+        reason = reason.replace(pid, p.name)
+    return reason
+
+
 def _resolve(room: Room, deck: Deck) -> None:
     """Lazily catch the room up to the present: auto-pick (via `pick_afk`) for whoever's
     turn has actually timed out, before doing anything else. Called at the top of every
@@ -996,7 +1022,7 @@ def _resolve(room: Room, deck: Deck) -> None:
         replay = replay_room(room, deck)
         if replay.stranded:
             room.status = "failed"
-            room.failure_reason = f"stranded on seat {replay.pending_seat_id}'s turn"
+            room.failure_reason = stranded_reason(room, replay.pending_seat_id)
             return
         if replay.complete:
             room.status = "complete"

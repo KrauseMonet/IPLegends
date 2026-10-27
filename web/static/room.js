@@ -350,13 +350,21 @@ function watchRoomVisibility(){
   document.addEventListener('visibilitychange', () => {
     if (!ROOM_CODE) return;
     if (document.hidden){
-      if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
-    } else if (!ROOM_POLL && (!ROOM || ROOM.status !== 'failed')){
-      // Not on a FAILED room: `renderRoomFailed` stops polling deliberately, and there
-      // is nothing further to learn about a room that has stranded. Every other status
-      // resumes, 'complete' included -- the match phase polls on this same interval.
+      // [A233] A draft keeps polling while hidden, slowly (ROOM_POLL_HIDDEN_MS), so a
+      // player who switched tabs while somebody else picked still learns that their own
+      // turn has come -- the tab's title says so (roomTurnAlert). A desktop browser runs
+      // a hidden tab's timers about once a second, then about once a minute after five
+      // minutes; a phone that switched apps runs nothing at all. So this helps the
+      // laptop drafter, and only a push notification could reach the phone.
+      if (ROOM_POLL && !(ROOM && ROOM.status === 'drafting')){
+        clearInterval(ROOM_POLL); ROOM_POLL = null;
+      }
+    } else {
+      // Every status resumes, 'complete' and 'failed' included -- the match phase polls
+      // on this same interval, and a stranded room waits for anyone's Play again. A
+      // draft keeps its interval while hidden (below), so it may already be running.
       pollRoom(true);
-      ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
+      if (!ROOM_POLL) ROOM_POLL = setInterval(pollRoom, ROOM_POLL_TICK_MS);
       // The countdown is derived from the server's own clock rather than counted down
       // locally, so it needs no catch-up of its own here -- re-rendering it is enough,
       // and it will already show the correct (probably expired) value.
@@ -404,6 +412,7 @@ function applyRoom(room){
 // moment a room felt stuck. A poll that has had no answer for ROOM_POLL_STUCK_MS is given
 // up on, so one lost request can never stop polling altogether.
 const ROOM_POLL_TICK_MS = 1000, ROOM_POLL_IDLE_MS = 2000, ROOM_POLL_STUCK_MS = 8000;
+const ROOM_POLL_HIDDEN_MS = 3000;   // [A233] a hidden tab's draft poll
 let ROOM_POLL_STARTED = 0, ROOM_POLL_INFLIGHT = false;
 function roomClockLive(){
   return !!ROOM && (ROOM.status === 'drafting' || ROOM.status === 'auctioning');
@@ -415,6 +424,11 @@ async function pollRoom(now){
   if (!ROOM_CODE) return;
   const since = Date.now() - ROOM_POLL_STARTED;
   if (ROOM_POLL_INFLIGHT && since < ROOM_POLL_STUCK_MS) return;
+  if (document.hidden){
+    // Only a draft polls while hidden, and slowly (see watchRoomVisibility).
+    if (!(ROOM && ROOM.status === 'drafting')) return;
+    if (now !== true && since < ROOM_POLL_HIDDEN_MS - 100) return;
+  }
   if (now !== true && !roomClockLive() && since < ROOM_POLL_IDLE_MS - 100) return;
   ROOM_POLL_INFLIGHT = true;
   ROOM_POLL_STARTED = Date.now();
@@ -591,6 +605,7 @@ function renderRoom(){
   $('#roomResult').classList.toggle('hide', r.status !== 'complete');
   $('#roomFailed').classList.toggle('hide', r.status !== 'failed');
 
+  if (r.status !== 'drafting') roomTurnAlert(false);
   if (r.status === 'lobby') renderRoomLobby(r);
   else if (r.status === 'drafting') renderRoomDraft(r);
   else if (r.status === 'auctioning') renderRoomAuction(r);
@@ -599,8 +614,9 @@ function renderRoom(){
 }
 
 function renderRoomFailed(r){
-  if (ROOM_POLL){ clearInterval(ROOM_POLL); ROOM_POLL = null; }
-  if (ROOM_TIMER_TICK){ clearInterval(ROOM_TIMER_TICK); ROOM_TIMER_TICK = null; }
+  // [A233] Polling carries on, as it does for a finished room: anyone seated may press
+  // Play again, and every other seat learns of the fresh lobby from its next poll. It
+  // used to stop here, when a stranded room was a dead end with nothing left to learn.
   $('#roomFailedCode').textContent = r.code;
   $('#roomFailedReason').textContent = r.failure_reason || '';
 }
@@ -944,20 +960,22 @@ function showRoomDeal(deal, fallbackText){
 // renderRoomDraft) so a correction is never left waiting up to a second to appear.
 function tickRoomTimer(){
   if (!ROOM_TIMER_BASE) return;
-  const el = $('#roomTimer');
-  if (!el) return;
   const {startedAt, max} = ROOM_TIMER_BASE;
   // Nothing here depends on when any response arrived, which is the whole point: flight
   // time varies from poll to poll and used to be absorbed silently into the reading.
   const remaining = Math.max(0, Math.round(max - (serverClock() - startedAt)));
-  el.textContent = remaining;
   const urgent = remaining > 0 && remaining <= 5;
-  el.classList.toggle('urgent', urgent);
-  const bar = $('#roomTimerBar');
-  if (bar){
-    const pct = max > 0 ? Math.max(0, Math.min(100, remaining / max * 100)) : 0;
-    bar.style.width = pct + '%';
-    bar.parentElement.classList.toggle('urgent', urgent);
+  const pct = max > 0 ? Math.max(0, Math.min(100, remaining / max * 100)) : 0;
+  // Two copies of one clock: the column's tally, and the phone's turn bar (A233).
+  for (const [numId, barId] of [['#roomTimer', '#roomTimerBar'],
+                                ['#roomTurnClock', '#roomTurnClockBar']]){
+    const n = $(numId);
+    if (n){ n.textContent = remaining; n.classList.toggle('urgent', urgent); }
+    const bar = $(barId);
+    if (bar){
+      bar.style.width = pct + '%';
+      bar.parentElement.classList.toggle('urgent', urgent);
+    }
   }
 }
 
@@ -973,6 +991,10 @@ function renderRoomDraft(r){
     closeSlotSheet();
   }
   $('#roomRoundNow').textContent = `round ${r.round + 1}/${r.rounds_total}`;
+  renderRoomTurnBar(r, me, active, amActive);
+  renderRoomNeeds(me);
+  renderRoomSoundBtn();
+  roomTurnAlert(amActive);
   tickRoomTimer();
   $('#roomCodeStamp').textContent = 'room ' + r.code;
 
@@ -1065,6 +1087,80 @@ function renderRoomDraft(r){
       <span class="fig">${p.picks_made}/12</span>
     </div>`;
   }).join('');
+}
+
+// [A233] What this seat's twelve has against what it must have -- solo's legality
+// panel, brought to rooms. The counts are the dealer's own (`needs`, from the server),
+// so this panel cannot disagree with which cards the deal offers.
+function roomNeedsItems(me){
+  const n = me && me.needs;
+  if (!n) return [];
+  return [
+    {label: 'Wicketkeeper', ok: n.keeper, val: n.keeper ? 'In' : 'Needed', short: 'Keeper',
+     shortVal: n.keeper ? '✓' : '✗'},
+    {label: 'Bowling options', ok: n.bowling >= n.bowling_needed,
+     val: `${Math.min(n.bowling, n.bowling_needed)} of ${n.bowling_needed}`, short: 'Bowling',
+     shortVal: `${Math.min(n.bowling, n.bowling_needed)}/${n.bowling_needed}`},
+    // Overseas is a cap, not a target: never "missing", only "full".
+    {label: 'Overseas', ok: true, full: n.overseas >= n.overseas_cap,
+     val: `${n.overseas} of ${n.overseas_cap}` + (n.overseas >= n.overseas_cap ? ' · full' : ''),
+     short: 'Overseas', shortVal: `${n.overseas}/${n.overseas_cap}`},
+  ];
+}
+
+function renderRoomNeeds(me){
+  const items = roomNeedsItems(me);
+  $('#roomNeedsCount').textContent = me ? `${me.picks_made}/12` : '';
+  $('#roomNeeds').innerHTML = items.map(i => `<div class="need ${i.ok ? 'ok' : 'todo'}${i.full ? ' full' : ''}">
+      <span>${i.label}</span><b>${i.val}</b></div>`).join('')
+    + (me && me.done ? '<div class="need ok"><span>Twelve</span><b>Complete</b></div>' : '');
+  $('#roomTurnNeeds').innerHTML = items.map(i =>
+    `<span class="${i.ok ? 'ok' : 'todo'}${i.full ? ' full' : ''}">${i.short} <b>${i.shortVal}</b></span>`).join('');
+}
+
+function renderRoomTurnBar(r, me, active, amActive){
+  const who = $('#roomTurnWho');
+  who.textContent = amActive ? 'Your pick'
+    : (active ? `${active.name} is picking` : 'Waiting…');
+  who.classList.toggle('mine', amActive);
+  $('#roomTurnBar').classList.toggle('mine', amActive);
+  $('#roomTurnRound').textContent = `Round ${r.round + 1}/${r.rounds_total}`;
+}
+
+// The turn bar is held just under the sticky nav, whose height changes as its links
+// wrap -- so the offset follows the nav's own size rather than being read once.
+(function holdTurnBarUnderNav(){
+  const nav = document.querySelector('.topnav');
+  if (!nav || !window.ResizeObserver) return;
+  new ResizeObserver(() => document.documentElement.style
+    .setProperty('--nav-h', nav.offsetHeight + 'px')).observe(nav);
+})();
+
+// [A233] Your turn arriving is announced: the tab's title while it is yours (seen from
+// another tab, since a hidden draft still polls), and a chime and a buzz the moment it
+// comes round. Only on that moment -- not when the page loads on a turn already yours,
+// and not when a snake draft hands you a second pick straight after your first (you
+// are looking at the screen; you just clicked).
+const ROOM_BASE_TITLE = document.title;
+let ROOM_WAS_ACTIVE = null;   // null until the first draft render of this page
+function roomTurnAlert(amActive){
+  document.title = amActive ? '● Your pick · ' + ROOM_BASE_TITLE : ROOM_BASE_TITLE;
+  const arrived = amActive && ROOM_WAS_ACTIVE === false;
+  ROOM_WAS_ACTIVE = (ROOM && ROOM.status === 'drafting') ? amActive : null;
+  if (!arrived) return;
+  if (typeof play === 'function') play('attention');
+  try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch(e) {}
+}
+
+// The chime shares the auction floor's sound switch (auction_sound.js, loaded on this
+// page), so turning sound off in one turns it off in both.
+function renderRoomSoundBtn(){
+  const b = $('#roomSoundBtn');
+  if (b && typeof SOUND_ON !== 'undefined') b.textContent = SOUND_ON ? 'Sound on' : 'Sound off';
+}
+function toggleRoomSound(){
+  if (typeof setSound === 'function') setSound(!SOUND_ON);
+  renderRoomSoundBtn();
 }
 
 function toggleRoomView(){

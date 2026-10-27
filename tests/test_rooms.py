@@ -1267,9 +1267,11 @@ def test_a_shared_pool_stranding_is_caused_by_another_seats_earlier_pick(conn, m
 
     room = _play_room_to_completion(conn, room, deck, [host_id, bob_id])
     assert room.status == "failed"
-    assert room.failure_reason and bob_id in room.failure_reason, (
+    # Attributed by NAME, never by seat id: the reason is sent to every seat (A233).
+    assert room.failure_reason == "stranded on Bob's turn", (
         "the stranding must be attributed to Bob's turn, not the host's"
     )
+    assert bob_id not in room.failure_reason
 
 
 def test_the_room_advances_per_turn_not_per_round(conn):
@@ -1663,3 +1665,77 @@ def test_an_ordinary_name_is_kept_as_typed_with_whitespace_tidied(conn):
     _, guest = rooms.join_room(conn, room.code, "Priyā Iyer", DECK)
     names = {p.player_id: p.name for p in rooms._load_room(conn, room.code).players.values()}
     assert names == {host: "Rohan D'Souza & Co.", guest: "Priyā Iyer"}
+
+
+# --- [A233] what a stranded room says, and what each seat is told it still needs ---------
+
+def _strand(conn):
+    deck = deck_of_no_keeper()
+    room, host_id = _make_room(conn, "final", timer_seconds=15)
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", deck)
+    room = rooms.start_room(conn, room.code, host_id, deck)
+    room = _play_room_to_completion(conn, room, deck, [host_id, bob_id])
+    assert room.status == "failed"
+    return room, deck, host_id, bob_id
+
+
+def test_a_stranded_room_names_the_player_not_the_seat_id(conn):
+    """A seat id is the only proof of who owns a seat (A231), and the reason is sent to
+    every seat -- so it must never carry one. It names the player instead."""
+    room, _deck, host_id, bob_id = _strand(conn)
+    reason = room.failure_reason
+    assert host_id not in reason and bob_id not in reason
+    assert "Host's turn" in reason or "Bob's turn" in reason
+
+
+def test_an_old_reason_with_a_seat_id_is_cleaned_before_it_is_sent(conn):
+    """A room that stranded before the fix still holds the id in its stored reason, and
+    lives a day; the room's response replaces it with the name."""
+    from web.app import _room_state_out
+    room, deck, _host_id, bob_id = _strand(conn)
+    room.failure_reason = f"stranded on seat {bob_id}'s turn"
+    out = _room_state_out(room, deck, caller_id=None)
+    assert bob_id not in out.failure_reason
+    assert out.failure_reason == "stranded on seat Bob's turn"
+
+
+def test_each_drafting_seat_is_told_what_its_twelve_still_needs(conn):
+    """`needs` is read off the dealer's running counts; checked here against the cards
+    each seat actually holds, counted afresh, so the two routes must agree. Read after
+    one pick (one seat has a keeper and the other has nothing yet) and after fourteen
+    (bowlers and overseas players on both). Historical fillers draft nothing and get
+    none."""
+    from web.app import _room_state_out
+    room, host_id = _make_room(conn, "cup", timer_seconds=15)
+    _, bob_id = rooms.join_room(conn, room.code, "Bob", DECK)
+    room = rooms.start_room(conn, room.code, host_id, DECK)
+    seen = []
+    for made in range(1, 15):
+        replay = rooms.replay_room(room, DECK)
+        pid = replay.pending_seat_id
+        _fs, candidates = replay.pending_deal
+        chosen, slot = pick_rational(candidates, rooms._draft_state(replay.seats[pid]),
+                                     random.Random(0))
+        i = next(k for k, c in enumerate(candidates) if c.person_id == chosen.person_id)
+        room = rooms.submit_pick(conn, room.code, pid, i, slot, DECK)
+        if made not in (1, 14):
+            continue
+        replay = rooms.replay_room(room, DECK)
+        out = _room_state_out(room, DECK, caller_id=host_id)
+        humans = 0
+        for p in out.players:
+            if p.is_cpu:
+                assert p.needs is None
+                continue
+            seat = replay.seats[p.player_id]
+            held = [c for c in seat.order if c is not None] + (
+                [seat.impact] if seat.impact is not None else [])
+            assert p.needs.keeper == any(c.keeper_eligible for c in held)
+            assert p.needs.bowling == sum(1 for c in held if c.bowl is not None)
+            assert p.needs.overseas == sum(1 for c in held if c.overseas is True)
+            seen.append(p.needs)
+            humans += 1
+        assert humans == 2
+    # The fixture must exercise every count both ways, or a wrong one could agree by luck.
+    assert {n.keeper for n in seen} == {True, False}
+    assert any(n.bowling for n in seen) and any(n.overseas for n in seen)

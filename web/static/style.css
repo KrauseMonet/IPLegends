@@ -268,13 +268,46 @@ section.busy-wait{pointer-events:none;opacity:.6;transition:opacity .15s}
    so the bar gets a slower, linear transition to sweep smoothly between whole seconds
    instead of the snap the shared .gauge default is tuned for. */
 .timer-gauge{margin-top:-4px}
-#roomTimerBar{transition:width 1s linear,background .3s}
+#roomTimerBar,#roomTurnClockBar{transition:width 1s linear,background .3s}
 .tally .n.urgent{color:var(--red-2);animation:timerPulse 1s ease-in-out infinite}
 .timer-gauge.urgent i{background:linear-gradient(90deg,var(--red),var(--red-2))}
 @keyframes timerPulse{
   0%,100%{opacity:1}
   50%{opacity:.5}
 }
+/* [A233] A room draft's needs panel (desktop, third column) and its phone turn bar,
+   which holds the clock and the same needs under the sticky nav, since on a phone the
+   column clock sat two screens below the deal being chosen from. */
+.room-needs{padding:2px 0 10px}
+.room-needs .need{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:7px 18px;font-size:13px;color:var(--ink-2);border-bottom:1px solid var(--line)}
+.room-needs .need b{font-family:var(--mono);font-size:12px;font-weight:700}
+.room-needs .need.ok b{color:var(--green)}
+.room-needs .need.todo b{color:var(--gold)}
+.room-needs .need.full b{color:var(--ink-3)}
+.room-turnbar{display:none}
+@media (max-width:900px){
+  .room-turnbar{display:block;position:sticky;top:var(--nav-h,0px);z-index:30;margin:0 -2px 12px;
+    padding:10px 14px 9px;background:rgba(10,23,48,.94);border:1px solid var(--line);
+    border-radius:10px;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+  .room-turnbar.mine{border-color:var(--gold);box-shadow:0 0 0 1px rgba(245,184,61,.35)}
+  .rtb-top{display:flex;align-items:baseline;gap:10px}
+  .rtb-top b{font-family:var(--mono);font-size:26px;line-height:1;color:var(--gold);
+    font-variant-numeric:tabular-nums;min-width:1.6em}
+  .rtb-top b.urgent{color:var(--red-2);animation:timerPulse 1s ease-in-out infinite}
+  .rtb-who{font-weight:700;font-size:14px;color:var(--ink-2);flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rtb-who.mine{color:var(--gold)}
+  .rtb-round{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--ink-3);flex:none}
+  .room-turnbar .rtb-gauge{margin:8px 0 7px}
+  .rtb-needs{display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;
+    color:var(--ink-3)}
+  .rtb-needs .ok b{color:var(--green)}
+  .rtb-needs .todo b{color:var(--gold)}
+  .room-tally,.room-needs-box{display:none}
+}
+@media (prefers-reduced-motion:reduce){.rtb-top b.urgent{animation:none}}
 /* The room's reconnecting notice. Deliberately quiet -- it reports a condition that
    usually clears itself within a poll or two, and it appears above a draft in progress,
    so it must not read as an error the player has to act on. */

@@ -2631,6 +2631,54 @@ nothing a squad needs: in one measured room the first forty held **1 keeper and 
 player**, against **8 and 86** in the full list. The index sent to the server is always the
 option's place in the full list, never its place on screen.
 
+### 15.14 The auction told as a story [A232]
+
+Four pieces, all worked out from the auction (and, for the verdict, the season) every time a
+page asks -- nothing stored, no random draw, no bid or sale changed. `game/auction_report.py`
+is pure; wording is chosen by hashing the auction's seed with the fact. Single player and
+auction rooms share every builder.
+
+- **The morning-after paper** (`morning_after`): up to eight clippings in *The Fine Leg
+  Gazette* -- the record sale, the longest bidding war (the record lot excluded, so it is not
+  told twice; 20+ bids), the steal and the splurge, your headline signing (your dearest win
+  under the hammer; a side that won nothing says so), the best player left unsold (and whether
+  the fill round picked him up), a Right to Match, and who spent the most and least. Nobody is
+  quoted and no player is given a pronoun. Opens by itself the moment the last squad fills
+  (`GET /api/auction/{state}/report`, `GET /api/rooms/{code}/auction/report`), and from a
+  button on the twelve and waiting screens after that.
+- **A price is judged against this auction, not a curve.** `fair_price` is the median paid in
+  the same auction for players rated within 2 points (at least five such sales, the fill
+  round excluded). A steal is the cheapest player rated 85+ at 0.6x that or less; a splurge
+  the dearest at 1.75x or more. Measured first: the computer teams' value curve is no market
+  price -- the median sale went for 1.29x it in an open auction and 0.71x in a mega one -- and
+  the best steal of an auction sits at a median 0.42x the going rate. Over 30 auctions a
+  format the steal appears in 27-28, the splurge in 23-28.
+- **Every squad ranked** (`squad_report`) by its best twelve's face value per player, with
+  where it is strongest and weakest (its batting and bowling rank of ten) and depth worth
+  knowing (one wicketkeeper, no bowler to spare). Ranked, not graded: the ten best twelves of
+  one auction sit 1.7-5.4 rating points apart (median 3.4).
+- **The board's brief** (`board_brief`, `judge`): three targets from the seed and the
+  franchise -- one squad (win back two former players under the hammer, two wicketkeepers,
+  three spinners, or in an open auction a 95+ player), one money (finish with ₹5 cr, pay no
+  more than ₹15 cr for one player, or in an open auction spend ₹90 cr), one season (reach the
+  playoffs, or 1 in 4 finish in the top two). A squad target is set only when the catalogue
+  holds enough players to meet it; fill-round buys do not count toward a "win under the
+  hammer" target. Shown beside the squad on the floor, judged when the auction ends and again
+  after the season. **Story only**: it changes nothing. Squad and money targets can always be
+  met by deliberate play; the season target cannot be promised.
+- **The season's verdict** (`season_verdict`; `GET /api/season/{state}/verdict`,
+  `GET /api/rooms/{code}/auction/verdict`): the league's bargain (of its 30 biggest
+  contributors by runs plus twenty a wicket, the cheapest buy -- not a retention, not a
+  legend), your best buy (of your better half by contribution, the most done per rupee),
+  your most expensive flop (of your three dearest who played, one in your side's bottom half),
+  your squad with a Player of the Match tally by the career's own rule, and the brief judged
+  against where you finished. Super overs count for nothing here, as everywhere (A135).
+- **The floor's whispers** (`whispers`): short lines in the sold feed, each the first time it
+  becomes true -- the first three teams to spend half their purse, the first two to fill
+  their overseas places, the first two still without a keeper once 40% of the lots are gone,
+  a run of three unsold lots (three times at most), a new longest fight after the first ten
+  lots, and the accelerated round. About eight an auction.
+
 ## 16. Team kits [A151]
 
 A drafted twelve is a mix of franchises, so it has no crest. It wears a **kit** instead: a

@@ -899,6 +899,8 @@ window.roomAuctionPost = async (path, body) => {
   return null;
 };
 window.roomAuctionSetsUrl = () => `/api/rooms/${ROOM_CODE}/auction/sets`;   // [A172]
+window.roomAuctionReportUrl = () => `/api/rooms/${ROOM_CODE}/auction/report?`    // [A232]
+  + new URLSearchParams({player_id: MY_PID});
 window.roomTradeCheckUrl = (to, give, get) => `/api/rooms/${ROOM_CODE}/auction/trade-check?`
   + new URLSearchParams({player_id: MY_PID, to, give, get});                  // [A174]
 window.roomIsHost = () => !!(ROOM && MY_PID && ROOM.host_id === MY_PID);   // [A171]
@@ -1704,7 +1706,13 @@ function showRoomMatchComplete(m){
       </div>
     </div>
     <div class="foot-actions room-actions">${playAgainBtn}${journeyBtn}
-      <button class="act" onclick="openRoomAnalysis(this)">Season analysis</button></div>`;
+      <button class="act" onclick="openRoomAnalysis(this)">Season analysis</button></div>
+    ${ROOM && ROOM.game !== 'draft' ? '<div id="roomVerdictHost" class="auc-verdict-host"></div>' : ''}`;
+  // [A232] An auction room: the season's verdict on each seat's buys, fetched once.
+  if (ROOM && ROOM.game !== 'draft' && typeof loadAuctionVerdict === 'function')
+    loadAuctionVerdict(`/api/rooms/${ROOM_CODE}/auction/verdict?`
+      + new URLSearchParams({player_id: MY_PID}), $('#roomVerdictHost'),
+      `room:${ROOM_CODE}:${m.champion}:${m.results.length}`);
 }
 
 

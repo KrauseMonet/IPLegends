@@ -4332,3 +4332,73 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-nt b{color:var(--ink-2)}
 .cr-nt.in{border-color:rgba(245,184,61,.5);color:var(--gold-2)}
 .cr-nt.in b{color:var(--gold)}
+
+/* ---- the auction told as a story [A232] --------------------------------------------------- */
+.auc-whisper{font-family:Georgia,serif;font-style:italic;font-size:12.5px;color:var(--ink-2);
+  padding:6px 4px 6px 12px;border-left:2px solid var(--gold);margin:4px 0;line-height:1.35}
+.auc-brief{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:14px 0;
+  background:rgba(255,255,255,.02)}
+.auc-brief.compact{margin:0 0 10px;padding:8px 10px}
+.auc-brief-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  margin-bottom:6px;flex-wrap:wrap}
+.auc-brief-head b{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+.auc-brief-head em{font-style:normal;font-size:10.5px;color:var(--ink-3)}
+.auc-brief-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;align-items:baseline;
+  padding:4px 0;font-size:13px}
+.auc-brief-row i{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-right:6px}
+.auc-brief-mark{font-weight:700;color:var(--ink-3);text-align:center}
+.auc-brief-row.met .auc-brief-mark{color:var(--green)}
+.auc-brief-row.missed .auc-brief-mark{color:var(--red-2)}
+.auc-brief-row.missed .auc-brief-text{color:var(--ink-3);text-decoration:line-through;text-decoration-color:rgba(255,255,255,.25)}
+.auc-brief-prog{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap}
+.auc-brief.compact .auc-brief-row{font-size:12px;padding:2px 0}
+.auc-rep-shell{width:min(860px,100%)}
+.auc-rep-shell .scorecard-frame{padding:20px 22px;max-height:calc(100vh - 120px);overflow-y:auto}
+.auc-rep .np{margin:0 0 14px}
+.auc-rep .np-grid{margin-bottom:6px}
+.auc-rep-head{display:flex;flex-direction:column;gap:2px;margin:20px 0 8px}
+.auc-rep-head b{font-family:var(--display);font-size:20px;text-transform:uppercase}
+.auc-rep-head em{font-style:normal;font-size:12px;color:var(--ink-3)}
+.auc-rep-scroll{overflow-x:auto}
+.auc-rep-table{width:100%;border-collapse:collapse;font-size:13px}
+.auc-rep-table th{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;padding:6px;border-bottom:1px solid var(--line-strong)}
+.auc-rep-table td{padding:8px 6px;border-top:1px solid var(--line);vertical-align:middle}
+.auc-rep-table tr.you td{background:rgba(242,190,60,.08)}
+.auc-rep-table .rk{font-family:var(--mono);color:var(--ink-3);width:24px}
+.auc-rep-table .tm{white-space:nowrap}
+.auc-rep-table .tm em,.auc-rep-table .buy em{display:block;font-style:normal;font-size:11px;color:var(--ink-3)}
+.auc-rep-crest{width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:6px}
+.auc-rep-table .rt{font-family:var(--mono);font-weight:700}
+.auc-rep-table .wide span{display:block}
+.auc-rep-table .up{color:var(--green)}
+.auc-rep-table .down{color:var(--ink-2)}
+.auc-rep-table .note-chip{display:inline-block !important;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.06em;color:var(--red-2);border:1px solid rgba(226,71,46,.4);border-radius:4px;
+  padding:1px 5px;margin:3px 4px 0 0}
+.auc-rep-table .left{font-family:var(--mono);white-space:nowrap}
+.auc-verdict-host{margin-top:28px}
+.auc-verdict{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.auc-verdict-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:8px 0 6px}
+.auc-verdict-card{border:1px solid var(--line-strong);border-radius:10px;padding:12px;
+  background:linear-gradient(160deg,var(--team-deep,rgba(255,255,255,.03)),transparent 70%)}
+.auc-verdict-card .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+.auc-verdict-card .nm{margin:6px 0 4px;font-size:15px}
+.auc-verdict-card .nm em{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-left:4px}
+.auc-verdict-card .fg{font-size:12.5px;color:var(--ink-2)}
+.auc-verdict-card .fg.dim{color:var(--ink-3)}
+.auc-verdict-card.plain .fg{margin-top:6px}
+.auc-verdict-table table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.auc-verdict-table th{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);text-align:left;padding:6px;border-bottom:1px solid var(--line-strong)}
+.auc-verdict-table td{padding:6px;border-top:1px solid var(--line)}
+.auc-verdict-table td:nth-child(n+2){font-family:var(--mono);white-space:nowrap}
+.auc-verdict-table td em{font-style:normal;color:var(--ink-3);font-size:10.5px}
+.auc-verdict-table tr.dnp td{color:var(--ink-3)}
+.auc-verdict-table .note{margin-top:10px;font-size:11.5px}
+@media (max-width:560px){
+  .auc-verdict-cards{grid-template-columns:1fr}
+  .auc-rep-table .wide{min-width:150px}
+  .auc-rep-table{font-size:12px}
+}

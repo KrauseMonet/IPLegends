@@ -141,6 +141,9 @@ async function apply(d, animate){
   else if (animate && prev && (isRtm(prev.phase) || prev.phase === 'rtm_watch'))
     await stampAfterRtm(prev, d);
   A = d;
+  // [A232] The hammer has fallen for the last time: the morning-after paper, once, as it
+  // happens. A reload does not repeat it; the button on the twelve screen opens it again.
+  if (prev && !squadsFull(prev) && squadsFull(d)) openAuctionReport(reportUrl());
   // [A141] A legend you claimed but another person's franchise had the better season of.
   if (d.retention_lost && d.retention_lost.length && !(prev && prev.retention_lost
       && prev.retention_lost.length)) d.retention_lost.forEach(m => slip(m));
@@ -698,7 +701,9 @@ function renderSide(){
     </div>`).join('');
 
   $('#aucSoldCount').textContent = d.sold;
+  // Newest first, so a whisper -- which followed its sale -- is drawn above it [A232].
   $('#aucFeed').innerHTML = d.recent.slice().reverse().slice(0, 14).map(s => `
+    ${(s.whispers || []).map(w => `<div class="auc-whisper">${esc(w)}</div>`).join('')}
     <div class="auc-feed-row${s.team ? '' : ' unsold'}${s.team === d.you ? ' mine' : ''}">
       <span class="auc-feed-name">${s.name} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
       ${s.team ? `${chip(s.team)}<b class="${tierOf(s.price)}">${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
@@ -744,7 +749,7 @@ function renderSquad(d, you){
   const pill = (label, have, need, cls) =>
     `<span class="auc-need ${cls}"><b>${have}/${need}</b>${label}</span>`;
 
-  squadNeedsEl().innerHTML = `
+  squadNeedsEl().innerHTML = `${aucBriefHtml(d.brief, true)}
     <div class="auc-spend crest-${d.you}">
       <div class="auc-spend-bar">
         ${kept ? `<i class="kept" style="width:${pct(kept)}"></i>` : ''}
@@ -1606,12 +1611,35 @@ function renderWait(){
   el.textContent = d.phase === 'complete'
     ? 'The auction is over. The season is about to start.'
     : `Waiting on ${who}…`;
+  reportButton(el);
+}
+
+// --- the morning after [A232] ------------------------------------------------------------------
+
+function squadsFull(d){
+  return !!(d && d.teams && d.teams.length && d.teams.every(t => t.players >= d.squad_size));
+}
+
+function reportUrl(){
+  return AUCTION_ROOM ? window.roomAuctionReportUrl() : `/api/auction/${A.state}/report`;
+}
+
+// The paper's button, beside whatever the screen's own actions are.
+function reportButton(after){
+  if (!after || document.getElementById('aucReportBtn') || !squadsFull(A)) return;
+  const b = document.createElement('button');
+  b.id = 'aucReportBtn';
+  b.className = 'act';
+  b.textContent = 'The morning after';
+  b.onclick = () => openAuctionReport(reportUrl());
+  after.after(b);
 }
 
 // --- pick your twelve ----------------------------------------------------------------------
 
 function renderTwelve(){
   const d = A;
+  reportButton($('#aucSeasonBtn'));
   // In a room the season waits for everybody's twelve, so the button only locks yours in.
   if (AUCTION_ROOM) $('#aucSeasonBtn').textContent = 'Lock in my twelve';
   const sim = $('#aucSimMode');

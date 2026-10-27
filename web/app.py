@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import REROLL_KINDS, TWELVE_SIZE, XI_SIZE, Card, team_rating
-from game import analysis, auction, quiz, records
+from game import analysis, auction, auction_report, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -2230,6 +2230,8 @@ class AuctionSaleOut(BaseModel):
     rtm_hammer: int | None = None
     rtm_raised: int | None = None
     rtm_matched: bool | None = None
+    whispers: list[str] = Field(default=[], description="[A232] what the floor muttered "
+                                "after this lot: lines that first became true with it")
 
 
 class AuctionLotOut(BaseModel):
@@ -2322,6 +2324,15 @@ class TradeOut(BaseModel):
     b_gave: CardOut
 
 
+class BriefOut(BaseModel):
+    """[A232] One of the board's three targets, and where it stands."""
+    key: str
+    kind: Literal["squad", "money", "season"]
+    text: str
+    state: Literal["open", "met", "missed"]
+    progress: str = ""
+
+
 class AuctionOut(BaseModel):
     state: str
     phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "rtm_watch", "fill",
@@ -2367,13 +2378,15 @@ class AuctionOut(BaseModel):
                                          "the trade window, while it is open")
     trades: list[TradeOut] = Field(default=[], description="[A174] every trade completed "
                                    "in this room, in order -- for the announcements")
+    brief: list[BriefOut] = Field(default=[], description="[A232] the board's three targets "
+                                  "for your franchise; story only, they change nothing")
 
 
 # `RoomStateOut` refers to `AuctionOut` before it is defined; resolve that now it exists.
 RoomStateOut.model_rebuild()
 
 
-def _sale_out(r, sale: auction.Sale) -> AuctionSaleOut:
+def _sale_out(r, sale: auction.Sale, whispers: list[str] | None = None) -> AuctionSaleOut:
     teams = r.auction.teams
     c = sale.lot.card
     return AuctionSaleOut(
@@ -2386,7 +2399,20 @@ def _sale_out(r, sale: auction.Sale) -> AuctionSaleOut:
         rtm_holder=teams[sale.rtm.holder].short if sale.rtm else None,
         rtm_hammer=sale.rtm.hammer if sale.rtm else None,
         rtm_raised=sale.rtm.raised_to if sale.rtm else None,
-        rtm_matched=sale.rtm.matched if sale.rtm else None)
+        rtm_matched=sale.rtm.matched if sale.rtm else None,
+        whispers=whispers or [])
+
+
+def _recent(r, whispers: dict[int, list[str]]) -> list[AuctionSaleOut]:
+    """The latest 25 sales, each carrying the floor's whispers that followed it [A232]."""
+    sales = r.auction.sales
+    start = max(0, len(sales) - 25)
+    return [_sale_out(r, s, whispers.get(start + i)) for i, s in enumerate(sales[start:])]
+
+
+def _brief_out(statuses) -> list[BriefOut]:
+    return [BriefOut(key=t.key, kind=t.kind, text=t.text, state=t.state, progress=t.progress)
+            for t in statuses]
 
 
 # The fill round sends this many options, best first. It was 40, which was fine for a list
@@ -2423,7 +2449,9 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
             state=r.state, phase="retain", mega=True, you=r.short, franchise=r.franchise,
             max_bid=auction.PURSE,
             retention_pool=[AuctionPoolOut(index=i, card=_card(c))
-                            for i, c in enumerate(r.retention_pool[:RETENTION_POOL_SHOWN])])
+                            for i, c in enumerate(r.retention_pool[:RETENTION_POOL_SHOWN])],
+            brief=[BriefOut(key=t.key, kind=t.kind, text=t.text, state="open")
+                   for t in auction_report.board_brief(STATE["deck"], r.seed, r.short, True)])
     a, you = r.auction, r.you
     out = AuctionOut(
         state=r.state, phase=r.phase, mega=r.mega, you=you.short, franchise=you.franchise,
@@ -2435,9 +2463,11 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
                for t in a.teams],
         squad=[AuctionSquadOut(card=_card(c), price=p, retained=i < you.retained)
                for i, (c, p) in enumerate(zip(you.squad, you.paid))],
-        recent=[_sale_out(r, s) for s in a.sales[-25:]],
+        recent=_recent(r, auction_report.whispers(a)),
         sold=sum(1 for s in a.sales if s.winner is not None),
         top_price=_top_price(a),
+        brief=_brief_out(auction_report.judge(
+            auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega), a, you)),
     )
     if r.phase in ("rtm_use", "rtm_match", "rtm_raise"):
         out.lot = _lot_out(r)
@@ -2591,6 +2621,152 @@ def auction_sets(state: str) -> AuctionCatalogueOut:
     except auction_session.InvalidState as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _catalogue_out(r.auction, r.lot, r.phase)
+
+
+# --- the auction told as a story [A232] -------------------------------------------------------
+
+
+class ReportClipOut(BaseModel):
+    """A clipping from the morning-after paper. Plain text: the page escapes it."""
+    key: str
+    section: str
+    headline: str
+    dek: str
+    body: list[str]
+    crest: str | None = None
+    tone: str = ""
+
+
+class ReportTeamOut(BaseModel):
+    rank: int
+    short: str
+    franchise: str
+    crest: str | None = None
+    human: bool
+    you: bool = False
+    owner: str | None = Field(default=None, description="auction rooms: the person")
+    rating: float | None = Field(description="the best twelve's face value per player")
+    batting: int | None = None
+    bowling: int | None = None
+    top_buy: CardOut | None = None
+    top_price: int | None = None
+    spent: int
+    purse: int
+    strength: str
+    gap: str
+    notes: list[str] = []
+
+
+class AuctionReportOut(BaseModel):
+    paper_name: str = auction_report.PAPER
+    paper: list[ReportClipOut]
+    teams: list[ReportTeamOut]
+    brief: list[BriefOut]
+
+
+class VerdictLineOut(BaseModel):
+    card: CardOut
+    price: int
+    retained: bool
+    legend: bool
+    played: bool
+    runs: int
+    wickets: int
+    pom: int = Field(description="Player of the Match awards, by the career's own rule")
+
+
+class VerdictOut(BaseModel):
+    bargain: VerdictLineOut | None = Field(default=None, description="of the league's "
+                                           "biggest contributors, the cheapest buy")
+    bargain_team: str | None = None
+    bargain_crest: str | None = None
+    best_buy: VerdictLineOut | None = None
+    flop: VerdictLineOut | None = None
+    yours: list[VerdictLineOut]
+    finish: int | None = None
+    brief: list[BriefOut]
+
+
+def _report_clip(c) -> ReportClipOut:
+    return ReportClipOut(key=c.key, section=c.section, headline=c.headline, dek=c.dek,
+                         body=c.body, tone=c.tone,
+                         crest=crest_url(c.franchise, c.year or None) if c.franchise else None)
+
+
+def _report_out(a, you: int | None, twelves: dict, brief, owners: dict | None = None
+                ) -> AuctionReportOut:
+    teams = []
+    for row in auction_report.squad_report(a, twelves):
+        top = row.top_buy
+        teams.append(ReportTeamOut(
+            rank=row.rank, short=row.short, franchise=row.franchise,
+            crest=crest_url(row.franchise), human=row.human, you=row.index == you,
+            owner=(owners or {}).get(row.short), rating=row.rating, batting=row.batting,
+            bowling=row.bowling, top_buy=_card(top[0]) if top else None,
+            top_price=top[1] if top else None, spent=row.spent, purse=row.purse,
+            strength=row.strength, gap=row.gap, notes=row.notes))
+    statuses = auction_report.judge(brief, a, a.teams[you]) if you is not None else []
+    return AuctionReportOut(paper=[_report_clip(c) for c in auction_report.morning_after(a, you)],
+                            teams=teams, brief=_brief_out(statuses))
+
+
+def _line_out(ln) -> VerdictLineOut:
+    return VerdictLineOut(card=_card(ln.card), price=ln.price, retained=ln.retained,
+                          legend=ln.legend, played=ln.played, runs=ln.runs,
+                          wickets=ln.wickets, pom=ln.pom)
+
+
+def _verdict_out(a, results, team_of_side: dict, you: int, finish: int | None, brief
+                 ) -> VerdictOut:
+    v = auction_report.season_verdict(a, results, team_of_side, you, finish)
+    bargain = v.bargain
+    team = (next(t for t in a.teams if t.short == bargain[1]) if bargain else None)
+    return VerdictOut(
+        bargain=_line_out(bargain[0]) if bargain else None,
+        bargain_team=bargain[1] if bargain else None,
+        bargain_crest=crest_url(team.franchise) if team else None,
+        best_buy=_line_out(v.best_buy) if v.best_buy else None,
+        flop=_line_out(v.flop) if v.flop else None,
+        yours=[_line_out(ln) for ln in v.yours], finish=finish,
+        brief=_brief_out(auction_report.judge(brief, a, a.teams[you], finish)))
+
+
+@app.get("/api/auction/{state}/report", response_model=AuctionReportOut)
+def auction_report_route(state: str) -> AuctionReportOut:
+    """[A232] The morning after: the paper, every squad ranked, the board's brief. Its own
+    route (like the sets list, A172): it is read once, when the hammer falls for the last
+    time, and costs ten best twelves."""
+    try:
+        r = auction_session.replay(STATE["deck"], state)
+    except auction_session.InvalidState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if r.phase not in ("twelve", "ready"):
+        raise HTTPException(status_code=409, detail="the auction is not over yet")
+    a, you = r.auction, r.you.index
+    twelves = {t.index: auction.best_twelve(t.squad) for t in a.teams}
+    return _report_out(a, you, twelves,
+                       auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega))
+
+
+@app.get("/api/season/{state}/verdict", response_model=VerdictOut)
+def season_verdict_route(state: str) -> VerdictOut:
+    """[A232] An auction season's verdict on the buys. 409 until the season is complete;
+    400 for a drafted season, which bought nobody."""
+    draft_state, season_moves = season_session.decode_full(state)
+    if not auction_session.is_auction_state(draft_state):
+        raise HTTPException(status_code=400, detail="only an auction season has buys to judge")
+    replay = _replay_season_or_400(state, season_session.recorded_moves(season_moves))
+    if not replay.complete:
+        raise HTTPException(status_code=409, detail="season not complete")
+    r = auction_session.replay(STATE["deck"], draft_state)
+    a, you = r.auction, r.you.index
+    s = replay.season
+    by_short = {t.short: t.index for t in a.teams}
+    team_of_side = {id(side): (you if side is replay.yours else by_short[side.short])
+                    for side in s.sides}
+    finish = next(n for n, row in enumerate(s.table, 1) if row.side is replay.yours)
+    return _verdict_out(a, s.results + s.playoffs, team_of_side, you, finish,
+                        auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega))
 
 
 @app.post("/api/auction/{state}/bid", response_model=AuctionOut)
@@ -2965,11 +3141,15 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained,
                                legend=c is you.legend)
                for i, (c, pr) in enumerate(zip(you.squad, you.paid))] if you else [],
-        recent=[_sale_out(r, x) for x in a.sales[-25:]],
+        recent=_recent(r, _room_whispers(r)),
         sold=sum(1 for x in a.sales if x.winner is not None),
         top_price=_top_price(a),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
+    if you is not None:
+        out.brief = _brief_out(auction_report.judge(
+            auction_report.board_brief(deck, room.seed, you.short, room.game == "mega"),
+            a, you))
     if r.phase == "retain" and phase == "retain":
         pool = r.pools[you_idx]
         out.retention_pool = [AuctionPoolOut(index=i, card=_card(c))
@@ -3017,6 +3197,13 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         out.trade = _trade_window_out(room, r, you_idx)
     out.trades = [_trade_out(r, t, owners) for t in r.trades]
     return out
+
+
+def _room_whispers(r) -> dict[int, list[str]]:
+    """Worked out once per replay [A231's memo]: every seat polls the floor each second."""
+    if "whispers" not in r.memo:
+        r.memo["whispers"] = auction_report.whispers(r.auction)
+    return r.memo["whispers"]
 
 
 def _trade_side_out(room, r, idx: int, owners: dict) -> TradeSideOut:
@@ -4055,6 +4242,77 @@ def room_auction_trade_check(code: str, player_id: str, to: str, give: str,
     except room_auction.AuctionRoomError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return TradeCheckOut(**room_auction.trade_check(r, player_id, to, give, get))
+
+
+def _room_auction_replay(code: str):
+    """(room, replay) for a read-only auction-room route: lock-free, like the sets list."""
+    with _db() as conn:
+        try:
+            room = rooms._load_room(conn, code, lock=False)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not room_auction.is_auction(room):
+        raise HTTPException(status_code=409, detail="this is not an auction room")
+    try:
+        return room, room_auction.replay(room, STATE["deck"])
+    except room_auction.AuctionRoomError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/rooms/{code}/auction/report", response_model=AuctionReportOut)
+def room_auction_report(code: str, player_id: str | None = None) -> AuctionReportOut:
+    """[A232] The morning after, for a room: the same paper and table for everyone, with
+    the caller's own signing and brief. Once every squad is full (the trade window, the
+    twelves, or later)."""
+    room, r = _room_auction_replay(code)
+    if r.phase not in ("trade", "twelve", "complete"):
+        raise HTTPException(status_code=409, detail="the auction is not over yet")
+    a = r.auction
+    you = r.team_of.get(player_id)
+    twelves = {}
+    for t in a.teams:
+        arranged = room_auction.best_twelve_for(r, t)
+        twelves[t.index] = (list(arranged[0]) + [arranged[1]]) if arranged else None
+    owners = {p.franchise: p.name for p in room.players.values() if not p.is_cpu}
+    brief = (auction_report.board_brief(STATE["deck"], room.seed, a.teams[you].short,
+                                        room.game == "mega") if you is not None else [])
+    return _report_out(a, you, twelves, brief, owners)
+
+
+@app.get("/api/rooms/{code}/auction/verdict", response_model=VerdictOut)
+def room_auction_verdict(code: str, player_id: str) -> VerdictOut:
+    """[A232] The season's verdict on one seat's buys, once the room's league is done."""
+    deck, model = STATE["deck"], STATE["model"]
+    with _db() as conn:
+        try:
+            room, replay = room_match_lib.room_match_state(conn, code, deck, model)
+        except rooms.RoomError as exc:
+            status = 404 if "no room" in str(exc) else 409
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+    if not room_auction.is_auction(room):
+        raise HTTPException(status_code=409, detail="this is not an auction room")
+    if not replay.complete:
+        raise HTTPException(status_code=409, detail="room not complete")
+    r = room_auction.replay(room, deck)
+    a = r.auction
+    you = r.team_of.get(player_id)
+    if you is None:
+        raise HTTPException(status_code=404, detail="no such player in this room")
+    by_short = {t.short: t.index for t in a.teams}
+    team_of_side = {}
+    for e in replay.results:
+        if e.result is None:
+            continue
+        for side, pid in ((e.result.home, e.home_pid), (e.result.away, e.away_pid)):
+            p = room.players.get(pid)
+            if p is not None and p.franchise in by_short:
+                team_of_side[id(side)] = by_short[p.franchise]
+    finish = next((n for n, row in enumerate(replay.table or [], 1) if row.pid == player_id),
+                  None)
+    return _verdict_out(a, [e.result for e in replay.results if e.result is not None],
+                        team_of_side, you, finish,
+                        auction_report.board_brief(deck, room.seed, a.teams[you].short,
+                                                   room.game == "mega"))
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)

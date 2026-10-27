@@ -185,6 +185,9 @@ function renderVerdictAndBracket(d){
   $('#capRow').innerHTML = capRowHtml(d.orange_cap, d.orange_cap_runs,
                                        d.purple_cap, d.purple_cap_wickets,
                                        d.orange_cap_side, d.purple_cap_side);
+  // [A232] An auction season: what the season made of the buys.
+  if (isAuctionState(d.state) && typeof loadAuctionVerdict === 'function')
+    loadAuctionVerdict(`/api/season/${d.state}/verdict`, $('#aucVerdictHost'), 'solo:' + d.state);
 }
 
 // A side as a results row names it: its mark, then its name -- yours resolved to your team.

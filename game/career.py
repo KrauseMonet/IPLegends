@@ -50,7 +50,7 @@ from game.auction import value_curve
 from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
-from game import national, press
+from game import career_incidents as incidents, national, press
 from game.simulator import Model
 
 # --- who you can be ------------------------------------------------------------------
@@ -467,14 +467,19 @@ class Moment:
 
 
 class _NeedMoment(Exception):
-    def __init__(self, moment: Moment, season, yours: Side, approaches: list,
+    def __init__(self, moment: Moment | None, season, yours: Side, approaches: list,
                  roster: dict | None = None, dropped: list | None = None,
                  verdicts: dict | None = None, absent: list | None = None,
-                 absence_reason: str | None = None):
+                 absence_reason: str | None = None, prompt: dict | None = None,
+                 incident_out: dict | None = None, incident: dict | None = None):
         self.moment, self.season, self.yours = moment, season, yours
         self.approaches = approaches
         self.roster, self.dropped, self.verdicts = roster or {}, dropped or [], verdicts or {}
         self.absent, self.absence_reason = absent or [], absence_reason
+        # [A230] A mid-season incident instead of a key moment: {key, title, text, options}
+        self.prompt = prompt
+        self.incident_out = incident_out or {}
+        self.incident = incident                   # an incident already answered this season
 
 
 # --- the market ------------------------------------------------------------------------
@@ -486,13 +491,15 @@ STAY_DISCOUNT = 0.9                  # staying put costs a little money
 PRICE_CAP = 2700                     # lakh: the real record (Pant, 2025)
 
 # --- event cards -----------------------------------------------------------------------
-# One per season, drawn from the seed and the setup -- never from your choices. Declared game
-# design. [A214] Effects are in RATING POINTS, turned into ability at your own scale
-# (`points_t`), so "+3" on a card is +3 on your Rating whoever you are; it was a fraction of
-# the start-to-ceiling gap, which made a mentor worth under one point and nothing said so.
-# An option may carry OUTCOMES decided by the seed when you choose: this season (a niggle
-# you play through may go again) or the next (a rebuilt technique pays off or does not; a
-# rushed comeback can break down). An event with one option is shown, not asked.
+# One per season, before it starts, drawn from the seed and the setup. Declared game design.
+# [A214] Effects are in RATING POINTS, turned into ability at your own scale (`points_t`).
+# [A230] Every card is a decision made in the off-season, and none is worded in numbers: an
+# option carries a HINT in the voice of somebody at the club, and a STORY the season card
+# tells afterwards. Injuries and slumps are no longer cards: they happen DURING a season, set
+# off by a real match (`game.career_incidents`). An answer can also move your STANDING with
+# the club and start a THREAD a later season remembers; a follow-up card (`FOLLOW_UPS`) can
+# take a season's place when one comes due, which reverses A197's rule that an answer never
+# changes which card comes next -- ratified with the user, for the sake of arcs.
 
 
 @dataclass(frozen=True)
@@ -504,6 +511,8 @@ class Outcome:
     text: str = ""                      # what the season card says when it lands
     injury: str = ""                    # a line for the injury record, if it is one
     next_season: bool = True            # lands next season, or this one
+    season: int = 0                     # [A230] Rating points, this season only
+    standing: int = 0                   # [A230]
 
 
 @dataclass(frozen=True)
@@ -518,6 +527,12 @@ class EventOption:
     story: str = ""                     # [A214] what the season card says about the choice
     injury: str = ""                    # [A214] a line for the injury record
     age: float = 0.0                    # [A224] seasons added to the career clock (minus: held back)
+    hint: str = ""                      # [A230] what it means, in a voice, never in numbers
+    standing: int = 0                   # [A230] how the club sees you
+    money: bool = False                 # [A230] an endorsement fee (`endorsement_fee`)
+    trade: bool = False                 # [A230] take the trade your club has agreed
+    thread: str = ""                    # [A230] something a later season remembers
+    tone: str = ""                      # [A230] 'up' | 'down' | '' for the season card's mark
 
 
 @dataclass(frozen=True)
@@ -529,106 +544,167 @@ class Event:
     options: tuple[EventOption, ...]
     # [A200] "{name}" in the text is a REAL player: "mentor" the best of your own kind in
     # your franchise's real squad that year, "rival" the best player in another team that
-    # year. Never a captain: captains are not in the archive.
+    # year, "pupil" (A230) the debutant in your squad who would go furthest. Never a
+    # captain: captains are not in the archive. "{club}" is a trade's club.
     who: str | None = None
     # [A200] Who can draw the card: "late" only from LATE_FROM seasons on, "overseas" only
-    # an overseas player, "pace" only a fast bowler (A214). Decided by the seed and the
-    # setup, never by a choice.
+    # an overseas player, "veteran" from VETERAN_FROM, "senior" from SENIOR_FROM (A230).
+    # "staying" and "capped" depend on the season, not the seed: a card that does not fit
+    # the season gives way to `fallback_event`.
     when: str | None = None
-    injury: bool = False                # [A214] weighted by your role's INJURY_RISK
+    injury: bool = False                # kept for old records; no card is an injury now (A230)
 
 
 EVENTS: tuple[Event, ...] = (
-    Event("quiet", "A quiet pre-season", "Nothing to report. Just cricket.", 4,
+    Event("quiet", "A quiet pre-season", "Nothing to report. Just cricket.", 1,
           (EventOption("Get on with it"),)),
-    Event("form", "In form", "A huge domestic season. You arrive hitting the ball sweetly.", 2,
-          (EventOption("Ride it", season=2,
-                       story="You arrived in form, a lift for this season only."),)),
-    Event("niggle", "A hamstring niggle", "Pre-season brings a niggle. How do you handle it?", 2,
-          (EventOption("Play through it", season=-2,
-                       story="You played through the niggle, below your best.",
-                       outcomes=(Outcome(0.7, text="The hamstring held up.", next_season=False),
-                                 Outcome(0.3, missed=3, next_season=False,
-                                         text="Playing through it cost you: the hamstring went, three matches out.",
-                                         injury="Hamstring, played through and torn (3 matches)"))),
-           EventOption("Rest and rehab", missed=2, injury="Hamstring niggle, rested (2 matches)",
-                       story="Two matches out, and you came back fresh.")), injury=True),
-    Event("captain", "The captaincy", "The franchise asks you to lead the side.", 1,
-          (EventOption("Take the armband", season=-1, captain=True,
-                       story="The armband weighs on your own game a little at first."),
-           EventOption("Not yet"))),
-    Event("coach", "A new coach", "A coach wants to rebuild your technique from scratch.", 2,
-          (EventOption("Rebuild it", season=-3,
+    Event("form", "Flying in the nets",
+          "A big season back home, and you arrive playing as well as you ever have.", 4,
+          (EventOption("Make your case to the captain", season=2, standing=-1, tone="up",
+                       hint="Tell him you are ready for more. Not everyone likes being told.",
+                       story="You told the captain you were ready for more, and backed it up."),
+           EventOption("Let your cricket do the talking", season=1, standing=1, tone="up",
+                       hint="They will notice soon enough.",
+                       story="You kept quiet and let your cricket speak."))),
+    Event("captain", "The captaincy", "The franchise asks you to lead the side.", 2,
+          (EventOption("Take the armband", season=-1, captain=True, standing=1,
+                       hint="Lead the side. It will take something from your own game at first.",
+                       story="The armband weighed on your own game a little at first."),
+           EventOption("Not yet", hint="Your own game comes first, for now.",
+                       story="You turned the armband down, for now."))),
+    Event("coach", "A new coach", "A new coach wants to rebuild your technique from scratch.", 3,
+          (EventOption("Rebuild it", season=-3, tone="down",
+                       hint="A hard season for a better game, if it works.",
                        story="Rebuilding your technique cost you this season.",
-                       outcomes=(Outcome(0.65, permanent=5, text="The rebuild paid off."),
+                       outcomes=(Outcome(0.65, permanent=5,
+                                         text="The rebuild paid off: the new technique is yours now."),
                                  Outcome(0.35, permanent=1, text="The rebuild never quite took."))),
-           EventOption("Stick with what works"))),
-    Event("injury", "A side strain", "A side strain in the first fortnight. The physio wants six weeks.", 1,
-          (EventOption("Rush back", season=-2, missed=2, injury="Side strain, rushed back (2 matches)",
-                       story="You rushed back from the strain.",
-                       outcomes=(Outcome(0.65, text="The side strain is behind you."),
-                                 Outcome(0.35, permanent=-1, missed=3,
-                                         text="The side strain came back: rushing it cost you.",
-                                         injury="Side strain, recurred (3 matches)"))),
-           EventOption("Take the full six weeks", missed=5, injury="Side strain (5 matches)",
-                       story="Six weeks out, and the strain healed properly.")), injury=True),
-    Event("fracture", "A stress fracture", "A scan finds a stress fracture in your lower back, "
-          "the fast bowler's injury.", 2,
-          (EventOption("Surgery and a long rehab", missed=9, injury="Back stress fracture, surgery (9 matches)",
-                       story="You missed most of the league, but your action is intact."),
-           EventOption("Manage it and keep bowling", missed=3, permanent=-3, age=0.5,
-                       injury="Back stress fracture, managed (3 matches)",
-                       story="You kept bowling through it and lost a yard of pace for good.")),
-          when="pace", injury=True),
-    Event("mentor", "A mentor", "{name} offers to work with you through the season.", 1,
-          (EventOption("Learn from him", season=-1, permanent=3,
+           EventOption("Stick with what works", hint="It got you here.",
+                       story="You thanked the coach and kept your own game."))),
+    Event("mentor", "A mentor", "{name} offers to work with you through the season.", 2,
+          (EventOption("Learn from him", season=-1, permanent=3, thread="mentor", tone="up",
+                       hint="Give up a little of this season to learn from the best.",
                        story="Time with {name} took a little from this season and added to every one after."),
-           EventOption("Do it your way")), who="mentor"),
-    Event("rivalry", "A rivalry", "The papers have built up your duel with {name}.", 1,
-          (EventOption("Rise to it", season=1, story="The duel with {name} brought out your best."),),
-          who="rival"),
-    Event("slump", "Out of form", "Nothing is coming off in the nets.", 1,
-          (EventOption("Work through it", season=-2, story="You played your way through the slump."),
-           EventOption("Take a break", missed=3, story="Three matches away cleared your head."))),
+           EventOption("Do it your way", hint="You know your own game.",
+                       story="You thanked {name} and did it your way.")), who="mentor"),
+    Event("rivalry", "A rivalry", "The papers have built up your duel with {name}.", 2,
+          (EventOption("Talk it up", hint="Give the papers their story, and then live up to it.",
+                       story="You talked up the duel with {name}.",
+                       outcomes=(Outcome(0.6, season=2, next_season=False,
+                                         text="It brought out your best."),
+                                 Outcome(0.4, season=-2, next_season=False,
+                                         text="It got into your head."))),
+           EventOption("Keep your head down", hint="Do not give him anything.",
+                       story="You refused to bite.")), who="rival"),
+    Event("endorsement", "A sponsor calls",
+          "A sportswear brand wants you for a campaign shoot. It falls in the week of the "
+          "pre-season camp.", 2,
+          (EventOption("Do the shoot", season=-1, standing=-1, money=True, tone="even",
+                       hint="Good money. The camp will go on without you.",
+                       story="You did the shoot and missed the camp. The money was good."),
+           EventOption("Go to the camp", standing=1, hint="The money will come if the runs do.",
+                       story="You turned the brand down and went to camp."))),
+    Event("trade", "A trade", "Your club has agreed to trade you to {club}. It only needs your yes.", 2,
+          (EventOption("Go to {club}", trade=True, hint="A fresh start somewhere that wants you.",
+                       story="You agreed to the trade."),
+           EventOption("Stay put", standing=-1, tone="down",
+                       hint="Tell them you are going nowhere. They were ready to let you go.",
+                       story="You turned the trade down. The club kept you, but it had been ready to let you go.")),
+          who="trade", when="staying"),
+    Event("youngster", "A youngster", "{name}, in his first IPL season, asks if he can shadow you.", 2,
+          (EventOption("Take him under your wing", season=-1, standing=1, thread="pupil", tone="even",
+                       hint="Time spent on him is time not spent on you.",
+                       story="You took {name} under your wing."),
+           EventOption("Keep your focus on your own game", hint="Your place is not safe either.",
+                       story="You kept your focus on your own game.")), who="pupil", when="senior"),
+    Event("workload", "The national board calls",
+          "Your national board wants to manage your workload, and asks you to sit out the IPL's "
+          "first fortnight.", 3,
+          (EventOption("Agree", missed=3, age=-0.5, tone="up",
+                       hint="Rest now, and last longer.",
+                       story="You sat out the first fortnight on the board's orders, and felt fresher for it."),
+           EventOption("Tell them you want to play", standing=1, hint="Your club needs you from day one.",
+                       story="You turned the board down and played from the first match.")),
+          when="capped"),
     Event("home_league", "A league back home",
           "Your home board wants you for its own T20 league, which runs into the IPL's opening weeks.", 2,
-          (EventOption("Skip it"),
-           EventOption("Play there first", permanent=1, missed=4,
+          (EventOption("Skip it", standing=1, hint="The IPL comes first.",
+                       story="You skipped the league at home."),
+           EventOption("Play there first", permanent=1, missed=4, standing=-1,
+                       hint="A month of cricket at home, and four IPL matches missed.",
                        story="A month of cricket at home sharpened you, at the cost of four IPL matches.")),
           when="overseas"),
     # [A224] A decision about how long you last, offered only to a senior player.
     Event("fitness", "A fitness programme", "A fitness coach offers a punishing off-season "
           "programme to keep you going for longer.", 1,
-          (EventOption("Commit to it", season=-1, age=-0.5,
-                       story="The off-season programme left you a little heavy-legged this year."),
-           EventOption("Not this year")), when="veteran"),
+          (EventOption("Commit to it", season=-1, age=-0.5, tone="up",
+                       hint="Hard months now, more seasons later.",
+                       story="The off-season programme left you heavy-legged this year, and younger for the next."),
+           EventOption("Not this year", hint="Your body knows what it needs.",
+                       story="You gave the programme a miss.")), when="veteran"),
     Event("one_more", "One more season?", "You are past your best, and the franchise still wants you.", 3,
-          (EventOption("One more year"),
-           EventOption("Retire on a high", retire=True)), when="late"),
+          (EventOption("One more year", hint="There is a little left in the legs."),
+           EventOption("Retire on a high", retire=True, hint="Go out while they still want you.")),
+          when="late"),
 )
+
+# [A230] Cards a season can bring because of what came before, in place of its own.
+FOLLOW_UPS: dict[str, Event] = {e.key: e for e in (
+    Event("press_feud", "The papers have not forgotten",
+          "A new season, and the columnist you hit back at is still writing about you.", 0,
+          (EventOption("Make peace with him", standing=1, tone="up",
+                       hint="Buy him a coffee. Make it go away.",
+                       story="You cleared the air, and the story went away."),
+           EventOption("Let your bat do the talking", hint="Make him eat his words.",
+                       story="You let your cricket answer him.",
+                       outcomes=(Outcome(0.5, season=2, next_season=False,
+                                         text="He had to eat his words."),
+                                 Outcome(0.5, season=-2, next_season=False,
+                                         text="Every failure became another column."))))),
+    Event("lead", "The dressing room's choice",
+          "The players want you to lead them, and the club agrees.", 0,
+          (EventOption("Take the armband", season=-1, captain=True, standing=1,
+                       hint="They asked for you. That counts for something.",
+                       story="You took the armband the dressing room offered you."),
+           EventOption("Not yet", hint="Your own game comes first, for now.",
+                       story="You turned the armband down, for now."))),
+)}
 
 LATE_FROM = 10                       # "One more season?" from the eleventh season on
 VETERAN_FROM = 7                     # [A224] the fitness programme from the eighth
+SENIOR_FROM = 5                      # [A230] a youngster asks from the sixth
+TRADE_FROM = 2                       # [A230] a trade from the third
 
-# [A214] How injury-prone each role is: the weight of an injury card is multiplied by this.
-# Declared, since the archive records no injuries: fast bowlers break down far more often
-# than anyone else, batters far less.
-# [A226] Cut, at the user's direction, to about one injury card in a twelve-season career for
-# everyone but a fast bowler and two to three for him (measured over 3,000 seeds' event
-# sequences: 0.92 batters, 0.97 keepers, 1.01 spinners, 1.04 all-rounders, 2.58 fast bowlers;
-# it was 1.07 / 1.29 / 1.68 / 2.16 / 4.67), with at most two hamstring niggles and one side
-# strain a career (EVENT_LIMIT; it was three and two). The order between roles is kept.
-INJURY_RISK = {"pace": 1.0, "allrounder": 0.42, "spin": 0.40, "keeper": 0.38,
-               "opener": 0.36, "middle": 0.36, "finisher": 0.36}
+# [A230] Injury risk by role now lives with the mid-season incidents, as a chance a season.
+INJURY_RISK = incidents.INJURY_RISK
 
 
-# Cards that make no sense for a man who has lost his place: in a squad season they become
-# a quiet pre-season (A199). Found in the page: "Captain" beside "Squad player, 5 matches".
-NOT_IN_A_SQUAD_SEASON = frozenset({"captain"})
+# Cards that make no sense for a man who has lost his place: in a squad season they give
+# way (A199). Found in the page: "Captain" beside "Squad player, 5 matches".
+NOT_IN_A_SQUAD_SEASON = frozenset({"captain", "trade", "workload"})
 
 # How often a card may come up in one career. Unlisted: no limit beyond no-repeats.
-EVENT_LIMIT = {"coach": 2, "captain": 2, "niggle": 2, "injury": 1, "mentor": 2, "slump": 2,
-               "fracture": 1, "fitness": 2}
+EVENT_LIMIT = {"coach": 2, "captain": 2, "mentor": 2, "fitness": 2, "trade": 1,
+               "endorsement": 3, "youngster": 2, "workload": 3, "rivalry": 3, "form": 4,
+               "quiet": 2}
+FALLBACK = ("form", "coach", "rivalry", "endorsement", "mentor")
+
+# [A230] How the club sees you: a hidden number, never shown as one. A move to a new club
+# starts it again. Declared game design.
+STANDING_MIN, STANDING_MAX = -3, 3
+STANDING_BACKED = 2                  # the club keeps you as a regular after a poor season
+STANDING_COLD = -2                   # ... or does not offer to keep you at all
+STANDING_LEAD = 3                    # the dressing room asks you to lead
+STANDING_WORDS = {3: "The club sees you as one of its own", 2: "The club trusts you",
+                  1: "Well thought of at the club", -1: "Some at the club have doubts",
+                  -2: "Relations with the club are strained", -3: "The club wants you gone"}
+RETAIN_TRUSTED = 3                   # a trusted player is retained this far below RETAIN_CARD
+PUPIL_STAR = 85                      # a youngster you helped has made it at this card
+
+
+def endorsement_fee(rating: int) -> int:
+    """A sponsor's fee in lakh, by your Rating: 25L at 70, 125L at 90. Declared."""
+    return max(25, 25 + 5 * (rating - 70))
 
 
 HOME_MAX = 24
@@ -1474,11 +1550,14 @@ def _club_offer(deck: Deck, fs: int, year: int, price: int, stay: bool) -> Offer
 
 
 def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | None, *,
-               capped: bool) -> MegaOffer:
+               capped: bool, trusted: bool = False) -> MegaOffer:
     from game.auction import BASE_PRICE_TIERS
 
     retain = None
     slab = retention_slab(last_display, capped=capped)
+    if slab is None and trusted and last_display is not None:
+        # [A230] A club that trusts you retains you a little below the usual bar.
+        slab = retention_slab(last_display + RETAIN_TRUSTED, capped=capped)
     if slab is not None and current is not None:
         mine = [fs for fs in year_fs_ids(deck, year)
                 if canonical(deck.cards_by_fs[fs][0].franchise) == current]
@@ -1584,28 +1663,34 @@ def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
 
 
 def event_sequence(seed: int, overseas: bool = False, role: str | None = None) -> list[Event]:
-    """The career's event cards, one per season, from the seed and the setup alone (never
-    from your choices, so an answer cannot change which card comes next). No card twice
-    running, and none beyond `EVENT_LIMIT` times in a career: four coaches in a row reads as
-    a bug and stacks a permanent effect the curve was not drawn for. A card's `when` decides
-    who may draw it at all, and your role how often an injury card comes up (A214)."""
+    """The career's event cards, one per season, from the seed and the setup alone. No card
+    twice running, and none beyond `EVENT_LIMIT` times in a career. A card's `when` decides
+    who may draw it at all; "staying" and "capped" depend on the season and are settled in
+    the loop, where a card that does not fit gives way to `fallback_event` (A230)."""
     rng = random.Random(f"{seed}:events")
-    risk = INJURY_RISK.get(role, 1.0) if role else 1.0
     out: list[Event] = []
     used: dict[str, int] = {}
     for k in range(MAX_SEASONS):
         allowed = [e for e in EVENTS
-                   if (not out or e.key == "quiet" or e is not out[-1])
+                   if (not out or e is not out[-1])
                    and used.get(e.key, 0) < EVENT_LIMIT.get(e.key, MAX_SEASONS)
                    and (e.when != "late" or k >= LATE_FROM)
                    and (e.when != "veteran" or k >= VETERAN_FROM)
-                   and (e.when != "overseas" or overseas)
-                   and (e.when != "pace" or role == "pace")]
-        e = rng.choices(allowed, weights=[e.weight * (risk if e.injury else 1.0)
-                                          for e in allowed])[0]
+                   and (e.when != "senior" or k >= SENIOR_FROM)
+                   and (e.when != "staying" or k >= TRADE_FROM)
+                   and (e.when != "overseas" or overseas)]
+        e = rng.choices(allowed, weights=[e.weight for e in allowed])[0]
         used[e.key] = used.get(e.key, 0) + 1
         out.append(e)
     return out
+
+
+def fallback_event(seed: int, k: int, not_this: str = "") -> Event:
+    """The card a season gets when its own does not fit it (a trade for a player not staying,
+    a workload card for one not in his national side): one of `FALLBACK`, from its own stream."""
+    keys = [x for x in FALLBACK if x != not_this]
+    key = random.Random(f"{seed}:fallback:{k}").choice(keys)
+    return next(e for e in EVENTS if e.key == key)
 
 
 def draw_event(seed: int, k: int, overseas: bool = False, role: str | None = None) -> Event:
@@ -1645,19 +1730,36 @@ def absence_words(reason: str, missed: int, first: int) -> str:
     return f"Left out for {missed} {plural} for {reason} ({span})."
 
 
-def potential_words(before: int, after: int, grade: int | None) -> str:
-    """The season card's line for a raised potential [A224]."""
-    if grade is not None:
-        return (f"A season graded {grade} against your potential of {before}: "
-                f"potential raised to {after}.")
-    return f"What you have added carried you past your potential: raised to {after}."
+# [A230] Each line has a few wordings, taken in turn by season, so a long career does not say
+# the same sentence every year.
+POTENTIAL_GRADE = ("A season like that has people talking about you as a future great.",
+                   "Seasons like that change what people think you can become.",
+                   "The talk now is of how far you could go.")
+POTENTIAL_GROWN = ("You are growing into a better player than anyone expected.",
+                   "You keep finding more in your game.",
+                   "There is more in you than anyone thought.")
+CLOCK_SLOW_WORDS = ("Form like that keeps the years at bay.",
+                    "Playing like that, nobody is talking about your age.")
+CLOCK_FAST_WORDS = ("A poor season this late in a career takes more out of you.",
+                    "A season like that, at your age, makes people wonder how long you have left.")
+DEV_UP = ("The coaches like what they are seeing.", "You are learning fast.",
+          "Every season you look more at home at this level.")
+DEV_DOWN = ("A hard season, and you will carry some of it into the next.",
+            "A season to learn from, the hard way.",
+            "It was a tough year, and it set you back a little.")
 
 
-def clock_words(step: float) -> str:
-    """The season card's line when form moves the career clock [A224]."""
-    if step < 1:
-        return "Form like that holds back the years: half a season of ageing saved."
-    return "A poor season this late in a career takes more out of you: half a season of extra ageing."
+def potential_words(before: int, after: int, grade: int | None, k: int = 0) -> str:
+    """The season card's line for a raised potential [A224], in words (A230): the bar on the
+    player card shows how far."""
+    words = POTENTIAL_GRADE if grade is not None else POTENTIAL_GROWN
+    return words[k % len(words)]
+
+
+def clock_words(step: float, k: int = 0) -> str:
+    """The season card's line when form moves the career clock [A224], in words (A230)."""
+    words = CLOCK_SLOW_WORDS if step < 1 else CLOCK_FAST_WORDS
+    return words[k % len(words)]
 
 
 def shape_words(shape: Shape, before: float, after: float, age: int) -> str | None:
@@ -1675,11 +1777,10 @@ def shape_words(shape: Shape, before: float, after: float, age: int) -> str | No
     return None
 
 
-def development_words(dev: float) -> str:
-    """The season card's line for a young player's development [A214]."""
-    return (f"{'What you did this season' if dev > 0 else 'A hard season'} "
-            f"{'adds' if dev > 0 else 'takes'} {max(1, round(abs(dev)))} Rating "
-            f"{'to' if dev > 0 else 'from'} next season.")
+def development_words(dev: float, k: int = 0) -> str:
+    """The season card's line for a young player's development [A214], in words (A230)."""
+    words = DEV_UP if dev > 0 else DEV_DOWN
+    return words[k % len(words)]
 
 
 def age_words(age: float) -> str:
@@ -1687,21 +1788,6 @@ def age_words(age: float) -> str:
     span = ("half a season" if abs(age) == 0.5 else "a season" if abs(age) == 1
             else f"{abs(age):g} seasons")
     return f"{span} of ageing held back" if age < 0 else f"{span} older"
-
-
-def _effect_words(text: str, season: int, permanent: int, missed: int,
-                  age: float = 0.0) -> str:
-    """A sentence on the season card: the story, then what it did in numbers [A214]."""
-    bits = []
-    if season:
-        bits.append(f"{season:+d} Rating this season")
-    if permanent:
-        bits.append(f"{permanent:+d} Rating for good")
-    if age:
-        bits.append(age_words(age))
-    if missed:
-        bits.append(f"{missed} match{'es' if missed != 1 else ''} missed")
-    return text + (f" ({', '.join(bits)})" if bits else "")
 
 
 # Which way a season-card note points, for the page's ▲/▼ [A218]. Read off the wording the
@@ -1729,30 +1815,48 @@ def note_tone(text: str) -> str:
     return "up" if ups and not downs else "down" if downs and not ups else ""
 
 
-def skill_words(before: Card, after: Card) -> str | None:
-    """What a lasting change did to the numbers you play with, in a fan's units [A214]:
-    runs per 100 balls and how often you get out, or runs an over and how often you strike."""
+def skill_change(before: Card, after: Card) -> list[tuple[str, bool]]:
+    """What a lasting change did to your game, as phrases and whether each is for the better
+    [A214, in words since A230]: scoring and staying in, or being hard to score off and
+    taking wickets."""
     out = []
     if before.bat_scoring is not None and after.bat_scoring is not None and before.role != "bowler":
         runs = 100 * (after.bat_scoring - before.bat_scoring)
         outs = 100 * (after.bat_dismissal / before.bat_dismissal - 1)
         if round(runs):
-            out.append(f"score {abs(runs):.0f} {'more' if runs > 0 else 'fewer'} runs per 100 balls")
+            out.append(("scoring more freely" if runs > 0 else "scoring less freely", runs > 0))
         if round(outs):
-            out.append(f"get out {abs(outs):.0f}% {'more' if outs > 0 else 'less'} often")
+            out.append(("getting out more often" if outs > 0 else "harder to get out", outs < 0))
     if before.bowl_scoring is not None and after.bowl_scoring is not None and before.role != "batter":
         econ = 6 * (after.bowl_scoring - before.bowl_scoring)      # positive: cheaper
         strike = 100 * (after.bowl_dismissal / before.bowl_dismissal - 1)
         if round(econ, 1):
-            out.append(f"concede {abs(econ):.1f} {'fewer' if econ > 0 else 'more'} runs an over")
+            out.append(("harder to score off" if econ > 0 else "easier to score off", econ > 0))
         if round(strike):
-            out.append(f"take wickets {abs(strike):.0f}% {'more' if strike > 0 else 'less'} often")
-    return f"You now {' and '.join(out)}." if out else None
+            out.append(("taking wickets more often" if strike > 0 else "taking wickets less often",
+                        strike > 0))
+    return out
 
 
-def event_name(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> str | None:
-    """The real player an event names: the best of your kind in your own squad (a mentor),
-    or the best player of any other team that year (a rival), by his card that season."""
+def skill_words(before: Card, after: Card) -> str | None:
+    """The season card's line for a lasting change to your game, or None for none."""
+    change = skill_change(before, after)
+    if not change:
+        return None
+    phrases = [p for p, _ in change]
+    said = phrases[0] if len(phrases) == 1 else ", ".join(phrases[:-1]) + " and " + phrases[-1]
+    return f"Something has changed: you are {said}."
+
+
+def skill_tone(before: Card, after: Card) -> str:
+    ups = [up for _, up in skill_change(before, after)]
+    return "up" if ups and all(ups) else "down" if ups and not any(ups) else ""
+
+
+def event_person(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> Card | None:
+    """The real player an event names, by his card that season: the best of your kind in your
+    own squad (a mentor), the best player of any other team that year (a rival), or the
+    debutant in your squad who would go furthest in the archive (a pupil, A230)."""
     if event.who == "mentor":
         # Somebody who actually did your job that season, by A33's volume floors and
         # whatever his listed role -- Jadeja, an "all-rounder", is Gujarat Lions 2017's real
@@ -1768,14 +1872,50 @@ def event_name(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> st
                      if c.display is not None and _kind(c) == _kind(you)]
         same = [c for c in mates if bowls and you.bowling_style
                 and c.bowling_style == you.bowling_style]
-        best = max(same or mates, key=lambda c: (c.display, c.person_id), default=None)
-    elif event.who == "rival":
+        return max(same or mates, key=lambda c: (c.display, c.person_id), default=None)
+    if event.who == "rival":
         others = [c for fs in year_fs_ids(deck, year) if fs != fs_id
                   for c in deck.cards_by_fs[fs] if c.display is not None]
-        best = max(others, key=lambda c: (c.display, c.person_id), default=None)
-    else:
-        return None
-    return best.name if best else None
+        return max(others, key=lambda c: (c.display, c.person_id), default=None)
+    if event.who == "pupil":
+        _, years = _deck_index(deck)
+        best = _best_cards(deck)
+        new = [c for c in deck.cards_by_fs[fs_id] if c.person_id != YOU_ID
+               and min(years.get(c.person_id, {year})) == year]
+        return max(new, key=lambda c: (best.get(c.person_id, 0), c.person_id), default=None)
+    return None
+
+
+def event_name(deck: Deck, event: Event, fs_id: int, year: int, you: Card) -> str | None:
+    c = event_person(deck, event, fs_id, year, you)
+    return c.name if c is not None else None
+
+
+_BEST: dict[int, dict[str, int]] = {}
+
+
+def _best_cards(deck: Deck) -> dict[str, int]:
+    """Each person's best card in the archive, once per deck."""
+    hit = _BEST.get(id(deck))
+    if hit is None:
+        hit = {}
+        for cards in deck.cards_by_fs.values():
+            for c in cards:
+                if c.display is not None and c.display > hit.get(c.person_id, 0):
+                    hit[c.person_id] = c.display
+        _BEST[id(deck)] = hit
+    return hit
+
+
+def trade_target(deck: Deck, seed: int, k: int, year: int, current: str) -> int | None:
+    """The club your club has agreed to trade you to: another team that year, from the seed."""
+    others = sorted(fs for fs in year_fs_ids(deck, year)
+                    if canonical(deck.cards_by_fs[fs][0].franchise) != current)
+    return random.Random(f"{seed}:trade:{k}").choice(others) if others else None
+
+
+def fill(text: str, name: str = "", club: str = "") -> str:
+    return text.replace("{name}", name or "A senior player").replace("{club}", club)
 
 
 # --- a season, and a career -------------------------------------------------------------
@@ -1856,6 +1996,14 @@ class SeasonRecord:
     national: str = ""
     caps: int = 0
     caps_total: int = 0
+    # [A230] Each note's mark ('up' | 'down' | ''), beside `notes`; empty on an older token,
+    # whose notes are read by `note_tone`. The season's mid-season incident (what happened,
+    # what you chose, how it went), the rival named before it (so a key moment against his
+    # side can say so), and money beyond the contract.
+    tones: list[str] = field(default_factory=list)
+    incident: dict | None = None
+    rival: list | None = None
+    extra_earnings: int = 0
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -1923,17 +2071,18 @@ SEASON_CACHE_MAX = 4000
 def _cached_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
                    record: SeasonRecord, key: tuple,
                    answers: tuple | None = None,
-                   plan: tuple[tuple[str, str], ...] = ()) -> tuple[SeasonRecord, "SeasonDetail"]:
+                   plan: tuple[tuple[str, str], ...] = (),
+                   spent: tuple[str, ...] = ()) -> tuple[SeasonRecord, "SeasonDetail"]:
     """The record is copied (the career goes on to change it); the detail is shared, since
     nothing changes it after it is built. Your answers are part of the key: a different call
     at a key moment is a different season. A season that pauses raises and is not cached."""
-    full = (id(deck), id(model), seed, k, key, answers, plan)
+    full = (id(deck), id(model), seed, k, key, answers, plan, spent)
     hit = _SEASON_CACHE.get(full)
     if hit is None:
         if len(_SEASON_CACHE) >= SEASON_CACHE_MAX:
             _SEASON_CACHE.clear()
         hit = _SEASON_CACHE[full] = play_season_detail(deck, model, seed, k, you, record,
-                                                       answers, plan)
+                                                       answers, plan, spent)
     return copy.deepcopy(hit[0]), hit[1]
 
 
@@ -1949,6 +2098,8 @@ class Year:
     verdicts: dict = field(default_factory=dict)     # make-or-break number -> kept | dropped
     absent: list = field(default_factory=list)       # league indices of the season's absence (A216)
     absence_reason: str | None = None                # why, or None for an event card's own
+    incident: dict | None = None                     # the season's incident and your answer (A230)
+    incident_out: dict = field(default_factory=dict) # league index -> why it kept you out (A230)
 
 
 def availability_shares(tenure: int | None, overseas: bool) -> tuple[float, ...]:
@@ -2063,11 +2214,58 @@ def _rested_lineup(side: Side, me: Card) -> tuple[list[Card], Card | None] | Non
     return [resting if c is me else c for c in side.xi], side.impact
 
 
+def incidents_spent(seasons: list) -> tuple[str, ...]:
+    """The incidents a career has had as often as `incidents.LIMIT` allows (A230)."""
+    seen: dict[str, int] = defaultdict(int)
+    for r in seasons:
+        if r.incident:
+            seen[r.incident["key"]] += 1
+    return tuple(sorted(key for key, n in seen.items() if n >= incidents.LIMIT.get(key, 99)))
+
+
+# [A230] What a season's feed and season card say kept you out, for an incident's absence.
+INCIDENT_ABSENCE = {"hamstring": "a hamstring", "side_strain": "a side strain",
+                    "back": "a back injury", "wedding": "a family wedding", "slump": "a break"}
+
+
+def _your_match(r: Result, yours: Side) -> tuple["incidents.Match", Side]:
+    """Your last match, as an incident's trigger reads it, and the side you played."""
+    home = yours is r.home
+    opp = r.away if home else r.home
+    mine = r.home_innings if home else r.away_innings
+    theirs = r.away_innings if home else r.home_innings
+    b = next((b for b in (mine.batting if mine else []) if b.player.person_id == YOU_ID), None)
+    w = next((w for w in (theirs.bowling if theirs else []) if w.player.person_id == YOU_ID), None)
+    lost = r.winner is not None and r.winner is not yours
+    runs, wkts = (r.home_runs, r.home_wickets) if home else (r.away_runs, r.away_wickets)
+    heavy = None
+    if lost and ((home and (r.away_wickets or 0) <= 10 - incidents.HEAVY_WICKETS)
+                 or (not home and r.home_runs - r.away_runs >= incidents.HEAVY_RUNS)):
+        # whichever half failed: a small total is the batters', a big one conceded the bowlers'
+        heavy = "the batters" if runs < incidents.BLAME_TOTAL else "the bowlers"
+    collapse = (f"Bowled out for {runs}" if wkts >= 10 and runs < incidents.COLLAPSE_TOTAL + 10
+                else f"Kept to {runs} batting first" if home and runs < incidents.COLLAPSE_TOTAL
+                else None)
+    hit = None
+    for o in (theirs.over_log if theirs else []):
+        if (o.over >= incidents.DEATH_OVER and o.over_runs >= incidents.DEATH_HIT
+                and getattr(o, "bowler_id", "") != YOU_ID and o.bowler
+                and (hit is None or o.over_runs > hit[1])):
+            hit = (o.bowler, o.over_runs, o.over + 1)
+    return incidents.Match(
+        opp=opp.name, played=b is not None or w is not None,
+        batted=b is not None and (b.faced_any or b.out), runs=b.runs if b else 0,
+        out=bool(b and b.out), bowl_balls=w.balls if w else 0, bowl_runs=w.runs if w else 0,
+        wickets=w.wickets if w else 0, lost=lost, heavy=heavy, collapse=collapse,
+        death_hit=hit), opp
+
+
 def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   squad: bool = False, extra_missed: int = 0,
                   answers: tuple | None = None,
                   plan: tuple[tuple[str, str], ...] = (),
-                  rating: int | None = None, extra_reason: str = "", tenure: int = 0) -> Year:
+                  rating: int | None = None, extra_reason: str = "", tenure: int = 0,
+                  rival: tuple[str, str] | None = None, spent: tuple[str, ...] = ()) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -2123,6 +2321,82 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     # (your match number, stage, opponent, approach). The NUMBER identifies the match: a
     # league meets every side twice, and keying on the opponent tagged the wrong meeting.
     approaches: list[tuple[int, str, str, str]] = []
+    # [A230] The season's mid-season incident: which one it may be, and once it has come,
+    # what it set going -- form for a while, a call kept for good, matches out.
+    inc_kind = incidents.kind_of(me)
+    inc_key, inc_target = (incidents.candidate(seed, k, inc_kind, league_matches)
+                           if not squad and answers is not None else (None, 0))
+    if inc_key in spent:
+        inc_key = None                             # it has happened as often as a career allows
+    if (inc_key is None and not squad and answers is not None
+            and random.Random(f"{seed}:slump:{k}").random() < incidents.SLUMP_CHANCE):
+        inc_key = "slump"                          # a season with nothing else may bring a slump
+    season_now: list = [None]
+    incident: dict | None = None
+    incident_out: dict[int, str] = {}
+    forms: list[tuple[int, int | None, int]] = []   # (from, until or None, level)
+    kept_call: list[int] = []                      # an approach kept for the rest of the season
+    season_over = [False]
+    recent_balls: list[int] = []
+
+    def form_at(idx: int) -> int:
+        return sum(lv for a, b, lv in forms if a <= idx and (b is None or idx < b))
+
+    def ask(key: str, detail: str, opp: Side, idx: int) -> None:
+        """Stop for an incident, or apply its recorded answer from this match on."""
+        nonlocal used, incident
+        inc = incidents.INCIDENTS[key]
+        text = inc.text.replace("{opp}", opp.name.rsplit(" ", 1)[0]).replace("{what}", detail)
+        if used >= len(answers):
+            raise _NeedMoment(None, season_now[0], yours, list(approaches), roster,
+                              list(dropped_seen), dict(verdicts),
+                              sorted(set(out) - set(incident_out)), absence_why,
+                              prompt={"key": key, "title": inc.title, "text": text,
+                                      "options": inc.options},
+                              incident_out=dict(incident_out))
+        ans = answers[used]
+        if not (isinstance(ans, tuple) and ans and ans[0] == "i"):
+            raise CareerError("expected an answer to what happened, not a key-moment call")
+        if not 0 <= ans[1] < len(inc.options):
+            raise CareerError(f"no choice {ans[1]} here")
+        used += 1
+        opt = inc.options[ans[1]]
+        turn = incidents.turn_for(seed, k, opt)
+        why = INCIDENT_ABSENCE.get(key, inc.title.lower())
+        back = idx
+        if opt.out == -1:
+            gone = range(idx, league_matches)
+            season_over[0] = True
+        else:
+            gone = range(idx, min(idx + opt.out, league_matches))
+        for i in gone:
+            incident_out[i] = why                  # out because of this now, whatever else
+        out.update(gone)
+        back = idx + max(opt.out, 0)
+        if opt.form:
+            forms.append((back, back + opt.form_matches if opt.form_matches else None, opt.form))
+        if turn is not None and turn.out:
+            late = range(back + 1, min(back + 1 + turn.out, league_matches))
+            for i in late:
+                incident_out[i] = why
+            out.update(late)
+        if turn is not None and turn.form:
+            forms.append((back, None, turn.form))
+        if opt.approach is not None:
+            kept_call.append(opt.approach)
+        if opt.death:
+            yours.bowling_plan = {**(yours.bowling_plan or {}), YOU_ID: "death"}
+        tone = opt.tone or ("up" if turn is not None and (turn.form > 0 or turn.permanent > 0)
+                            else "down" if turn is not None and (turn.form < 0 or turn.permanent < 0
+                                                                 or turn.out or turn.standing < 0)
+                            else "")
+        incident = {"key": key, "title": inc.title, "text": text, "choice": opt.label,
+                    "story": opt.story, "turn": turn.text if turn else "", "at": seen + 1,
+                    "standing": opt.standing + (turn.standing if turn else 0),
+                    "permanent": opt.permanent + (turn.permanent if turn else 0),
+                    "age": opt.age, "thread": opt.thread, "tone": tone,
+                    "injuries": [x for x in (opt.injury, turn.injury if turn else "") if x],
+                    "out": len([i for i in incident_out])}
 
     def moment(a: Side, b: Side, season, stage: str, left: int,
                make_or_break: str | None = None) -> None:
@@ -2145,12 +2419,17 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         if answers is None:
             return                                 # every call Balanced, nobody asked
         opp = b if a is yours else a
+        if rival and opp.franchise == rival[0]:
+            stakes = f"{stakes} {rival[1]} is in their side."
         if used >= len(answers):
             raise _NeedMoment(Moment(stage, opp.name, opp.short, opp.franchise, opp.year,
                                      stakes, labels, kind), season, yours, list(approaches),
-                              roster, list(dropped_seen), dict(verdicts), sorted(out),
-                              absence_why)
+                              roster, list(dropped_seen), dict(verdicts),
+                              sorted(set(out) - set(incident_out)), absence_why,
+                              incident_out=dict(incident_out), incident=incident)
         ans = answers[used]
+        if isinstance(ans, tuple) and ans and ans[0] == "i":
+            raise CareerError("expected a key-moment call, not an answer to what happened")
         used += 1
         # An answer is a call, or a call with a new bowling plan from this match on (A213).
         choice, replan = (ans, None) if isinstance(ans, int) else ans
@@ -2167,11 +2446,23 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         by the real rate of drops, so a drop adds to it rather than coming off it."""
         dropped.update(range(idx, min(idx + DROP_MATCHES, league_matches)))
 
-    def lineup() -> tuple[list[Card], Card | None]:
-        """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays."""
+    def lineup(idx: int) -> tuple[list[Card], Card | None]:
+        """An all-rounder bowls in ALLROUNDER_BOWL_SHARE of the matches he plays. Your form
+        and any call you keep for the season (A230) are applied to your card."""
         if rested is None or bowl_rng.random() < ALLROUNDER_BOWL_SHARE:
-            return with_you
-        return rested
+            xi, impact = with_you
+        else:
+            xi, impact = rested
+        level = form_at(idx)
+        if not level and not kept_call:
+            return xi, impact
+
+        def mine(c: Card) -> Card:
+            if c.person_id != YOU_ID:
+                return c
+            c = incidents.formed(c, level)
+            return approach_card(c, kept_call[-1]) if kept_call else c
+        return [mine(c) for c in xi], impact
 
     def league_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal played, seen, breaks, pending_break
@@ -2190,7 +2481,25 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                     drop_from(idx)
                 pending_break = None
             benched = idx in out or idx in dropped
-            yours.xi, yours.impact = without if benched else lineup()
+            season_now[0] = season
+            if mine:
+                last, last_opp = _your_match(season.results[mine[-1]], yours)
+                if last.played:
+                    recent_balls.append(last.bowl_balls)
+            if incident is None and inc_key is not None and not benched and mine:
+                inc = incidents.INCIDENTS[inc_key]
+                if inc.trigger != "form":
+                    detail = incidents.fires(inc, inc_kind, last, idx, inc_target, recent_balls)
+                    if detail is not None:
+                        ask(inc_key, detail, last_opp, idx)
+                elif idx + 1 < league_matches:
+                    rank0 = book.form_rank(you_key)
+                    if rank0 is not None and rank0 < FORM_POOR:
+                        games = book.games[you_key][-FORM_MATCHES:]
+                        ask("slump", ", ".join(form_figure(_kind(me), g) for g in games),
+                            last_opp, idx)
+                benched = idx in out or idx in dropped
+            yours.xi, yours.impact = without if benched else lineup(idx)
             played += 1
             seen += 1
             if idx in dropped:
@@ -2210,7 +2519,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     def playoff_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal seen
         if yours is a or yours is b:
-            yours.xi, yours.impact = without if squad else lineup()
+            yours.xi, yours.impact = without if squad or season_over[0] else lineup(10 ** 6)
             seen += 1
             moment(a, b, season, stage, 0)
 
@@ -2223,7 +2532,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     if answers is not None and used < len(answers):
         raise CareerError("more answers than the season had moments")
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
-                absent=sorted(out), absence_reason=absence_why)
+                absent=sorted(set(out) - set(incident_out)), absence_reason=absence_why,
+                incident=incident, incident_out=incident_out)
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
     return year
@@ -2278,6 +2588,7 @@ class MatchLine:
     approach: str | None = None         # your call, when this was a key moment (A204)
     stop: str | None = None             # what kind of key moment: must_win, playoff, make_or_break
     verdict: str | None = None          # a make-or-break's outcome: "kept" | "dropped" (A205)
+    incident: str | None = None         # what happened before this match, and your answer (A230)
     dropped: bool = False               # left out for form (A205)
     form: list[str] = field(default_factory=list)   # your last FORM_SHOWN matches, oldest first
     form_word: str | None = None        # In form / Steady / Out of form, after this match
@@ -2487,9 +2798,13 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
             line.approach, line.stop = m[3], m[4]
         line.verdict = year.verdicts.get(n)
         line.dropped = n in year.dropped
-        if (not line.played and not line.dropped and r.stage == "league"
-                and n - 1 in year.absent):
-            line.absence = year.absence_reason or "out"
+        if year.incident and year.incident["at"] == n:
+            line.incident = f"{year.incident['title']}: {year.incident['choice']}"
+        if not line.played and not line.dropped and r.stage == "league":
+            if n - 1 in year.incident_out:
+                line.absence = year.incident_out[n - 1]
+            elif n - 1 in year.absent:
+                line.absence = year.absence_reason or "out"
         book.add(year.results[:i + 1])     # form as it stands straight after this match
         line.form = [form_figure(you_kind, g) for g in book.games.get(you_key, [])[-FORM_SHOWN:]]
         line.form_word = form_word(book.form_rank(you_key))
@@ -2520,15 +2835,17 @@ def play_season(deck: Deck, model: Model, seed: int, k: int, you: Card,
 
 def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                        record: SeasonRecord, answers: tuple | None = None,
-                       plan: tuple[tuple[str, str], ...] = ()
+                       plan: tuple[tuple[str, str], ...] = (),
+                       spent: tuple[str, ...] = ()
                        ) -> tuple[SeasonRecord, SeasonDetail]:
     year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers,
                          plan, record.rating if record.rating else None, record.absence,
-                         record.tenure)
+                         record.tenure, tuple(record.rival) if record.rival else None, spent)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
     record.dropped = len(year.dropped)
+    record.incident = year.incident
     record.absence = year.absence_reason or ""
     record.absent_from = year.absent[0] + 1 if year.absent else 0
     key = (YOU_ID, id(yours))
@@ -2664,6 +2981,9 @@ class Pending:
     mega: MegaOffer | None = None      # a mega-auction year's choice (A212)
     plan_bowlers: list[Card] = field(default_factory=list)   # a captain's plan is for these (A213)
     plan: dict[str, str] = field(default_factory=dict)        # ... and stands at this
+    incident: dict | None = None       # what happened mid-season, and the answers (A230)
+    event_fill: tuple[str, str] = ("", "")                    # the name and club a card names
+    cold: bool = False                 # your club has not offered to keep you (A230)
 
 
 @dataclass
@@ -2758,7 +3078,7 @@ def summarise(career: Career, real_runs: list[int] | None = None,
         orange_caps=sum(r.orange_cap for r in s), purple_caps=sum(r.purple_cap for r in s),
         captaincies=sum(r.captain for r in s), regular_seasons=sum(not r.squad for r in s),
         franchises=franchises,
-        earnings=sum(r.price for r in s), peak_display=peak.display, peak_year=peak.year,
+        earnings=sum(r.price + r.extra_earnings for r in s), peak_display=peak.display, peak_year=peak.year,
         five_fors=sum(r.five_fors for r in s), hat_tricks=sum(r.hat_tricks for r in s),
         milestones=[(r.year, m.text) for r in s for m in r.milestones])
     best = max(s, key=lambda r: (r.rating, -r.year))
@@ -2880,6 +3200,11 @@ class Checkpoint:
     epilogue: str | None = None
     # [A229] The national record so far: {"capped", "in_side", "caps"}; empty is uncapped.
     national: dict = field(default_factory=dict)
+    # [A230] How your club sees you (STANDING_MIN..STANDING_MAX, never shown as a number), and
+    # the threads a later season remembers: a mentor, a youngster you helped, a feud with the
+    # papers, the armband the dressing room has already offered at a club.
+    standing: int = 0
+    threads: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -2901,7 +3226,8 @@ class Checkpoint:
                    injuries=[list(i) for i in d.get("injuries") or []],
                    clock=d.get("clock", float(d["k"])), potential=d.get("potential", 0.0),
                    shaped=d.get("shaped", False), epilogue=d.get("epilogue", ""),
-                   national=dict(d.get("national") or {}))
+                   national=dict(d.get("national") or {}), standing=d.get("standing", 0),
+                   threads=[dict(t) for t in d.get("threads") or []])
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -2934,7 +3260,7 @@ def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceili
     after = round(top_card(ceiling, legend, cp.potential).display)
     if after == before:
         return None
-    return potential_words(before, after, grade if gain else None)
+    return potential_words(before, after, grade if gain else None, cp.k)
 
 
 # --- the papers [A228] -------------------------------------------------------------------------
@@ -3018,7 +3344,74 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
                    "total": played.caps_total, "grade": played.display}
                   if setup.nation else None),
         caps_marks=_marks(played.caps_total - played.caps, played.caps_total, national.CAP_MARK)
-        if played.caps else [])
+        if played.caps else [],
+        traded=played.event == "trade" and moved is not None,
+        stories=(["endorse"] if played.event == "endorsement" and played.extra_earnings else [])
+        + (["hit_back"] if played.incident and played.incident.get("thread") == "press_feud"
+           else []))
+
+
+def season_event(cp: "Checkpoint", k: int, year: int, offer: Offer, squad: bool,
+                 already: bool, seed: int, setup: Setup) -> Event:
+    """The season's card: a follow-up when one is due (A230), else the seeded card, giving
+    way to `fallback_event` where it does not fit the season."""
+    if any(t["k"] == "press_feud" and t["year"] == year - 1 for t in cp.threads):
+        return FOLLOW_UPS["press_feud"]
+    club = canonical(offer.franchise)
+    if (cp.standing >= STANDING_LEAD and not squad and not already and k >= 2
+            and not any(t["k"] == "lead" and t.get("club") == club for t in cp.threads)):
+        return FOLLOW_UPS["lead"]
+    event = draw_event(seed, k, setup.overseas, setup.role)
+    unfit = ((squad and event.key in NOT_IN_A_SQUAD_SEASON)
+             or (already and event.key == "captain")
+             or (event.key == "trade" and (not offer.stay or year in MEGA_YEARS))
+             or (event.key == "workload" and not (setup.nation and cp.national.get("in_side"))))
+    return fallback_event(seed, k, event.key) if unfit else event
+
+
+_BY_YEAR: dict[int, dict[str, dict[int, int]]] = {}
+
+
+def _cards_by_year(deck: Deck) -> dict[str, dict[int, int]]:
+    """Each person's best card in each archive year, once per deck."""
+    hit = _BY_YEAR.get(id(deck))
+    if hit is None:
+        hit = defaultdict(dict)
+        for cards in deck.cards_by_fs.values():
+            for c in cards:
+                if c.display is not None and c.display > hit[c.person_id].get(c.season_year, 0):
+                    hit[c.person_id][c.season_year] = c.display
+        _BY_YEAR[id(deck)] = hit = dict(hit)
+    return hit
+
+
+def threads_due(deck: Deck, cp: "Checkpoint", year: int, say) -> None:
+    """The payoffs of what a career started (A230), each told once, in the archive's own
+    terms: a mentor's last IPL season, and a youngster you helped who became a star."""
+    _, years = _deck_index(deck)
+    by_year = _cards_by_year(deck)
+    keep = []
+    for th in cp.threads:
+        k = th["k"]
+        if k == "mentor":
+            last = max(years.get(th["id"], {0}))
+            if last == year - 1 and last <= MATE_LAST_BEFORE:
+                say(f"{th['name']}, who took you under his wing in {th['year']}, has played "
+                    f"his last IPL season.")
+                continue
+            if last < year - 1:
+                continue
+        elif k == "pupil":
+            if by_year.get(th["id"], {}).get(year, 0) >= PUPIL_STAR:
+                say(f"{th['name']}, the youngster who shadowed you in {th['year']}, is now one "
+                    f"of the best players in the league.", "up")
+                continue
+            if max(years.get(th["id"], {0})) < year:
+                continue
+        elif k == "press_feud" and th["year"] < year - 1:
+            continue
+        keep.append(th)
+    cp.threads = keep
 
 
 def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[str],
@@ -3046,8 +3439,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         """This season's answers at its key moments: the `m{i}` moves that follow its offer
         and event (A204). A captain's may carry a new bowling plan, `m{i}p{digits}` (A213)."""
         out = []
-        while queue and isinstance(queue[0], str) and queue[0].startswith("m"):
+        while queue and isinstance(queue[0], str) and queue[0][:1] in ("m", "i"):
             mv = queue.pop(0)
+            if mv.startswith("i"):                 # an answer to what happened (A230)
+                if not mv[1:].isdigit():
+                    raise CareerError(f"expected an answer, got {mv!r}")
+                out.append(("i", int(mv[1:])))
+                continue
             call, _, digits = mv.partition("p")
             choice = _index(call, "m", 3)
             if not _:
@@ -3069,7 +3467,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if year in MEGA_YEARS and k > 0:
             cp.contract = None                 # a mega auction ends every deal (A212)
             capped = bool(cp.national.get("capped"))
-            mo = mega_offer(deck, year, cp.current, market, capped=capped)
+            mo = mega_offer(deck, year, cp.current, market, capped=capped,
+                            trusted=cp.standing >= STANDING_BACKED)
             career.checkpoint = copy.deepcopy(cp)
             move = nxt()
             if move is None:
@@ -3102,6 +3501,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                 capped=bool(cp.national.get("capped")))
             if cp.contract is not None and (len(offers) != 1 or not offers[0].contract_year):
                 cp.contract = None                 # the club has no team this year: deal void
+            cold = (cp.standing <= STANDING_COLD and not offers[0].contract_year
+                    and offers[0].stay)
+            if cold:
+                offers = offers[1:]                # [A230] the club does not ask you to stay
             career.checkpoint = copy.deepcopy(cp)
             move = nxt()
             if move is None:
@@ -3112,7 +3515,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     pos, rank = where_you_play(deck, dataclasses.replace(
                         here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id)
                     placed.append(dataclasses.replace(o, position=pos, attack_rank=rank))
-                career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad)
+                career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad,
+                                         cold=cold)
                 return career
             if move == "r":
                 if k == 0:
@@ -3129,72 +3533,104 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 offer = offers[_index(move, "o", len(offers))]
                 if not offer.contract_year:
                     cp.contract = None
-        event = draw_event(seed, k, setup.overseas, setup.role)
+        if canonical(offer.franchise) != cp.current:
+            cp.standing = 0                    # a new club starts from nothing (A230)
         # The armband stays once taken, until you change club or have a poor season (A213).
         already = cp.captain is not None and cp.captain == canonical(offer.franchise)
-        if (squad_now or already) and event.key in NOT_IN_A_SQUAD_SEASON:
-            event = EVENTS[0]              # nobody asks a squad player (or the captain) to lead
+        event = season_event(cp, k, year, offer, squad_now, already, seed, setup)
+        probe = ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id, year=year,
+                        franchise=offer.franchise)
+        person = event_person(deck, event, offer.fs_id, year, probe) if event.who else None
+        target = (trade_target(deck, seed, k, year, canonical(offer.franchise))
+                  if event.who == "trade" else None)
+        club_name = deck.cards_by_fs[target][0].franchise if target is not None else ""
+        name = person.name if person is not None else ""
         if len(event.options) == 1:
             option = event.options[0]
         else:
             move = nxt()
             if move is None:
-                text = event.text
-                if event.who:
-                    probe = ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id,
-                                    year=year, franchise=offer.franchise)
-                    text = text.replace("{name}", event_name(deck, event, offer.fs_id, year,
-                                                             probe) or "A senior player")
                 career.pending = Pending("event", year, k, offers=[offer], event=event,
-                                         squad=squad_now, event_text=text)
+                                         squad=squad_now,
+                                         event_text=fill(event.text, name, club_name),
+                                         event_fill=(name, club_name))
                 return career
             option = event.options[_index(move, "e", len(event.options))]
         if option.retire:
             career.retired, cp.ended = True, "retired"
             break
-        # [A214] What last season set in motion lands now; then this season's answer.
+        # [A214] What last season set in motion lands now; then this season's answer. Every
+        # note is a sentence with its mark beside it, never a number (A230).
         notes: list[str] = []
+        tones: list[str] = []
+
+        def say(text: str, tone: str = "") -> None:
+            if text:
+                notes.append(text)
+                tones.append(tone)
+
         perm_before = cp.permanent
         landed_missed = 0
         for lt in cp.later:
             cp.permanent += points_t(lt["permanent"], start, top)
             landed_missed += lt["missed"]
-            notes.append(_effect_words(lt["text"], 0, lt["permanent"], lt["missed"]))
+            say(lt["text"], "up" if lt["permanent"] > 0 else "down"
+                if lt["permanent"] < 0 or lt["missed"] else "")
             if lt["injury"]:
                 cp.injuries.append([year, lt["injury"]])
         cp.later = []
+        threads_due(deck, cp, year, say)
+        if option.trade and target is not None:
+            mates = cp.contract
+            offer = _club_offer(deck, target, year, offer.price, False)
+            if mates is not None:
+                mates.club = canonical(offer.franchise)
+            cp.standing = 1                    # they asked for you
+            already = False
         outcome = draw_outcome(seed, k, option)
         now = outcome if outcome is not None and not outcome.next_season else None
         if outcome is not None and outcome.next_season:
             cp.later.append(dataclasses.asdict(outcome))
         cp.permanent += points_t(option.permanent, start, top)
-        t = arc_point(clock, cp.permanent, points_t(option.season, start, top), shape)
+        season_pts = option.season + (now.season if now else 0)
+        t = arc_point(clock, cp.permanent, points_t(season_pts, start, top), shape)
         extra = option.missed + landed_missed + (now.missed if now else 0)
+        cp.standing += option.standing + (now.standing if now else 0)
         for line in (option.injury, now.injury if now else ""):
             if line:
                 cp.injuries.append([year, line])
-        if option.story:
-            name = (event_name(deck, event, offer.fs_id, year,
-                               ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id,
-                                       year=year, franchise=offer.franchise)) or "A senior player"
-                    if event.who else "")
-            notes.append(_effect_words(option.story.replace("{name}", name), option.season,
-                                       option.permanent, option.missed, option.age))
+        tone = "" if option.tone == "even" else option.tone or (
+            "up" if option.permanent > 0 or option.season > 0 else
+            "down" if option.permanent < 0 or option.season < 0 else "")
+        story = fill(option.story, name, club_name) if option.story else ""
+        if option.trade and target is not None:
+            story = f"You agreed to the trade, and started the season at {offer.franchise}."
         if now is not None:
-            notes.append(_effect_words(now.text, 0, now.permanent, now.missed))
+            say(f"{story} {fill(now.text, name, club_name)}".strip(),
+                "up" if now.season > 0 or now.permanent > 0 else "down")
+        else:
+            say(story, tone)
         if outcome is not None and outcome.next_season and any(o.permanent > 0 for o in option.outcomes):
-            notes.append("Whether it works, you will see next season.")
-        skill = skill_words(
-            ability(start, top, arc_point(clock, perm_before, 0.0, shape), setup=setup, fs_id=offer.fs_id,
-                    year=year, franchise=offer.franchise),
-            ability(start, top, arc_point(clock, cp.permanent, 0.0, shape), setup=setup, fs_id=offer.fs_id,
-                    year=year, franchise=offer.franchise))
-        if skill:
-            notes.append(skill)
+            say("Whether it works, you will see next season.")
+        money = endorsement_fee(rating_at(start, top, t)) if option.money else 0
+        if option.thread == "mentor" and person is not None:
+            cp.threads.append({"k": "mentor", "id": person.person_id, "name": person.name,
+                               "year": year})
+        if option.thread == "pupil" and person is not None:
+            cp.threads.append({"k": "pupil", "id": person.person_id, "name": person.name,
+                               "year": year})
+        if event.key == "lead":
+            cp.threads.append({"k": "lead", "club": canonical(offer.franchise)})
+        cp.threads = [th for th in cp.threads if not (th["k"] == "press_feud" and event.key == "press_feud")]
+        before = ability(start, top, arc_point(clock, perm_before, 0.0, shape), setup=setup,
+                         fs_id=offer.fs_id, year=year, franchise=offer.franchise)
+        after = ability(start, top, arc_point(clock, cp.permanent, 0.0, shape), setup=setup,
+                        fs_id=offer.fs_id, year=year, franchise=offer.franchise)
+        say(skill_words(before, after) or "", skill_tone(before, after))
         option = dataclasses.replace(option, missed=extra)
         # what keeps you out when an event card does (A216): it names itself
         absence_label = (event.title.lower() if option.injury or (now and now.missed) or
-                         event.key in ("slump", "home_league") and extra else
+                         event.key in ("workload", "home_league") and extra else
                          "an injury that came back" if landed_missed else "")
         you = ability(start, top, t, setup=setup, fs_id=offer.fs_id, year=year,
                       franchise=offer.franchise)
@@ -3214,7 +3650,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             plan = parse_plan(move[1:], bowlers)
         record = SeasonRecord(k=k, year=year, franchise=offer.franchise, short=offer.short,
                               price=offer.price, stayed=offer.stay, event=event.key,
-                              choice=option.label, captain=captain_now, ability=t,
+                              choice=fill(option.label, name, club_name), captain=captain_now,
+                              ability=t,
                               teams=0, squad=squad_now, extra_missed=option.missed, mega=mega_note,
                               contract_year=(CONTRACT_YEARS - cp.contract.left + 1
                                              if cp.contract else 0),
@@ -3224,29 +3661,49 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         # this loop built, and the next season's offers would price you as a 70.
         record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
                        if c.person_id in dict(plan)]
+        if event.who == "rival" and person is not None:
+            record.rival = [person.franchise, person.name]
         answers = take_answers(bowlers)
         current = dict(plan)               # the plan as it stands after this season's replans
         for a in answers:
-            if not isinstance(a, int):
+            if isinstance(a, tuple) and a[0] != "i":
                 current = dict(a[1])
         try:
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
                                                    (setup, start, top, offer, option, t,
-                                                    squad_now, record.tenure), answers, plan)
+                                                    squad_now, record.tenure), answers, plan,
+                                                   incidents_spent(cp.seasons))
         except _NeedMoment as need:
-            # The season stops at a key moment: told up to here, waiting for your call.
+            # The season stops at a key moment, or at something that happened (A230): told up
+            # to here, waiting for your call.
             so_far = Year(need.season, need.yours,
                           list(need.season.results) + list(need.season.playoffs or []),
                           need.roster, 0, need.approaches, need.dropped, need.verdicts,
-                          need.absent, need.absence_reason)
+                          need.absent, need.absence_reason, incident=need.incident,
+                          incident_out=need.incident_out)
             career.detail = season_detail(so_far, complete=False)
             career.live_milestones = career_milestones(cp.seasons, career.detail.feed)
-            career.pending = Pending("moment", year, k, squad=squad_now, offers=[offer],
-                                     moment=need.moment,
+            career.pending = Pending("incident" if need.prompt else "moment", year, k,
+                                     squad=squad_now, offers=[offer], moment=need.moment,
+                                     incident=need.prompt,
                                      plan_bowlers=bowlers, plan=current)
             return career
         played.form = played.display
         played.display = reputation_floor([r.display for r in cp.seasons], played.display)
+        played.extra_earnings = money
+        # [A230] What happened during the season, and what your answer set going.
+        inc = played.incident
+        inc_age = 0.0
+        if inc:
+            say(" ".join(x for x in (inc["story"], inc["turn"]) if x), inc["tone"])
+            cp.permanent += points_t(inc["permanent"], start, top)
+            cp.standing += inc["standing"]
+            inc_age = inc["age"]
+            for line in inc["injuries"]:
+                cp.injuries.append([year, line])
+            if inc["thread"]:
+                cp.threads.append({"k": inc["thread"], "year": year})
+        cp.standing = max(STANDING_MIN, min(STANDING_MAX, cp.standing))
         played.milestones = career_milestones(
             cp.seasons, career.detail.feed if career.detail else None, played)
         # [A229] The selectors read the season; a new international is a milestone.
@@ -3261,7 +3718,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 played.milestones.append(CareerMilestone("caps", f"{m} internationals for {country}"))
             said = national.words(sel, country)
             if said:
-                notes.append(said)
+                say(said, "up" if sel.event in ("debut", "kept", "recalled") else
+                    "down" if sel.event == "dropped" else "")
         for key in setup.ambitions:
             state, when = ambition_status(key, cp.seasons + [played])
             if state == "done" and when == year:
@@ -3278,39 +3736,48 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             cp.contract.left -= 1
             if cp.contract.left == 0:
                 cp.contract = None
+        was_squad = cp.squad
         cp.squad, released = form_after(cp.squad, played.percentile, poor_bar(setup.role))
         if k < YOUTH_SEASONS:
             if cp.squad:
-                notes.append(f"A poor season, but at {DEBUT_AGE + k} the franchise is giving you time.")
+                say(f"A poor season, but at {DEBUT_AGE + k} the franchise is giving you time.")
             cp.squad, released = False, False      # a youngster gets time (A214)
+        elif cp.squad and not was_squad and cp.standing >= STANDING_BACKED:
+            # [A230] A club that trusts you keeps you in the side through a poor season, once:
+            # it spends some of that trust.
+            cp.squad = False
+            cp.standing -= 1
+            say("A poor season, but the club stood by you. You keep your place.", "up")
         growing = shape.growing(clock)
         dev = round(2 * DEV_POINTS * (played.percentile - 0.5), 1) if growing else 0.0
         played.development = dev
         cp.permanent += points_t(dev, start, top)
         if abs(dev) >= 0.5:
-            notes.append(development_words(dev))
+            say(development_words(dev, k), "up" if dev > 0 else "down")
         if played.absence and not played.extra_missed:
-            notes.append(absence_words(played.absence, played.missed - played.dropped,
-                                       played.absent_from))
+            block = played.missed - played.dropped - (inc["out"] if inc else 0)
+            if block > 0:
+                say(absence_words(played.absence, block, played.absent_from))
         # [A224] Set on the PLAYED record, never on `record` before the season: the season
         # cache shares a record between careers that reach it with different clocks.
         played.potential, played.clock = cp.potential, clock
-        step = 1.0 + option.age
+        step = 1.0 + option.age + inc_age
         if shape.declining(clock):
             if played.form >= played.rating + CLOCK_MARGIN:
                 step += CLOCK_SLOW - 1.0
-                notes.append(clock_words(CLOCK_SLOW))
+                say(clock_words(CLOCK_SLOW, k), "up")
             elif played.percentile < poor_bar(setup.role):
                 step += CLOCK_FAST - 1.0
-                notes.append(clock_words(CLOCK_FAST))
+                say(clock_words(CLOCK_FAST, k), "down")
         cp.clock = clock + step
         hint = shape_words(shape, clock, cp.clock, DEBUT_AGE + k)
         if hint:
-            notes.append(hint)
+            say(hint, "down" if "catching up" in hint else "up" if hint.startswith(
+                ("At ", "Still", "Past your peak now, but")) else "")
         raised = grow_potential(cp, played.form, growing, start, ceiling, legend, shape)
         if raised:
-            notes.append(raised)
-        played.notes = notes
+            say(raised, "up")
+        played.notes, played.tones = notes, tones
         cp.captain = next_captain(captain_now, cp.squad, canonical(offer.franchise))
         if bowlers:
             cp.plan = current
@@ -3319,6 +3786,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if released and played.rating >= STAR_RATING:
             released = False                   # a star is never out of work (A214)
             played.notes.append("Two poor seasons, but at your level somebody always signs you.")
+            played.tones.append("")
         if released:
             career.released, cp.ended = True, "released"
             break
@@ -3345,6 +3813,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
 def _index(move: str, kind: str, n: int) -> int:
     if not isinstance(move, str) or not move.startswith(kind) or not move[1:].isdigit():
         what = {"o": "an offer", "c": "an offer", "e": "an event answer", "m": "a key-moment call",
+                "i": "an answer to what happened",
                 "b": "a base price", "w": "a where-are-they-now"}.get(kind, "a")
         raise CareerError(f"expected {what} move, got {move!r}")
     i = int(move[1:])
@@ -3369,6 +3838,8 @@ def policy_move(career: Career, policy: str, rng: random.Random) -> str:
         return "k" if m.retain else f"b{m.suggested}"
     if p.kind == "moment":
         return f"m{rng.randrange(3) if policy == 'random' else 1}"
+    if p.kind == "incident":                   # A230
+        return f"i{rng.randrange(len(p.incident['options'])) if policy == 'random' else 0}"
     if p.kind == "event":
         return f"e{rng.randrange(len(p.event.options)) if policy == 'random' else 0}"
     if policy == "money":

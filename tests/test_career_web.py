@@ -19,7 +19,8 @@ from game import press as P
 from web import career_routes as R
 
 DOC = read_document()
-pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
+              pytest.mark.usefixtures("no_incidents")]
 
 
 @pytest.fixture(autouse=True)
@@ -75,8 +76,9 @@ def test_resuming_from_a_checkpoint_is_the_same_career_as_a_replay(deck, model):
 
 def _through_moments(client, d, answer="m1"):
     """Answer key moments (A204) until the season they paused finishes."""
-    while d["pending"] and d["pending"]["kind"] == "moment":
-        r = client.post("/api/career/move", json={"token": d["token"], "move": answer})
+    while d["pending"] and d["pending"]["kind"] in ("moment", "incident"):
+        move = answer if d["pending"]["kind"] == "moment" else "i0"
+        r = client.post("/api/career/move", json={"token": d["token"], "move": move})
         assert r.status_code == 200, r.text
         d = r.json()
     return d
@@ -187,19 +189,28 @@ def test_a_move_that_does_not_fit_is_a_conflict_not_a_crash(client):
         assert r.status_code == 409, move
 
 
-def test_every_event_options_hint_says_what_its_numbers_do():
-    for e in C.EVENTS:
-        for o in e.options:
-            h = R.option_hint(o).lower()
-            # [A214] the Rating points it applies, exactly, and every way it can turn out
-            own = [part for part in h.split("; ") if "% chance" not in part]
-            assert (f"{o.season:+d} rating this season" in own) == bool(o.season)
-            assert (f"{o.permanent:+d} rating for good" in own) == bool(o.permanent)
-            assert ("captain" in h) == o.captain
-            assert (f"miss {o.missed} matches" in h) == bool(o.missed)
-            for out in o.outcomes:
-                if out.permanent or out.missed:
-                    assert f"{round(100 * out.chance)}% chance" in h
+def test_every_card_reaches_the_page_in_words_with_its_names_filled_in():
+    """[A230] Each option carries its own voice line, with the real name and club the card
+    names, and nothing in numbers."""
+    import re
+    for e in list(C.EVENTS) + list(C.FOLLOW_UPS.values()):
+        p = R._pending(C.Pending("event", 2016, 3, event=e, event_text=e.text,
+                                 event_fill=("AB de Villiers", "Mumbai Indians")))
+        assert [o.label for o in p.event.options] == [
+            C.fill(o.label, "AB de Villiers", "Mumbai Indians") for o in e.options]
+        assert [o.hint for o in p.event.options] == [
+            C.fill(o.hint, "AB de Villiers", "Mumbai Indians") for o in e.options]
+        for o in p.event.options:
+            assert "{" not in o.label + o.hint and not re.search(r"\d", o.label + o.hint)
+
+
+def test_an_incident_reaches_the_page_as_a_card():
+    from game import career_incidents as I
+    inc = I.INCIDENTS["row"]
+    p = R._pending(C.Pending("incident", 2016, 3, incident={
+        "key": "row", "title": inc.title, "text": "After the hammering...", "options": inc.options}))
+    assert p.kind == "incident" and p.incident.title == inc.title
+    assert [(o.label, o.hint) for o in p.incident.options] == [(o.label, o.hint) for o in inc.options]
 
 
 def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
@@ -221,22 +232,16 @@ def test_a_suspended_club_is_named_when_there_is_no_offer_to_stay(client, deck):
     assert later["pending"]["club_gone"] is None
 
 
-def test_hints_name_missed_matches_and_an_ending():
-    for e in C.EVENTS:
-        for o in e.options:
-            h = R.option_hint(o).lower()
-            assert (f"miss {o.missed} matches" in h) == (o.missed > 0)
-            assert ("career ends" in h) == o.retire
-
-
 def test_a_three_year_deal_through_the_api(client, deck):
-    seed = next(s for s in range(1, 2000) if all(len(C.draw_event(s, k, role="opener").options) == 1 for k in range(2)))
+    seed = 1
     # 2015 and 2016: a 2017 deal's second year would be 2018, a mega year that ends it (A212)
     d = _token(client, seed=seed, debut=2015)
     clubs_2016 = {C.canonical(deck.cards_by_fs[fs][0].franchise) for fs in C.year_fs_ids(deck, 2016)}
     i = next(n for n, o in enumerate(d["pending"]["offers"]) if C.canonical(o["franchise"]) in clubs_2016)
     assert d["pending"]["offers"][i]["price3"]
     d = client.post("/api/career/move", json={"token": d["token"], "move": f"c{i}"}).json()
+    if d["pending"] and d["pending"]["kind"] == "event":
+        d = client.post("/api/career/move", json={"token": d["token"], "move": "e0"}).json()
     d = _through_moments(client, d)
     assert d["seasons"][0]["contract_year"] == 1
     o = d["pending"]["offers"]
@@ -287,7 +292,7 @@ def _auto_move(p) -> str:
         return "k" if p["mega"]["retain"] else f"b{p['mega']['suggested']}"
     if p["kind"] == "plan":
         return "p" + "0" * len(p["plan"])
-    return {"offer": "o0", "event": "e0", "epilogue": "w0"}.get(p["kind"], "m1")
+    return {"offer": "o0", "event": "e0", "epilogue": "w0", "incident": "i0"}.get(p["kind"], "m1")
 
 
 def test_a_paused_moment_says_what_kind_it_is_and_the_feed_carries_form(client):
@@ -496,57 +501,27 @@ def test_a_level_match_is_a_tie_in_the_form():
 
 # --- [A218] tier 2: the notes' marks, and the auctioneer's prices ---------------------------
 
-def test_every_season_note_is_marked_the_way_it_points(deck):
-    """`note_tone` reads the wording the season card's own generators write, so it is fed
-    their output here rather than hand-typed sentences: a change of wording it stops
-    recognising fails this, instead of quietly losing its ▲ or ▼."""
-    import dataclasses
+def test_an_old_season_s_notes_are_still_marked_the_way_they_point():
+    """[A230] New notes carry their own mark (`SeasonRecord.tones`). A season played before
+    them has only its words, worded in numbers then, and `note_tone` reads those: real notes
+    from the A214-A229 generators, as old tokens hold them."""
     t = C.note_tone
-    assert t(C._effect_words("A lift.", 2, 0, 0)) == "up"
-    assert t(C._effect_words("A niggle.", -2, 0, 0)) == "down"
-    assert t(C._effect_words("Rebuilt.", 0, 3, 0)) == "up"
-    assert t(C._effect_words("Rebuild.", -3, 5, 0)) == ""                 # mixed
-    assert t(C._effect_words("Rested.", 0, 0, 2)) == "down"               # matches missed alone
-    assert t(C._effect_words("Played through.", 1, 0, 2)) == "up"         # the Rating decides
-    assert t(C._effect_words("Nothing.", 0, 0, 0)) == ""
-    assert t(C.development_words(1.2)) == "up"
-    assert t(C.development_words(-0.8)) == "down"
-    # [A229] the selectors' verdict, from national.words itself
+    assert t("You arrived in form, a lift for this season only. (+2 Rating this season)") == "up"
+    assert t("You played through the niggle, below your best. (-2 Rating this season)") == "down"
+    assert t("Rebuilding your technique cost you this season. (-3 Rating this season)") == "down"
+    assert t("Time with X took a little. (-1 Rating this season, +3 Rating for good)") == ""
+    assert t("Two matches out, and you came back fresh. (2 matches missed)") == "down"
+    assert t("What you did this season adds 1 Rating to next season.") == "up"
+    assert t("A hard season takes 1 Rating from next season.") == "down"
+    assert t("You now score 2 more runs per 100 balls and get out 16% less often.") == "up"
+    assert t("You now concede 0.4 more runs an over.") == "down"
+    assert t("What you have added carried you past your potential: raised to 84.") == "up"
+    assert t("Form like that holds back the years: half a season of ageing saved.") == "up"
+    assert t("Left out for 4 matches for team balance (matches 1-4).") == ""
     from game import national as N
     sel = lambda ev: N.Selection(ev, 5, 20, ev != "dropped", True)
     assert [t(N.words(sel(ev), "India")) for ev in ("debut", "recalled", "kept", "dropped")] == [
         "up", "up", "up", "down"]
-    assert t(C.absence_words("rested", 2, 5)) == ""                       # information, not a cost
-    # [A224] the potential, the clock and the shape's hints
-    assert t(C.potential_words(84, 85, 88)) == "up"
-    assert t(C.potential_words(84, 86, None)) == "up"
-    assert t(C.clock_words(C.CLOCK_SLOW)) == "up"
-    assert t(C.clock_words(C.CLOCK_FAST)) == "down"
-    assert t(C._effect_words("Fitness.", -1, 0, 0, -0.5)) == ""            # mixed
-    assert t(C._effect_words("Managed it.", 0, 0, 3, 0.5)) == "down"
-    hints = {sh: [C.shape_words(C.Shape(*sh), c / 2, c / 2 + 1, 25) for c in range(40)]
-             for sh in (("early", "gentle"), ("late", "steep"), ("standard", "standard"))}
-    marks = {h: t(h) for hs in hints.values() for h in hs if h}
-    assert marks == {"At 25 you are already close to your best.": "up",
-                     "Past your peak now, but your body is holding up well.": "up",
-                     "Still improving at 25: you are coming into your own late.": "up",
-                     "Past your peak now, and the years are catching up with you quickly.": "down",
-                     "Past your peak now.": ""}
-    card = next(c for cs in deck.cards_by_fs.values() for c in cs
-                if c.bat_scoring is not None and c.bowl_scoring is not None and c.role == "allrounder")
-    better_bat = dataclasses.replace(card, bat_scoring=card.bat_scoring + 0.08,
-                                     bat_dismissal=card.bat_dismissal * 0.9)
-    worse_bowl = dataclasses.replace(card, bowl_scoring=card.bowl_scoring - 0.1,
-                                     bowl_dismissal=card.bowl_dismissal * 0.9)
-    assert t(C.skill_words(card, better_bat)) == "up"
-    assert t(C.skill_words(better_bat, card)) == "down"
-    assert t(C.skill_words(card, worse_bowl)) == "down"
-    assert t(C.skill_words(worse_bowl, card)) == "up"
-    safer = dataclasses.replace(card, bat_dismissal=card.bat_dismissal * 0.85)   # out less, nothing else
-    assert t(C.skill_words(card, safer)) == "up"
-    assert t(C.skill_words(safer, card)) == "down"
-    mixed = dataclasses.replace(card, bat_scoring=card.bat_scoring + 0.08, bat_dismissal=card.bat_dismissal * 1.2)
-    assert t(C.skill_words(card, mixed)) == ""
 
 
 def test_the_career_auction_carries_its_prices_in_lakh_for_the_voice():
@@ -563,9 +538,10 @@ def test_the_career_auction_carries_its_prices_in_lakh_for_the_voice():
 def test_a_seasons_notes_reach_the_page_with_one_mark_each(client):
     d, _ = _season_with_moves(client, "pace", 3)
     assert sum(len(s["notes"]) for s in d["seasons"])          # something to mark
-    for s in d["seasons"]:
-        assert len(s["note_tones"]) == len(s["notes"])
-        assert [C.note_tone(n) for n in s["notes"]] == s["note_tones"]
+    _, _, cp, _ = R.read_token(d["token"])
+    for s, r in zip(d["seasons"], cp.seasons):
+        assert len(s["note_tones"]) == len(s["notes"]) == len(r.tones)
+        assert s["note_tones"] == r.tones                       # the engine's own marks (A230)
 
 
 # --- [A219] tier 3: the role lines, and the milestones' kinds ----------------------------------

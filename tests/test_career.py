@@ -23,7 +23,8 @@ from game.season import fixtures, tournament_leaders
 from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
-pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
+              pytest.mark.usefixtures("no_incidents")]
 
 
 @pytest.fixture(scope="module")
@@ -37,8 +38,9 @@ def model():
 
 
 
-def _play(deck, model, seed, setup, moves, **kw):
-    """`play_career` with every key moment answered "Balanced" (A204), every mega-auction year
+def _play(deck, model, seed, setup, moves, stop_at_event=False, **kw):
+    """`play_career` with every key moment answered "Balanced" (A204), every incident and
+    every event the test does not answer itself with its first option (A230), every mega-auction year
     (A212) and bowling plan (A213) answered as an automatic player would, so a test written
     for offers and events keeps testing them. The given moves are fed one at a time."""
     moves, made = list(moves), []
@@ -46,6 +48,13 @@ def _play(deck, model, seed, setup, moves, **kw):
         c = C.play_career(deck, model, seed, setup, made, **kw)
         if c.pending is not None and c.pending.kind == "moment":
             made.append("m1")
+            continue
+        if c.pending is not None and c.pending.kind == "incident":     # A230
+            made.append("i0")
+            continue
+        if (c.pending is not None and c.pending.kind == "event"
+                and not (moves and moves[0][0] == "e") and not (stop_at_event and not moves)):
+            made.append("e0")                   # A230: nearly every card asks now
             continue
         if c.pending is not None and c.pending.kind == "plan":
             made.append(C.policy_move(c, "strength", None))
@@ -338,10 +347,10 @@ def test_a_fresh_career_asks_for_a_franchise_first(deck, model):
 
 def test_an_event_with_a_choice_waits_for_the_answer(deck, model):
     seed = _event_seed(True)
-    c = _play(deck, model, seed, _setup(), ["o0"])
+    c = C.play_career(deck, model, seed, _setup(), ["o0"])
     assert c.pending.kind == "event" and not c.seasons
     with pytest.raises(C.CareerError):
-        _play(deck, model, seed, _setup(), ["o0", "o1"])
+        C.play_career(deck, model, seed, _setup(), ["o0", "o1"])
 
 
 @pytest.mark.parametrize("moves", [["r"], ["x1"], ["o9"], ["e0"], ["o-1"]])
@@ -351,7 +360,7 @@ def test_moves_that_do_not_fit_are_refused(deck, model, moves):
 
 
 def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
+    seed = next(s for s in range(100) if all(True
                                              for k in range(2)))
     asked = _play(deck, model, seed, _setup(), ["o0", "r"])
     assert asked.retired and asked.pending.kind == "epilogue"     # where next? (A228)
@@ -367,7 +376,7 @@ def test_retiring_ends_the_career_and_moves_after_it_are_refused(deck, model):
 def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
     """The season cache must never change a career: the first version read the next
     season's price from the blank record on a cache hit and priced you as a 70."""
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
+    seed = next(s for s in range(100) if all(True
                                              for k in range(3)))
     moves = ["o1", "o2"]
     C._SEASON_CACHE.clear()
@@ -390,7 +399,7 @@ def test_a_warm_replay_is_the_same_career_as_a_cold_one(deck, model):
 def test_a_season_is_a_pure_function_of_its_inputs(deck, model):
     """Each season draws from its own seeded stream (A93), so the same inputs give the same
     season, whatever else has drawn random numbers in between."""
-    seed = next(s for s in range(100) if all(len(C.draw_event(s, k, role="opener").options) == 1
+    seed = next(s for s in range(100) if all(True
                                              for k in range(2)))
     start, ceiling = C.spin(deck, seed, "opener")
     fs = C.year_fs_ids(deck, 2013)[0]
@@ -514,7 +523,7 @@ def _no_patience(monkeypatch):
 
 
 def _quiet_seed(n, role="opener"):
-    return next(s for s in range(300) if all(len(C.draw_event(s, k, role=role).options) == 1
+    return next(s for s in range(300) if all(True
                                              for k in range(n)))
 
 
@@ -694,18 +703,18 @@ def test_a_squad_player_is_never_made_captain(deck, model, monkeypatch):
     _no_patience(monkeypatch)
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     seed = next(s for s in range(500) if C.draw_event(s, 1, role="opener").key == "captain"
-                and len(C.draw_event(s, 0, role="opener").options) == 1)
+                and True)
     first = _play(deck, model, seed, _setup(), ["o0", "o0", "w0"])
     assert first.seasons[0].squad is False and first.complete      # released after two
     second = first.seasons[1]
-    assert second.squad and not second.captain and second.event == "quiet"
+    assert second.squad and not second.captain and second.event != "captain"
 
 
 # --- contracts, where you play, the new cards, real names (A200) ----------------------------
 
 
 def _seed_quiet(n, overseas=False, role="opener"):
-    return next(s for s in range(2000) if all(len(C.draw_event(s, k, overseas, role).options) == 1
+    return next(s for s in range(2000) if all(True
                                               for k in range(n)))
 
 
@@ -758,7 +767,7 @@ def test_a_contract_protects_you_from_release_and_then_does_not(deck, model, mon
 def test_a_contract_lapses_when_the_club_has_no_team(deck, model):
     """Chennai have no team in 2016: a deal signed there in 2015 cannot carry over."""
     setup = C.Setup("Tester", "opener", 2015)
-    seed = next(s for s in range(2000) if len(C.draw_event(s, 0, role="opener").options) == 1 and any(
+    seed = next(s for s in range(2000) if True and any(
         "Chennai" in o.franchise for o in C.offers_for(deck, s, 0, 2015, None, None, capped=True)))
     i = next(n for n, o in enumerate(_play(deck, model, seed, setup, []).pending.offers)
              if "Chennai" in o.franchise)
@@ -794,7 +803,7 @@ def test_late_and_overseas_cards_only_reach_who_they_are_for():
                 if e.when == "overseas":
                     assert overseas
     seen = {e.key for s in range(600) for e in C.event_sequence(s, True)}
-    assert {"one_more", "home_league", "injury", "mentor", "rivalry", "slump"} <= seen
+    assert {"one_more", "home_league", "mentor", "rivalry", "trade", "youngster"} <= seen
 
 
 def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monkeypatch):
@@ -803,9 +812,9 @@ def test_retiring_on_a_high_ends_the_career_before_the_season(deck, model, monke
     setup = C.Setup("Tester", "opener", 2008)
     seed, k = next((s, k) for s in range(5000) for k in range(C.LATE_FROM, 14)
                    if C.draw_event(s, k, role="opener").key == "one_more"
-                   and all(len(C.draw_event(s, j, role="opener").options) == 1 for j in range(k)))
+                   and all(True for j in range(k)))
     moves = ["o0"] * k
-    before = _play(deck, model, seed, setup, moves + ["o0"])
+    before = _play(deck, model, seed, setup, moves + ["o0"], stop_at_event=True)
     assert before.pending.kind == "event" and before.pending.event.key == "one_more"
     done = _play(deck, model, seed, setup, moves + ["o0", "e1", "w0"])
     assert done.retired and done.complete and len(done.seasons) == k

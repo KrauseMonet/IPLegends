@@ -190,6 +190,7 @@ class OfferOut(BaseModel):
     stay: bool
     position: int | None          # where you would bat in that eleven
     attack_rank: int | None       # where you would come in its attack, if you bowl
+    strength_words: str = ""      # the squad in words (A230): the page shows no number
 
 
 class MegaOut(BaseModel):
@@ -234,7 +235,7 @@ class PlanBowlerOut(BaseModel):
 
 class EventOptionOut(BaseModel):
     label: str
-    hint: str                     # what it does, worded from the option's own numbers
+    hint: str                     # what it means, in a voice at the club -- never numbers (A230)
 
 
 class EventOut(BaseModel):
@@ -276,6 +277,8 @@ class PendingOut(BaseModel):
     mega: MegaOut | None = None
     plan: list[PlanBowlerOut] | None = None    # a captain's side: set it, or change it here (A213)
     epilogue: list[str] = []                    # a finished career: where next? `w{i}` (A228)
+    incident: EventOut | None = None            # something happened mid-season: `i{n}` (A230)
+    cold: bool = False                          # your club has not asked you to stay (A230)
 
 
 class MilestoneOut(BaseModel):
@@ -358,6 +361,7 @@ class MatchLineOut(BaseModel):
     form_word: str | None = None  # In form / Steady / Out of form
     card: int | None = None       # index into `cards`: this match's scorecard (A214)
     absence: str | None = None    # why you missed this match (A216)
+    incident: str | None = None   # what happened before this match, and your answer (A230)
     milestones: list[str] = []    # career milestones reached in this match (A209)
     pom: bool = False             # Player of the Match (A228)
 
@@ -431,6 +435,7 @@ class CareerOut(BaseModel):
     country: str = ""             # who you can play for: India, the chosen country, or "" (A229)
     caps: int = 0
     in_side: bool = False
+    standing: str = ""            # how your club sees you, in words; "" when neutral (A230)
 
 
 def _template(c) -> TemplateOut:
@@ -449,7 +454,8 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
         crest=crests.crest_url(r.franchise, r.year), price=crore(r.price), stayed=r.stayed,
         squad=r.squad, captain=r.captain, contract_year=r.contract_year, event=r.event,
         choice=r.choice, card=r.display, rating=r.rating or None, age=C.DEBUT_AGE + r.k,
-        notes=list(r.notes), note_tones=[C.note_tone(t) for t in r.notes],
+        notes=list(r.notes),
+        note_tones=(list(r.tones) if len(r.tones) == len(r.notes) else [C.note_tone(t) for t in r.notes]),
         form=r.form, matches=r.matches, missed=r.missed, dropped=r.dropped, runs=r.runs, balls=r.balls,
         outs=r.outs, highest=r.highest, fifties=r.fifties, hundreds=r.hundreds,
         wickets=r.wickets, bowl_balls=r.bowl_balls, bowl_runs=r.bowl_runs,
@@ -463,33 +469,13 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
         plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan])
 
 
-def option_hint(o: C.EventOption) -> str:
-    """What an answer does, in words, derived from the numbers it applies -- never written
-    beside them, so the hint cannot say one thing while the option does another. In Rating
-    points (A214), with the chances of each way it can turn out."""
-    bits = []
-    if o.season:
-        bits.append(f"{o.season:+d} Rating this season")
-    if o.permanent:
-        bits.append(f"{o.permanent:+d} Rating for good")
-    if o.captain:
-        bits.append("you captain the side")
-    if o.age:
-        bits.append(C.age_words(o.age))
-    if o.missed:
-        bits.append(f"miss {o.missed} matches")
-    if o.retire:
-        bits.append("your career ends here")
-    for out in o.outcomes:
-        what = []
-        if out.permanent:
-            what.append(f"{out.permanent:+d} Rating for good")
-        if out.missed:
-            what.append(f"{out.missed} more matches out")
-        if what:
-            when = "next season" if out.next_season else "this season"
-            bits.append(f"{round(100 * out.chance)}% chance {when}: {', '.join(what)}")
-    return "; ".join(bits)[:1].upper() + "; ".join(bits)[1:] if bits else "No change"
+def strength_words(strength: int | None) -> str:
+    """A squad's strength in words (A230): the mean card of its best twelve, without you.
+    Measured over all 166 real squads: 77 to 84, median 80, top tenth 82."""
+    if strength is None:
+        return ""
+    return ("Title contenders" if strength >= 82 else "A strong side" if strength >= 81
+            else "A mid-table side" if strength >= 80 else "A side rebuilding")
 
 
 def _club_gone(career: C.Career) -> str | None:
@@ -504,14 +490,18 @@ def _club_gone(career: C.Career) -> str | None:
 
 PHASE_WORDS = {"powerplay": "Powerplay", "middle": "Middle overs", "death": "Death"}
 
-APPROACH_HINTS = ("Fewer runs, safer: out less often", "Your usual game",
-                  "More runs, riskier: out more often")
-BOWLING_HINTS = ("Cheaper overs, fewer wickets", "Your usual game",
-                 "More wickets, more runs conceded")
+# [A230] What each call means, said the way a teammate would say it: never in numbers.
+APPROACH_HINTS = ("Bat time. Let the others take the risks.", "Play your natural game.",
+                  "Take the bowlers on from ball one.")
+BOWLING_HINTS = ("Hit your lengths and dry up the runs.", "Bowl your usual stuff.",
+                 "Attack the stumps. Wickets win this.")
+ALLROUNDER_HINTS = ("Keep it tight, with bat and ball.", "Play your natural game.",
+                    "Go hard at everything.")
 
 
 def _moment(m: C.Moment, role: str) -> MomentOut:
-    hints = BOWLING_HINTS if role in ("pace", "spin") else APPROACH_HINTS
+    hints = (BOWLING_HINTS if role in ("pace", "spin") else
+             ALLROUNDER_HINTS if role == "allrounder" else APPROACH_HINTS)
     return MomentOut(stage=m.stage, opponent=m.opponent, opp_short=m.opp_short,
                      opp_crest=crests.crest_url(m.opp_franchise, m.opp_year), stakes=m.stakes,
                      options=[MomentOptionOut(label=l, hint=h) for l, h in zip(m.labels, hints)],
@@ -519,11 +509,18 @@ def _moment(m: C.Moment, role: str) -> MomentOut:
 
 
 def _pending(p: C.Pending, role: str = "") -> PendingOut:
-    event = None
+    event = incident = None
     if p.kind == "event":
+        name, club = p.event_fill
         event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
-                         options=[EventOptionOut(label=o.label, hint=option_hint(o))
+                         options=[EventOptionOut(label=C.fill(o.label, name, club),
+                                                 hint=C.fill(o.hint, name, club))
                                   for o in p.event.options])
+    if p.kind == "incident" and p.incident:
+        incident = EventOut(key=p.incident["key"], title=p.incident["title"],
+                            text=p.incident["text"],
+                            options=[EventOptionOut(label=o.label, hint=o.hint)
+                                     for o in p.incident["options"]])
     plan = [PlanBowlerOut(name=c.name, you=c.person_id == C.YOU_ID, style=c.bowling_style,
                           wickets=c.bowl_wickets, economy=c.economy,
                           phase=p.plan.get(c.person_id)) for c in p.plan_bowlers] or None
@@ -536,7 +533,7 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
         offers=[_offer(o, p.year) for o in p.offers],
         event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
-        mega=mega, plan=plan,
+        mega=mega, plan=plan, incident=incident, cold=p.cold,
         epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [])
 
 
@@ -546,7 +543,8 @@ def _offer(o: C.Offer, year: int) -> OfferOut:
                     price3=(crore(o.price3) if o.price3 is not None and not o.contract_year
                             else None),
                     contract_year=o.contract_year, strength=o.strength, stay=o.stay,
-                    position=o.position, attack_rank=o.attack_rank)
+                    position=o.position, attack_rank=o.attack_rank,
+                    strength_words=strength_words(o.strength))
 
 
 def _auction(a: C.MegaResult, year: int) -> AuctionOut:
@@ -639,7 +637,7 @@ def _season_play(detail: C.SeasonDetail,
         purple=l.purple[0], purple_n=l.purple[1], purple_you=l.purple[2], watch=l.watch,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
         form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i], pom=l.pom,
-        card=l.card, absence=l.absence)
+        card=l.card, absence=l.absence, incident=l.incident)
         for i, l in enumerate(detail.feed)]
     table = [TableRowOut(pos=i, short=t.short, name=t.name,
                          crest=crests.crest_url(t.franchise, t.year), played=t.played,
@@ -761,7 +759,9 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         rating=_rating_now(career), potential=round(career.top.display),
         potential_start=career.ceiling.display,
         age=C.DEBUT_AGE + (career.pending.k if career.pending else len(career.seasons) - 1),
-        injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])])
+        injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])],
+        standing=(C.STANDING_WORDS.get(career.checkpoint.standing, "")
+                  if career.checkpoint and not career.summary else ""))
 
 
 def _rating_now(career: C.Career) -> int:
@@ -783,7 +783,8 @@ def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     """The moves to keep beside the checkpoint: those that answered the season now pending
     (an offer awaiting its event, a season paused at a key moment), none once a season is
     played or the career is over."""
-    return (moves if career.pending is not None and career.pending.kind in ("event", "plan", "moment")
+    return (moves if career.pending is not None
+            and career.pending.kind in ("event", "plan", "moment", "incident")
             else [])
 
 

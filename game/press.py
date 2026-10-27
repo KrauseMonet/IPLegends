@@ -578,12 +578,47 @@ def _nt_caps(f: dict, v: Voice) -> Clipping:
                     None, None, "gold")
 
 
+# [A230] The choices a career makes, as the papers would tell them.
+def _trade(f: dict, v: Voice) -> Clipping:
+    club, old, sur = _club(f["club"]), _club(f["from"]), v.sur
+    head = _pick(v, f, [f"{sur} traded to {club}", f"{old} let {sur} go in trade"])
+    body = [f"{_who(v, f)} has been traded from {old} to {club} before the season.",
+            _pick(v, f, ["The deal needed the player's agreement, and got it.",
+                         f"{club} had wanted {sur} for some time."], "colour")]
+    quote = _quote(v, f, ["They wanted me. That matters.", "It was time for something new."])
+    return Clipping("trade", f["y"], "SPORT", head, "A trade before the season",
+                    city(f["club"], f["y"]).upper(), body, quote, 42, None, f["club"])
+
+
+def _endorse(f: dict, v: Voice) -> Clipping:
+    sur = v.sur
+    head = _pick(v, f, [f"{sur} the new face of a sportswear brand", f"{sur} signs a sponsorship deal"])
+    body = [f"{_who(v, f)} skipped part of {_club(f['club'])}'s pre-season camp for a campaign shoot.",
+            _pick(v, f, ["Not everyone at the club was impressed.",
+                         "The team management declined to comment."], "colour")]
+    return Clipping("endorse", f["y"], "GOSSIP", head, "A campaign shoot", "", body, "", 22,
+                    None, f.get("club"))
+
+
+def _hit_back(f: dict, v: Voice) -> Clipping:
+    sur = v.sur
+    head = _pick(v, f, [f"{sur} hits back at critics", f"\"Write what you like\": {sur} fires back"])
+    body = [f"{_who(v, f)} answered the critics at a heated press conference.",
+            _pick(v, f, ["It was not the answer the room expected.",
+                         "The columnist in question was sitting in the second row."], "colour")]
+    quote = _quote(v, f, ["Some of these people have never held a bat.",
+                          "I know what I am worth. Watch the next match."])
+    return Clipping("hit_back", f["y"], "SPORT", head, "A heated press conference", "", body,
+                    quote, 32, None, f.get("club"), "red")
+
+
 RENDER = {"hundred": _hundred, "blitz": _blitz, "five_for": _five_for, "hattrick": _hattrick,
           "final_star": _final_star, "playoff_hero": _playoff_hero, "debut": _debut,
           "move": _move, "mega": _mega, "title": _title, "final_lost": _final_lost, "cap": _cap,
           "captain": _captain, "injury": _injury, "mate_last": _mate_last, "elite": _elite,
           "ambition": _ambition, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
-          "nt_dropped": _nt_dropped, "nt_caps": _nt_caps}
+          "nt_dropped": _nt_dropped, "nt_caps": _nt_caps,
+          "trade": _trade, "endorse": _endorse, "hit_back": _hit_back}
 
 
 def render(fact: dict, v: Voice) -> Clipping | None:
@@ -677,6 +712,8 @@ class SeasonFacts:
     first_five_for: bool = False
     national: dict | None = None       # [A229] {"country", "event", "caps", "total", "grade"}
     caps_marks: list[int] = field(default_factory=list)   # every 50 internationals crossed
+    traded: bool = False               # [A230] the move was a trade
+    stories: list[str] = field(default_factory=list)      # [A230] "endorse", "hit_back"
 
 
 def season_facts(s: SeasonFacts, feed) -> list[dict]:
@@ -706,8 +743,10 @@ def season_facts(s: SeasonFacts, feed) -> list[dict]:
     elif s.mega is not None:
         out.append({"k": "mega", "y": y, "club": club, **s.mega})
     elif s.moved_from:
-        out.append({"k": "move", "y": y, "club": club, "from": s.moved_from, "price": s.price,
-                    "contract": s.contract})
+        out.append({"k": "trade" if s.traded else "move", "y": y, "club": club,
+                    "from": s.moved_from, "price": s.price, "contract": s.contract})
+    for kind in s.stories:
+        out.append({"k": kind, "y": y, "club": club})
     if s.orange is not None:
         out.append({"k": "cap", "y": y, "club": club, "cap": "orange", "n": s.orange})
     if s.purple is not None:

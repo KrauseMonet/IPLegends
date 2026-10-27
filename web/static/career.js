@@ -176,7 +176,8 @@ function crShow(d, moment){
   }
   $('#crHead').classList.remove('cr-held');
   if (moment === 'season') return d.season_play ? crFeed(d) : crSeason(d, d.seasons[d.seasons.length - 1]);
-  if (d.pending && d.pending.kind === 'moment') return d.season_play ? crFeed(d) : crEnd(d);
+  if (d.pending && (d.pending.kind === 'moment' || d.pending.kind === 'incident'))
+    return d.season_play ? crFeed(d) : crEnd(d);
   if (!d.pending) return crEnd(d);
   if (d.pending.kind === 'epilogue') return crEpilogue(d);
   if (d.pending.kind === 'mega') return crMega(d);
@@ -234,6 +235,7 @@ function crHead(d, hold){
           <div class="cr-pot-bar"><i style="width:${pct}%"></i>${earned ? `<u style="left:${from}%"></u>` : ''}</div>
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
+        ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
         ${crNationalChip(d)}
         ${crAmbitionChips(d)}
       </div>
@@ -377,8 +379,9 @@ function crOffers(d){
   const p = d.pending;
   // The squad's twelve's mean card rating, without you [A218]: a bar from a weak squad (74)
   // to a great one (90), so three offers compare at a glance rather than by reading numbers.
-  const strength = o => o.strength == null ? '' : `<div class="cr-strength" title="Squad strength: the mean rating of its best twelve, without you">
-      <span>Squad</span><i><b style="width:${Math.max(4, Math.min(100, Math.round(100 * (o.strength - 74) / 16)))}%"></b></i><em>${o.strength}</em></div>`;
+  // [A230] In words, not a number: the bar runs over the real squads' range (77 to 84).
+  const strength = o => o.strength == null ? '' : `<div class="cr-strength" title="How strong the squad is, without you">
+      <i><b style="width:${Math.max(6, Math.min(100, Math.round(100 * (o.strength - 76) / 8)))}%"></b></i><em>${esc(o.strength_words)}</em></div>`;
   const deal = (o, i) => o.contract_year
     ? `<div class="cr-deal"><button class="act lead" onclick="crMove('o${i}')">Play on</button>
          <span>Year ${o.contract_year} of 3 · ${esc(o.price)}</span></div>`
@@ -392,6 +395,7 @@ function crOffers(d){
       <h2 class="cr-h">${p.offers.some(o => o.contract_year) ? 'Your contract goes on'
         : p.season_no === 1 ? 'Who signs you?' : 'Who wants you this season?'}</h2>
       ${p.club_gone ? `<p class="room-note" style="text-align:center">${esc(p.club_gone)} have no team in ${p.year}, so there is no staying put.</p>` : ''}
+      ${p.cold ? `<p class="cr-warn">Your club has not asked you to stay. Things have not been good between you.</p>` : ''}
       ${p.squad ? `<p class="cr-warn">Last season was poor: you start this one as a squad player and
         will get only a few matches.${p.offers.some(o => o.contract_year) ? ' Your contract keeps you safe from release.'
         : ' Another poor season and nobody will sign you.'}</p>` : ''}
@@ -610,13 +614,14 @@ function crEvent(d){
         <div class="cr-event-opts">${e.options.map((o, i) =>
           `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('e${i}')">
             <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
-        <div class="cr-event-now">Your Rating going in: <b>${d.rating}</b></div>
       </div>
     </div>`;
 }
 
 const CR_EVENT_ICON = {quiet: '☀', form: '🔥', niggle: '🩹', captain: '©', coach: '🎓', injury: '🩹',
-  fracture: '🦴', mentor: '🤝', rivalry: '⚔', slump: '🌧', home_league: '✈', one_more: '⏳'};
+  fracture: '🦴', mentor: '🤝', rivalry: '⚔', slump: '🌧', home_league: '✈', one_more: '⏳',
+  endorsement: '📸', trade: '🔁', youngster: '🌱', workload: '🧭', fitness: '🏋',
+  press_feud: '📰', lead: '©'};
 
 // --- the season as it happens [A202] ---------------------------------------------------------
 // Your matches arrive one at a time, the table and the cap race moving with them. Playoff
@@ -740,7 +745,9 @@ function crFeedAppend(){
   // [A228] A match that made the papers carries its clipping under it.
   const clips = (f.sp.press || []).filter(c => c.match === idx);
   l.clipped = clips.length > 0;
-  $('#crFeedList').insertAdjacentHTML('beforeend', crFeedRow(l, f.n) + crFeedMilestones(l)
+  // [A230] What happened before this match, and what you did about it.
+  const told = l.incident ? `<li class="cr-inc-li">${esc(l.incident)}</li>` : '';
+  $('#crFeedList').insertAdjacentHTML('beforeend', told + crFeedRow(l, f.n) + crFeedMilestones(l)
     + clips.map(c => `<li class="cr-np-li">${crClip(c, 'mini')}</li>`).join(''));
   crFeedPanel(l);
   return l;
@@ -749,7 +756,7 @@ function crFeedAppend(){
 function crFeedStep(){
   const f = CR.feed;
   if (!f) return;
-  if (f.i >= f.sp.feed.length) return f.sp.complete ? crFeedEnd() : crMomentCard();
+  if (f.i >= f.sp.feed.length) return f.sp.complete ? crFeedEnd() : crPauseCard();
   const l = crFeedAppend();
   $('#crFeedList').lastElementChild.scrollIntoView({block: 'nearest'});
   if (l.watch != null && !f.watched.has(l.watch)){
@@ -778,7 +785,48 @@ function crFeedSkip(){
     const l = crFeedAppend();
     if (l.watch != null) f.watched.add(l.watch);
   }
-  return f.sp.complete ? crFeedEnd() : crMomentCard();
+  return f.sp.complete ? crFeedEnd() : crPauseCard();
+}
+
+function crPauseCard(){
+  return CR.feed.d.pending.kind === 'incident' ? crIncidentCard() : crMomentCard();
+}
+
+// [A230] Something happened during the season, set off by the match just played: what do
+// you do about it? Told in words; what it does, the season shows.
+function crIncidentCard(){
+  const e = CR.feed.d.pending.incident;
+  $('#crFeedAction').innerHTML = `
+    <div class="cr-moment inc">
+      <div class="cr-moment-top"><div class="cr-inc-icon">${CR_INCIDENT_ICON[e.key] || '◆'}</div>
+        <div><div class="over-line">DURING THE SEASON</div><b>${esc(e.title)}</b></div></div>
+      <p class="cr-moment-stakes">${esc(e.text)}</p>
+      <div class="cr-moment-label">What do you do?</div>
+      <div class="cr-moment-opts">${e.options.map((o, i) => `
+        <button class="cr-moment-opt" onclick="crAnswer(${i})">
+          <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
+    </div>`;
+  $('#crFeedAction').scrollIntoView({block: 'nearest', behavior: 'smooth'});
+}
+
+const CR_INCIDENT_ICON = {hamstring: '🩹', side_strain: '🩹', back: '🦴', press: '📰', row: '💢',
+  collapse: '📉', death: '🎯', wedding: '💍', slump: '🌧'};
+
+async function crAnswer(i){
+  if (CR.busy) return;
+  CR.busy = true;
+  $('#crFeedAction').innerHTML = `<div class="cr-loading small"><div class="cr-ball"></div><b>The season goes on…</b></div>`;
+  try {
+    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move: `i${i}`})});
+    crSave({token: d.token});
+    CR.data = d;
+    crHead(d, true);
+    crTimeline(d, true);
+    crFeed(d);
+  } catch(e){
+    slip(e.message || 'That did not go through. Try again.');
+    crIncidentCard();
+  } finally { CR.busy = false; }
 }
 
 // A key moment [A204]: the season has stopped, and this match is yours to call.

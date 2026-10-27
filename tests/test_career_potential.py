@@ -12,7 +12,8 @@ from game import career as C
 from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
-pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
+              pytest.mark.usefixtures("no_incidents")]
 
 
 @pytest.fixture(scope="module")
@@ -161,7 +162,7 @@ def test_points_for_good_the_peak_would_swallow_move_into_the_potential(deck):
     note = C.grow_potential(cp, 0, True, start, ceiling, legend, C.STANDARD)
     assert cp.potential == pytest.approx(0.3 * gap)
     assert cp.permanent == pytest.approx(0.0)
-    assert note is None or "carried you past your potential" in note
+    assert note is None or note in C.POTENTIAL_GROWN           # in words (A230)
 
 
 def test_only_the_swallowed_part_moves_and_the_rest_keeps_its_rating_points(deck):
@@ -232,10 +233,12 @@ def test_the_season_card_names_what_moved_the_clock_and_the_shape(careers):
         past = [r.k for r in car.seasons if any(n.startswith("Past your peak now") for n in r.notes)]
         assert early == ([rise - 1] if car.shape.peak == "early" else [])
         assert late == ([C.PEAK_SEASONS["standard"] - 1] if car.shape.peak == "late" else [])
-        assert len(past) == 1 and car.seasons[past[0]].clock <= rise + 1 < car.seasons[past[0] + 1].clock
+        assert len(past) == 1 and car.seasons[past[0]].clock <= rise + 1
+        if past[0] + 1 < len(car.seasons):
+            assert rise + 1 < car.seasons[past[0] + 1].clock
         for r, nxt in zip(car.seasons, car.seasons[1:]):
-            slow = C.clock_words(C.CLOCK_SLOW) in r.notes
-            fast = C.clock_words(C.CLOCK_FAST) in r.notes
+            slow = any(n in C.CLOCK_SLOW_WORDS for n in r.notes)
+            fast = any(n in C.CLOCK_FAST_WORDS for n in r.notes)
             assert not (slow and fast)
             if not car.shape.declining(r.clock):
                 assert not slow and not fast
@@ -253,10 +256,8 @@ def test_a_raised_potential_is_said_on_the_season_that_raised_it(careers):
         for r, nxt in zip(car.seasons, car.seasons[1:]):
             before = round(car.ceiling.display + r.potential)
             after = round(car.ceiling.display + nxt.potential)
-            said = [n for n in r.notes if "potential" in n and "raised to" in n]
+            said = [n for n in r.notes if n in C.POTENTIAL_GRADE + C.POTENTIAL_GROWN]
             assert bool(said) == (after != before), (r.year, before, after, r.notes)
-            if said:
-                assert said[0].endswith(f"raised to {after}.")
             assert nxt.potential >= r.potential                 # a potential never falls
 
 
@@ -293,8 +294,10 @@ def test_the_fitness_programme_is_only_offered_to_a_senior_player():
 
 
 def test_an_answer_that_moves_the_clock_says_so():
+    """[A230] In words: held back or older, never 'half a season of ageing'."""
+    from game import career_incidents as I
+
     fitness = next(e for e in C.EVENTS if e.key == "fitness")
-    assert fitness.options[0].age < 0
-    assert "ageing held back" in C._effect_words("x", 0, 0, 0, fitness.options[0].age)
-    managed = next(o for e in C.EVENTS if e.key == "fracture" for o in e.options if o.age)
-    assert "older" in C._effect_words("x", 0, managed.permanent, 0, managed.age)
+    assert fitness.options[0].age < 0 and "younger" in fitness.options[0].story
+    managed = next(o for o in I.INCIDENTS["back"].options if o.age)
+    assert managed.age > 0 and "for good" in managed.story

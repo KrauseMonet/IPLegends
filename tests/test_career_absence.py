@@ -9,6 +9,8 @@ import pytest
 from game import career as C
 from tools.snapshot_deck import deck_from, model_from, read_document
 
+pytestmark = pytest.mark.usefixtures("no_incidents")   # A230: incidents are tested in test_career_story
+
 DOC = read_document()
 
 
@@ -169,18 +171,3 @@ def test_seasons_at_the_club_are_part_of_the_season_cache_key(deck, model, monke
     C.auto_career(deck, model, 6, C.Setup("Tester", "middle", 2010, True), "loyal")
     assert seen and all(key[-1] == tenure for tenure, key in seen)
     assert max(t for t, _ in seen) >= C.SETTLED_SEASONS
-
-
-INJURY_CARDS = {"niggle", "injury", "fracture"}
-
-
-@pytest.mark.parametrize("role,lo,hi,most", [("opener", 0.8, 1.1, 3), ("keeper", 0.8, 1.1, 3),
-                                             ("spin", 0.85, 1.15, 3), ("allrounder", 0.9, 1.2, 3),
-                                             ("pace", 2.0, 3.0, 4)])
-def test_about_one_injury_card_a_career_and_two_to_three_for_a_fast_bowler(role, lo, hi, most):
-    """[A226] Ratified by the user: injury cards in a twelve-season career average about one,
-    two to three for a fast bowler, never more than three (four for a fast bowler)."""
-    counts = [sum(e.key in INJURY_CARDS for e in C.event_sequence(s, False, role)[:12])
-              for s in range(2000)]
-    assert lo <= sum(counts) / len(counts) <= hi
-    assert max(counts) <= most

@@ -11,7 +11,8 @@ from game import career as C
 from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
-pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
+              pytest.mark.usefixtures("no_incidents")]
 
 
 @pytest.fixture(scope="module")
@@ -96,16 +97,19 @@ def test_clubs_price_you_on_your_rating_and_your_last_season(deck, model):
 # --- a youngster gets time; a star always finds a club ----------------------------------------
 
 
-def _quiet(n, role="opener"):
-    return next(s for s in range(300) if all(len(C.draw_event(s, k, role=role).options) == 1
-                                             for k in range(n)))
+def _quiet(monkeypatch, cards=None):
+    """Every season's card is the quiet one (or `cards[k]`), so nothing but form moves it.
+    [A230] Nearly every card asks something now, so a quiet career cannot be found by seed."""
+    events = {e.key: e for e in C.EVENTS}
+    monkeypatch.setattr(C, "season_event", lambda cp, k, *a, **kw:
+                        events[(cards or {}).get(k, "quiet")])
 
 
 def test_a_youngsters_first_seasons_cannot_cost_him_his_place(deck, model, monkeypatch):
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)             # every season poor
     monkeypatch.setattr(C, "STAR_RATING", 100)
-    seed = _quiet(4)
-    c = _play(deck, model, seed, _setup(), ["o0"] * 4)
+    _quiet(monkeypatch)
+    c = _play(deck, model, 1, _setup(), ["o0"] * 4)
     squads = [r.squad for r in c.seasons]
     assert squads[:C.YOUTH_SEASONS + 1] == [False] * (C.YOUTH_SEASONS + 1)
     assert squads[C.YOUTH_SEASONS + 1] is True                  # then form decides again
@@ -115,26 +119,17 @@ def test_a_youngsters_first_seasons_cannot_cost_him_his_place(deck, model, monke
 def test_a_star_is_never_released_for_form(deck, model, monkeypatch):
     monkeypatch.setattr(C, "POOR_PERCENTILE", 1.01)
     monkeypatch.setattr(C, "YOUTH_SEASONS", 0)
-    seed = _quiet(4)
+    _quiet(monkeypatch)
     monkeypatch.setattr(C, "STAR_RATING", 100)
-    out = _play(deck, model, seed, _setup(), ["o0", "o0"])
+    out = _play(deck, model, 1, _setup(), ["o0", "o0"])
     assert out.released
     monkeypatch.setattr(C, "STAR_RATING", 0)
-    kept = _play(deck, model, seed, _setup(), ["o0", "o0", "o0"])
+    kept = _play(deck, model, 1, _setup(), ["o0", "o0", "o0"])
     assert not kept.released and [r.squad for r in kept.seasons] == [False, True, True]
     assert any("somebody always signs you" in n for n in kept.seasons[1].notes)
 
 
 # --- events -----------------------------------------------------------------------------------
-
-
-def test_injuries_come_mostly_to_fast_bowlers_and_a_stress_fracture_only_to_them():
-    def injuries(role):
-        return Counter(e.key for s in range(500) for e in C.event_sequence(s, False, role)
-                       if e.injury)
-    pace, opener, spin = injuries("pace"), injuries("opener"), injuries("spin")
-    assert sum(pace.values()) > 2 * sum(spin.values()) > 2 * sum(opener.values()) * 0.9
-    assert pace["fracture"] > 0 and opener["fracture"] == spin["fracture"] == 0
 
 
 def test_every_option_states_its_outcomes_and_they_add_up():
@@ -144,52 +139,41 @@ def test_every_option_states_its_outcomes_and_they_add_up():
                 assert sum(x.chance for x in o.outcomes) == pytest.approx(1.0)
 
 
-def _event_seed(key, role="opener", k=0):
-    return next(s for s in range(5000) if C.draw_event(s, k, role=role).key == key
-                and all(len(C.draw_event(s, j, role=role).options) == 1 for j in range(k)))
-
-
-def test_a_rebuild_costs_this_season_and_lands_the_next(deck, model):
+def test_a_rebuild_costs_this_season_and_lands_the_next(deck, model, monkeypatch):
     # a quiet second season, so nothing else moves its ability
     # [A224] and a standard shape, so the second season's ability is the ARC's
-    seed = next(s for s in range(5000) if C.draw_event(s, 0, role="opener").key == "coach"
-                and C.draw_event(s, 1, role="opener").key == "quiet"
-                and C.draw_shape(s) == C.STANDARD)
+    seed = next(s for s in range(5000) if C.draw_shape(s) == C.STANDARD)
+    _quiet(monkeypatch, {0: "coach"})
     coach = next(e for e in C.EVENTS if e.key == "coach")
     rebuild = coach.options[0]
     turned = C.draw_outcome(seed, 0, rebuild)
     c = _play(deck, model, seed, _setup(), ["o0", "e0", "o0"])
     first, second = c.seasons[0], c.seasons[1]
     assert first.rating == C.rating_at(c.start, c.ceiling, C.arc_point(0, 0.0, 0.0)) + rebuild.season
-    assert any(f"{rebuild.season:+d} Rating this season" in n for n in first.notes)
-    assert any(turned.text in n and f"{turned.permanent:+d} Rating for good" in n
-               for n in second.notes)
+    # [A230] told in words, never in Rating points
+    assert rebuild.story in first.notes
+    assert turned.text in second.notes
+    assert not any("Rating" in n for n in first.notes + second.notes)
     # and the permanent change reached the ability the second season was played at
     assert second.potential == 0, "the fixture must not raise its potential after season 1"
     dev = C.points_t(first.development, c.start, c.ceiling)
     assert second.ability == pytest.approx(C.arc_point(1, dev + C.points_t(turned.permanent, c.start, c.ceiling), 0.0))
 
 
-def test_a_lasting_change_is_put_in_a_fans_numbers(deck, model):
-    seed = _event_seed("mentor")
-    c = _play(deck, model, seed, _setup(), ["o0", "e0"])
+def test_a_lasting_change_is_told_in_a_fans_words(deck, model, monkeypatch):
+    _quiet(monkeypatch, {0: "mentor"})
+    c = _play(deck, model, 1, _setup(), ["o0", "e0"])
     notes = " ".join(c.seasons[0].notes)
-    assert "+3 Rating for good" in notes and "per 100 balls" in notes
-    assert "{name}" not in notes
-
-
-def test_injuries_are_kept_on_the_career(deck, model):
-    seed = _event_seed("fracture", role="pace")
-    c = _play(deck, model, seed, _setup("pace"), ["o0", "e1"])
-    assert c.checkpoint.injuries and "stress fracture" in c.checkpoint.injuries[0][1].lower()
-    assert any("-3 Rating for good" in n for n in c.seasons[0].notes)
-    again = C.Checkpoint.from_dict(c.checkpoint.to_dict())
-    assert again.injuries == c.checkpoint.injuries and again.later == c.checkpoint.later
+    assert "Something has changed: you are" in notes
+    assert "{name}" not in notes and "Rating" not in notes and "%" not in notes
 
 
 def test_a_skill_line_names_only_what_changed():
     from etl.feasibility import Card
     a = Card(fs_id=1, person_id="a", name="a", role="batter", bat_scoring=0.0, bat_dismissal=1.0)
     b = Card(fs_id=1, person_id="a", name="a", role="batter", bat_scoring=0.05, bat_dismissal=0.9)
-    assert C.skill_words(a, b) == "You now score 5 more runs per 100 balls and get out 10% less often."
+    assert C.skill_words(a, b) == "Something has changed: you are scoring more freely and harder to get out."
+    c = Card(fs_id=1, person_id="a", name="a", role="batter", bat_scoring=0.05, bat_dismissal=1.0)
+    assert C.skill_words(a, c) == "Something has changed: you are scoring more freely."
     assert C.skill_words(a, a) is None
+    assert C.skill_tone(a, b) == "up" and C.skill_tone(b, a) == "down"

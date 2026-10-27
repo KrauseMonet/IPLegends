@@ -14,13 +14,15 @@ from game.auction import LOYALTY, next_price
 from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
-pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
+              pytest.mark.usefixtures("no_incidents")]
 
 # Found by search: a middle-order batter whose 2011 market value cannot draw a ₹2 cr base,
 # and whose 2010 was NOT poor -- so the squad season the test sees is the late signing's alone.
 # [A214] Re-found when clubs began pricing on your Rating blended with last season's grade.
 # [A224] seed 12, found by search again when the career shapes moved every curve
-UNSOLD = (12, C.Setup("X", "middle", 2010, False), ["o0", "m1"])
+# [A230] the same seed, now with its 2010 card answered (nearly every card asks)
+UNSOLD = (12, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
 
 
 @pytest.fixture(scope="module")

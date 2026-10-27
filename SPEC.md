@@ -2864,3 +2864,37 @@ uncapped price (Rs 4 cr) and valued at 0.8 of a capped player in offers and at a
 auction the changed price can change which club buys you. Measured against the real record,
 54% of comparable real players were capped and 85-88% of simulated careers are, because
 simulated careers are longer and better than the real cohort; recorded, not tuned.
+
+
+## 22. A career told as a story [A230]
+
+No choice in Build a Career is worded in numbers. Each answer carries a line in the voice of
+somebody at the club, and the season card tells what happened in sentences, each marked ▲, ▼
+or neither by the engine itself; Rating and potential stay on the player card, but nothing
+explains their movement in points.
+
+Before each season the player meets one card, a decision made in the off-season: a new coach,
+a mentor (a real teammate), the captaincy, a rivalry with a real star, a sponsor's shoot that
+clashes with camp, a trade the club has agreed (a real IPL trade needs the player's yes), a
+debutant asking to shadow a senior player, the national board managing workload (a player in
+his national side), a league back home (overseas), a fitness programme (a veteran) and one more
+season (late). A card that does not fit the season (a trade for a player not staying, in a mega
+year, or in a squad season) gives way to another. A quiet pre-season is rare.
+
+During the season, at most one thing happens to the player, set off by a match that really
+happened and asked about before the next: a hamstring, a side strain or a stress fracture (a
+fast bowler), the papers turning on a poor game, a row after a hammering, a collapse that asks
+someone to drop anchor, a bad over at the death that asks a bowler to take it on, a family
+wedding, or a slump read off his last three matches. An answer can keep him out of the next
+matches, move his form for a while, set a call he keeps for the season, give him the death
+overs, change how the club sees him, or cost something for good. Injuries keep A226's rates
+per career, now as one chance a season by role.
+
+The club's view of the player (its standing) is hidden and never a number. It rises and falls
+with his answers and starts again at a new club. A club that trusts him keeps him in the side
+through one poor season, retains him a little below the usual bar at a mega auction, and its
+dressing room may ask him to lead; one that has soured does not offer to keep him. Some answers
+start threads a later season remembers: a mentor's last IPL season, a youngster he helped who
+became a star (from the archive), and a feud with the papers that comes back the next year.
+Answers to incidents are moves (`i{n}`) like key-moment calls, so a career stays a pure function
+of its seed and moves.

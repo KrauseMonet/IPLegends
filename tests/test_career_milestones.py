@@ -11,6 +11,8 @@ from game import career as C
 from game.simulator import Milestone
 from tools.snapshot_deck import deck_from, model_from, read_document
 
+pytestmark = pytest.mark.usefixtures("no_incidents")   # A230: incidents are tested in test_career_story
+
 
 def _rec(**kw) -> C.SeasonRecord:
     base = dict(k=0, year=2010, franchise="Mumbai Indians", short="MI 2010", price=100,
@@ -126,13 +128,13 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    # seed 1, found by search (again after A229 priced uncapped players lower, which moved
-    # the mega auctions): a hat-trick, so the count has something to agree with
-    career, moves = C.auto_career(deck, model, 1, setup, "strength")
+    # seed 4, found by search (again after A230 made nearly every card ask): a hat-trick, so
+    # the count has something to agree with
+    career, moves = C.auto_career(deck, model, 4, setup, "strength")
     seasons, checked = career.seasons, 0
     assert sum(r.hat_tricks for r in seasons) >= 1, "the fixture must take a hat-trick"
     for k in range(len(seasons)):
-        played = C.play_career(deck, model, 1, setup, moves[:_moves_through(moves, k)])
+        played = C.play_career(deck, model, 4, setup, moves[:_moves_through(moves, k)])
         feed = played.detail.feed
         rec = played.checkpoint.seasons[k]
         for l in feed:

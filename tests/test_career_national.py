@@ -17,6 +17,8 @@ from game import national as N
 from game import press as P
 from tools.snapshot_deck import deck_from, model_from, read_document
 
+pytestmark = pytest.mark.usefixtures("no_incidents")   # A230: incidents are tested in test_career_story
+
 DOC = read_document()
 needs_deck = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 
@@ -112,8 +114,9 @@ def test_a_mega_auction_values_an_uncapped_player_lower(deck):
 @needs_deck
 def test_a_cap_changes_what_you_are_paid_and_never_how_you_play(deck, model, monkeypatch):
     """The same loyal career with the selectors switched off plays every match identically
-    until a mega auction, where the cap can change which club buys you; before that only the
-    money moves."""
+    until a mega auction, where the cap can change which club buys you, or (A230) a season
+    whose card is the national board's workload call, offered only to a player in his
+    national side; before that only the money moves."""
     setup = C.Setup("Ann Example", "opener", 2010)
     real, _ = C.auto_career(deck, model, 3, setup, "loyal")
     assert any(r.national == "debut" for r in real.seasons), "the fixture must be capped"
@@ -127,8 +130,9 @@ def test_a_cap_changes_what_you_are_paid_and_never_how_you_play(deck, model, mon
     a, b = play(real), play(never)
     split = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)
     if split is not None:
-        assert real.seasons[split].year in C.MEGA_YEARS, "a cap changed a match, not a price"
-        assert real.seasons[split].franchise != never.seasons[split].franchise
+        r, n = real.seasons[split], never.seasons[split]
+        assert (r.year in C.MEGA_YEARS and r.franchise != n.franchise) or (
+            r.event == "workload" != n.event), "a cap changed a match, not a price"
     capped_from = next(i for i, r in enumerate(real.seasons) if r.national == "debut")
     later = list(zip(real.seasons, never.seasons))[capped_from + 1:split]
     assert later and all(a.price >= b.price for a, b in later)

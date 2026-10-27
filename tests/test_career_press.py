@@ -20,6 +20,8 @@ from game import career as C
 from game import press as P
 from tools.snapshot_deck import deck_from, model_from, read_document
 
+pytestmark = pytest.mark.usefixtures("no_incidents")   # A230: incidents are tested in test_career_story
+
 DOC = read_document()
 needs_deck = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 ARCHIVE = Path(__file__).resolve().parents[1] / "data" / "ipl_json.zip"

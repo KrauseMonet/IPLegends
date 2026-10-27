@@ -81,7 +81,20 @@ function crShowCreate(){
     `<button class="room-choice${i ? '' : ' sel'}" data-v="${esc(n)}" onclick="crPick('crCountry', this)">${esc(n)}</button>`).join('');
   $('#crAmb').innerHTML = (o.ambitions || []).map(a =>
     `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
+  Promise.resolve(CR.me).then(crSeedRow, crSeedRow);
 }
+
+// [A235] The seed box is an admin's alone (the server refuses anybody else's seed), and it
+// takes ?seed= from the address so a seed can be passed on as a link.
+function crSeedRow(){
+  const row = document.getElementById('crSeedRow');
+  if (!row) return;
+  const admin = typeof ME !== 'undefined' && ME && ME.is_admin;
+  row.classList.toggle('hide', !admin);
+  const linked = new URLSearchParams(location.search).get('seed');
+  if (admin && linked && !$('#crSeed').value) $('#crSeed').value = linked;
+}
+document.addEventListener('signedin', crSeedRow);
 
 function crAmbition(btn){
   const on = document.querySelectorAll('#crAmb .room-choice.sel').length;
@@ -99,13 +112,15 @@ async function crStart(btn){
   CR.busy = true; btn.disabled = true;
   try {
     const num = $('#crNumber').value.trim();
+    const seed = typeof ME !== 'undefined' && ME && ME.is_admin ? $('#crSeed').value.trim() : '';
     const d = await api('/api/career/start', {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify({
       name, role: crChosen('crRoles').v, debut: Number(crChosen('crDebut').v),
       overseas: crChosen('crPassport').v === '1',
       number: num === '' ? null : Number(num), home: $('#crHome').value.trim(),
       celebration: (crChosen('crCel') || {}).v || '',
       ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v),
-      country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : ''})});
+      country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : '',
+      ...(seed ? {seed: Number(seed)} : {})})});
     crSave({token: d.token});
     CR.seen = 0;
     crShow(d, 'spin');

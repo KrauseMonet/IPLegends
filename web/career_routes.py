@@ -835,8 +835,16 @@ class StartIn(BaseModel):
     country: str = ""                                          # A229, overseas only
 
 
+def seed_allowed(request: Request) -> bool:
+    """[A235] Choosing a career's seed is for admins: a seed fixes the two spins and the
+    career's shape, so picking one picks a known-great career -- and a saved career's best
+    season can be brought into a friends' auction (A215). Everybody else gets a random one."""
+    token = request.cookies.get(auth.COOKIE_NAME)
+    return admin_lib.is_admin(auth.verify_session_cookie(token) if token is not None else None)
+
+
 @router.post("/api/career/start")
-def career_start(body: StartIn) -> CareerOut:
+def career_start(body: StartIn, request: Request) -> CareerOut:
     name = " ".join(body.name.split())
     if not name or any(ch in name for ch in "<>") or any(ord(ch) < 32 for ch in name):
         raise HTTPException(400, "Choose a plain name.")
@@ -849,6 +857,8 @@ def career_start(body: StartIn) -> CareerOut:
         setup.check()
     except C.CareerError as e:
         raise HTTPException(400, str(e)) from None
+    if body.seed is not None and not seed_allowed(request):
+        raise HTTPException(403, "Choosing a seed is for admins.")
     seed = body.seed or random.SystemRandom().randint(1, 2 ** 31)
     deck, model = _state()
     career = C.play_career(deck, model, seed, setup, [], _facts())
@@ -882,7 +892,7 @@ def career_reroll(body: RerollIn, request: Request, response: Response) -> Caree
     return career_start(StartIn(name=setup.name, role=setup.role, debut=setup.debut,
                                 overseas=setup.overseas, seed=new, number=setup.number,
                                 home=setup.home, celebration=setup.celebration,
-                                ambitions=list(setup.ambitions), country=setup.country))
+                                ambitions=list(setup.ambitions), country=setup.country), request)
 
 
 class MoveIn(BaseModel):

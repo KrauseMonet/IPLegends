@@ -770,6 +770,15 @@ async function setRoomTrades(on, ctrl){
 // your sign-in, so the page only names which one.
 let ROOM_HALL = null;          // your saved careers, fetched once when you need them
 
+// [A234] Your legends, most valuable first: the runs a match each adds to a twelve, worked out
+// by the server from the numbers the engine plays, not the 70-99 number on his card. Equal
+// values keep the Hall of Fame's own order.
+function legendsByValue(hall){
+  return hall.filter(c => c.legend)
+    .sort((a, b) => (b.legend_value ?? -Infinity) - (a.legend_value ?? -Infinity));
+}
+// --- end legendsByValue
+
 function renderLobbyLegends(r){
   const host = MY_PID === r.host_id;
   const on = !!r.legends_on;
@@ -794,11 +803,11 @@ function renderLobbyLegends(r){
     : !ROOM_HALL.length ? '<div class="note">You have no saved careers yet. Finish one in <a href="/career">Build a Career</a>.</div>'
     : `<div class="lg-pick"><select id="lobbyLegendPick" class="room-input">
          <option value="">No legend</option>
-         ${ROOM_HALL.filter(c => c.legend).map(c => { const l = c.card.legend || {};
+         ${legendsByValue(ROOM_HALL).map(c => { const l = c.card.legend || {};
            // [A225] a legend is a season, so the season is what is named
            const mine = r.legends[MY_PID];
            return `<option value="${c.key}"${mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating ? ' selected' : ''}>
-           ${esc(c.name)} · ${esc(c.role_label)} · ${l.year} · ${l.rating}</option>`; }).join('')}
+           ${esc(c.name)} · ${esc(c.role_label)} · ${l.year} · ${l.rating}${c.legend_value != null ? ` · ${c.legend_value >= 0 ? '+' : ''}${c.legend_value.toFixed(1)} runs a match` : ''}</option>`; }).join('')}
        </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
     saved career's best season, carded like a real one. He joins your squad free, takes one of the eighteen places and counts toward

@@ -1004,8 +1004,18 @@ class HallOut(BaseModel):
     card: dict
     completed_at: str
     legend: bool = False          # can be brought into a friends' auction (A215)
+    legend_value: float | None = None   # runs a match he adds to a twelve (A234)
     honours: list[str] = []       # which induction honours it holds (A225)
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
+
+
+def _legend_value(card: dict) -> float | None:
+    """[A234] Worked out when read from the stored legend, so every legend, old or new, is
+    valued by the same rule."""
+    from tools.snapshot_deck import _card_from
+
+    leg = card.get("legend")
+    return round(C.legend_value(_card_from(leg["card"])), 2) if leg else None
 
 
 @router.get("/api/career/hall")
@@ -1036,7 +1046,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             runs=r["runs"], wickets=r["wickets"], titles=r["titles"],
             peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
             peak_rating=r["card"].get("peak_rating"), peak_rating_year=r["card"].get("peak_rating_year"),
-            legend=bool(r["card"].get("legend")),
+            legend=bool(r["card"].get("legend")), legend_value=_legend_value(r["card"]),
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
             completed_at=r["completed_at"].isoformat()))

@@ -3120,6 +3120,35 @@ def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
     return best, dataclasses.replace(card, display=best.rating)
 
 
+# [A234] What a legend is worth to a twelve, in runs a match above an average player. The
+# 70-99 number on his card does not decide a match: the engine plays the card's four numbers
+# (A160), and sixteen of one account's legends, all rated 99, are worth +12.0 down to +2.4. So the
+# lobby picker orders legends by this, worked out when read, never stored.
+# Balls faced a team innings at each batting position, measured over the 2,421 full-length
+# innings of the archive (super overs excluded, a wide is not a ball faced, A22):
+BALLS_FACED_AT = {1: 21.3, 2: 21.9, 3: 19.5, 4: 17.4, 5: 13.8, 6: 9.5, 7: 6.2,
+                  8: 3.4, 9: 1.9, 10: 1.0, 11: 0.4}
+BALLS_BOWLED = 24             # a bowler in the five bowls his four overs
+LEAGUE_OUT_RATE = 0.051       # dismissals a ball, the league's own (about 6 an innings)
+WICKET_RUNS = 5.8             # the engine's own price of a wicket (A160's Costs, weighted)
+
+
+def legend_value(c: Card) -> float:
+    """Runs a match this card adds over an average player: his batting at the average
+    exposure of the places he may bat, plus four overs of bowling unless his bowling is
+    thin, since a side with five real bowlers never bowls a thin one (A203)."""
+    from game.__main__ import ATTACK_MIN_BALLS
+
+    v = 0.0
+    if c.bat_scoring is not None and c.positions:
+        faced = statistics.fmean(BALLS_FACED_AT[p] for p in c.positions)
+        v += (c.bat_scoring - (c.bat_dismissal - 1) * LEAGUE_OUT_RATE * WICKET_RUNS) * faced
+    thin = c.bowl_balls is not None and c.bowl_balls < ATTACK_MIN_BALLS
+    if c.bowl_scoring is not None and c.has_bowl and not thin:
+        v += (c.bowl_scoring + (c.bowl_dismissal - 1) * LEAGUE_OUT_RATE * WICKET_RUNS) * BALLS_BOWLED
+    return v
+
+
 def all_time_rank(n: int, real: list[int]) -> int:
     """Where a career total would sit on a real all-time list: one more than the real
     players above it. The career card and the Hall of Fame (A210) both read it."""

@@ -138,7 +138,7 @@ function statusError(r, body){
 }
 
 async function apiOnce(path, opts){
-  if (opts && opts.hedge && hedgeSecondOrigin()) return apiHedged(path, opts);
+  if (opts && opts.hedge && hedgeBackups().length) return apiHedged(path, opts);
   const started = Date.now();
   const method = ((opts && opts.method) || 'GET').toUpperCase();
   const ctrl = new AbortController();
@@ -179,90 +179,120 @@ async function apiOnce(path, opts){
 //
 // A page cannot ask the browser for a new connection to the same site. It CAN get one by
 // asking a different hostname, so a request that has had no answer for HEDGE_AFTER_MS is
-// sent again through the second hostname and whichever answer comes first is used. It
-// must be a hostname the browser cannot fold onto the frozen connection: any
-// `*.fineleg.app` name is covered by the same certificate and would be, so it is the
-// project's `vercel.app` address.
+// sent again through a backup hostname and whichever answer comes first is used. It must
+// be a hostname the browser cannot fold onto the frozen connection. A browser folds a name
+// onto an open connection only when that connection's certificate covers it AND the name
+// resolves to the connection's address, so a `*.fineleg.app` name qualifies only with an
+// address of its own (see HEDGE_BACKUPS); the project's `vercel.app` address has a
+// different certificate altogether.
 //
 // Only for requests that are safe to send twice: polls, and the moves that name what they
 // are about (a pick its pick count, a bid its lot and price), whose repeat the server
 // refuses or ignores [A146]. Callers opt in with `hedge: true`.
 const HEDGE_AFTER_MS = 2000;
-const HEDGE_SECOND = {'fineleg.app': 'https://iplegends.vercel.app'};
-// If the second hostname cannot be reached at all (blocked by a network, or a server not
-// yet answering it), stop trying it for this page after this many failures in a row.
+// [A236] The backups, in order: a stuck request goes to the first after HEDGE_AFTER_MS and
+// to the next after another HEDGE_AFTER_MS. Measured on 2026-10-28: each kept-open
+// connection freezes for 15 s about every one to two minutes, and never two at the same
+// moment, so the one backup A231 added was itself mid-freeze for about a fifth of the
+// resends (26 of 112 on 2026-10-27 ended with both copies stuck). A third copy on a third
+// connection makes that rare. `api.fineleg.app` is covered by fineleg.app's own wildcard
+// certificate, which would let a browser fold it onto the main connection -- but only if it
+// resolves to an address that connection uses, so it has its own DNS record pointing at
+// Vercel's fixed 76.76.21.21, which fineleg.app does not resolve to.
+const HEDGE_BACKUPS = {'fineleg.app': ['https://iplegends.vercel.app', 'https://api.fineleg.app']};
+// The name a report gives the copy that answered: this page's own hostname, then each
+// backup by its place in HEDGE_BACKUPS (so 'second' always means the same hostname).
+const HEDGE_NAMES = ['first', 'second', 'third'];
+// If a backup cannot be reached at all (blocked by a network, or a server not yet
+// answering it), stop trying it for this page after this many failures in a row -- but
+// only if it has NEVER answered on this page [A236]. Once it has answered, a failure is
+// the freeze itself, not a blocked hostname: on 2026-10-27 the backup failed fast twice in
+// a row during a freeze, the page gave it up, and 156 of 177 room-poll timeouts that
+// evening came after that, with nothing left to resend through.
 const HEDGE_GIVE_UP_AFTER = 2;
-let HEDGE_PREFER_SECOND = false;  // the last hedge was won by the second hostname
-let HEDGE_SECOND_FAILS = 0;
+let HEDGE_PREFER = '';            // the hostname that answered the last hedge ('' = this page's)
+const HEDGE_STATE = {};           // backup -> {fails, worked}
 
-function hedgeSecondOrigin(){
-  // A test or a local check may point the second hostname somewhere else.
-  const second = (typeof window !== 'undefined' && window.HEDGE_SECOND_ORIGIN !== undefined)
-    ? window.HEDGE_SECOND_ORIGIN : HEDGE_SECOND[location.host];
-  if (!second || HEDGE_SECOND_FAILS >= HEDGE_GIVE_UP_AFTER) return null;
-  return second;
+function hedgeBackups(){
+  // A test or a local check may point the backups somewhere else.
+  const all = (typeof window !== 'undefined' && window.HEDGE_BACKUP_ORIGINS !== undefined)
+    ? window.HEDGE_BACKUP_ORIGINS : (HEDGE_BACKUPS[location.host] || []);
+  return all.filter(o => {
+    const s = HEDGE_STATE[o];
+    return !s || s.worked || s.fails < HEDGE_GIVE_UP_AFTER;
+  });
+}
+
+function hedgeName(origin){
+  if (!origin) return HEDGE_NAMES[0];
+  const all = (typeof window !== 'undefined' && window.HEDGE_BACKUP_ORIGINS !== undefined)
+    ? window.HEDGE_BACKUP_ORIGINS : (HEDGE_BACKUPS[location.host] || []);
+  return HEDGE_NAMES[all.indexOf(origin) + 1] || 'second';
 }
 
 function apiHedged(path, opts){
   const started = Date.now();
   const method = ((opts && opts.method) || 'GET').toUpperCase();
   const {retry, timeoutMs, hedge, ...fetchOpts} = opts || {};
-  const second = hedgeSecondOrigin();
-  // Start where the last hedge was won, so a frozen connection is not asked first again.
-  const tries = HEDGE_PREFER_SECOND
-    ? [{url: second + path, second: true}, {url: path, second: false}]
-    : [{url: path, second: false}, {url: second + path, second: true}];
+  // Start where the last hedge was won, so a frozen connection is not asked first again;
+  // then this page's own hostname, then the backups in order.
+  const order = ['', ...hedgeBackups()];
+  if (order.includes(HEDGE_PREFER)) order.sort((a, b) => (b === HEDGE_PREFER) - (a === HEDGE_PREFER));
   return new Promise((resolve, reject) => {
-    let done = false, live = 0;
+    let done = false, live = 0, next = 0, timer = null;
     const ctrls = [];
-    const finish = (ok, value, winner) => {
+    const finish = (ok, value, origin) => {
       if (done) return;
       done = true;
-      clearTimeout(hedgeTimer);
+      clearTimeout(timer);
       clearTimeout(limit);
       ctrls.forEach(c => c && c.abort());
-      if (ctrls[1]) noteFailure('hedge', method, path, null, started,
-                                {won: winner ? (winner.second ? 'second' : 'first') : 'none'});
-      if (winner && winner === tries[1]) HEDGE_PREFER_SECOND = winner.second;
+      if (ctrls.length > 1) noteFailure('hedge', method, path, null, started,
+                                        {won: origin === undefined ? 'none' : hedgeName(origin)});
+      if (origin !== undefined && ctrls.length > 1) HEDGE_PREFER = origin;
       (ok ? resolve : reject)(value);
     };
-    const failed = (i, err) => {
+    const failed = (err) => {
       live--;
-      if (!ctrls[1]) return launch(1);      // the first failed before the hedge: go now
+      if (next < order.length) return launch();     // a copy failed fast: send the next now
       if (live === 0){
         if (err.status) noteFailure('server', method, path, err.status, started);
         else noteFailure('network', method, path, null, started);
-        finish(false, err, null);
+        finish(false, err);
       }
     };
-    const launch = (i) => {
-      if (done || ctrls[i]) return;
-      const t = tries[i];
+    const launch = () => {
+      if (done || next >= order.length) return;
+      const origin = order[next++];
+      clearTimeout(timer);
+      if (next < order.length) timer = setTimeout(launch, HEDGE_AFTER_MS);
       const ctrl = new AbortController();
-      ctrls[i] = ctrl;
+      ctrls.push(ctrl);
       live++;
-      fetch(t.url, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
-                    signal: ctrl.signal})
+      fetch(origin + path, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
+                            signal: ctrl.signal})
         .then(async r => ({r, body: await r.json().catch(() => ({}))}))
         .then(({r, body}) => {
           if (done) return;
-          if (t.second) HEDGE_SECOND_FAILS = 0;
-          if (r.status >= 500) return failed(i, statusError(r, body));
-          if (!r.ok) return finish(false, statusError(r, body), t);
+          if (origin) HEDGE_STATE[origin] = {fails: 0, worked: true};
+          if (r.status >= 500) return failed(statusError(r, body));
+          if (!r.ok) return finish(false, statusError(r, body), origin);
           noteSuccess();
-          finish(true, body, t);
+          finish(true, body, origin);
         }, () => {
           if (done) return;
-          if (t.second) HEDGE_SECOND_FAILS++;
-          failed(i, networkError());
+          if (origin){
+            const s = HEDGE_STATE[origin] || (HEDGE_STATE[origin] = {fails: 0, worked: false});
+            s.fails++;
+          }
+          failed(networkError());
         });
     };
-    const hedgeTimer = setTimeout(() => launch(1), HEDGE_AFTER_MS);
     const limit = setTimeout(() => {
       noteFailure('timeout', method, path, null, started);
-      finish(false, timeoutError(), null);
+      finish(false, timeoutError());
     }, timeoutMs || API_TIMEOUT_MS);
-    launch(0);
+    launch();
   });
 }
 // --- end hedged requests

@@ -1514,7 +1514,7 @@ class ClientFailureIn(BaseModel):
     # [A231] "hedge" is not a failure: a request was sent again on a fresh connection
     # after HEDGE_AFTER_MS without an answer, and `won` says which copy answered.
     kind: Literal["timeout", "network", "server", "hedge"]
-    won: Literal["first", "second", "none"] | None = None
+    won: Literal["first", "second", "third", "none"] | None = None
     method: str = Field(max_length=8)
     path: str = Field(max_length=200)
     status: int | None = None

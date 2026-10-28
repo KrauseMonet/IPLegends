@@ -42,13 +42,14 @@ def test_the_browser_and_python_agree_on_the_address():
 # stuck room request is sent again through. It is a transport address the page fetches
 # from and never shows, links to or shares, so it is not the old name coming back -- and it
 # is allowed on this exact line only, so a link or share line naming it still fails.
-HEDGE_LINE = "const HEDGE_SECOND = {'fineleg.app': 'https://iplegends.vercel.app'};"
+HEDGE_LINE = ("const HEDGE_BACKUPS = {'fineleg.app': ['https://iplegends.vercel.app', "
+              "'https://api.fineleg.app']};")
 
 
 def visible_text(f: pathlib.Path) -> str:
     body = text(f)
     if f.name == "common.js":
-        assert body.count(HEDGE_LINE) == 1, "the second hostname moved off its one line"
+        assert body.count(HEDGE_LINE) == 1, "the backup hostnames moved off their one line"
         body = body.replace(HEDGE_LINE, "")
     return body
 

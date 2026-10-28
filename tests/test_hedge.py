@@ -21,7 +21,7 @@ from game.site import SITE_ORIGIN
 from web.app import ClientFailureIn, app
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SECOND_HOST = "iplegends.vercel.app"
+BACKUP_HOSTS = ["iplegends.vercel.app", "api.fineleg.app"]
 
 
 @pytest.fixture(scope="module")
@@ -57,21 +57,26 @@ def test_a_poll_from_the_site_carries_the_permission(client):
     assert r.headers.get("access-control-allow-origin") == SITE_ORIGIN
 
 
-def test_the_second_hostname_answers_the_api_and_sends_pages_to_the_site():
+def test_every_backup_hostname_answers_the_api_and_sends_pages_to_the_site():
     routes = json.loads((ROOT / "vercel.json").read_text())["routes"]
     gated = [r for r in routes if any(h.get("type") == "host" for h in r.get("has", []))]
-    assert routes[:2] == gated, "the host rules must come before every other route"
-    api, pages = gated
-    assert all(h["value"] == SECOND_HOST for r in gated for h in r["has"])
-    assert re.fullmatch(api["src"], "/api/rooms/AB12CD") and api["dest"] == "api/index.py"
-    assert re.fullmatch(pages["src"], "/rooms/AB12CD") and pages["status"] == 308
-    assert pages["headers"]["Location"] == SITE_ORIGIN + "/$1"
+    assert routes[:len(gated)] == gated, "the host rules must come before every other route"
+    hosts = []
+    for api, pages in zip(gated[::2], gated[1::2]):
+        (host,) = {h["value"] for r in (api, pages) for h in r["has"]}
+        hosts.append(host)
+        assert re.fullmatch(api["src"], "/api/rooms/AB12CD") and api["dest"] == "api/index.py"
+        assert re.fullmatch(pages["src"], "/rooms/AB12CD") and pages["status"] == 308
+        assert pages["headers"]["Location"] == SITE_ORIGIN + "/$1"
+    assert hosts == BACKUP_HOSTS
 
 
-def test_the_page_and_the_routes_name_the_same_second_hostname():
+def test_the_page_and_the_routes_name_the_same_backups():
     common = (ROOT / "web" / "static" / "common.js").read_text()
-    mapping = re.search(r"const HEDGE_SECOND = \{([^}]*)\}", common).group(1)
-    assert f"'{SITE_ORIGIN.split('//')[1]}': 'https://{SECOND_HOST}'" in mapping
+    mapping = re.search(r"const HEDGE_BACKUPS = \{([^}]*)\}", common).group(1)
+    listed = re.findall(r"'https://([^']+)'", mapping)
+    assert mapping.strip().startswith(f"'{SITE_ORIGIN.split('//')[1]}'")
+    assert listed == BACKUP_HOSTS
 
 
 def test_a_resend_is_accepted_in_a_failure_report_with_which_copy_answered():
@@ -79,7 +84,8 @@ def test_a_resend_is_accepted_in_a_failure_report_with_which_copy_answered():
                         won="second")
     assert (e.kind, e.won) == ("hedge", "second")
     with pytest.raises(ValueError):
-        ClientFailureIn(t=1.0, kind="hedge", method="GET", path="/x", ms=1, won="third")
+        ClientFailureIn(t=1.0, kind="hedge", method="GET", path="/x", ms=1, won="fourth")
+    assert ClientFailureIn(t=1.0, kind="hedge", method="GET", path="/x", ms=1, won="third").won
 
 
 # --- the summary, against a real Postgres (opt-in, like tests/test_client_failures.py) -----

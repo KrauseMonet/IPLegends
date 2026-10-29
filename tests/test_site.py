@@ -165,3 +165,19 @@ def test_every_page_carries_the_adsense_verification_tag_in_its_head():
     without it would read as a page the account does not cover."""
     missing = [p.name for p in PAGES if ADSENSE_TAG not in text(p).split("</head>", 1)[0]]
     assert PAGES and not missing, missing
+
+
+def test_ads_txt_names_the_publisher_and_is_routed_at_the_root():
+    """[A237] AdSense reports 'ads.txt not found' unless the file answers at /ads.txt. It must
+    name the SAME publisher as the verification tag, and be routed in both places that serve
+    the site: the CDN (vercel.json) and local uvicorn (web/app.py)."""
+    pub = re.search(r'ca-(pub-\d+)', ADSENSE_TAG).group(1)
+    line = text(STATIC / "ads.txt").strip()
+    assert line == f"google.com, {pub}, DIRECT, f08c47fec0942fa0"
+    routes = json.loads(text(ROOT / "vercel.json"))["routes"]
+    assert any(r["src"] == "/ads.txt" and r["dest"] == "/web/static/ads.txt" for r in routes)
+    from fastapi.testclient import TestClient
+    from web.app import app
+    r = TestClient(app).get("/ads.txt")
+    assert r.status_code == 200 and r.text.strip() == line
+    assert r.headers["content-type"].startswith("text/plain")

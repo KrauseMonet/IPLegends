@@ -308,6 +308,12 @@ def manifest() -> FileResponse:
                         media_type="application/manifest+json")
 
 
+@app.get("/ads.txt", include_in_schema=False)
+def ads_txt() -> FileResponse:
+    """[A237] AdSense looks for this at the ROOT of the domain; plain text, no redirect."""
+    return FileResponse(STATIC / "ads.txt", media_type="text/plain")
+
+
 @app.get("/offline.html", include_in_schema=False)
 def offline_page() -> FileResponse:
     """Only ever reached through the worker's own fallback -- but it has to be fetchable at

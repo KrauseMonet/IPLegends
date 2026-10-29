@@ -177,6 +177,9 @@ class SeasonOut(BaseModel):
     caps_total: int = 0
     press: list[ClippingOut] = [] # the season in the papers, the biggest story first (A228)
     league: list[str] = []        # real news from around the league that year (A228)
+    role: str = ""                # the role this season was played in, when changed (A238)
+    role_label: str = ""
+    trial: bool = False           # a trial season the coach offered
 
 
 class OfferOut(BaseModel):
@@ -279,6 +282,7 @@ class PendingOut(BaseModel):
     epilogue: list[str] = []                    # a finished career: where next? `w{i}` (A228)
     incident: EventOut | None = None            # something happened mid-season: `i{n}` (A230)
     cold: bool = False                          # your club has not asked you to stay (A230)
+    coach: EventOut | None = None               # the coach's offer: `t{i}` (A238)
 
 
 class MilestoneOut(BaseModel):
@@ -411,8 +415,12 @@ class AmbitionOut(BaseModel):
 class CareerOut(BaseModel):
     token: str
     name: str
-    role: str
+    role: str                     # the role you were created in
     role_label: str
+    role_now: str = ""            # the role the coach has you in now (A238)
+    role_now_label: str = ""
+    season_role: str = ""         # the role the season pending is played in (a trial's)
+    role_path: list[str] = []     # "Opening batter", "All-rounder from 2014"
     debut: int
     overseas: bool
     start: TemplateOut
@@ -466,7 +474,22 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
                     for h in r.highlights],
         five_fors=r.five_fors, hat_tricks=r.hat_tricks,
         milestones=[m.text for m in r.milestones], mega=r.mega,
-        plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan])
+        plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan],
+        role=r.role["role"] if r.role else "",
+        role_label=C.ROLES[r.role["role"]]["label"] if r.role else "",
+        trial=bool(r.role and r.role["trial"]))
+
+
+def role_path(c: C.Career) -> list[str]:
+    """The jobs a career has had, in order [A238]: "Opening batter", "All-rounder from 2014".
+    Trial seasons are not a change of job."""
+    out, now = [C.ROLES[c.setup.role]["label"]], c.setup.role
+    for r in c.seasons:
+        role = r.role["role"] if r.role and not r.role["trial"] else c.setup.role
+        if role != now:
+            out.append(f"{C.ROLES[role]['label']} from {r.year}")
+            now = role
+    return out
 
 
 def strength_words(strength: int | None) -> str:
@@ -516,6 +539,11 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
                          options=[EventOptionOut(label=C.fill(o.label, name, club),
                                                  hint=C.fill(o.hint, name, club))
                                   for o in p.event.options])
+    coach = None
+    if p.kind == "coach" and p.coach:
+        coach = EventOut(key=p.coach["key"], title=p.coach["title"], text=p.coach["text"],
+                         options=[EventOptionOut(label=o["label"], hint=o["hint"])
+                                  for o in p.coach["options"]])
     if p.kind == "incident" and p.incident:
         incident = EventOut(key=p.incident["key"], title=p.incident["title"],
                             text=p.incident["text"],
@@ -533,7 +561,7 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
         offers=[_offer(o, p.year) for o in p.offers],
         event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
-        mega=mega, plan=plan, incident=incident, cold=p.cold,
+        mega=mega, plan=plan, incident=incident, cold=p.cold, coach=coach,
         epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [])
 
 
@@ -701,7 +729,7 @@ def share_text(c: C.Career) -> str:
     """One line per career, no player names: what happened, not who it was built from
     (the spin is the surprise for whoever plays next, as A129 keeps a daily's answer back)."""
     s = c.summary
-    role = C.ROLES[c.setup.role]["label"]
+    role = " → ".join(x.split(" from ")[0] for x in role_path(c))
     marks = "".join("🏆" if r.champion else "🟧" if r.orange_cap else "🟪" if r.purple_cap
                     else "⬜" if r.squad else "🟩" for r in c.seasons)
     bits = [f"{s.seasons} seasons"]
@@ -747,9 +775,12 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         in_side=bool((career.checkpoint.national if career.checkpoint else {}).get("in_side")),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
+        role_now=career.role_now or st.role,
+        role_now_label=C.ROLES[career.role_now or st.role]["label"],
+        season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
         seasons=[_season(r, career.ceiling.display, v) for r in career.seasons],
-        pending=(_pending(career.pending, st.role).model_copy(update={"club_gone": _club_gone(career)})
+        pending=(_pending(career.pending, career.season_role or st.role).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
@@ -784,7 +815,7 @@ def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     (an offer awaiting its event, a season paused at a key moment), none once a season is
     played or the career is over."""
     return (moves if career.pending is not None
-            and career.pending.kind in ("event", "plan", "moment", "incident")
+            and career.pending.kind in ("event", "plan", "moment", "incident", "coach")
             else [])
 
 

@@ -75,7 +75,24 @@ def _one(job: tuple[str, str, int]) -> dict:
         "peak_rating": s.peak_rating,
         "pot_gain": round(getattr(career, "top", career.ceiling).display - career.ceiling.display),
         "shape": str(getattr(career, "shape", "")),
+        # [A238] the coach: offers made, trial seasons and how many passed, seasons in a
+        # changed role, and whether the career ever changed role for good
+        "coach": sum(bool(getattr(r, "coach", None)) for r in career.seasons),
+        "trials": sum(bool(r.role and r.role["trial"]) for r in career.seasons if getattr(r, "role", None)),
+        "passed": sum(bool(r.role and r.role["trial"]) and _trial_rank(r) >= C.TRIAL_PASS
+                      for r in career.seasons if getattr(r, "role", None)),
+        "changed": sum(bool(r.role and not r.role["trial"]) for r in career.seasons
+                       if getattr(r, "role", None)),
+        # each trial season's place in the discipline it tried (-1: too little to judge),
+        # so a pass bar can be read off one run for any value of it
+        "trial_ranks": [_trial_rank(r) for r in career.seasons
+                        if getattr(r, "role", None) and r.role["trial"]],
     }
+
+
+def _trial_rank(r) -> float:
+    rank = r.bowl_rank if r.role["add"] in ("bowl", "") else r.bat_rank
+    return -1.0 if rank is None else rank
 
 
 def _peak_pos(xs: list[float]) -> float | None:
@@ -219,7 +236,11 @@ def _shape_line(g: list[dict]) -> str:
     return (f"\n  {'':22s}        peak at {_q(pos, .25):.2f}/{st.median(pos):.2f}/{_q(pos, .75):.2f}  "
             f"peak Rating med {st.median(x['peak_rating'] for x in g):4.0f}  "
             f"potential +{st.median(gain):.0f} med, p90 +{_q(gain, .9):.0f}, "
-            f"{sum(v > 0 for v in gain) / len(gain):3.0%} raised")
+            f"{sum(v > 0 for v in gain) / len(gain):3.0%} raised"
+            + (f"\n  {'':22s}        coach offers {st.mean(x.get('coach', 0) for x in g):.1f}/career, "
+               f"trials {sum(x.get('trials', 0) for x in g)} ({sum(x.get('passed', 0) for x in g)} passed), "
+               f"changed role {sum(x.get('changed', 0) > 0 for x in g) / len(g):3.0%} of careers, "
+               f"{st.mean(x.get('changed', 0) for x in g):.1f} seasons in it" if g else ""))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -251,6 +272,12 @@ def main(argv: list[str] | None = None) -> int:
     real, alltime = real_side()
     report(rows, real, alltime)
     print(f"\n{len(rows)} careers in {time.time() - t0:.0f}s")
+    ranks = sorted(x for r in rows for x in r.get("trial_ranks", []))
+    if ranks:
+        print(f"trial seasons {len(ranks)}: pass rate at a bar of "
+              + ", ".join(f"{b:.2f} {sum(x >= b for x in ranks) / len(ranks):.0%}"
+                          for b in (0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5))
+              + f"; unjudged {sum(x < 0 for x in ranks)}")
     return 0
 
 

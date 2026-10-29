@@ -40,9 +40,11 @@ def legend(career: C.Career) -> dict | None:
     if best is None:
         return None
     r, c = best
-    return {"rating": round(c.display), "year": r.year, "role": career.setup.role,
+    # [A238] the role that season was played in: a batter turned all-rounder is an all-rounder
+    role = r.role["role"] if r.role else career.setup.role
+    return {"rating": round(c.display), "year": r.year, "role": role,
             "basis": "season" if r.measured else "rating",
-            "role_label": C.ROLES[career.setup.role]["label"], "name": career.setup.name,
+            "role_label": C.ROLES[role]["label"], "name": career.setup.name,
             "card": _card_doc(c)}
 
 

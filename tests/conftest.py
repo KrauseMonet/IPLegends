@@ -22,6 +22,19 @@ def no_incidents():
 
 
 @pytest.fixture(autouse=True)
+def coach_off(request, monkeypatch):
+    """The coach's offers (A238) are a new decision in a season, so a hand-written move list
+    from before them would meet a question it does not answer. They are off for every test
+    except a module that sets `COACH_TESTS = True` (`test_career_coach.py`), which tests them.
+    The season cache needs no clearing: a changed role is part of its key."""
+    if getattr(request.module, "COACH_TESTS", False):
+        return
+    from game import career as C
+
+    monkeypatch.setattr(C, "COACH_ON", False)
+
+
+@pytest.fixture(autouse=True)
 def career_seeds_open(monkeypatch):
     """Choosing a career's seed is for admins (A235), but most career tests start from a fixed
     seed to get a repeatable career, signed out. They are not testing who may choose one, so

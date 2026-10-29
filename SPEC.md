@@ -2946,3 +2946,41 @@ start threads a later season remembers: a mentor's last IPL season, a youngster 
 became a star (from the archive), and a feud with the papers that comes back the next year.
 Answers to incidents are moves (`i{n}`) like key-moment calls, so a career stays a pure function
 of its seed and moves.
+
+
+## 23. Changing role on the coach's offer [A238]
+
+A player can change job during a career, and every change is an OFFER FROM THE TEAM COACH that
+he may turn down (`t{i}` moves, like any other answer). An opener or middle-order batter can
+become an all-rounder and then a full-time bowler; a spinner or fast bowler can move up the
+order and become an all-rounder; an all-rounder can become a full-time bowler. Finishers and
+keepers do not change role.
+
+The way in is a TRIAL SEASON. From the second season to the tenth, a player still in the role
+he was created in has a declared 25% chance a season of the coach offering one, at most twice a
+career: a batter bowls as an all-rounder for a season (picking seam or spin if his start never
+bowled), a bowler bats at five to seven and keeps bowling. The trial is judged on the new
+discipline alone, against that discipline's regulars of the same simulated season, and needs
+real volume (60 balls bowled, five innings). If it was not a poor season in that discipline --
+clear of the bottom 30%, the way back's own bar, so a trial never passes at a level that would
+send a full-time player back -- the coach offers the job full-time before the next season;
+otherwise he goes back to his old one. (Eased from halfway up at the user's request: over 494
+trial seasons, 9% cleared halfway and 21% the bottom 30%.) An all-rounder needs no
+trial: the coach offers him a full-time bowler's job when his bowling was in the top 40% of the
+league's, or when his batting fell to the bottom 30% while his bowling held in the top 60% -- the
+archive's own pattern, where an all-rounder becomes a bowler when his batting fades rather than
+when his bowling shines. Turned down, that offer is not repeated the next season.
+
+Where he bats follows the job: an all-rounder made from a batter keeps his place in the order,
+one made from a bowler bats at five to seven, a full-time bowler bats at eight to eleven. The
+discipline he took up starts from his own start card's numbers in it, or, where it has none,
+from the pooled level of those like him (real part-time bowlers for a batter, the finisher
+band's below-floor level for a bowler -- A48's rule, never league average), and grows each
+season in the role toward a SECOND CEILING: a third spin, from the seed, among the real seasons
+of that job better than where he starts. It never runs ahead of his body: it declines with him.
+A passed trial counts as a season of that growth, so a full-time switch does not start the new
+skill again from scratch. A poor season in the new discipline (the bottom 30%) and the coach
+sends him back one step -- except in his first full-time season in the new job, which is the
+coach's to give: a poor one is not yet the end.
+Every threshold here is declared game design. A season in a changed role keeps its role, so a
+career legend is carded in the role his best season was played in.

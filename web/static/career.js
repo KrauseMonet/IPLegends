@@ -18,7 +18,8 @@ const crOrd = n => { const t = n % 100, u = n % 10;
 
 // A bowler's wickets come before his runs, a batter's runs before his wickets [A217]. The
 // role is the career's own (`d.role`): what the player was built as, not one season's form.
-const crBowls = d => d && (d.role === 'pace' || d.role === 'spin');
+// [A238] ...or the role the coach has moved you into, and in a trial season the trial's.
+const crBowls = d => d && ['pace', 'spin'].includes(d.season_role || d.role_now || d.role);
 
 // "10 wkts · 89 runs" for a bowler, "156 runs" for a batter who took none. The role's own
 // figure is always shown, even at nought; the other only when there is something in it.
@@ -197,6 +198,7 @@ function crShow(d, moment){
   if (d.pending.kind === 'epilogue') return crEpilogue(d);
   if (d.pending.kind === 'mega') return crMega(d);
   if (d.pending.kind === 'plan') return crPlan(d);
+  if (d.pending.kind === 'coach') return crCoach(d);
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
 }
 
@@ -242,7 +244,7 @@ function crHead(d, hold){
       <div class="cr-pc-rating ${crTier(d.rating)}"><b>${d.rating}</b><span>Rating</span></div>
       <div class="cr-pc-who">
         <b>${esc(d.name)}</b>
-        <span>${d.number != null ? `No. ${d.number} · ` : ''}${esc(d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''}${d.home ? ` · ${esc(d.home)}` : ''} · debut ${d.debut}</span>
+        <span>${d.number != null ? `No. ${d.number} · ` : ''}${esc(d.role_now_label || d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''}${d.home ? ` · ${esc(d.home)}` : ''} · debut ${d.debut}</span>
       </div>
       <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
       <div class="cr-pc-foot">
@@ -633,6 +635,24 @@ function crEvent(d){
     </div>`;
 }
 
+// [A238] The coach's offer: a trial in a new job, the full-time role a good trial earned, or a
+// full-time bowler's job. Worded as the coach would say it; turning it down is a real answer.
+function crCoach(d){
+  const p = d.pending, e = p.coach, o = p.offers[0];
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · ${esc(o.franchise).toUpperCase()} · FROM THE COACH</div>
+      <div class="cr-event cr-event-coach cr-coach">
+        <div class="cr-event-icon">📋</div>
+        <h2 class="cr-h">${esc(e.title)}</h2>
+        <p>${esc(e.text)}</p>
+        <div class="cr-event-opts">${e.options.map((o, i) =>
+          `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('t${i}')">
+            <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
+      </div>
+    </div>`;
+}
+
 const CR_EVENT_ICON = {quiet: '☀', form: '🔥', niggle: '🩹', captain: '©', coach: '🎓', injury: '🩹',
   fracture: '🦴', mentor: '🤝', rivalry: '⚔', slump: '🌧', home_league: '✈', one_more: '⏳',
   endorsement: '📸', trade: '🔁', youngster: '🌱', workload: '🧭', fitness: '🏋',
@@ -991,7 +1011,7 @@ function crSeason(d, r){
   const last = r === d.seasons[d.seasons.length - 1];
   const nextR = last && d.pending && r.rating && d.rating !== r.rating
     ? `<em class="${d.rating > r.rating ? 'up' : 'down'}">→ ${d.rating} next season</em>` : '';
-  const lines = crBowls(d) ? crBowl(r) + crBat(r) : crBat(r) + crBowl(r);
+  const lines = ['pace', 'spin'].includes(r.role || d.role) ? crBowl(r) + crBat(r) : crBat(r) + crBowl(r);
   $('#crStage').innerHTML = `
     <div class="cr-step">
       <div class="cr-season${r.champion ? ' champ' : ''} ${crestClass(r.crest)}">
@@ -1006,6 +1026,7 @@ function crSeason(d, r){
           </div>
         </div>
         <div class="cr-badges">
+          ${crBadge(!!r.role, r.trial ? '' : 'gold', r.trial ? `Trial · ${esc(r.role_label)}` : esc(r.role_label))}
           ${crBadge(r.national === 'debut', 'gold', `${esc(CR.data.country)} debut`)}
           ${crBadge(r.national === 'recalled', 'gold', `Recalled by ${esc(CR.data.country)}`)}
           ${crBadge(r.national === 'kept', '', `${esc(CR.data.country)} · ${r.caps_total} internationals`)}
@@ -1084,7 +1105,7 @@ function crEnd(d){
       <div class="cr-final">
         <div class="over-line">THE CAREER OF</div>
         <h2 class="cr-final-name">${esc(d.name)}</h2>
-        <div class="cr-final-sub">${esc(d.role_label)} · ${d.debut}–${d.debut + s.seasons - 1} · ${ending}</div>
+        <div class="cr-final-sub">${(d.role_path && d.role_path.length ? d.role_path : [d.role_label]).map(esc).join(' → ')} · ${d.debut}–${d.debut + s.seasons - 1} · ${ending}</div>
         <div class="cr-final-crests">${d.seasons.filter((r, i, a) => a.findIndex(x => x.franchise === r.franchise) === i)
           .map(r => crestImg(r.crest, 'cr-final-crest')).join('')}</div>
         ${crRank(s.runs_rank, 'runs')}${crRank(s.wickets_rank, 'wickets')}
@@ -1374,7 +1395,8 @@ async function crDrawCard(d){
   const ending = s.ending === 'retired' ? 'RETIRED' : s.ending === 'released' ? 'RELEASED' : 'PLAYED TO 2026';
   ctx.textAlign = 'left';
   ctx.fillStyle = col.ink; ctx.font = `700 22px ${CARD_FIGS}`;
-  ctx.fillText(`BUILD A CAREER · ${d.role_label.toUpperCase()}`, tx, 122);
+  const path = (d.role_path && d.role_path.length ? d.role_path : [d.role_label]).map(x => x.split(' from ')[0]);
+  ctx.fillText(fitText(ctx, `BUILD A CAREER · ${path.join(' → ').toUpperCase()}`, tw, 700, 22, CARD_FIGS, 14), tx, 122);
   ctx.fillStyle = ink;
   ctx.fillText(fitText(ctx, d.name.toUpperCase(), tw, 400, 88, CARD_DISPLAY, 40), tx, 214);
   ctx.fillStyle = ink2; ctx.font = `600 24px ${CARD_FIGS}`;

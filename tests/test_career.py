@@ -784,13 +784,32 @@ def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
         c = _play(deck, model, seed, _setup(role), [])
         for o in c.pending.offers:
             assert 1 <= o.position <= 11
-            assert (o.attack_rank is not None) == (role == "pace")
-            if o.attack_rank is not None:
-                assert 1 <= o.attack_rank <= 5
+            # [A239] a bowler is in the five; a batter only ever as the change bowler
+            assert (1 <= o.attack_rank <= 5) if role == "pace" else o.attack_rank in (None, 6)
             you = C.ability(c.start, c.ceiling, C.arc_point(0, 0.0, 0.0), setup=_setup(role),
                             fs_id=o.fs_id, year=2012, franchise=o.franchise)
             _, yours = C.year_sides(deck, 2012, you)
             assert next(i for i, x in enumerate(yours.xi, 1) if x.person_id == C.YOU_ID) == o.position
+            from game.__main__ import attack
+            ids = [p.person_id for p in attack(yours.xi, model)]
+            assert o.attack_rank == (ids.index(C.YOU_ID) + 1 if C.YOU_ID in ids else None)
+
+
+def test_a_batter_is_told_when_he_would_be_the_change_bowler(deck, model):
+    """[A239] An offer names a batter's place in the attack only as its change bowler, and
+    that is where the side's attack really puts him. Opener seed 10 (2012), found by search,
+    has such an offer."""
+    from game.__main__ import attack
+    setup = C.Setup("T", "opener", 2012)
+    c = C.play_career(deck, model, 10, setup, moves=[])
+    sixth = [o for o in c.pending.offers if o.attack_rank == 6]
+    assert sixth, "the fixture must hold an offer as the change bowler"
+    for o in c.pending.offers:
+        you = C.ability(c.start, c.ceiling, C.arc_point(0, 0.0, 0.0), setup=setup,
+                        fs_id=o.fs_id, year=2012, franchise=o.franchise)
+        _, yours = C.year_sides(deck, 2012, you)
+        ids = [p.person_id for p in attack(yours.xi, model)]
+        assert o.attack_rank == (ids.index(C.YOU_ID) + 1 if C.YOU_ID in ids else None)
 
 
 def test_late_and_overseas_cards_only_reach_who_they_are_for():
@@ -1042,7 +1061,7 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
 # pinned to the engine, so an engine change can move them (A208 moved every one of them,
 # Kings XI 2019 before this); re-find them by search rather than loosening a guard.
 MOMENT_FS = 26
-MOMENT_SEED = 1
+MOMENT_SEED = 2   # re-found after A239 moved seed 1
 EDGE = (26, 0)    # Chennai 2019: see test_every_league_stop_and_only_those_is_a_close_race
 
 
@@ -1315,9 +1334,9 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 140, "kept": 26}
-MOB_SEED = {"dropped": 31, "kept": 3}
-SIXTH = (26, 12)   # Chennai 2019: see test_a_make_or_break_is_failed_only_in_the_worst_sixth
+MOB_FS = {"dropped": 123, "kept": 26}     # "dropped" re-found after A239
+MOB_SEED = {"dropped": 143, "kept": 3}
+SIXTH = (26, 0)    # Chennai 2019 (re-found after A239): see test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
 
 def _mob_you(deck, fs, role="opener"):
@@ -1473,10 +1492,12 @@ def test_the_feed_shows_the_form_the_engine_read_and_the_drop(deck, model):
                                book.games[(C.YOU_ID, id(year.yours))][-C.FORM_SHOWN:]]
 
 
-def test_a_batter_bowls_only_when_his_side_lacks_five_real_bowlers(deck, model):
+def test_a_batter_bowls_in_the_five_only_when_his_side_lacks_five_real_bowlers(deck, model):
     """A batter's bowling is part-time (A26), so it is marked thin as a real part-timer's
-    is (A203, A205): he never bowls ahead of five bowlers with real volume. The seasons are
-    ones where, unmarked, he would have been ranked into the five."""
+    is (A203, A205): he never bowls ahead of five bowlers with real volume -- since A239 he
+    can be their change bowler, never one of the five. The seasons are ones where, unmarked,
+    he would have been ranked into the five."""
+    from game import simulator as C_SIM
     from game.__main__ import BOWLERS_IN_TWELVE, bowling_order
 
     acted = 0
@@ -1501,7 +1522,10 @@ def test_a_batter_bowls_only_when_his_side_lacks_five_real_bowlers(deck, model):
             if year.yours not in (r.home, r.away):
                 continue
             theirs = r.away_innings if year.yours is r.home else r.home_innings
-            assert not any(w.player.person_id == C.YOU_ID and w.balls for w in theirs.bowling)
+            # [A239] never in the frontline: at most an over or two as the change bowler
+            for w in theirs.bowling:
+                if w.player.person_id == C.YOU_ID and w.balls:
+                    assert w.change and w.balls <= C_SIM.CHANGE_MAX_OVERS * C_SIM.BALLS_PER_OVER
         if acted >= 2:
             break
     assert acted >= 2, "the rule must have had to act"

@@ -387,6 +387,9 @@ function crRoll(done){
 }
 
 function crPlace(o){
+  // [A239] Past the five, the change bowler: an over or two when someone is being hit.
+  if (o.attack_rank != null && o.attack_rank > 5)
+    return (o.position != null ? `Bats at ${o.position} · ` : '') + 'first change with the ball';
   if (o.attack_rank != null)
     return o.attack_rank <= 2 ? 'Opens the bowling' : `Bowls ${crOrd(o.attack_rank)} in the attack`;
   return o.position != null ? `Bats at ${o.position}` : '';

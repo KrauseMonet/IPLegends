@@ -78,6 +78,21 @@ BALLS_PER_OVER = 6
 WICKETS = 10
 MAX_OVERS_PER_BOWLER = 4
 
+# [A239] The sixth bowler. Real captains use more than five: over 1,902 full-length real
+# innings only 20% used exactly five bowlers (65% six, 14% seven), and bowlers beyond the
+# main five bowled 7.2% of overs, 62% of them in the middle overs, at 10.5 an over against
+# the main five's 8.1. So an attack may carry bowlers past its first FRONTLINE_BOWLERS:
+# each is a CHANGE bowler, capped at CHANGE_MAX_OVERS, and comes on only to take an over
+# off a frontline bowler who is going for CHANGE_ECONOMY or more after CHANGE_MIN_OVERS --
+# the captain reacting to the match, with no random draw. FRONTLINE_BOWLERS is A50's five
+# (`BOWLERS_IN_TWELVE`, restated here because this module cannot import the draft's).
+# CHANGE_ECONOMY is FITTED, not measured: it was swept until the change bowlers' share of a
+# simulated season's overs matched the archive's 7.2% (see A239's entry for the sweep).
+FRONTLINE_BOWLERS = 5
+CHANGE_MAX_OVERS = 2
+CHANGE_MIN_OVERS = 1
+CHANGE_ECONOMY = 11.0
+
 
 @dataclass(frozen=True)
 class Player:
@@ -493,6 +508,12 @@ class BowlerCard:
     off_bat: int = 0
     exp_runs: float = 0.0
     exp_wickets: float = 0.0
+    # [A239] A change bowler (past the attack's frontline five) and his cap, and how many
+    # overs a frontline bowler has had taken off him by one, which sends him to the back of
+    # the queue for the overs that are left.
+    change: bool = False
+    max_overs: int = MAX_OVERS_PER_BOWLER
+    taken_off: int = 0
 
     @property
     def overs(self) -> str:
@@ -622,19 +643,48 @@ def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
     and a bowler saved for a later phase last -- but never in a way that leaves the innings
     unable to finish its twenty overs (`_can_finish`). With no plan, exactly as before: no
     other mode changes.
+
+    [A239] Only the frontline bowlers are chosen here; a change bowler comes on through
+    `change_bowler`, never by rotation. A frontline bowler who has had an over taken off him
+    counts that over as bowled for his place in the queue, so the over the change bowler
+    took is HIS -- the expensive bowler bowls one fewer, not whoever happens to rank last.
+    Until an over is taken off anyone, this is exactly the rule it always was. No finishing
+    check is needed for that: 200,000 random rotations with up to two overs taken off at
+    random never left the frontline unable to finish (a guard written for it was measured
+    to be dead code and removed). A captain's plan keeps its own check, as before.
     """
-    available = [b for b in bowlers
-                 if b.balls < MAX_OVERS_PER_BOWLER * BALLS_PER_OVER and b is not previous]
-    default = lambda b: (b.balls, -(b.player.bowl or 0.0))
+    frontline = [b for b in bowlers if not b.change]
+    available = [b for b in frontline
+                 if b.balls < b.max_overs * BALLS_PER_OVER and b is not previous]
+    default = lambda b: (b.balls + BALLS_PER_OVER * b.taken_off, -(b.player.bowl or 0.0))
+    if not available:                     # never reached by a legal attack; never crash
+        return min((b for b in bowlers if b.balls < b.max_overs * BALLS_PER_OVER
+                    and b is not previous), key=default)
     if not plan or over is None:
         return min(available, key=default)
     phase = phase_of_over(over)
     order = sorted(available, key=lambda b: (_plan_rank(plan.get(b.player.person_id), phase),)
                    + default(b))
     for b in order:
-        if _can_finish(bowlers, b, OVERS - over - 1):
+        if _can_finish(frontline, b, OVERS - over - 1):
             return b
     return min(available, key=default)
+
+
+def change_bowler(bowlers: list[BowlerCard], chosen: BowlerCard,
+                  previous: BowlerCard | None) -> BowlerCard | None:
+    """[A239] The change bowler who takes this over off `chosen`, or None. Only when
+    `chosen` has bowled CHANGE_MIN_OVERS and is going at CHANGE_ECONOMY or more (wides
+    included, as a real economy counts them); the change bowler with fewest overs, best
+    first, never two overs running and never past his cap. (`chosen` is always frontline:
+    the rotation never picks a change bowler.)"""
+    if chosen.balls < CHANGE_MIN_OVERS * BALLS_PER_OVER:
+        return None
+    if chosen.runs * BALLS_PER_OVER < CHANGE_ECONOMY * chosen.balls:
+        return None
+    options = [b for b in bowlers if b.change and b is not previous
+               and b.balls < b.max_overs * BALLS_PER_OVER]
+    return min(options, key=lambda b: (b.balls, -(b.player.bowl or 0.0)), default=None)
 
 
 PLAN_PHASES = ("powerplay", "middle", "death")
@@ -660,7 +710,7 @@ def _can_finish(bowlers: list[BowlerCard], chosen: BowlerCard, overs_left: int) 
     """With `chosen` bowling this over, can the next `overs_left` still be bowled -- four
     overs each, never two running? Always handing the over to whoever has most overs left
     (other than the man who just bowled) is optimal for that, so playing it out decides."""
-    left = {id(b): MAX_OVERS_PER_BOWLER - b.balls // BALLS_PER_OVER - (b is chosen)
+    left = {id(b): b.max_overs - b.balls // BALLS_PER_OVER - (b is chosen)
             for b in bowlers}
     prev = id(chosen)
     for _ in range(overs_left):
@@ -697,7 +747,10 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     wicket dimension is live and it is not.
     """
     cards = [BatterCard(p) for p in batting]
-    attack = [BowlerCard(p) for p in bowling]
+    # [A239] Past the first five, a change bowler on a shorter cap.
+    attack = [BowlerCard(p) if i < FRONTLINE_BOWLERS
+              else BowlerCard(p, change=True, max_overs=CHANGE_MAX_OVERS)
+              for i, p in enumerate(bowling)]
     innings = Innings(cards, attack)
 
     striker, non_striker, next_in = cards[0], cards[1], 2
@@ -710,8 +763,15 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
     for over in range(overs):
         # A captain's phase plan (A213) is for a full twenty only; a super over has none.
-        bowler = (choose_bowler(attack, previous, over, plan) if plan and overs == OVERS
-                  else choose_bowler(attack, previous))
+        # A super over has one bowler and no change of bowling (A239).
+        full = overs == OVERS
+        bowler = choose_bowler(attack, previous, over if full else None,
+                               plan if full else None)
+        if full:
+            change = change_bowler(attack, bowler, previous)
+            if change is not None:
+                bowler.taken_off += 1
+                bowler = change
         previous = bowler
         over_wickets_by_bowler = 0
         over_start_runs, over_start_wickets = innings.runs, innings.wickets

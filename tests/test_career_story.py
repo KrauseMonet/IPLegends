@@ -23,7 +23,7 @@ CSK_2019 = 26
 K = 4
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
 OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 9, "wedding": 12, "collapse": 20}
-PACE = {"press": 2, "side_strain": 3, "hamstring": 5, "back": 9, "death": 18, "wedding": 25}
+PACE = {"press": 8, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239
 
 
 @pytest.fixture(scope="module")

@@ -30,7 +30,7 @@ def test_a_one_over_keeper_does_not_open_the_bowling(deck):
     fs = next(fs for fs, v in deck.cards_by_fs.items()
               if v[0].franchise == "Kings XI Punjab" and v[0].season_year == 2013)
     xi, _ = opposition_twelve(list(deck.cards_by_fs[fs]))
-    five = [p.name for p in attack(xi, model_from(DOC))]
+    five = [p.name for p in attack(xi, model_from(DOC))][:5]      # the frontline [A239]
     assert "AC Gilchrist" not in five and len(five) == 5
 
 
@@ -44,7 +44,7 @@ def test_no_eleven_bowls_a_thin_season_while_a_real_bowler_waits(deck):
     for fs, squad in deck.cards_by_fs.items():
         xi, _ = opposition_twelve(list(squad))
         by_id = {c.person_id: c for c in xi}
-        five = [by_id[p.person_id] for p in attack(xi, model)]
+        five = [by_id[p.person_id] for p in attack(xi, model)][:5]   # the frontline [A239]
         real_in_xi = sum(c.has_bowl and not _thin(c) for c in xi)
         thin_bowling = sum(_thin(c) for c in five)
         assert thin_bowling == max(0, 5 - real_in_xi), (squad[0].franchise, squad[0].season_year)

@@ -2000,13 +2000,17 @@ def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
     by the same selection the season itself makes."""
     xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]))
     position = next(i for i, c in enumerate(xi, 1) if c.person_id == YOU_ID)
-    if not bowls_for_you(you):
+    if not you.has_bowl:
         return position, None
     me = next(c for c in xi if c.person_id == YOU_ID)
-    from game.__main__ import bowling_order
+    from game.__main__ import BOWLERS_IN_TWELVE, CHANGE_BOWLERS, bowling_order
 
     attack = sorted((c for c in xi if c.has_bowl), key=bowling_order)
-    return position, next(i for i, c in enumerate(attack, 1) if c is me)
+    rank = next(i for i, c in enumerate(attack, 1) if c is me)
+    if bowls_for_you(you):
+        return position, rank
+    # [A239] A batter is in the attack only as its change bowler, an over or two when needed.
+    return position, rank if rank <= BOWLERS_IN_TWELVE + CHANGE_BOWLERS else None
 
 
 def event_sequence(seed: int, overseas: bool = False, role: str | None = None) -> list[Event]:

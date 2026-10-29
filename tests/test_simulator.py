@@ -120,11 +120,12 @@ def test_a_bowler_is_not_recalled_immediately_even_when_he_is_the_obvious_choice
 
 def test_the_attack_is_capped_at_five_however_many_can_bowl():
     """An XI with seven bowlers would otherwise give all seven three overs each, and the
-    best bowler in the side would bowl a quarter of their allocation."""
+    best bowler in the side would bowl a quarter of their allocation. [A239] The five are
+    the frontline; the sixth comes along only as the change bowler, the seventh not at all."""
     xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(7)]
     picked = attack(xi, model=None)
-    assert len(picked) == BOWLERS_IN_TWELVE
-    assert [p.name for p in picked] == ["p6", "p5", "p4", "p3", "p2"]
+    assert len(picked) == BOWLERS_IN_TWELVE + 1
+    assert [p.name for p in picked] == ["p6", "p5", "p4", "p3", "p2", "p1"]
 
 
 def test_attack_tags_the_impact_player_when_he_is_among_the_xi_it_is_given():
@@ -136,7 +137,7 @@ def test_attack_tags_the_impact_player_when_he_is_among_the_xi_it_is_given():
     xi = [Card(1, f"p{i}", f"p{i}", bat=0.0, bowl=0.1 * i) for i in range(10)]
     impact = Card(1, "impact", "impact", bat=0.0, bowl=99.0)
     picked = attack(xi + [impact], model=None, impact=impact)
-    assert len(picked) == BOWLERS_IN_TWELVE
+    assert len(picked) == BOWLERS_IN_TWELVE + 1                 # five and the change [A239]
     assert picked[0].name == "impact", "still just the best five by rating"
     assert picked[0].is_impact is True
     assert all(p.is_impact is False for p in picked[1:])

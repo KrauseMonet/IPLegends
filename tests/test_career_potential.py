@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from collections import Counter
 
 import pytest
@@ -191,9 +192,22 @@ def test_a_negative_change_never_moves_into_the_potential(deck):
 AGE = {(e.key, o.label): o.age for e in C.EVENTS for o in e.options}
 
 
-# Found by search: one of each kind of shape, between them a slowed and a sped-up clock.
-CLOCK_FIXTURES = ((9, C.Shape("early", "steep")), (34, C.Shape("late", "gentle")),
-                  (16, C.Shape("standard", "standard")))
+def _age(event: str, choice: str) -> float:
+    """An answer's clock change; a label with a club in it ("Go to {club}") is matched as a
+    template, since the season records it filled in."""
+    if (event, choice) in AGE:
+        return AGE[(event, choice)]
+    for (key, label), age in AGE.items():
+        if key == event and "{" in label and re.fullmatch(
+                re.escape(label).replace(r"\{club\}", ".+"), choice):
+            return age
+    raise KeyError((event, choice))
+
+
+# Found by search: one of each kind of shape, between them a slowed and a sped-up clock
+# (re-found after A239's sixth bowler moved every season).
+CLOCK_FIXTURES = ((0, C.Shape("early", "steep")), (15, C.Shape("late", "gentle")),
+                  (5, C.Shape("standard", "standard")))
 
 
 @pytest.fixture(scope="module")
@@ -211,7 +225,7 @@ def test_the_clock_runs_a_season_a_season_unless_form_or_a_choice_moves_it(caree
     for _, car, _ in careers:
         poor = C.poor_bar("opener")
         for r, nxt in zip(car.seasons, car.seasons[1:]):
-            step = 1.0 + AGE[(r.event, r.choice)]
+            step = 1.0 + _age(r.event, r.choice)
             if car.shape.declining(r.clock):
                 if r.form >= r.rating + C.CLOCK_MARGIN:
                     step += C.CLOCK_SLOW - 1

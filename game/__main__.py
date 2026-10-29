@@ -144,6 +144,21 @@ def old_bowling_order(on: bool = True):
         _OLD_ORDER.reset(token)
 
 
+# [A239] The attack's change bowlers -- the sixth -- and the daily's switch back to the
+# five-man attack its earlier days were scored under, for `_OLD_ORDER`'s reason.
+CHANGE_BOWLERS = 1
+_FIVE_MAN = contextvars.ContextVar("five_man_attack", default=False)
+
+
+@contextlib.contextmanager
+def five_man_attack(on: bool = True):
+    token = _FIVE_MAN.set(on)
+    try:
+        yield
+    finally:
+        _FIVE_MAN.reset(token)
+
+
 # [A208] Who bats, and where. The five batters an opposition eleven picks were chosen by
 # `Card.bat`, a per-ball rating, and A65 rates every season that faced a ball, so a bowler
 # who faced three balls outranked a real batter: Mumbai 2024 left out Rohit Sharma, Tilak
@@ -323,10 +338,14 @@ def attack(xi: list[Card], model: Model, impact: Card | None = None) -> list[Pla
     or not, and this just picks the best five of them.] Capped at five deliberately:
     `choose_bowler` hands the next over to whoever has bowled least, so a pool bigger than
     five would spread overs thinner still (A50).
+
+    [A239] Plus a sixth, the next in the same order, as a change bowler: he bowls at most
+    two overs and only when a frontline bowler is being hit (`simulator.change_bowler`), so
+    the five still get their four overs unless the match says otherwise.
     """
+    size = BOWLERS_IN_TWELVE + (0 if _FIVE_MAN.get() else CHANGE_BOWLERS)
     return [to_player(c, model, is_impact=(impact is not None and c is impact))
-            for c in sorted((c for c in xi if c.has_bowl),
-                            key=bowling_order)[:BOWLERS_IN_TWELVE]]
+            for c in sorted((c for c in xi if c.has_bowl), key=bowling_order)[:size]]
 
 
 def overseas_status(xi: list[Card]) -> str:
@@ -507,6 +526,67 @@ def validate(conn, model: Model, trials: int, seed: int) -> None:
           f"{archive['innings']:,} real innings for the archive column")
 
     _validate_super_over(conn, model, trials, seed)
+    _validate_sixth_bowler(conn, model, seed)
+
+
+def archive_bowler_use(conn) -> dict:
+    """How real attacks spread their overs, over full-length innings: the share of overs
+    bowled by bowlers beyond each innings' five busiest, and the share of innings that used
+    exactly five bowlers (A239)."""
+    over_share, five_share, n = conn.execute(
+        """
+        with inn as (
+          select match_id, innings_no from deliveries
+           where not is_super_over and innings_scheduled_balls = 120
+           group by 1, 2 having count(distinct over_no) = 20),
+        ov as (
+          select d.match_id, d.innings_no, d.over_no, min(d.bowler_id) bowler,
+                 sum(d.runs_batter + d.extra_wides + d.extra_noballs) runs
+            from deliveries d join inn using (match_id, innings_no)
+           where not d.is_super_over group by 1, 2, 3),
+        per as (
+          select match_id, innings_no, count(*) overs,
+                 row_number() over (partition by match_id, innings_no
+                                    order by count(*) desc, sum(runs), bowler) rk
+            from ov group by match_id, innings_no, bowler)
+        select sum(overs) filter (where rk > 5)::float / sum(overs),
+               (select count(*) from (select 1 from per group by match_id, innings_no
+                                      having count(*) = 5) x)::float
+                 / count(distinct (match_id, innings_no)),
+               count(distinct (match_id, innings_no))
+          from per
+        """
+    ).fetchone()
+    return {"over_share": over_share, "five_share": five_share, "innings": n}
+
+
+def _validate_sixth_bowler(conn, model: Model, seed: int, seasons: int = 16) -> None:
+    """The sixth bowler's row, REPORTED rather than asserted: `CHANGE_ECONOMY` was swept to
+    land the over share near the archive's, so the over share agreeing is a fit. It plays
+    real historical sides, since among league-average bowlers a change of bowling changes
+    nothing."""
+    from game.season import historical_sides, run_league
+    from game.simulator import CHANGE_ECONOMY
+
+    deck = load_deck(conn)
+    overs = change = five = innings = 0
+    for s in range(seasons):
+        rng = random.Random(seed * 1000 + s)
+        for r in run_league(model, historical_sides(deck, rng, 10), rng).results:
+            for inn in (r.home_innings, r.away_innings):
+                innings += 1
+                five += sum(1 for b in inn.bowling if b.balls) <= BOWLERS_IN_TWELVE
+                overs += inn.balls
+                change += sum(b.balls for b in inn.bowling if b.change)
+    real = archive_bowler_use(conn)
+
+    print(f"\n=== the sixth bowler, {seasons} historical-side leagues, seed {seed} ===\n")
+    print(f"    {'':28}{'simulated':>12}{'archive':>12}")
+    print(f"    {'overs beyond the five':28}{change / overs:11.1%}{real['over_share']:11.1%}")
+    print(f"    {'innings using only five':28}{five / innings:11.1%}{real['five_share']:11.1%}")
+    print(f"\n    reported, not asserted -- CHANGE_ECONOMY = {CHANGE_ECONOMY} was swept to fit "
+          f"the first row\n    ({real['innings']:,} real innings); balls, not overs, on "
+          "the simulated side.")
 
 
 def _validate_super_over(conn, model: Model, trials: int, seed: int) -> None:

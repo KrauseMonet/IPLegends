@@ -300,6 +300,8 @@ class DayPlay:
 BOWLING_ORDER_FROM = datetime.date(2026, 10, 22)
 # [A208] Likewise for who bats and where. Set to the day after the change ships.
 BATTING_ORDER_FROM = datetime.date(2026, 10, 23)
+# [A239] Likewise for the sixth bowler. Set to the day after the change ships.
+SIXTH_BOWLER_FROM = datetime.date(2026, 10, 30)
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
@@ -311,10 +313,11 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     ranks on (A19): the match is a pure function of those three, so a page reload re-derives
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
-    from game.__main__ import old_batting_order, old_bowling_order
+    from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
 
     with (old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM),
-          old_batting_order(day.challenge_date < BATTING_ORDER_FROM)):
+          old_batting_order(day.challenge_date < BATTING_ORDER_FROM),
+          five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM)):
         return _play_and_score(full, model, day, player, state)
 
 

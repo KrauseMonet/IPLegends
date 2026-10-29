@@ -1887,7 +1887,8 @@ simplification is indistinguishable from a bug:
    as on ball 40. §7 rates a season, not an innings, so there is no per-innings shape to
    consume yet.
 2. **No captaincy.** `choose_bowler` gives the next over to whoever has bowled least, best
-   bowler breaking the tie, and never twice running. A real captain saves his best for the
+   bowler breaking the tie, and never twice running (a change of bowling when someone is
+   being hit is the one reaction it has, §10.4, A239). A real captain saves his best for the
    death. Bowling order is a tactical layer and adding one before the engine underneath it
    has been read would bury the engine's behaviour under a policy's.
 3. **No chase pressure.** The second innings uses the same first-innings grids and stops
@@ -1903,6 +1904,32 @@ each is exactly five. The attack is *capped* at five for the same reason: `choos
 equalises workload, so an XI holding seven bowlers would give all seven three overs and hand
 the best bowler in the side a quarter of his allocation, flattening exactly the rating
 differences the draft is about.
+
+**[A239] A sixth bowler, as a change and never in the rotation.** Real attacks use more
+than five: over 1,902 full-length real innings only 19.9% used exactly five bowlers (65%
+six, 14% seven), and bowlers beyond each innings' five busiest bowled 7.2% of overs. So
+`attack()` also returns the next bowler in the same order (A203's: real volume, then
+rating) as a **change bowler**. He is never chosen by `choose_bowler`'s rotation; he comes
+on only through `change_bowler`, to take an over off a frontline bowler who has bowled at
+least one over and is going at `CHANGE_ECONOMY` (11.0 an over, wides counted) or more,
+never two overs running, at most `CHANGE_MAX_OVERS` (2) an innings. The over he takes is
+the expensive bowler's: a frontline bowler counts an over taken off him as bowled for his
+place in the queue (200,000 random rotations with overs taken off never left the frontline
+unable to finish, so no further check is needed). No random draw is added, so an attack whose sixth never comes
+on plays exactly the innings five would. A50's cap stands for the frontline; the sixth is
+what the cap left out. A batter becomes a part-time bowler by being his side's sixth.
+`CHANGE_ECONOMY` is **fitted** to the 7.2%, and `--validate` reports it as such: 8.1% of
+overs and 20.3% of innings using only five, against the archive's 7.2% and 19.9%.
+
+**What it does not reproduce, recorded rather than tuned.** Real overs beyond the five go
+62% to the middle overs, 24% to the powerplay and 14% to the death, at 10.5 an over against
+the five's 8.1; simulated, about 90% fall in the middle overs and they cost the same as the
+frontline's. The powerplay share is low because the rotation gives every frontline bowler
+an over before anyone has an economy to read, the death share because two overs are
+usually spent by then; and the engine has no momentum, so a change bowler bowls to batters
+priced like any others, where a real captain changes the bowling when the batters are on
+top. Real sixth bowlers are also mostly bowlers (55%) and all-rounders (29%); batters bowled
+only 16% of those overs, about 1.2% of all overs.
 
 **The four-overseas rule is enforced on the KNOWN count and nowhere else.** A23 left 314
 people with a NULL nationality, so the engine enforces a lower bound and reports how far

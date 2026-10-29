@@ -777,6 +777,17 @@ function legendsByValue(hall){
   return hall.filter(c => c.legend)
     .sort((a, b) => (b.legend_value ?? -Infinity) - (a.legend_value ?? -Infinity));
 }
+// [A240] Some accounts have their picker cut to their best few legends by that value
+// (`ME.legend_limit`, set per account on the server; null lists them all), so a long Hall of
+// Fame is not a long list to scroll. The legend you have already brought stays listed even if
+// it has since fallen outside them, so the box never shows "No legend" over one you brought.
+function legendChoices(hall, mine, limit){
+  const all = legendsByValue(hall);
+  if (limit == null) return all;
+  const same = c => { const l = c.card.legend || {};
+    return !!mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating; };
+  return all.slice(0, limit).concat(all.slice(limit).filter(same).slice(0, 1));
+}
 // --- end legendsByValue
 
 function renderLobbyLegends(r){
@@ -803,12 +814,13 @@ function renderLobbyLegends(r){
     : !ROOM_HALL.length ? '<div class="note">You have no saved careers yet. Finish one in <a href="/career">Build a Career</a>.</div>'
     : `<div class="lg-pick"><select id="lobbyLegendPick" class="room-input">
          <option value="">No legend</option>
-         ${legendsByValue(ROOM_HALL).map(c => { const l = c.card.legend || {};
+         ${legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit).map(c => { const l = c.card.legend || {};
            // [A225] a legend is a season, so the season is what is named
            const mine = r.legends[MY_PID];
            return `<option value="${c.key}"${mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating ? ' selected' : ''}>
            ${esc(c.name)} · ${esc(c.role_label)} · ${l.year} · ${l.rating}${c.legend_value != null ? ` · ${c.legend_value >= 0 ? '+' : ''}${c.legend_value.toFixed(1)} runs a match` : ''}</option>`; }).join('')}
-       </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>`;
+       </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>
+       ${ME.legend_limit != null && legendsByValue(ROOM_HALL).length > ME.legend_limit ? `<div class="note" style="margin-top:4px">Your best ${ME.legend_limit} of ${legendsByValue(ROOM_HALL).length} legends, by runs a match.</div>` : ''}`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
     saved career's best season, carded like a real one. He joins your squad free, takes one of the eighteen places and counts toward
     the overseas limit.</div>${chosen ? `<div class="lg-list">${chosen}</div>` : ''}${mineHtml}`;

@@ -66,6 +66,26 @@ def is_admin(account_id: int | None) -> bool:
     return account_id is not None and str(account_id) in admin_ids()
 
 
+# [A240] The friends'-auction legend picker lists only the best LEGEND_PICKS legends for the
+# accounts named in LEGEND_LIMIT_ACCOUNT_IDS -- a per-account choice, not a rule for every
+# player. Read at call time like the admin ids; when unset or empty the admin ids stand in,
+# so the owner's account has it with no new setting.
+LEGEND_LIMIT_ACCOUNT_IDS = "LEGEND_LIMIT_ACCOUNT_IDS"
+LEGEND_PICKS = 5
+
+
+def legend_limit_ids() -> frozenset[str]:
+    raw = os.environ.get(LEGEND_LIMIT_ACCOUNT_IDS, "")
+    if not raw.strip():
+        return admin_ids()
+    return frozenset(p.strip() for p in raw.split(",") if p.strip().isdigit())
+
+
+def legend_limit(account_id: int | None) -> int | None:
+    """How many legends this account's picker lists, or None for all of them."""
+    return LEGEND_PICKS if account_id is not None and str(account_id) in legend_limit_ids() else None
+
+
 def _log(actor: int, action: str, detail: str) -> None:
     print(f"[admin] account {actor} {action}: {detail}", file=sys.stderr, flush=True)
 

@@ -1147,6 +1147,10 @@ class MeOut(BaseModel):
                                                          "null if none was ever chosen")
     is_admin: bool = Field(default=False, description="[A154] whether to show the Admin "
                            "link. A convenience only: every admin route checks again.")
+    legend_limit: int | None = Field(
+        default=None, description="[A240] how many legends this account's auction picker "
+                                  "lists; null lists them all. Display only: any of your own "
+                                  "legends can still be brought.")
 
 
 class LeaderOut(BaseModel):
@@ -2863,7 +2867,8 @@ def me(request: Request) -> MeOut:
         # treated the same as no cookie at all rather than assumed unreachable.
         return MeOut(account_id=None, username=None)
     return MeOut(account_id=account.account_id, username=account.username,
-                 kit=_kit_out(account.kit), is_admin=admin_lib.is_admin(account.account_id))
+                 kit=_kit_out(account.kit), is_admin=admin_lib.is_admin(account.account_id),
+                 legend_limit=admin_lib.legend_limit(account.account_id))
 
 
 @app.put("/api/account/kit", response_model=KitOut)

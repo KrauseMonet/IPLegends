@@ -930,7 +930,6 @@ def _ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
 # nothing (1-3 balls a match). So the way in is a TRIAL SEASON the coach offers, judged on
 # the new discipline alone; a good trial brings the full-time offer; a poor season in the
 # new role sends you back. Every constant here is declared game design.
-TAIL_SLOTS = frozenset({8, 9, 10, 11})
 COACH_ON = True                      # tests of rules written before A238 turn the coach off
 COACH_TRIAL_CHANCE = 0.25            # an eligible season's chance of the coach offering a trial
 COACH_TRIALS_MAX = 2                 # trial offers a career, taken or not
@@ -947,11 +946,22 @@ SECOND_STEP, SECOND_FORM = 0.25, 0.2 # how fast a new discipline grows toward it
                                      # a passed trial counts as a season of it, and the first
                                      # full-time season cannot send you back (the grace)
 TRIAL_ROLES = ("opener", "middle", "pace", "spin")   # finisher and keeper do not change (scope)
+# A FULL-TIME BOWLER bowls his four overs every match and keeps his place in the batting
+# order: an all-rounder who is never rested from the attack, which is what the user meant by
+# the coach's bowling offer. (First built as a bowler batting eight to eleven, and corrected.)
+FULL_TIME = "fulltime"
+FULL_TIME_LABEL = "Full-time bowler"
 
 
 def role_kind(role: str) -> str:
     """'batter', 'bowler' or 'allrounder' for a ROLES key (a keeper bats)."""
-    return {"pace": "bowler", "spin": "bowler", "allrounder": "allrounder"}.get(role, "batter")
+    return {"pace": "bowler", "spin": "bowler", "allrounder": "allrounder",
+            FULL_TIME: "allrounder"}.get(role, "batter")
+
+
+def role_label(role: str) -> str:
+    """A role's name for the page: a ROLES key, or a full-time bowler."""
+    return FULL_TIME_LABEL if role == FULL_TIME else ROLES[role]["label"]
 
 
 def bat_value(scoring: float, dismissal: float) -> float:
@@ -1029,13 +1039,17 @@ def role_state(deck: Deck, model: Model, seed: int, setup: Setup, start: Card, r
     from `base` toward `top`, `second` of the way."""
     if not role or role == setup.role:
         return None
-    origin, now = _kind(start), role_kind(role)
+    origin = _kind(start)
+    if role in ("pace", "spin") and origin != "bowler":
+        role = FULL_TIME                       # a checkpoint saved before the correction
+    now = role_kind(role)
+    full_time = role == FULL_TIME
     if now == "allrounder" and origin == "batter":
         positions, band = start.positions, start.band
     elif now == "allrounder" and origin == "bowler":
         positions, band = FINISHER_SLOTS, "finisher"
-    elif now == "bowler" and origin != "bowler":
-        positions, band = TAIL_SLOTS, "tail"
+    elif full_time and origin == "allrounder":
+        positions, band = start.positions, start.band
     else:
         raise CareerError(f"a {setup.role} does not become a {role}")
     style = start.bowling_style or style or None
@@ -1051,7 +1065,8 @@ def role_state(deck: Deck, model: Model, seed: int, setup: Setup, start: Card, r
         top = second_ceiling(deck, seed, add, style if add == "bowl" else None, base)
     return {"role": role, "kind": now, "positions": sorted(positions), "band": band,
             "style": style, "add": add, "base": list(base) if base else None,
-            "top": list(top) if top else None, "second": round(second, 6), "trial": trial}
+            "top": list(top) if top else None, "second": round(second, 6), "trial": trial,
+            "full_time": full_time}
 
 
 def apply_role(card: Card, rd: dict | None, t: float) -> Card:
@@ -1079,7 +1094,8 @@ def role_key(rd: dict | None) -> tuple | None:
     if rd is None:
         return None
     return (rd["role"], rd["trial"], tuple(rd["positions"]), rd["style"], rd["add"],
-            tuple(rd["base"] or ()), tuple(rd["top"] or ()), rd["second"])
+            tuple(rd["base"] or ()), tuple(rd["top"] or ()), rd["second"],
+            rd.get("full_time", False))
 
 
 def discipline_rank(lines: dict, key: tuple, disc: str) -> float | None:
@@ -1127,14 +1143,15 @@ def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
         return None
     prev = cp.seasons[-1] if cp.seasons else None
     style = start.bowling_style or cp.style
-    if (kind == "allrounder" and prev is not None and style and prev.bowl_rank is not None
+    if (kind == "allrounder" and now != FULL_TIME and prev is not None and style
+            and prev.bowl_rank is not None
             and cp.coach_declined != k - 1 and not (prev.role or {}).get("trial")
             and (prev.role or {}).get("kind", _kind(start)) == "allrounder"):
         fading = (prev.bat_rank is not None and prev.bat_rank < FADING_BAT
                   and prev.bowl_rank >= FADING_BOWL)
         if prev.bowl_rank >= SPECIALISE_BOWL or fading:
             card = COACH_FADING if fading and prev.bowl_rank < SPECIALISE_BOWL else COACH_SPECIALISE
-            return dict(card, target=style)
+            return dict(card, target=FULL_TIME)
     if (now == setup.role and setup.role in TRIAL_ROLES
             and cp.trials < COACH_TRIALS_MAX and COACH_TRIAL_FROM <= k <= COACH_TRIAL_UNTIL
             and random.Random(f"{seed}:coach:{k}").random() < COACH_TRIAL_CHANCE):
@@ -1181,16 +1198,16 @@ COACH_SWITCH = {
                 _opt("Not yet", "Go back to your old job. The offer may not come again.",
                      "You thanked the coach and went back to your old job.", False)]}
 _SPECIALISE_OPTS = [
-    _opt("Concentrate on bowling", "A full-time bowler: every match, and down the order with "
-         "the bat.", "You are a full-time bowler now.", True),
-    _opt("Stay an all-rounder", "Keep doing both.",
-         "You told the coach you want to keep doing both.", False)]
+    _opt("Bowl every match", "Your four overs every game, and you keep your place in the "
+         "order.", "You are a full-time bowler now: four overs every match.", True),
+    _opt("Keep things as they are", "Bowl when the side needs you, as now.",
+         "You told the coach you are happy bowling when the side needs you.", False)]
 COACH_SPECIALISE = {
     "key": "specialise", "title": "The coach makes an offer",
-    "text": "\"Your bowling is winning us matches. Concentrate on it: bowl every game, and "
-            "bat down the order.\"", "options": _SPECIALISE_OPTS}
+    "text": "\"Your bowling is winning us matches. I want your four overs every game, and you "
+            "keep your place in the order.\"", "options": _SPECIALISE_OPTS}
 COACH_FADING = dict(COACH_SPECIALISE, text="\"The runs have dried up, but your bowling can "
-                    "carry you. Concentrate on it, and bat down the order.\"")
+                    "carry you. I want your four overs every game.\"")
 
 
 def _grown(second: float, rank: float) -> float:
@@ -1203,8 +1220,11 @@ def coach_after(cp: "Checkpoint", setup: Setup, rd: dict | None, played: "Season
     growth, and the way back after a poor season in the new role."""
     if rd is None:
         return
-    disc = rd["add"] or "bowl"
-    rank = played.bowl_rank if disc == "bowl" else played.bat_rank
+    def rank_of(disc: str) -> float | None:
+        return played.bowl_rank if disc == "bowl" else played.bat_rank
+
+    disc = "bowl" if rd.get("full_time") else (rd["add"] or "bowl")
+    rank = rank_of(disc)
     if rd["trial"]:
         if rank is not None and rank >= TRIAL_PASS:
             cp.coach_next = rd["role"]
@@ -1215,18 +1235,24 @@ def coach_after(cp: "Checkpoint", setup: Setup, rd: dict | None, played: "Season
         else:
             say("The trial did not come off. Back to your old job.", "down")
         return
+    grow = rank_of(rd["add"]) if rd["add"] else None
+    if grow is not None:
+        cp.second = _grown(cp.second, grow)
+        if grow >= COMING_ON and cp.second < 1.0:
+            say("Your bowling is coming on." if rd["add"] == "bowl" else "Your batting is coming on.",
+                "up")
     if rank is None:
         return
-    if rd["add"]:
-        cp.second = _grown(cp.second, rank)
-        if rank >= COMING_ON and cp.second < 1.0:
-            say("Your bowling is coming on." if disc == "bowl" else "Your batting is coming on.", "up")
     if rank < WAY_BACK and played.k == cp.role_since:
         # the first full-time season is the coach's to give: a poor one is not yet the end
         say("A hard first season in the new job, but the coach is giving you time.")
     elif rank < WAY_BACK:
-        cp.roles.pop()
+        left = cp.roles.pop()
         back = cp.roles[-1] if cp.roles else setup.role
+        if left == FULL_TIME:
+            say("The coach has taken you off full-time bowling: you bowl when the side needs "
+                "you again.", "down")
+            return
         say({"batter": "The bowling did not work out. The coach has taken you out of the "
                        "attack: you are a batter again.",
              "bowler": "The runs did not come. The coach has sent you back down the order.",
@@ -2593,7 +2619,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   answers: tuple | None = None,
                   plan: tuple[tuple[str, str], ...] = (),
                   rating: int | None = None, extra_reason: str = "", tenure: int = 0,
-                  rival: tuple[str, str] | None = None, spent: tuple[str, ...] = ()) -> Year:
+                  rival: tuple[str, str] | None = None, spent: tuple[str, ...] = (),
+                  full_time: bool = False) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -2640,7 +2667,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     breaks = 0
     pending_break: int | None = None               # your match number of an unresolved one
     played = 0
-    rested = _rested_lineup(yours, me)
+    # a full-time bowler is never rested from the attack (A238)
+    rested = None if full_time else _rested_lineup(yours, me)
     bowl_rng = random.Random(f"{seed}:bowls:{k}")
     labels = APPROACH_LABELS[_kind(me)]
     used = 0                                       # answers consumed
@@ -3168,7 +3196,8 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                        ) -> tuple[SeasonRecord, SeasonDetail]:
     year = simulate_year(deck, model, seed, k, you, record.squad, record.extra_missed, answers,
                          plan, record.rating if record.rating else None, record.absence,
-                         record.tenure, tuple(record.rival) if record.rival else None, spent)
+                         record.tenure, tuple(record.rival) if record.rival else None, spent,
+                         full_time=bool(record.role and record.role.get("full_time")))
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -3512,7 +3541,7 @@ def reputation_floor(previous: list[int], form: int) -> int:
 def poor_bar(role: str) -> float:
     """Below this place among your kind, a season is poor: `POOR_PERCENTILE`, unless the
     role declares its own."""
-    return ROLES[role].get("poor_percentile", POOR_PERCENTILE)
+    return ROLES.get(role, {}).get("poor_percentile", POOR_PERCENTILE)
 
 
 def form_after(squad: bool, percentile: float, bar: float | None = None) -> tuple[bool, bool]:

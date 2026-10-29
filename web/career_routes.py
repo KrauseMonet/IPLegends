@@ -476,7 +476,7 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
         milestones=[m.text for m in r.milestones], mega=r.mega,
         plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan],
         role=r.role["role"] if r.role else "",
-        role_label=C.ROLES[r.role["role"]]["label"] if r.role else "",
+        role_label=C.role_label(r.role["role"]) if r.role else "",
         trial=bool(r.role and r.role["trial"]))
 
 
@@ -487,7 +487,7 @@ def role_path(c: C.Career) -> list[str]:
     for r in c.seasons:
         role = r.role["role"] if r.role and not r.role["trial"] else c.setup.role
         if role != now:
-            out.append(f"{C.ROLES[role]['label']} from {r.year}")
+            out.append(f"{C.role_label(role)} from {r.year}")
             now = role
     return out
 
@@ -524,7 +524,7 @@ ALLROUNDER_HINTS = ("Keep it tight, with bat and ball.", "Play your natural game
 
 def _moment(m: C.Moment, role: str) -> MomentOut:
     hints = (BOWLING_HINTS if role in ("pace", "spin") else
-             ALLROUNDER_HINTS if role == "allrounder" else APPROACH_HINTS)
+             ALLROUNDER_HINTS if C.role_kind(role) == "allrounder" else APPROACH_HINTS)
     return MomentOut(stage=m.stage, opponent=m.opponent, opp_short=m.opp_short,
                      opp_crest=crests.crest_url(m.opp_franchise, m.opp_year), stakes=m.stakes,
                      options=[MomentOptionOut(label=l, hint=h) for l, h in zip(m.labels, hints)],
@@ -776,7 +776,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         role_now=career.role_now or st.role,
-        role_now_label=C.ROLES[career.role_now or st.role]["label"],
+        role_now_label=C.role_label(career.role_now or st.role),
         season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
         seasons=[_season(r, career.ceiling.display, v) for r in career.seasons],

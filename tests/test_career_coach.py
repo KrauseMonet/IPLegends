@@ -59,9 +59,19 @@ def test_where_you_bat_follows_the_job(deck, model):
     assert set(rd["positions"]) == set(C.FINISHER_SLOTS) and rd["band"] == "finisher"
     assert rd["add"] == "bat"
     ar = _starts(deck, "allrounder")[0]
-    rd = C.role_state(deck, model, 1, _setup("allrounder"), ar, ar.bowling_style, 0.0, "", 2012)
-    assert rd["kind"] == "bowler" and set(rd["positions"]) == set(C.TAIL_SLOTS)
+    rd = C.role_state(deck, model, 1, _setup("allrounder"), ar, C.FULL_TIME, 0.0, "", 2012)
+    # a full-time bowler bowls every match and keeps his place in the order
+    assert rd["kind"] == "allrounder" and rd["full_time"]
+    assert set(rd["positions"]) == set(ar.positions) and rd["band"] == ar.band
     assert rd["add"] == ""                      # an all-rounder already bowls
+    # a checkpoint saved before the correction (a style for a role) reads as full time
+    legacy = C.role_state(deck, model, 1, _setup("allrounder"), ar, ar.bowling_style, 0.0, "", 2012)
+    assert legacy["role"] == C.FULL_TIME and set(legacy["positions"]) == set(ar.positions)
+    # a batter turned full-time bowler still bats where he did
+    rd = C.role_state(deck, model, 1, _setup("opener"), opener, C.FULL_TIME, 0.0, "pace", 2012)
+    assert set(rd["positions"]) == set(opener.positions) and rd["add"] == "bowl" and rd["full_time"]
+    assert not C.role_state(deck, model, 1, _setup("opener"), opener, "allrounder", 0.0, "pace",
+                            2012)["full_time"]
 
 
 def test_a_batter_who_never_bowled_starts_at_the_part_timers_level(deck, model):
@@ -149,6 +159,59 @@ def _line(role, innings=0, runs=0, balls=0, outs=0, bowl_balls=0, bowl_runs=0, w
                   outs=outs, bowl_balls=bowl_balls, bowl_runs=bowl_runs, wickets=wickets)
 
 
+def test_a_full_time_bowler_bowls_in_every_match_he_plays_and_keeps_his_place(deck, model):
+    """The point of the job: an all-rounder is rested from the attack in about four matches
+    in ten, a full-time bowler in none, and both bat where they did."""
+    ar = next(c for c in _starts(deck, "allrounder") if set(c.positions) == {1, 2, 3})
+    setup = _setup("allrounder")
+    fs = C.year_fs_ids(deck, 2015)[0]
+    club = deck.cards_by_fs[fs][0].franchise
+    counts = {}
+    for full in (False, True):
+        rd = (C.role_state(deck, model, 9, setup, ar, C.FULL_TIME, 0.0, "", 2015) if full else None)
+        you = C.ability(ar, ar, 0.5, setup=setup, fs_id=fs, year=2015, franchise=club, role=rd)
+        year = C.simulate_year(deck, model, 9, 0, you, full_time=full)
+        played = bowled = 0
+        top = True
+        for r in year.results:
+            if year.yours not in (r.home, r.away):
+                continue
+            bat = r.home_innings if r.home is year.yours else r.away_innings
+            ball = r.away_innings if r.home is year.yours else r.home_innings
+            if not any(b.player.person_id == C.YOU_ID for b in bat.batting):
+                continue
+            played += 1
+            bowled += any(w.player.person_id == C.YOU_ID for w in ball.bowling)
+            top &= next(i for i, b in enumerate(bat.batting) if b.player.person_id == C.YOU_ID) < 3
+        counts[full] = (played, bowled, top)
+    (p0, b0, top0), (p1, b1, top1) = counts[False], counts[True]
+    assert b1 == p1 and b0 < p0                     # never rested, against rested sometimes
+    assert top0 and top1                            # opening in both
+
+
+def test_a_full_time_season_reaches_the_engine_as_full_time(deck, model, monkeypatch):
+    """The wiring: a season record in a full-time role tells the season it is one."""
+    seen = []
+
+    class Seen(Exception):
+        pass
+
+    def spy(*a, **kw):
+        seen.append(kw.get("full_time"))
+        raise Seen
+
+    monkeypatch.setattr(C, "simulate_year", spy)
+    ar = _starts(deck, "allrounder")[0]
+    setup = _setup("allrounder")
+    you = C.ability(ar, ar, 0.5, setup=setup, fs_id=C.year_fs_ids(deck, 2015)[0], year=2015,
+                    franchise=None)
+    for rd in (C.role_state(deck, model, 9, setup, ar, C.FULL_TIME, 0.0, "", 2015), None):
+        record = dataclasses.replace(_prev(), role=rd)
+        with pytest.raises(Seen):
+            C.play_season_detail(deck, model, 9, 0, you, record)
+    assert seen == [True, False]
+
+
 def test_a_discipline_is_ranked_among_its_own_regulars_with_enough_volume():
     me = _line("allrounder", innings=10, runs=200, balls=150, outs=8,
                bowl_balls=200, bowl_runs=300, wickets=6)
@@ -202,7 +265,11 @@ def test_an_allrounder_whose_bowling_carries_him_is_asked_to_specialise(deck):
     ar = _starts(deck, "allrounder")[0]
     setup = _setup("allrounder")
     strong = C.coach_card(1, setup, ar, _cp(seasons=[_prev(bowl_rank=0.7, bat_rank=0.6)]), 2, False)
-    assert strong["key"] == "specialise" and strong["target"] == ar.bowling_style
+    assert strong["key"] == "specialise" and strong["target"] == C.FULL_TIME
+    # already bowling every match: nothing more to offer
+    already = C.coach_card(1, setup, ar, _cp(roles=[C.FULL_TIME],
+                                             seasons=[_prev(bowl_rank=0.9, bat_rank=0.6)]), 2, False)
+    assert already is None or already["key"] != "specialise"
     assert strong["text"] == C.COACH_SPECIALISE["text"]
     fading = C.coach_card(1, setup, ar, _cp(seasons=[_prev(bowl_rank=0.45, bat_rank=0.2)]), 2, False)
     assert fading["key"] == "specialise" and fading["text"] == C.COACH_FADING["text"]
@@ -263,7 +330,7 @@ def test_the_coach_is_silent_when_turned_off(deck):
 def _rd(role="allrounder", add="bowl", trial=False):
     return {"role": role, "kind": C.role_kind(role), "positions": [1, 2, 3], "band": "opener",
             "style": "pace", "add": add, "base": [0.0, 1.0], "top": [0.1, 1.2], "second": 0.0,
-            "trial": trial}
+            "trial": trial, "full_time": role == C.FULL_TIME}
 
 
 def test_a_trial_passes_at_the_way_backs_own_bar():
@@ -331,10 +398,21 @@ def test_a_poor_season_in_the_new_role_is_the_way_back():
     cp = _cp(roles=["allrounder"])
     C.coach_after(cp, _setup("opener"), _rd(), _prev(bowl_rank=C.WAY_BACK), lambda *a: None)
     assert cp.roles == ["allrounder"]
-    # one step back at a time: a batter turned all-rounder turned bowler goes back to doing both
-    cp = _cp(roles=["allrounder", "pace"])
-    C.coach_after(cp, _setup("opener"), _rd("pace"), _prev(bowl_rank=0.1), lambda *a: said.append(a))
-    assert cp.roles == ["allrounder"] and "both" in said[-1][0]
+    # one step back at a time: a full-time bowler goes back to bowling when needed
+    cp = _cp(roles=["allrounder", C.FULL_TIME])
+    C.coach_after(cp, _setup("opener"), _rd(C.FULL_TIME), _prev(bowl_rank=0.1), lambda *a: said.append(a))
+    assert cp.roles == ["allrounder"] and "off full-time bowling" in said[-1][0]
+    # a bowler made an all-rounder then full time: the way back reads his BOWLING, while his
+    # new batting keeps growing
+    cp = _cp(roles=["allrounder", C.FULL_TIME], second=0.2)
+    C.coach_after(cp, _setup("spin"), _rd(C.FULL_TIME, add="bat"), _prev(bowl_rank=0.8, bat_rank=0.1),
+                  lambda *a: None)
+    assert cp.roles == ["allrounder", C.FULL_TIME]
+    assert cp.second == pytest.approx(0.2 + C.SECOND_STEP + C.SECOND_FORM * (0.1 - 0.5))
+    cp = _cp(roles=["allrounder", C.FULL_TIME])
+    C.coach_after(cp, _setup("spin"), _rd(C.FULL_TIME, add="bat"), _prev(bowl_rank=0.1, bat_rank=0.9),
+                  lambda *a: None)
+    assert cp.roles == ["allrounder"]
     # an injured season with nothing to judge changes nothing
     cp = _cp(roles=["allrounder"], second=0.4)
     C.coach_after(cp, _setup("opener"), _rd(), _prev(bowl_rank=None), lambda *a: None)
@@ -450,15 +528,21 @@ def test_the_legend_is_carded_in_the_role_his_best_season_was_played_in(deck, mo
     assert card.role == "allrounder" and card.bat_scoring == 0.1
     saved = career_results.legend(career)
     assert saved["role"] == "allrounder" and saved["role_label"] == "All-rounder"
+    # a full-time bowler's legend is an all-rounder to a room, named as he was
+    ft = C.role_state(deck, model, 4, setup, start, C.FULL_TIME, 0.5, "", 2013)
+    saved = career_results.legend(dataclasses.replace(
+        career, seasons=[dataclasses.replace(best, role=ft)]))
+    assert saved["role"] == "allrounder" and saved["role_label"] == C.FULL_TIME_LABEL
 
 
 def test_the_role_state_survives_a_checkpoint_round_trip():
-    cp = C.Checkpoint(k=5, roles=["allrounder", "pace"], second=0.6, style="pace",
+    cp = C.Checkpoint(k=5, roles=["allrounder", C.FULL_TIME], second=0.6, style="pace",
                       coach_next="allrounder", trials=2, coach_declined=3, role_since=4)
     back = C.Checkpoint.from_dict(json.loads(json.dumps(cp.to_dict())))
     assert (back.roles, back.second, back.style, back.coach_next, back.trials,
-            back.coach_declined, back.role_since) == (["allrounder", "pace"], 0.6, "pace",
+            back.coach_declined, back.role_since) == (["allrounder", C.FULL_TIME], 0.6, "pace",
                                                        "allrounder", 2, 3, 4)
+    assert back.roles == ["allrounder", C.FULL_TIME]
 
 
 def test_an_old_checkpoint_reads_as_no_change():

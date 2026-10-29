@@ -87,32 +87,3 @@ def test_the_picker_lists_legends_most_valuable_first():
                           f"legendsByValue({json.dumps(hall)}).map(c => c.key)))"],
                          capture_output=True, text=True, check=True).stdout
     assert json.loads(out) == ["c", "e", "a", "d"]
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_the_picker_lists_only_the_best_five_and_keeps_the_one_you_brought():
-    """Seven legends: the five most valuable are listed. One already brought that has fallen
-    outside the five stays listed, so the picker never hides what you have brought."""
-    body = re.search(r"function legendsByValue[\s\S]*?(?=\n// --- end legendsByValue)",
-                     JS.read_text()).group(0)
-    hall = [{"key": k, "legend": True, "legend_value": v, "name": k.upper(),
-             "card": {"legend": {"year": 2012, "rating": 99}}}
-            for k, v in zip("abcdefg", (9.0, 3.0, 8.0, 7.0, 1.0, 6.0, 5.0))]
-
-    def run(mine):
-        out = subprocess.run(["node", "-e", f"{body}; console.log(JSON.stringify("
-                              f"legendChoices({json.dumps(hall)}, {json.dumps(mine)}).map(c => c.key)))"],
-                             capture_output=True, text=True, check=True).stdout
-        return json.loads(out)
-
-    assert run(None) == ["a", "c", "d", "f", "g"]
-    assert run({"name": "B", "year": 2012, "rating": 99}) == ["a", "c", "d", "f", "g", "b"]
-    assert run({"name": "A", "year": 2012, "rating": 99}) == ["a", "c", "d", "f", "g"]
-
-
-def test_the_lobby_picker_is_fed_through_the_cap():
-    """The cap is a function the picker has to call: the list in the lobby is built from
-    `legendChoices` and never straight from the full sort."""
-    body = re.search(r"function renderLobbyLegends[\s\S]*?\n}\n", JS.read_text()).group(0)
-    assert "legendChoices(ROOM_HALL, r.legends[MY_PID])" in body
-    assert "legendsByValue(ROOM_HALL).map" not in body

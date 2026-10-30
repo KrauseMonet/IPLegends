@@ -546,6 +546,52 @@ def test_using_and_matching_a_card_takes_the_player_and_spends_the_card(deck, cl
     assert lot.card in team.squad and team.rtm == cards - 1
 
 
+def _asked_twice(conn, code, deck, host, guest, clock):
+    """[A241] Walk to a Right to Match question whose answer "yes" leaves the SAME seat with
+    another question on the same lot -- the winner raised, so the holder is asked to match.
+    That is where a resent answer would have done harm."""
+    for _ in range(60):
+        r = walk_to_rtm(conn, code, deck, host, guest, clock)
+        if r is None:
+            return None
+        pid = r.pid_of[r.rtm_team]
+        probe = load(conn, code)
+        probe.moves = probe.moves + [{"k": "rtm_use", "seat": pid, "use": True}]
+        nxt = ra.replay(probe, deck)
+        if nxt.phase == "rtm_match" and nxt.pid_of[nxt.rtm_team] == pid:
+            return r
+        ra.submit(conn, code, deck, ra.rtm, pid, False)
+    return None
+
+
+def test_a_resent_right_to_match_answer_is_refused_not_applied_to_the_next_question(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    r = _asked_twice(conn, code, deck, host, guest, clock)
+    assert r is not None, "no card was ever raised and put back to its holder"
+    pid, lot, rnd = r.pid_of[r.rtm_team], r.lot.index, au.ROUNDS[r.round_no]
+    ra.submit(conn, code, deck, ra.rtm, pid, True, None, lot, rnd, "rtm_use")
+    after = ra.replay(load(conn, code), deck)
+    assert after.phase == "rtm_match" and after.pid_of[after.rtm_team] == pid
+    moves = list(load(conn, code).moves)
+    with pytest.raises(rooms.StaleMove):
+        ra.submit(conn, code, deck, ra.rtm, pid, True, None, lot, rnd, "rtm_use")
+    assert load(conn, code).moves == moves        # the match question is still unanswered
+
+
+def test_a_right_to_match_answer_for_another_lot_is_refused(deck, clock):
+    conn = FakeConn()
+    code, host, guest = started_mega(conn, deck, clock)
+    r = walk_to_rtm(conn, code, deck, host, guest, clock)
+    pid, rnd = r.pid_of[r.rtm_team], au.ROUNDS[r.round_no]
+    moves = list(load(conn, code).moves)
+    with pytest.raises(rooms.StaleMove):
+        ra.submit(conn, code, deck, ra.rtm, pid, True, None, r.lot.index - 1, rnd, "rtm_use")
+    assert load(conn, code).moves == moves
+    ra.submit(conn, code, deck, ra.rtm, pid, False, None, r.lot.index, rnd, "rtm_use")
+    assert load(conn, code).moves[-1]["k"] == "rtm_use"
+
+
 def test_a_card_nobody_answers_is_not_played(deck, clock):
     conn = FakeConn()
     code, host, guest = started_mega(conn, deck, clock)

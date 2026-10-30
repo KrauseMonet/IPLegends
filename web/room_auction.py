@@ -915,13 +915,27 @@ def retain(room, deck: Deck, player_id: str, picks: list[int]) -> RoomAuctionRep
     return record(room, deck, {"k": "retain", "seat": player_id, "picks": list(picks)})
 
 
-def rtm(room, deck: Deck, player_id: str, yes: bool, price: int | None = None
+def rtm(room, deck: Deck, player_id: str, yes: bool, price: int | None = None,
+        lot: int | None = None, round_name: str | None = None, kind: str | None = None
         ) -> RoomAuctionReplay:
-    """Answer whichever Right to Match question is being asked of this seat."""
+    """Answer whichever Right to Match question is being asked of this seat.
+
+    [A241] The page names the question it is answering -- the lot, the round and which of
+    the three questions -- so an answer can be sent twice safely. Without that, a repeat
+    of "yes, play the card" that arrived after the first had landed would answer the SAME
+    seat's next question on that lot ("match the raise?") or its next lot's card, neither
+    of which was ever shown. Room C7IC7U lost every RTM a player tried because the answer
+    could not be resent on a fresh connection while the page's own one was frozen (A231),
+    and the 15-second clock then answered "no". An old client that names nothing is
+    checked as before."""
     r = replay(room, deck)
     team = _seat(r, player_id)
     if not r.phase.startswith("rtm") or r.rtm_team != team.index:
-        raise AuctionRoomError("no Right to Match is waiting on you")
+        raise AuctionRoomError("that Right to Match question has already been answered")
+    if lot is not None and (lot != r.lot.index
+                            or (round_name is not None and round_name != au.ROUNDS[r.round_no])
+                            or (kind is not None and kind != r.phase)):
+        raise AuctionRoomError("that Right to Match question has already been answered")
     if r.phase == "rtm_use":
         move = {"k": "rtm_use", "seat": player_id, "use": bool(yes)}
     elif r.phase == "rtm_match":

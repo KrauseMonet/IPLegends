@@ -254,7 +254,8 @@ def test_there_is_no_second_hostname_off_the_real_site():
 def test_the_room_page_resends_polls_and_only_the_moves_it_already_retries():
     """A duplicate is safe only for a move that names what it is about (A146); those are
     exactly the moves the page already retries, so the resend follows the same flag. A
-    fill, a twelve, a retention or a Right to Match answer is never sent twice."""
+    fill, a twelve or a retention is never sent twice. [A241] A Right to Match answer is,
+    now that it names its lot, round and question."""
     src = (STATIC / "room.js").read_text()
     post = re.search(r"async function roomPost[\s\S]*?\n}", src).group(0)
     assert re.search(r"hedge:\s*!!retry", post)
@@ -262,6 +263,15 @@ def test_the_room_page_resends_polls_and_only_the_moves_it_already_retries():
     assert re.search(r"/match\?player_id=[^;]*hedge:\s*true", src)                  # the match poll
     retryable = re.search(r"AUCTION_RETRYABLE = new Set\(\[([^\]]*)\]\)", src).group(1)
     assert sorted(re.findall(r"'(\w+)'", retryable)) == sorted(
-        ["bid", "limit", "pass", "offer", "answer", "withdraw", "ready"])
-    for unsafe in ("fill", "twelve", "retain", "rtm"):
+        ["bid", "limit", "pass", "rtm", "offer", "answer", "withdraw", "ready"])
+    for unsafe in ("fill", "twelve", "retain"):
         assert f"'{unsafe}'" not in retryable
+
+
+def test_a_right_to_match_answer_names_the_question_it_answers():
+    """[A241] Resending an answer is safe only because it carries its lot, round and kind,
+    which the server checks. Without them a repeat could answer the next question."""
+    src = (STATIC / "auction.js").read_text()
+    move = re.search(r"function roomMove[\s\S]*?\n}", src).group(0)
+    line = re.search(r"path === 'rtm'\)[^\n]*", move).group(0)
+    assert "...on" in line and "kind:" in line

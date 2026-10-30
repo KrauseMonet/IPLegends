@@ -4040,6 +4040,10 @@ class RoomRtmIn(BaseModel):
     player_id: str
     yes: bool
     price: int | None = None
+    # [A241] which question this answers, so a resent answer cannot land on another one
+    lot: int | None = None
+    round: str | None = None
+    kind: Literal["rtm_use", "rtm_match", "rtm_raise"] | None = None
 
 
 class RoomTwelveIn(BaseModel):
@@ -4138,7 +4142,8 @@ def room_auction_retain(code: str, body: RoomRetainIn):
 
 @app.post("/api/rooms/{code}/auction/rtm", response_model=RoomStateOut)
 def room_auction_rtm(code: str, body: RoomRtmIn):
-    return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price)
+    return _auction_move(code, body.player_id, room_auction.rtm, body.yes, body.price,
+                         body.lot, body.round, body.kind)
 
 
 class RoomTradesIn(BaseModel):

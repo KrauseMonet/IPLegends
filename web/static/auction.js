@@ -880,6 +880,8 @@ function roomMove(path, body){
   if (path === 'bid' && body.done) return ['limit', {max: body.ceiling, ...on}];
   if (path === 'bid') return ['bid', {price: body.ceiling, ...on}];
   if (path === 'pass') return ['pass', {...body, ...on}];
+  // [A241] An answer names its question, so the room can resend it if the line is stuck.
+  if (path === 'rtm') return ['rtm', {...body, ...on, kind: A.rtm && A.rtm.kind}];
   return [path, body];
 }
 

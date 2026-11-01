@@ -50,7 +50,8 @@ global.fetch = (url, init) => {
       if (init.signal.aborted) return;
       if (b.error) return rej(new TypeError('Failed to fetch'));
       const status = b.status || 200;
-      res({status, ok: status < 400, statusText: 'x', json: async () => (b.body || {})});
+      res({status, ok: status < 400, statusText: 'x',
+           json: async () => { if (b.cut) throw new SyntaxError('cut off'); return b.body || {}; }});
     }, b.delay || 0);
   });
 };
@@ -275,3 +276,26 @@ def test_a_right_to_match_answer_names_the_question_it_answers():
     move = re.search(r"function roomMove[\s\S]*?\n}", src).group(0)
     line = re.search(r"path === 'rtm'\)[^\n]*", move).group(0)
     assert "...on" in line and "kind:" in line
+
+
+# [A243] A 200 whose body was cut off read as `{}`, an empty success, and the career page
+# stored that as the career -- losing it. A cut body is a failed request now.
+
+def test_a_cut_off_200_is_a_network_failure_not_an_empty_answer():
+    o = run([{}], {"first": [{"delay": 5, "cut": True}]})
+    assert o["results"][0]["ok"] is False and o["results"][0]["network"]
+    assert o["successes"] == 0
+    assert [n["kind"] for n in o["notes"]] == ["network"]
+
+
+def test_a_cut_off_200_on_a_hedged_request_sends_the_next_copy():
+    o = run([HEDGED], {"first": [{"delay": 5, "cut": True}], "second": [{"delay": 5, "body": {"v": "s"}}]})
+    assert o["results"][0]["ok"] and o["results"][0]["body"] == {"v": "s"}
+    assert [e["host"] for e in o["log"]] == ["first", "second"]
+
+
+def test_an_empty_204_and_a_refusal_with_no_body_still_read_as_before():
+    o = run([{}, {}], {"first": [{"delay": 5, "status": 204, "cut": True},
+                                 {"delay": 5, "status": 409, "cut": True}]})
+    assert o["results"][0] == {"ok": True, "body": {}, "ms": o["results"][0]["ms"]}
+    assert o["results"][1]["ok"] is False and o["results"][1]["status"] == 409

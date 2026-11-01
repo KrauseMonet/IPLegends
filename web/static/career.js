@@ -12,6 +12,24 @@ let CR = {options: null, data: null, busy: false, seen: 0};
 
 const crStore = () => { try { return JSON.parse(localStorage.getItem(CR_KEY)) || {}; } catch(e){ return {}; } };
 const crSave = patch => { try { localStorage.setItem(CR_KEY, JSON.stringify(Object.assign(crStore(), patch))); } catch(e){} };
+// [A243] A career exists only as its token, so the page never stores anything that is not
+// one. A response that arrived cut off once replaced a live career with `{}`: the token was
+// saved as nothing, every retry went out without one (refused, 422) and a reload found no
+// career to load. Every response is checked before it is kept, and the token it replaces
+// is kept beside it (`prev`), so a reload that cannot read one can still pick up the other.
+const crTokenOk = t => typeof t === 'string' && t.indexOf('.') > 0;
+function crKeepToken(t){
+  if (!crTokenOk(t)) throw new Error('That did not come through whole. Try again.');
+  const s = crStore();
+  crSave({token: t, prev: crTokenOk(s.token) && s.token !== t ? s.token : (s.prev || null)});
+}
+// Every career request is a pure function of the token it sends (A199: nothing is stored),
+// so sending one twice cannot play anything twice, and every one may be retried.
+async function crPost(path, body){
+  const d = await api(path, {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify(body)});
+  crKeepToken(d && d.token);
+  return d;
+}
 const crNum = n => Number(n).toLocaleString('en-IN');
 const crOrd = n => { const t = n % 100, u = n % 10;
   return n + (t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'); };
@@ -114,15 +132,14 @@ async function crStart(btn){
   try {
     const num = $('#crNumber').value.trim();
     const seed = typeof ME !== 'undefined' && ME && ME.is_admin ? $('#crSeed').value.trim() : '';
-    const d = await api('/api/career/start', {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify({
+    const d = await crPost('/api/career/start', {
       name, role: crChosen('crRoles').v, debut: Number(crChosen('crDebut').v),
       overseas: crChosen('crPassport').v === '1',
       number: num === '' ? null : Number(num), home: $('#crHome').value.trim(),
       celebration: (crChosen('crCel') || {}).v || '',
       ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v),
       country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : '',
-      ...(seed ? {seed: Number(seed)} : {})})});
-    crSave({token: d.token});
+      ...(seed ? {seed: Number(seed)} : {})});
     CR.seen = 0;
     crShow(d, 'spin');
   } catch(e){ slip(e.message || 'Could not start a career.'); }
@@ -135,9 +152,7 @@ async function crReroll(btn){
   if (CR.busy) return;
   CR.busy = true; btn.disabled = true;
   try {
-    const d = await api('/api/career/reroll', {method: 'POST', headers: CR_JSON,
-                                                body: JSON.stringify({token: CR.data.token})});
-    crSave({token: d.token});
+    const d = await crPost('/api/career/reroll', {token: CR.data.token});
     CR.seen = 0;
     crShow(d, 'spin');
   } catch(e){ slip(e.message || 'Could not reroll.'); }
@@ -154,8 +169,7 @@ async function crMove(move){
   if (move[0] === 'w') crLoading('The papers go to print…', 'Your career, as the papers tell it.');
   else if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
-    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
-    crSave({token: d.token});
+    const d = await crPost('/api/career/move', {token: CR.data.token, move});
     const next = () => crShow(d, d.seasons.length > before ? 'season' : null);
     if (mega && d.auction){ CR.data = d; crHead(d); crTimeline(d); return crAuctionPlay(d.auction, next); }
     next();
@@ -855,8 +869,7 @@ async function crAnswer(i){
   CR.busy = true;
   $('#crFeedAction').innerHTML = `<div class="cr-loading small"><div class="cr-ball"></div><b>The season goes on…</b></div>`;
   try {
-    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move: `i${i}`})});
-    crSave({token: d.token});
+    const d = await crPost('/api/career/move', {token: CR.data.token, move: `i${i}`});
     CR.data = d;
     crHead(d, true);
     crTimeline(d, true);
@@ -893,8 +906,7 @@ async function crCall(i){
   $('#crFeedAction').innerHTML = `<div class="cr-loading small"><div class="cr-ball"></div><b>Playing it…</b></div>`;
   try {
     const move = `m${i}` + (CR.planDirty ? 'p' + CR.plan.join('') : '');
-    const d = await api('/api/career/move', {method: 'POST', headers: CR_JSON, body: JSON.stringify({token: CR.data.token, move})});
-    crSave({token: d.token});
+    const d = await crPost('/api/career/move', {token: CR.data.token, move});
     CR.data = d;
     crHead(d, true);
     crTimeline(d, true);
@@ -1539,9 +1551,26 @@ async function crKeep(d){
 document.addEventListener('signedin', () => { if (CR.data && CR.data.summary) crKeep(CR.data); });
 
 function crNew(){
-  crSave({token: null});
+  crSave({token: null, prev: null});        // a new career on purpose: nothing to fall back to
   crShowCreate();
   window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// The career this browser holds: the current token first, then the one it replaced [A243].
+// A token is dropped only when the server says it cannot be read (a 4xx); a failed
+// connection throws and keeps both for the next reload. Null when there is none to load.
+async function crResume(){
+  const store = crStore();
+  for (const key of ['token', 'prev']){
+    const token = store[key];
+    if (!crTokenOk(token)) continue;
+    try { return await crPost('/api/career/view', {token}); }
+    catch(e){
+      if (!(e.status && e.status < 500)) throw e;
+      crSave({[key]: null});                                   // a token that no longer reads
+    }
+  }
+  return null;
 }
 
 // --- boot ----------------------------------------------------------------------------------
@@ -1552,14 +1581,9 @@ function crNew(){
   loadMeta().then(renderDeckStats).catch(() => {});
   try { CR.options = await api('/api/career/options'); }
   catch(e){ slip('Could not load the career page. Try again.'); return; }
-  const token = crStore().token;
-  if (token){
-    try {
-      const d = await api('/api/career/view', {method: 'POST', headers: CR_JSON, retry: true, body: JSON.stringify({token})});
-      return crShow(d, null);
-    } catch(e){
-      if (e.status && e.status < 500) crSave({token: null});      // a token that no longer reads
-    }
-  }
+  let d = null;
+  try { d = await crResume(); }
+  catch(e){ slip(e.message || 'Could not load your career. Reload to try again.'); }
+  if (d) return crShow(d, null);
   crShowCreate();
 })();

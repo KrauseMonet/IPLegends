@@ -137,6 +137,17 @@ function statusError(r, body){
   return err;
 }
 
+// [A243] A 200 whose body was cut off on the way (a connection dropped mid-download) used to
+// read as `{}` -- an empty success -- and the career page took that for the new state of a
+// career and stored nothing in its place, losing the career for good. A body that cannot be
+// read is BODY_CUT unless the response was meant to be empty (204) or was a refusal anyway,
+// where `{}` only loses the server's wording.
+const BODY_CUT = Symbol('body cut off');
+async function readBody(r){
+  try { return await r.json(); }
+  catch(e){ return r.ok && r.status !== 204 ? BODY_CUT : {}; }
+}
+
 async function apiOnce(path, opts){
   if (opts && opts.hedge && hedgeBackups().length) return apiHedged(path, opts);
   const started = Date.now();
@@ -151,16 +162,21 @@ async function apiOnce(path, opts){
     r = await fetch(path, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
                            signal: ctrl.signal});
   } catch(e){
+    clearTimeout(timer);
     if (e.name === 'AbortError'){
       noteFailure('timeout', method, path, null, started);
       throw timeoutError();
     }
     noteFailure('network', method, path, null, started);
     throw networkError();
-  } finally {
-    clearTimeout(timer);
   }
-  const body = await r.json().catch(() => ({}));
+  // The body is read inside the same timeout, and a body that does not arrive whole is a
+  // failed request rather than an empty answer [A243].
+  const body = await readBody(r).finally(() => clearTimeout(timer));
+  if (body === BODY_CUT){
+    noteFailure(ctrl.signal.aborted ? 'timeout' : 'network', method, path, r.status, started);
+    throw ctrl.signal.aborted ? timeoutError() : networkError();
+  }
   if (r.status >= 500) noteFailure('server', method, path, r.status, started);
   if (!r.ok) throw statusError(r, body);
   noteSuccess();
@@ -271,9 +287,10 @@ function apiHedged(path, opts){
       live++;
       fetch(origin + path, {...fetchOpts, headers: {...API_HEADERS, ...fetchOpts.headers},
                             signal: ctrl.signal})
-        .then(async r => ({r, body: await r.json().catch(() => ({}))}))
+        .then(async r => ({r, body: await readBody(r)}))
         .then(({r, body}) => {
           if (done) return;
+          if (body === BODY_CUT) return failed(networkError());     // [A243] cut off: try another copy
           if (origin) HEDGE_STATE[origin] = {fails: 0, worked: true};
           if (r.status >= 500) return failed(statusError(r, body));
           if (!r.ok) return finish(false, statusError(r, body), origin);

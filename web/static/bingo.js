@@ -12,7 +12,7 @@
 const BG_KEY = 'iplegends_bingo_v1';
 
 let BG = {mode: 'daily', grid: null, guesses: [], state: null, sel: null,
-          players: null, answers: null, busy: false, matches: [], active: 0};
+          answers: null, busy: false, matches: [], active: 0};
 
 // --- storage: the guess list per grid, and the days a daily was finished ------------------
 
@@ -198,13 +198,15 @@ async function bgGuess(pid){
     bgRender();
     const el = document.querySelector(`.bg-cell[data-cell="${cell}"]`);
     if (el) el.classList.add(r.correct ? 'pop' : 'shake');
+    // Finish before anything else can throw: a last guess that was wrong once crashed on its own
+    // message and skipped the finish, so the result was never saved or ranked (A242).
+    if (BG.state.finished) bgFinish(true);
     if (!r.correct){
-      const name = (BG.players.find(p => p.id === pid) || {}).name || 'That player';
+      const name = ((PZ_PLAYERS || []).find(p => p.id === pid) || {}).name || 'That player';
       slip(`${name} doesn't fit. ${BG.state.guesses_left} guess${BG.state.guesses_left === 1 ? '' : 'es'} left.`);
       $('#bgInput').value = ''; $('#bgResults').innerHTML = '';
-      $('#bgInput').focus({preventScroll: true});
+      if (!BG.state.finished) $('#bgInput').focus({preventScroll: true});
     }
-    if (BG.state.finished) bgFinish(true);
   } catch(e){ slip(e.message); }
   finally { BG.busy = false; }
 }

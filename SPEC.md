@@ -3016,3 +3016,50 @@ sends him back one step -- except in his first full-time season in the new job, 
 coach's to give: a poor one is not yet the end.
 Every threshold here is declared game design. A season in a changed role keeps its role, so a
 career legend is carded in the role his best season was played in.
+
+## 24. Who your player becomes [A245]
+
+Every choice in a career makes something of the player, for good. Four TRAITS, each a number
+from -3 to +3, never shown as a number -- the player card shows words ("An aggressive
+player", "Steely in big games"), and a season card says when one moved a whole level:
+
+- **Temper**, calm to aggressive. A STYLE, not a value: an aggressive batter scores faster and
+  gets out more often, an aggressive bowler takes more wickets and costs more, along the
+  trade-off a key moment's call already uses (A204, `TRADE_SLOPE` measured from the state
+  model). A full step is a third of a key-moment call; a fully aggressive player plays every
+  match as one attacking call. It does not move the Rating.
+- **Nerve**, how he plays in must-wins, make-or-breaks and playoffs, and only there.
+- **Work**, 1.5 Rating points a step for good, added AFTER the career's arc is capped at the
+  ceiling: the one way past the potential shown, and the Rating shows it.
+- **Leadership**, no change to how he bats or bowls. A leader (two steps or more) keeps his
+  place through one poor season and is asked to lead the side.
+
+A move is CERTAIN -- the choice decides it, never a coin flip -- and lands from the next
+season. Every option of every card either moves a trait or has a concrete consequence
+(matches, money, standing, the career clock, the armband), or is marked neutral and says in
+its hint what it protects; a test holds every card to that. The hard path usually costs this
+season (a rebuilt technique, a missed camp) and builds the player; the comfortable answer
+protects the season and often costs something later. Key-moment calls build temper too: three
+the same way make a step.
+
+A teammate who teaches passes on his style, read from his own real numbers that season
+projected onto the same trade-off: a mentor who took the game on makes you lean aggressive.
+When the coach offers a trial in a new discipline (§23), the squad's best regular bowler of
+that style (or its best batter at five to seven) comes with it, and the new discipline grows
+toward the player HE was that season where that is better than where you start.
+
+**Captaincy** pays off where the archive can back it, and nowhere it cannot: a captain is never
+dropped at a make-or-break; his club pays 10% more to keep him and offers to retain him a
+little below the usual bar; each season as captain builds leadership, and taking the side into
+the playoffs builds nerve. It never makes teammates play better.
+
+**Cards that make sense.** A captain meets a dressing-room row as the captain (a team meeting,
+a quiet word, or letting it go), is never asked to "back the captain", and makes his case to
+the coach rather than to himself. A mentor is offered only to a player still growing, no more
+than nine seasons in, rated under 88, and only when the squad has someone rated at least three
+above him. Nobody rebuilds the technique of a veteran or of a player rated 88 or more. A card
+that does not fit gives way to one that does.
+
+The guardrail is measured, not argued: on paired careers (`tools.career_traits_report`), all
+the right choices lift a peak Rating about five points, all the wrong ones lower it, and a
+careless player lands close to a career with the traits switched off.

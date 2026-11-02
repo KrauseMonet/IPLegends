@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import career as C
-from game import national, press
+from game import career_traits as ct, national, press
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
@@ -444,6 +444,7 @@ class CareerOut(BaseModel):
     caps: int = 0
     in_side: bool = False
     standing: str = ""            # how your club sees you, in words; "" when neutral (A230)
+    traits: list[str] = []        # who your player has become, in words, never numbers (A245)
 
 
 def _template(c) -> TemplateOut:
@@ -534,10 +535,9 @@ def _moment(m: C.Moment, role: str) -> MomentOut:
 def _pending(p: C.Pending, role: str = "") -> PendingOut:
     event = incident = None
     if p.kind == "event":
-        name, club = p.event_fill
         event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
-                         options=[EventOptionOut(label=C.fill(o.label, name, club),
-                                                 hint=C.fill(o.hint, name, club))
+                         options=[EventOptionOut(label=C.fill(o.label, *p.event_fill),
+                                                 hint=C.fill(o.hint, *p.event_fill))
                                   for o in p.event.options])
     coach = None
     if p.kind == "coach" and p.coach:
@@ -792,7 +792,16 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         age=C.DEBUT_AGE + (career.pending.k if career.pending else len(career.seasons) - 1),
         injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])],
         standing=(C.STANDING_WORDS.get(career.checkpoint.standing, "")
-                  if career.checkpoint and not career.summary else ""))
+                  if career.checkpoint and not career.summary else ""),
+        traits=_trait_words(career))
+
+
+def _trait_words(career: C.Career) -> list[str]:
+    """Who your player has become (A245): the checkpoint's traits, in words."""
+    if career.checkpoint is None:
+        return []
+    role = career.role_now or career.setup.role
+    return ct.words(career.checkpoint.traits, bowler=C.role_kind(role) == "bowler")
 
 
 def _rating_now(career: C.Career) -> int:
@@ -802,7 +811,7 @@ def _rating_now(career: C.Career) -> int:
         return career.seasons[-1].rating if career.seasons else 0
     cp = career.checkpoint
     return C.rating_at(career.start, career.top,
-                       C.arc_point(cp.clock, cp.permanent, 0.0, career.shape))
+                       C.career_t(cp, career.start, career.top, career.shape))
 
 
 def _auction_year(career: C.Career) -> int:

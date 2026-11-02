@@ -76,6 +76,11 @@ class IncidentOption:
     thread: str = ""           # something a later season remembers
     tone: str = ""             # 'up' | 'down' | '' for the season card's mark
     turns: tuple[Turn, ...] = ()
+    # [A245] What the choice makes of you, for good, after the season (`game.career_traits`):
+    # certain, never a turn of luck. `neutral` marks an option with no lasting effect at all,
+    # whose hint names what it protects.
+    traits: tuple[tuple[str, float], ...] = ()
+    neutral: bool = False
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,18 @@ class Incident:
     options: tuple[IncidentOption, ...]
     injury: bool = False
     weight: int = 0            # among the non-injury incidents
+    # [A245] For a player who is himself the captain: the words, and where the dressing room
+    # is his to settle, the options. None: the same card.
+    captain_text: str | None = None
+    captain_options: tuple[IncidentOption, ...] | None = None
+
+    def for_captain(self, captain: bool) -> "Incident":
+        """This incident as a captain meets it: nobody asks the captain to back the captain."""
+        if not captain or (self.captain_text is None and self.captain_options is None):
+            return self
+        import dataclasses
+        return dataclasses.replace(self, text=self.captain_text or self.text,
+                                   options=self.captain_options or self.options)
 
 
 ALL = frozenset({"batter", "keeper", "pace", "spin", "allrounder"})
@@ -141,14 +158,17 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         "not worth the money.", "poor_game", ALL,
         (IncidentOption("Own it", "\"I have to be better.\" The dressing room will hear it.",
                         "You held your hand up, and the dressing room noticed.", standing=1,
-                        tone="up"),
-         IncidentOption("Say nothing", "Let it blow over.",
-                        "You kept your head down and let the noise pass."),
+                        tone="up", traits=(("nerve", 0.5), ("lead", 0.5))),
+         IncidentOption("Say nothing", "Let it blow over, and keep your cool.",
+                        "You kept your head down and let the noise pass.",
+                        traits=(("temper", -0.5),)),
+         # [A245] It makes you angrier at the crease, for good: certain, not a coin flip. What
+         # it does for the rest of THIS season is still a turn of the noise around you.
          IncidentOption("Hit back at the press conference", "Give them a headline of your own.",
                         "You hit back at the press conference, and it made the back pages.",
-                        thread="press_feud",
+                        thread="press_feud", traits=(("temper", 1.0), ("lead", -0.5)),
                         turns=(Turn(0.5, "The anger got you going.", form=1),
-                               Turn(0.5, "The row followed you round the grounds.", form=-1)))),
+                               Turn(0.5, "The row followed you round the grounds.")))),
         weight=3),
     Incident(
         "row", "A row in the dressing room",
@@ -156,37 +176,62 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         "blames {what}.", "heavy_defeat", ALL,
         (IncidentOption("Back the captain", "The side needs to pull together, and be seen to.",
                         "You stood with the captain, and the dressing room settled.", standing=1,
-                        tone="up"),
+                        tone="up", traits=(("lead", 0.5),)),
          IncidentOption("Have it out with him", "Clear the air, whatever it costs.",
-                        "You had it out with him behind closed doors.",
+                        "You had it out with him behind closed doors.", traits=(("temper", 1.0),),
                         turns=(Turn(0.5, "Clearing the air sharpened you.", form=1),
                                Turn(0.5, "Word of it got out, and the management were not pleased.",
                                     standing=-1))),
-         IncidentOption("Stay out of it", "Not your fight.", "You kept out of the row.")),
-        weight=2),
+         IncidentOption("Stay out of it", "Not your fight.", "You kept out of the row.",
+                        traits=(("lead", -0.5),))),
+        weight=2,
+        captain_text="After the hammering by {opp}, voices are raised in the dressing room: a "
+                     "senior player blames {what}. It is your dressing room.",
+        captain_options=(
+            IncidentOption("Call a team meeting", "Everyone in the room, and everyone says it.",
+                           "You called the team together, and the side came out of it as one.",
+                           standing=1, tone="up", traits=(("lead", 1.0),)),
+            IncidentOption("Take him aside", "Settle it quietly, one to one.",
+                           "You took him aside and settled it between the two of you.",
+                           traits=(("lead", 0.5), ("temper", -0.5))),
+            IncidentOption("Let it go", "It will blow over. Probably.",
+                           "You let the row run its course.", standing=-1, tone="down",
+                           traits=(("lead", -1.0),)))),
     Incident(
         "collapse", "A collapse",
         "{what} against {opp}. The captain asks you to drop anchor for the rest of the season "
         "and bat through.", "collapse", BATTING,
         (IncidentOption("Take the anchor's job", "Fewer fireworks. Someone has to be there at the end.",
                         "You took the anchor's job for the rest of the season.", approach=0,
-                        standing=1, tone="up"),
-         IncidentOption("Play your own game", "It is what got you here.",
-                        "You kept playing your own game."),
+                        standing=1, tone="up", traits=(("temper", -1.0),)),
+         IncidentOption("Play your own game", "It is what got you here, and you keep it.",
+                        "You kept playing your own game.", neutral=True),
          IncidentOption("Take the attack to them", "Somebody has to take the bowlers on.",
                         "You decided the answer was attack, for the rest of the season.",
-                        approach=2)),
-        weight=2),
+                        approach=2, traits=(("temper", 1.0),))),
+        weight=2,
+        captain_text="{what} against {opp}. The batting needs an answer, and as captain it is "
+                     "yours to give."),
     Incident(
         "death", "The death overs",
         "{what} against {opp}. The captain asks whether you will take the death overs from "
         "here on.", "death_hit", BOWLING,
         (IncidentOption("Take the death overs", "The hardest job in the side. He asked you.",
                         "You took the death overs for the rest of the season.", death=True,
-                        standing=1, tone="up"),
-         IncidentOption("Stick to your usual overs", "Do what you do best.",
-                        "You stuck to your usual overs.")),
-        weight=2),
+                        standing=1, tone="up", traits=(("nerve", 1.0),)),
+         IncidentOption("Stick to your usual overs", "Do what you do best, where you do it best.",
+                        "You stuck to your usual overs.", traits=(("nerve", -0.5),))),
+        weight=2,
+        captain_text="{what} against {opp}. The death overs need somebody. As captain, will you "
+                     "take them yourself from here on?",
+        captain_options=(
+            IncidentOption("Take the death overs yourself", "The hardest job in the side. Lead "
+                           "from the front.", "You took the death overs yourself for the rest "
+                           "of the season.", death=True, standing=1, tone="up",
+                           traits=(("nerve", 1.0), ("lead", 0.5))),
+            IncidentOption("Keep your usual overs", "Do what you do best, and back him to come "
+                           "good.", "You kept your usual overs and backed your bowler.",
+                           traits=(("lead", 0.5), ("nerve", -0.5))))),
     Incident(
         "wedding", "A family wedding",
         "Your sister is getting married back home in three days.", "seeded", ALL,
@@ -201,11 +246,12 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         "slump", "Out of form",
         "Your last three: {what}. Nothing is coming off, and you can feel it.", "form", ALL,
         (IncidentOption("Grind it out in the nets", "Hit balls until it comes back.",
-                        "You ground it out in the nets.",
+                        "You ground it out in the nets.", traits=(("work", 0.5),),
                         turns=(Turn(0.5, "It clicked one evening.", form=1),
                                Turn(0.5, "Nothing changed."))),
          IncidentOption("Ask for a break", "Step away for two matches and clear your head.",
                         "You asked for a break and sat out two matches.", out=2,
+                        traits=(("work", -0.5),),
                         turns=(Turn(0.6, "The break cleared your head.", form=1),
                                Turn(0.4, "You came back no different."))),
          IncidentOption("Call your old coach", "Go back to the person who knows your game.",

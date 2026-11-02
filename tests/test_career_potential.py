@@ -189,7 +189,8 @@ def test_a_negative_change_never_moves_into_the_potential(deck):
 # --- the clock, in played careers -------------------------------------------------------------
 
 
-AGE = {(e.key, o.label): o.age for e in C.EVENTS for o in e.options}
+AGE = {(e.key, o.label): o.age
+       for e in list(C.EVENTS) + list(C.FOLLOW_UPS.values()) for o in e.options}
 
 
 def _age(event: str, choice: str) -> float:
@@ -199,7 +200,7 @@ def _age(event: str, choice: str) -> float:
         return AGE[(event, choice)]
     for (key, label), age in AGE.items():
         if key == event and "{" in label and re.fullmatch(
-                re.escape(label).replace(r"\{club\}", ".+"), choice):
+                re.escape(label).replace(r"\{club\}", ".+").replace(r"\{boss\}", ".+"), choice):
             return age
     raise KeyError((event, choice))
 

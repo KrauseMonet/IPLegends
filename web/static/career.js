@@ -267,6 +267,7 @@ function crHead(d, hold){
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
+        ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
         ${crNationalChip(d)}
         ${crAmbitionChips(d)}
       </div>

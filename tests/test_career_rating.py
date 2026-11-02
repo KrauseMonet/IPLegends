@@ -157,7 +157,10 @@ def test_a_rebuild_costs_this_season_and_lands_the_next(deck, model, monkeypatch
     # and the permanent change reached the ability the second season was played at
     assert second.potential == 0, "the fixture must not raise its potential after season 1"
     dev = C.points_t(first.development, c.start, c.ceiling)
-    assert second.ability == pytest.approx(C.arc_point(1, dev + C.points_t(turned.permanent, c.start, c.ceiling), 0.0))
+    # [A245] the rebuild is also a step of work ethic, which lands on top of the arc
+    work = C.points_t(C.ct.work_points(dict(rebuild.traits)), c.start, c.ceiling)
+    assert second.ability == pytest.approx(
+        C.arc_point(1, dev + C.points_t(turned.permanent, c.start, c.ceiling), 0.0) + work)
 
 
 def test_a_lasting_change_is_told_in_a_fans_words(deck, model, monkeypatch):

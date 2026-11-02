@@ -46,6 +46,34 @@ from web import session as sess
 DAILY_REROLLS = 0
 
 
+# [A244] The first day on which a wicketkeeper by trade can fill the keeper place. A day
+# before it was drafted, and marked, with only IPL keepers eligible, and widening the
+# rule changes which cards the forward check offers -- so an old day's stored state would
+# replay to a different twelve. It keeps the old rule. Set to the day after the change
+# ships; move it if it ships later.
+KEEPER_TRADE_FROM = datetime.date(2026, 11, 3)
+
+_IPL_KEEPER_DECKS: dict[int, Deck] = {}
+
+
+def ipl_keeper_deck(full: Deck) -> Deck:
+    """`full` with each card's keeper eligibility as it was before A244 (`keeper_ipl`).
+
+    Cached per deck object: the deck is loaded once at boot and never changed, and a copy
+    costs about 3,300 `replace` calls."""
+    deck = _IPL_KEEPER_DECKS.get(id(full))
+    if deck is None or deck.fs_ids != full.fs_ids:
+        deck = Deck(
+            cards_by_fs={fs: [c if c.keeper_ipl is None
+                              else replace(c, keeper_eligible=c.keeper_ipl)
+                              for c in cards]
+                         for fs, cards in full.cards_by_fs.items()},
+            fs_ids=list(full.fs_ids))
+        _IPL_KEEPER_DECKS.clear()
+        _IPL_KEEPER_DECKS[id(full)] = deck
+    return deck
+
+
 def deck_for_day(full: Deck, fs_ids) -> Deck:
     """The day's deck: the given squads only, over the whole archive's cards.
 
@@ -105,6 +133,8 @@ def replay_day(full: Deck, challenge_date, player: int | str, deck_fs_ids,
     top-up takes that back to ~0% while firing on about 15 picks in 6,000. `Result.widened`
     counts it, so a day whose deck cannot serve its own drafters is visible rather than
     quietly papered over."""
+    if challenge_date < KEEPER_TRADE_FROM:
+        full = ipl_keeper_deck(full)
     return sess.replay(
         deck_for_day(full, deck_fs_ids),
         player_seed(challenge_date, player),

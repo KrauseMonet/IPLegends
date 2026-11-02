@@ -562,13 +562,16 @@ def do_keepers(conn) -> None:
     print(f"  keepers added by hand      {len(marked - derived):>5}")
     print(f"  is_keeper set              {len(keepers):>5}")
 
-    # Everyone who kept is in here as a yes; everyone plausible is in as a blank for
-    # a human to decide. Sorted so the ones that matter are reviewed first.
+    # Everyone who kept is in here as a yes; everyone else who played is in as a blank
+    # for a human to decide. [A244] EVERY player, not just the regulars: the decision is
+    # now whether he is a wicketkeeper by trade, and a keeper-batter with four IPL
+    # matches (Robin Minz) is as much one as Dhoni. Sorted so the ones that matter are
+    # reviewed first.
     candidates = sorted(
         (
             (played.get(pid, 0), people[pid], pid)
             for pid in people
-            if pid in derived or played.get(pid, 0) >= 10
+            if pid in derived or played.get(pid, 0) > 0
         ),
         reverse=True,
     )

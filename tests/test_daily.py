@@ -121,8 +121,12 @@ def test_repositions_are_still_allowed():
 # had to re-pin one or more -- while the two `pick_random` cases survived all four,
 # because a random drafter never reads a rating. The policy is not what this test is
 # about; that a restricted deck can strand and the fallback rescues it is.
-STRANDING_CASES = ((51, pick_random), (144, pick_random), (198, pick_random),
-                   (211, pick_random), (264, pick_random))
+#
+# [A244] Three of them (51, 198, 211) did move once, for a reason that is not a rating:
+# keepers by trade became keeper-eligible, which removes some keeper dead ends. Re-found
+# by the same search; stranding is rarer now (7 cases in 800 days, against 5 in 265).
+STRANDING_CASES = ((144, pick_random), (264, pick_random), (434, pick_random),
+                   (490, pick_random), (684, pick_random))
 
 
 @pytest.mark.parametrize("offset,policy", STRANDING_CASES)

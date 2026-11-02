@@ -164,6 +164,14 @@ def _career_roles(conn) -> dict[str, str]:
             for pid, by_role in counts.items()}
 
 
+def career_role(role: str | None, keeper: bool) -> str | None:
+    """[A244] A batter who can keep wicket -- by trade, or because he kept in the IPL -- is
+    a keeper, whatever most of his seasons' roles say: those record who held the gloves for
+    that squad, and a keeper-batter behind somebody else's gloves is still one. A bowler or
+    all-rounder keeps his role."""
+    return "keeper" if keeper and role == "batter" else role
+
+
 def build_players(conn, deck) -> list[PlayerFacts]:
     """Every person in the deck, with the career facts a puzzle can ask about."""
     franchises: dict[str, set[str]] = defaultdict(set)
@@ -214,6 +222,7 @@ def build_players(conn, deck) -> list[PlayerFacts]:
     out = []
     for pid in sorted(name):
         years = runs_by_year[pid].keys()
+
         out.append(PlayerFacts(
             person_id=pid, name=name[pid],
             franchises=tuple(sorted(franchises[pid])), seasons=tuple(sorted(years)),
@@ -223,7 +232,8 @@ def build_players(conn, deck) -> list[PlayerFacts]:
             best_season_wickets=max(wkts_by_year[pid].values()),
             hundreds=hundreds.get(pid, 0), fifties=fifties.get(pid, 0),
             four_wicket_hauls=hauls.get(pid, 0), sixes=sixes.get(pid, 0),
-            role=role_of.get(pid), country=country.get(pid), bowling_style=style.get(pid),
+            role=career_role(role_of.get(pid), keeper[pid]),
+            country=country.get(pid), bowling_style=style.get(pid),
             squads=tuple(sorted(squad_of[pid]))))
     return out
 

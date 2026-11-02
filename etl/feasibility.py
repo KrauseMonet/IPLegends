@@ -152,12 +152,11 @@ class Card:
     bowl: float | None = None
     band: str | None = None
     role: str | None = None
-    # [A77] True if `role == "keeper"` THIS season, OR this person is `role == "keeper"`
-    # in some OTHER season of their own career -- derived from squad_members' own
-    # per-season role (A24/A52's trustworthy signal), never from the stale, mostly-
-    # blank `people.is_keeper` CSV column A24 already superseded (that column is not
-    # read here at all any more). A season's `role`/rating/icon are untouched either
-    # way; only whether a card can satisfy the squad's keeper requirement widens.
+    # [A77, A244] True if this person can keep wicket: `role == "keeper"` in ANY season of
+    # his IPL career (squad_members' per-season role, A24/A52), OR he is a wicketkeeper by
+    # trade (`people.is_keeper`, hand-checked for every player from the public record,
+    # A244). A season's `role`/rating/icon are untouched either way; only whether a card
+    # can satisfy a keeper requirement widens.
     keeper_eligible: bool = False
     season_year: int | None = None
     franchise: str | None = None
@@ -201,6 +200,10 @@ class Card:
     bat_dismissal: float | None = None
     bowl_scoring: float | None = None
     bowl_dismissal: float | None = None
+    # [A244] The A77 answer -- kept wicket in some IPL season -- WITHOUT the by-trade
+    # widening. Only `web.daily` reads it, so a day scored before A244 replays under the
+    # rule it was scored under. None means "the same as `keeper_eligible`".
+    keeper_ipl: bool | None = None
 
     @property
     def strike_rate(self) -> float | None:
@@ -280,6 +283,13 @@ class Deck:
         return dict(supply)
 
 
+def keeper_rule(role: str | None, person_id: str, ever_kept, by_trade) -> tuple[bool, bool]:
+    """(can keep wicket, could under A77): [A244] a card can keep if this season's role is
+    keeper, if the person kept in any IPL season, or if he is a wicketkeeper by trade."""
+    ipl = role == "keeper" or person_id in ever_kept
+    return ipl or person_id in by_trade, ipl
+
+
 def load_deck(conn) -> Deck:
     """Every rated player-season, and the batting role (A76) it may bat under.
 
@@ -355,11 +365,15 @@ def load_deck(conn) -> Deck:
 
     # [A77] Who has EVER kept in some season of their own career, per squad_members'
     # own per-season role -- the same trustworthy signal A24/A52 built (stumpings,
-    # gap-filled from the public record), not the stale `people.is_keeper` CSV (A24
-    # already superseded it; it is not read here at all any more).
+    # gap-filled from the public record).
     ever_kept = {
         row[0] for row in conn.execute("select distinct person_id from squad_members "
                                         "where role = 'keeper'")
+    }
+    # [A244] Who is a wicketkeeper by trade, from `keepers.csv`: decided for every player
+    # from the public record (it was mostly blank when A77 stopped reading it).
+    by_trade = {
+        row[0] for row in conn.execute("select person_id from people where is_keeper")
     }
 
     cards_by_fs: dict[int, list[Card]] = defaultdict(list)
@@ -372,7 +386,7 @@ def load_deck(conn) -> Deck:
             career_by_person.get(person_id, {}),
             role,
         )
-        keeper_eligible = role == "keeper" or person_id in ever_kept
+        keeper_eligible, keeper_ipl = keeper_rule(role, person_id, ever_kept, by_trade)
         cards_by_fs[fs_id].append(
             Card(fs_id, person_id, name, bat, bowl, band, role, keeper_eligible,
                  season_year, franchise, overseas, bowling_style, display,
@@ -380,7 +394,8 @@ def load_deck(conn) -> Deck:
                  bat_runs=bat_runs, bat_balls=bat_balls, bowl_wickets=bowl_wickets,
                  bowl_runs=bowl_runs, bowl_balls=bowl_balls,
                  bat_scoring=bat_scoring, bat_dismissal=bat_dismissal,
-                 bowl_scoring=bowl_scoring, bowl_dismissal=bowl_dismissal)
+                 bowl_scoring=bowl_scoring, bowl_dismissal=bowl_dismissal,
+                 keeper_ipl=None if keeper_ipl == keeper_eligible else keeper_ipl)
         )
 
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]

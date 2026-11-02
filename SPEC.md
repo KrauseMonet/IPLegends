@@ -3017,6 +3017,16 @@ coach's to give: a poor one is not yet the end.
 Every threshold here is declared game design. A season in a changed role keeps its role, so a
 career legend is carded in the role his best season was played in.
 
+**The side's need [A246].** The coach is far more likely to ask (60% instead of 25%) when the
+club you join that season needs the job done: a batter whose twelve, without him, has fewer than
+five regular bowlers (150+ balls, the engine's own rule -- such a side bowls him anyway as its
+change bowler), or a bowler whose twelve has fewer than five regular batters. The offer says
+why. Saying yes to a side that needs you builds leadership; saying no costs the club's standing
+and some leadership. With no need the offer, its chance and its answers are exactly as before.
+The archive does NOT say real sides behave like this -- real squads cover a weak attack with
+all-rounders, not batters (2.2% of overs from batters in the weakest-attack quartile against
+1.7% in the strongest) -- so the reason is the game's own engine, not realism.
+
 ## 24. Who your player becomes [A245]
 
 Every choice in a career makes something of the player, for good. Four TRAITS, each a number

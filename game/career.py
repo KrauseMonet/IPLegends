@@ -1163,7 +1163,7 @@ def discipline_rank(lines: dict, key: tuple, disc: str) -> float | None:
 
 
 def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
-               squad: bool) -> dict | None:
+               squad: bool, need: str | None = None) -> dict | None:
     """What the coach offers before this season, if anything: the full-time role after a
     good trial, a full-time bowler's job to an all-rounder whose bowling carries him, or a
     trial. One a season, in that order. Its own random stream, so it never moves a match."""
@@ -1186,15 +1186,88 @@ def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
         if prev.bowl_rank >= SPECIALISE_BOWL or fading:
             card = COACH_FADING if fading and prev.bowl_rank < SPECIALISE_BOWL else COACH_SPECIALISE
             return dict(card, target=FULL_TIME)
-    if (now == setup.role and setup.role in TRIAL_ROLES
-            and cp.trials < COACH_TRIALS_MAX and COACH_TRIAL_FROM <= k <= COACH_TRIAL_UNTIL
-            and random.Random(f"{seed}:coach:{k}").random() < COACH_TRIAL_CHANCE):
+    # [A246] The side's need, when it is the job this player would take up, raises the
+    # chance; the draw is the same stream, so with no need nothing changes.
+    needed = need == ("bat" if origin == "bowler" else "bowl")
+    chance = COACH_NEED_CHANCE if needed else COACH_TRIAL_CHANCE
+    if (trial_eligible(setup, cp, k, squad)
+            and random.Random(f"{seed}:coach:{k}").random() < chance):
         if origin == "bowler":
-            return dict(COACH_TRIAL_BAT, target="allrounder")
-        if style:
-            return dict(COACH_TRIAL_BOWL, target="allrounder")
-        return dict(COACH_TRIAL_STYLE, target="allrounder")
+            card = dict(COACH_TRIAL_BAT, target="allrounder")
+        elif style:
+            card = dict(COACH_TRIAL_BOWL, target="allrounder")
+        else:
+            card = dict(COACH_TRIAL_STYLE, target="allrounder")
+        return asked_by_need(card) if needed else card
     return None
+
+
+def trial_eligible(setup: Setup, cp: "Checkpoint", k: int, squad: bool) -> bool:
+    """Whether the coach could offer a trial this season at all (A238's conditions)."""
+    now = cp.roles[-1] if cp.roles else setup.role
+    return (not squad and now == setup.role and setup.role in TRIAL_ROLES
+            and cp.trials < COACH_TRIALS_MAX and COACH_TRIAL_FROM <= k <= COACH_TRIAL_UNTIL)
+
+
+# --- the side's need [A246] -----------------------------------------------------------------
+# The coach asks because the side needs it: a batter whose twelve has fewer than five regular
+# bowlers (the engine's own volume rule, A203: such a side bowls him anyway as its change
+# bowler, A206/A239), or a bowler whose twelve has fewer than NEED_BATTERS regular batters.
+# Measured first, and the archive does NOT say real sides do this: by quality of attack, the
+# weakest quartile of real squads got 2.2% of overs from batters against 1.7% for the
+# strongest; by regular bowlers, three-bowler squads 1.9% against five-bowler squads 2.1%. So
+# the reason is the game's own engine, never "real IPL behaviour". Declared game design.
+COACH_NEED_CHANCE = 0.6
+NEED_BOWLERS = 5                     # regular bowlers a twelve needs (BOWLERS_IN_TWELVE)
+# Regular batters a twelve needs before a bowler is asked to bat higher. "Nobody at five to
+# seven" was tried first and never fires: 161 of the 166 real twelves have two or more. The
+# archive's own gradient is by count -- bowlers face 13.5% of balls in squads with four
+# regular batters, 10.8% with five, 7.5% with seven. Six was tried next and made need the
+# NORM: a bowler joining the eleven pushes a batter out, so his side was short in 52-56% of
+# career seasons. Under five: 12 of 166 real twelves, 14-19% of a bowler's career seasons.
+NEED_BATTERS = 5
+NEED_TEXT = {
+    "trial_bowl": "The coach takes you aside. \"We are a bowler short, and you are going to "
+                  "bowl anyway. Let's make it official: a season as an all-rounder?\"",
+    "trial_bat": "The coach takes you aside. \"We are short of runs in the lower order. Pad up "
+                 "at six or seven this season and keep bowling?\"",
+}
+
+
+def squad_need(deck: Deck, you: Card, fs_id: int) -> str | None:
+    """What the side you join this season is short of, by the eleven (and Impact Player) it
+    would actually pick with you in it: "bowl" (under NEED_BOWLERS regular bowlers besides
+    you), "bat" (under NEED_BATTERS regular batters), or None."""
+    from game.__main__ import ATTACK_MIN_BALLS, BAT_MIN_BALLS
+
+    xi, impact = xi_with(you, list(deck.cards_by_fs[fs_id]))
+    twelve = [c for c in xi + ([impact] if impact is not None else []) if c.person_id != YOU_ID]
+    if _kind(you) == "batter":
+        regular = sum((c.bowl_balls or 0) >= ATTACK_MIN_BALLS for c in twelve)
+        return "bowl" if regular < NEED_BOWLERS else None
+    if _kind(you) == "bowler":
+        regular = sum((c.bat_balls or 0) >= BAT_MIN_BALLS and c.role != "bowler" for c in twelve)
+        return "bat" if regular < NEED_BATTERS else None
+    return None
+
+
+def asked_by_need(card: dict) -> dict:
+    """A trial the side needs (A246): the coach says why, saying yes is backing the side, and
+    saying no costs you with the club."""
+    opts = []
+    for o in card["options"]:
+        if o["take"]:
+            o = dict(o, traits=list(o.get("traits", [])) + [("lead", NEED_LEAD)])
+        else:
+            o = dict(o, standing=NEED_STANDING, traits=list(o.get("traits", [])) + [("lead", -NEED_LEAD)],
+                     hint=o["hint"] + " The side needed you, and they will remember.",
+                     story=o["story"] + " The club had asked because it needed you.")
+        opts.append(o)
+    return dict(card, need=True, text=NEED_TEXT[card["key"]], options=opts)
+
+
+NEED_LEAD = 0.5
+NEED_STANDING = -1
 
 
 def _opt(label: str, hint: str, story: str, take: bool, style: str = "") -> dict:
@@ -1281,7 +1354,8 @@ def _mentored(opt: dict, m: dict | None, add: str) -> dict:
     out = dict(opt, mentor=m,
                hint=f"{m['name']} will take you through it. {style}".strip(),
                story=f"{opt['story']} {m['name']} took charge of your {job}.",
-               traits=[("temper", MENTOR_LEAN * lean)] if lean else [])
+               traits=list(opt.get("traits", []))
+               + ([("temper", MENTOR_LEAN * lean)] if lean else []))
     return out
 
 
@@ -4164,7 +4238,12 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         already = cp.captain is not None and cp.captain == canonical(offer.franchise)
         # [A238] What the coach offers before the season: a trial, the full-time role a good
         # trial earned, or a full-time bowler's job. Answered `t{i}`; turning it down is fine.
-        coach = coach_card(seed, setup, start, cp, k, squad_now)
+        need = None
+        if COACH_ON and trial_eligible(setup, cp, k, squad_now):
+            here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
+                           fs_id=offer.fs_id, year=year, franchise=offer.franchise, role=rd)
+            need = squad_need(deck, here, offer.fs_id)
+        coach = coach_card(seed, setup, start, cp, k, squad_now, need)
         if coach is not None:
             coach = with_coach_mentor(deck, coach, offer.fs_id, start, cp)
         coach_said, coach_rec = None, None
@@ -4177,7 +4256,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 return career
             pick = coach["options"][_index(move, "t", len(coach["options"]))]
             coach_said = (pick["story"], "up" if pick["take"] else "")
-            coach_rec = {"key": coach["key"], "choice": pick["label"], "take": pick["take"]}
+            coach_rec = {"key": coach["key"], "choice": pick["label"], "take": pick["take"],
+                         "need": bool(coach.get("need"))}
+            cp.standing += pick.get("standing", 0)
             trial = False
             if coach["key"] == "switch":
                 cp.coach_next = ""

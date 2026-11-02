@@ -441,9 +441,12 @@ def _stats(r):
             r.position)
 
 
-def test_turning_the_coach_down_changes_no_match(deck, model):
+def test_turning_the_coach_down_changes_no_match(deck, model, monkeypatch):
     """A declined offer is a sentence in the season's notes and nothing else: every season
-    plays exactly as it would with no coach at all."""
+    plays exactly as it would with no coach at all. [A246] That holds for an offer the side
+    does not need; refusing a side that needs you costs standing, by design, and is tested in
+    test_career_need.py -- so the side's need is switched off here."""
+    monkeypatch.setattr(C, "squad_need", lambda deck, you, fs: None)
     setup = C.Setup("Test", "opener", 2010, False)
     declined, moves = _drive(deck, model, 3, setup, lambda c: len(c["options"]) - 1)
     assert any(r.coach for r in declined.seasons)

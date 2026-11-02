@@ -499,11 +499,12 @@ const ICON = {
   unrated:    `<span class="ic none" title="Not rated"></span>`,
 };
 
-// [A77] A career keeper still counts toward the squad's keeper requirement even in a
-// season the archive says someone else kept -- invisible otherwise, so this small
-// secondary glove marks it wherever the primary icon isn't already "keeper".
+// [A77, A244] A bowler or all-rounder who can keep wicket (by trade, or from another IPL
+// season) still counts toward the squad's keeper requirement -- invisible otherwise, so
+// this small secondary glove marks it wherever the primary icon isn't already "keeper".
+// A batter who can keep shows the gloves as his main icon instead.
 const KEEPER_BADGE =
-  `<span class="ic glove-badge" title="Also a proven keeper -- kept in another season">${svg(GLOVE)}</span>`;
+  `<span class="ic glove-badge" title="Can keep wicket">${svg(GLOVE)}</span>`;
 function keeperBadge(card){
   return (card.keeper_eligible && card.kind !== 'keeper') ? KEEPER_BADGE : '';
 }

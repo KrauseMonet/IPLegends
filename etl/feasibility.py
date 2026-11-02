@@ -290,6 +290,15 @@ def keeper_rule(role: str | None, person_id: str, ever_kept, by_trade) -> tuple[
     return ipl or person_id in by_trade, ipl
 
 
+
+def reads_as_keeper(card: "Card") -> bool:
+    """[A244] A card that reads as a wicketkeeper: this season's keeper, or a batter who can
+    keep wicket (by trade, or from another IPL season). The auction's Wicketkeepers set and
+    the card's icon both follow it; a bowler or all-rounder who can keep keeps his own label
+    and shows the small glove badge instead. The same rule as `career_role` in the puzzles."""
+    return card.role == "keeper" or (card.keeper_eligible and card.role == "batter")
+
+
 def load_deck(conn) -> Deck:
     """Every rated player-season, and the batting role (A76) it may bat under.
 

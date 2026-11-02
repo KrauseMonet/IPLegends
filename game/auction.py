@@ -33,6 +33,7 @@ from typing import Callable
 
 from etl.feasibility import (
     BOWLERS_IN_TWELVE, IMPACT_SLOT, OVERSEAS_CAP, TWELVE_SIZE, XI_SIZE, Card, Deck,
+    reads_as_keeper,
 )
 from etl.franchise_map import canonical
 
@@ -327,7 +328,8 @@ class Lot:
 
 
 def _category(c: Card) -> str:
-    if c.role == "keeper":
+    # [A244] A batter who can keep is sold with the keepers, not the batters.
+    if reads_as_keeper(c):
         return "WK"
     if c.role == "allrounder":
         return "AL"
@@ -494,7 +496,7 @@ def need(team: Team, card: Card) -> float:
     if card.keeper_eligible:
         if keepers == 0:
             m *= 1.4
-        elif keepers >= KEEPERS_WANTED and card.role == "keeper":
+        elif keepers >= KEEPERS_WANTED and reads_as_keeper(card):
             m *= 0.8
     if card.has_bowl:
         bowlers = sum(c.has_bowl for c in team.squad)

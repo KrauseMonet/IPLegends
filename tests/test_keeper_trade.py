@@ -167,3 +167,45 @@ def test_keeper_rule(role, kept, trade, want):
 ])
 def test_career_role(role, keeper, want):
     assert career_role(role, keeper) == want
+
+
+# --- the auction's sets and the card's icon ------------------------------------------
+
+from dataclasses import replace as _replace
+
+from etl.feasibility import Card, reads_as_keeper
+from game import auction
+
+
+def _card(role, can_keep, style=None):
+    return Card(1, "p", "P", band="top_order", role=role, keeper_eligible=can_keep,
+                bowling_style=style, positions=frozenset({1, 2, 3}))
+
+
+@pytest.mark.parametrize("role,can_keep,style,want", [
+    ("keeper", True, None, "WK"),
+    ("batter", True, None, "WK"),        # a keeper by trade is sold with the keepers
+    ("batter", False, None, "BA"),
+    ("allrounder", True, None, "AL"),    # keeps his own set; the glove badge marks him
+    ("bowler", True, "pace", "FA"),
+])
+def test_auction_set(role, can_keep, style, want):
+    assert auction._category(_card(role, can_keep, style)) == want
+
+
+def test_minz_is_sold_with_the_keepers_and_shows_the_gloves(deck):
+    from web.app import _kind
+    for c in cards_of(deck, MINZ):
+        assert reads_as_keeper(c) and auction._category(c) == "WK" and _kind(c) == "keeper"
+    for c in cards_of(deck, KOHLI):
+        assert auction._category(c) != "WK" and _kind(c) == c.role
+
+
+def test_a_squad_with_two_keepers_wants_a_keeper_by_trade_less():
+    """The demand curve treats a batter who can keep exactly like a listed keeper."""
+    team = auction.Team(0, "T", "T")
+    for i in range(2):
+        team.squad.append(_replace(_card("keeper", True), person_id=f"k{i}"))
+    trade = _card("batter", True)
+    plain = _card("batter", False)
+    assert auction.need(team, trade) < auction.need(team, plain)

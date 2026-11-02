@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from etl.feasibility import (BOWLERS_IN_TWELVE, OVERSEAS_CAP, REROLL_KINDS, TWELVE_SIZE,
-                             XI_SIZE, Card, team_rating)
+                             XI_SIZE, Card, reads_as_keeper, team_rating)
 from game import analysis, auction, auction_report, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
@@ -1417,7 +1417,12 @@ def _kind(card: Card) -> str:
     live deck: of 1,816 cards the old test called all-rounder, only 284 actually clear
     A26's thresholds; the other 1,532 are pure bowlers or batters who happened to face or
     bowl a token ball. A genuine dual-threat season (Narine 2024: 488 runs AND a rated
-    bowling season) still clears A26's averages on its own, so nothing real is lost."""
+    bowling season) still clears A26's averages on its own, so nothing real is lost.
+
+    [A244] One exception: a batter who can keep wicket (by trade, or from another season)
+    shows the gloves, as the auction sells him with the keepers."""
+    if reads_as_keeper(card):
+        return "keeper"
     return card.role or "unrated"
 
 

@@ -59,10 +59,10 @@ def test_figures_match_the_public_record(players):
     Malinga is a Sri Lankan fast bowler. (Not Malinga's debut year: whether he played the
     first season is exactly the sort of figure that is easy to claim and wrong.)"""
     by = {p.name: p for p in players.values()}
-    assert by["V Kohli"].seasons[0] == 2008 and by["V Kohli"].franchises == ("Royal Challengers Bengaluru",)
+    assert by["Virat Kohli"].seasons[0] == 2008 and by["Virat Kohli"].franchises == ("Royal Challengers Bengaluru",)
     assert by["MS Dhoni"].role == "keeper"
     assert set(by["MS Dhoni"].franchises) == {"Chennai Super Kings", "Rising Pune Supergiant"}
-    assert (by["SL Malinga"].country, by["SL Malinga"].bowling_style) == ("Sri Lanka", "pace")
+    assert (by["Lasith Malinga"].country, by["Lasith Malinga"].bowling_style) == ("Sri Lanka", "pace")
 
 
 def test_career_role_is_the_most_common_season_role_with_a_fixed_tie_break():
@@ -164,7 +164,7 @@ def test_the_pool_is_the_recognisable(players):
     it was broken to zero."""
     pool = G.pool(players)
     names = {p.name for p in pool}
-    assert {"V Kohli", "MS Dhoni", "SL Malinga", "CH Gayle", "JJ Bumrah"} <= names
+    assert {"Virat Kohli", "MS Dhoni", "Lasith Malinga", "Chris Gayle", "Jasprit Bumrah"} <= names
     assert 150 <= len(pool) < len(players) // 2          # the recognisable, not everybody
     least = sorted(players.values(), key=lambda p: (p.prominence, p.person_id))[:100]
     assert not any(p in pool for p in least)             # a one-season substitute is never the answer

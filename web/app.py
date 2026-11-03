@@ -123,7 +123,7 @@ def _load_unrated(conn) -> dict[int, list]:
     """
     rows = conn.execute(
         """
-        select s.franchise_season_id, p.primary_name, s.role, s.batting_band,
+        select s.franchise_season_id, coalesce(p.display_name, p.primary_name), s.role, s.batting_band,
                p.is_overseas, s.matches_played,
                max(i.balls) filter (where i.discipline = 'batting'),
                max(i.balls) filter (where i.discipline = 'bowling')
@@ -137,7 +137,7 @@ def _load_unrated(conn) -> dict[int, list]:
             where r.franchise_season_id = s.franchise_season_id
               and r.person_id = s.person_id)
         group by 1, 2, 3, 4, 5, 6
-        order by p.primary_name
+        order by 2
         """
     ).fetchall()
     out: dict[int, list] = {}

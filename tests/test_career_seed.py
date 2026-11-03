@@ -41,4 +41,4 @@ def test_an_admin_chooses_the_seed_and_gets_its_spins(client):
     a = client.post("/api/career/start", json={**BODY, "seed": 54408}).json()
     b = client.post("/api/career/start", json={**BODY, "seed": 54408}).json()
     assert a["ceiling"] == b["ceiling"] and a["start"] == b["start"]
-    assert a["ceiling"]["name"] == "V Suryavanshi" and a["ceiling"]["year"] == 2026
+    assert a["ceiling"]["name"] == "Vaibhav Sooryavanshi" and a["ceiling"]["year"] == 2026

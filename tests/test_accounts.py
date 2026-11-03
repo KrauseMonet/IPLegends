@@ -157,11 +157,11 @@ class FakeConn:
                     existing.add((row[0], row[1]))
             return FakeCursor([])
 
-        if sql_norm.startswith("select p.person_id, p.primary_name, sum(grp.sim_bat_runs)"):
+        if sql_norm.startswith("select p.person_id, coalesce(p.display_name, p.primary_name), sum(grp.sim_bat_runs)"):
             (account_id,) = params
             return FakeCursor(self._leaderboard(account_id, stat_index=2, limit=5))
 
-        if sql_norm.startswith("select p.person_id, p.primary_name, sum(grp.sim_bowl_wickets)"):
+        if sql_norm.startswith("select p.person_id, coalesce(p.display_name, p.primary_name), sum(grp.sim_bowl_wickets)"):
             (account_id,) = params
             return FakeCursor(self._leaderboard(account_id, stat_index=4, limit=5))
 

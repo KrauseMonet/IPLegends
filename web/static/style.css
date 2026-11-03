@@ -514,6 +514,8 @@ tr.cut td{border-bottom:1.5px solid var(--gold)}
 .standings .st-mark{margin-right:10px;vertical-align:middle}
 .standings img.st-mark{width:28px;height:24px;object-fit:contain}
 .standings .kit-badge.st-mark{width:24px;height:24px;font-size:8px}
+.nm-short{display:none}
+@media (max-width:560px){ .nm-full{display:none} .nm-short{display:inline} }
 .st-full{font-weight:650;color:var(--ink)}
 .standings tr.you .st-full{font-weight:800}
 .st-short{display:none;font-weight:700;color:var(--ink)}

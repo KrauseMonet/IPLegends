@@ -335,7 +335,8 @@ def load_deck(conn) -> Deck:
              where not is_super_over
              group by 1, 2
         )
-        select s.franchise_season_id, s.person_id, p.primary_name,
+        select s.franchise_season_id, s.person_id,
+               coalesce(p.display_name, p.primary_name),
                s.role, s.batting_band,
                f.season_year, f.display_name, p.is_overseas, p.bowling_style,
                max(r.rated_per_ball) filter (where r.discipline = 'batting') as bat,

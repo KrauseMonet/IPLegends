@@ -65,10 +65,10 @@ def test_figures_match_the_public_record(facts):
     database: Gayle's six IPL hundreds and 357 sixes, Malinga's 170 wickets, Warner's four
     hundreds. A wrong innings rule (counting a super over, splitting a match in two) moves
     these and no internal consistency check would notice."""
-    gayle = by_name(facts, "CH Gayle")
+    gayle = by_name(facts, "Chris Gayle")
     assert (gayle.hundreds, gayle.sixes) == (6, 357)
-    assert by_name(facts, "SL Malinga").wickets == 170
-    assert by_name(facts, "DA Warner").hundreds == 4
+    assert by_name(facts, "Lasith Malinga").wickets == 170
+    assert by_name(facts, "David Warner").hundreds == 4
 
 
 def test_franchise_membership_is_the_decks_own(facts, deck):
@@ -408,7 +408,10 @@ def test_the_finished_state_carries_the_share_text(client, facts):
 def test_players_list_names_everybody_and_hints_at_nothing(client, facts):
     d = client.get("/api/puzzles/players").json()
     assert len(d) == len(facts.players)
-    assert set(d[0]) == {"id", "name"}
+    # [A252] `aka` is the archive's name for the same man -- another name, not a hint.
+    assert all(set(p) == {"id", "name", "aka"} for p in d)
+    assert all(p["aka"] == (facts.players[p["id"]].aka or None) for p in d)
+    assert {p["name"]: p["aka"] for p in d}["Wanindu Hasaranga"] == "PWH de Silva"
 
 
 def test_answers_route_matches_the_grid(client, facts):

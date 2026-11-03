@@ -108,12 +108,12 @@ def test_describe_groups_by_club_and_merges_consecutive_years():
 def test_real_pairs_the_record_is_certain_about(real, players):
     by = {p.name: p.person_id for p in players.values()}
     w = real.world
-    assert w.shared(by["MS Dhoni"], by["SK Raina"])           # Chennai, from the first season
-    assert not w.shared(by["MS Dhoni"], by["CH Gayle"])       # never at a club together
+    assert w.shared(by["MS Dhoni"], by["Suresh Raina"])           # Chennai, from the first season
+    assert not w.shared(by["MS Dhoni"], by["Chris Gayle"])       # never at a club together
     # Dhoni and Raina were together at Chennai for a decade, so most of Chennai is common to them.
-    assert len(w.common(by["MS Dhoni"], by["SK Raina"])) >= 20
+    assert len(w.common(by["MS Dhoni"], by["Suresh Raina"])) >= 20
     # Kohli and Gayle shared Bengaluru 2011-2017, so Gayle's and Kohli's common set holds de Villiers.
-    assert by["AB de Villiers"] in w.common(by["V Kohli"], by["CH Gayle"])
+    assert by["AB de Villiers"] in w.common(by["Virat Kohli"], by["Chris Gayle"])
 
 
 def test_squads_are_the_decks_own_franchise_seasons(players):

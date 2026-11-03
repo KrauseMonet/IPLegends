@@ -458,20 +458,20 @@ def test_a_shared_legend_goes_to_the_franchise_with_his_better_season(deck, cloc
     r = ra.replay(load(conn, code), deck)
     rcb, kkr = r.team_of[host], r.team_of[guest]
     gayle_rcb_2014 = next(i for i, c in enumerate(r.pools[rcb])
-                          if c.name == "CH Gayle" and c.season_year == 2014)
-    gayle_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name == "CH Gayle")
-    other_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name != "CH Gayle")
+                          if c.name == "Chris Gayle" and c.season_year == 2014)
+    gayle_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name == "Chris Gayle")
+    other_kkr = next(i for i, c in enumerate(r.pools[kkr]) if c.name != "Chris Gayle")
     assert r.pools[kkr][gayle_kkr].display > r.pools[rcb][gayle_rcb_2014].display
     ra.submit(conn, code, deck, ra.retain, guest, [gayle_kkr, other_kkr])   # Ben first
     ra.submit(conn, code, deck, ra.retain, host, [gayle_rcb_2014])          # sealed: accepted
     after = ra.replay(load(conn, code), deck)
     rcb_t, kkr_t = after.auction.teams[rcb], after.auction.teams[kkr]
-    assert "CH Gayle" in [c.name for c in rcb_t.squad[:rcb_t.retained]]
-    assert "CH Gayle" not in [c.name for c in kkr_t.squad]
+    assert "Chris Gayle" in [c.name for c in rcb_t.squad[:rcb_t.retained]]
+    assert "Chris Gayle" not in [c.name for c in kkr_t.squad]
     # Ben keeps his other pick, at the FIRST slab now, and the lost place is a card.
     assert kkr_t.retained == 1 and kkr_t.paid[0] == au.RETENTION_SLABS[0]
     assert kkr_t.rtm == au.RTM_PLACES - 1
-    assert [(c.name, w) for c, w in after.retention_lost[kkr]] == [("CH Gayle", rcb)]
+    assert [(c.name, w) for c, w in after.retention_lost[kkr]] == [("Chris Gayle", rcb)]
 
 
 def test_retentions_charge_the_slabs_and_the_rest_become_cards(deck, clock):

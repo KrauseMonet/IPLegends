@@ -809,6 +809,26 @@ function esc(s){
     c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
 
+// [A252] The short form of a player's name for tight spots -- the live crease, a phone
+// scorecard, the auction feed: the first name cut to its initial, everything after it
+// kept ("Wanindu Hasaranga" -> "W Hasaranga", "Quinton de Kock" -> "Q de Kock"). A name
+// that already leads with initials ("MS Dhoni", "AB de Villiers") or is one word is left
+// alone. Derived, never stored: the full name is the only one anybody maintains.
+function shortName(name){
+  const s = String(name == null ? '' : name).trim();
+  const words = s.split(/\s+/);
+  if (words.length < 2 || /^[A-Z]{1,4}$/.test(words[0])) return s;
+  return words[0][0] + ' ' + words.slice(1).join(' ');
+}
+
+// The full name on a wide screen and the short one on a phone (style.css .nm-full/.nm-short),
+// both escaped. Where the two are the same there is nothing to swap.
+function nameSwap(name){
+  const full = esc(name), short = esc(shortName(name));
+  return full === short ? full
+    : `<span class="nm-full">${full}</span><span class="nm-short">${short}</span>`;
+}
+
 function kitPalette(){ return (META && META.kits) || []; }
 function kitColour(key){
   const p = kitPalette();

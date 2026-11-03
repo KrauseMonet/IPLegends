@@ -66,8 +66,8 @@ def test_the_committed_leans_read_true_to_the_record():
     """Real specialists, by person id, as the record has them: Malinga a death bowler,
     Bhuvneshwar a new-ball one, de Villiers dangerous at the death."""
     by_name = {c.name: c.person_id for cs in deck_from(DOC).cards_by_fs.values() for c in cs}
-    malinga = P.lean(by_name["SL Malinga"], "bowl")
-    bhuvi = P.lean(by_name["B Kumar"], "bowl")
+    malinga = P.lean(by_name["Lasith Malinga"], "bowl")
+    bhuvi = P.lean(by_name["Bhuvneshwar Kumar"], "bowl")
     abd = P.lean(by_name["AB de Villiers"], "bat")
     assert malinga[2] > 0 and malinga[2] > malinga[0]
     assert bhuvi[0] > 0 and bhuvi[0] > bhuvi[2]

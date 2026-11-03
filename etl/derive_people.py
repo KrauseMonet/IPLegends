@@ -799,11 +799,69 @@ def do_bowling_style(conn) -> None:
               "is filled.\n  Blank stays NULL in the database - never guessed.")
 
 
+def do_full_names(conn) -> None:
+    """[A252] The name a fan knows each player by, from `full_names.csv`.
+
+    Cricsheet's register names are initials (PWH de Silva is Wanindu Hasaranga), and the
+    archive carries nothing better, so this is the fifth file only the public record can
+    fill. It is decided by the A112 method: `cricinfo_id` -> Wikidata P2697 -> the English
+    Wikipedia article title, never a name. `wikipedia` (the title as found) and `source`
+    (how each row was decided) are carried columns: this generator makes no network call,
+    so it neither refreshes nor drops them (A112's rule). A blank `full_name` stays NULL,
+    and every reader then shows `primary_name`.
+    """
+    people = ipl_people(conn)
+    played = matches_played(conn)
+    overrides = read_override(OVERRIDES / "full_names.csv")
+    filled = {
+        row["person_id"]: row["full_name"].strip()
+        for row in overrides
+        if row.get("full_name", "").strip() and row["person_id"] in people
+    }
+    clash = Counter(filled.values())
+    dupes = sorted(name for name, n in clash.items() if n > 1)
+    if dupes:
+        # The unique index (migration 051) would refuse these anyway; saying which is kinder.
+        raise SystemExit(f"full_names.csv gives one name to two players: {dupes}. "
+                         "Tell them apart by a middle name or initial.")
+
+    with conn.cursor() as cur:
+        cur.execute("update people set display_name = null")
+        cur.executemany(
+            "update people set display_name = %s where person_id = %s",
+            [(name, pid) for pid, name in sorted(filled.items())],
+        )
+    conn.commit()
+
+    cricinfo = cricinfo_ids()
+    rows = [
+        {
+            "person_id": pid,
+            "name": people[pid],
+            "matches": played.get(pid, 0),
+            "cricinfo_id": cricinfo.get(pid, ""),
+            "full_name": "",
+        }
+        for pid in sorted(people, key=lambda p: (-played.get(p, 0), p))
+    ]
+    path = OVERRIDES / "full_names.csv"
+    print(f"\n  players                {len(people):>5}")
+    print(f"  full names filled in   {len(filled):>5}")
+    print(f"  still blank            {len(people) - len(filled):>5}")
+    report_merge(path, merge_override(
+        path,
+        ["person_id", "name", "matches", "cricinfo_id", "full_name"],
+        rows,
+        decided="full_name",
+    ))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nationality", action="store_true")
     parser.add_argument("--keepers", action="store_true")
     parser.add_argument("--bowling-style", action="store_true")
+    parser.add_argument("--full-names", action="store_true")
     parser.add_argument("--all", action="store_true")
     args = parser.parse_args(argv)
 
@@ -814,9 +872,11 @@ def main(argv: list[str] | None = None) -> None:
         steps.append(("SPEC 6.2 wicketkeepers", do_keepers))
     if args.all or args.bowling_style:
         steps.append(("SPEC 6.3 pace versus spin", do_bowling_style))
+    if args.all or args.full_names:
+        steps.append(("A252 full names", do_full_names))
     if not steps:
         raise SystemExit("Nothing to do. Pass --nationality, --keepers, "
-                         "--bowling-style or --all.")
+                         "--bowling-style, --full-names or --all.")
 
     with connect(direct=True) as conn:
         for title, step in steps:

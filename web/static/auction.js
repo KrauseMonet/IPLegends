@@ -706,7 +706,7 @@ function renderSide(){
   $('#aucFeed').innerHTML = d.recent.slice().reverse().slice(0, 14).map(s => `
     ${(s.whispers || []).map(w => `<div class="auc-whisper">${esc(w)}</div>`).join('')}
     <div class="auc-feed-row${s.team ? '' : ' unsold'}${s.team === d.you ? ' mine' : ''}">
-      <span class="auc-feed-name">${s.name} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
+      <span class="auc-feed-name">${esc(shortName(s.name))} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
       ${s.team ? `${chip(s.team)}<b class="${tierOf(s.price)}">${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
     </div>`).join('') || '<div class="note">Nothing sold yet.</div>';
 

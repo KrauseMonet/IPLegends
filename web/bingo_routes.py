@@ -97,6 +97,7 @@ class PlayOut(BaseModel):
 class PlayerOut(BaseModel):
     id: str
     name: str
+    aka: str | None = None   # [A252] the archive's initials form, searchable but not shown
 
 
 class RevealCellOut(BaseModel):
@@ -176,7 +177,7 @@ def bingo_players(response: Response) -> list[PlayerOut]:
     game, which is why it is not under /api/bingo. Names only: a hint such as the clubs a
     man played for would answer the question being asked."""
     response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
-    return [PlayerOut(id=p.person_id, name=p.name)
+    return [PlayerOut(id=p.person_id, name=p.name, aka=p.aka or None)
             for p in sorted(facts().players.values(), key=lambda p: (p.name, p.person_id))]
 
 

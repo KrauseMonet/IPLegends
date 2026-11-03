@@ -20,6 +20,7 @@ DECIDED = {
     "keepers.csv": "is_keeper",
     "keepers_by_season.csv": "kept",
     "bowling_style.csv": "bowling_style",
+    "full_names.csv": "full_name",          # [A252] free text, like nationality
 }
 
 

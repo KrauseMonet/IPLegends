@@ -37,7 +37,7 @@ def _thin(c):
 def test_a_tail_ender_with_an_odd_band_bats_in_the_tail(deck):
     """Zaheer Khan 2011's squad band is `top_order`; A76 says 8-11, and so does the record."""
     squad = _squad(deck, "Royal Challengers Bangalore", 2011)
-    zak = next(c for c in squad if c.name == "Z Khan")
+    zak = next(c for c in squad if c.name == "Zaheer Khan")
     assert zak.band == "top_order" and min(zak.positions) == 8      # the fixture's shape
     order, _ = opposition_twelve(squad)
     assert zak in order and order.index(zak) + 1 >= 8
@@ -54,8 +54,8 @@ def test_mumbai_2024_picks_its_real_batters(deck):
     """Under the per-ball pick, L Wood's three balls outranked Rohit Sharma's 278."""
     xi = opposition_xi(_squad(deck, "Mumbai Indians", 2024))
     names = {c.name for c in xi}
-    assert {"RG Sharma", "Tilak Varma", "TH David"} <= names
-    assert "L Wood" not in names
+    assert {"Rohit Sharma", "Tilak Varma", "Tim David"} <= names
+    assert "Luke Wood" not in names
 
 
 def test_no_thin_batter_is_picked_while_a_real_one_waits():

@@ -95,8 +95,8 @@ function sideTint(side){
 function sideStarsHtml(batted, bowledAt){
   const bat = inningsTopBatter(batted), bowl = inningsTopBowler(bowledAt);
   const parts = [];
-  if (bat) parts.push(`<span><b>${esc(bat.name)}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
-  if (bowl) parts.push(`<span><b>${esc(bowl.name)}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
+  if (bat) parts.push(`<span><b>${esc(shortName(bat.name))}</b> ${bat.runs}${bat.out ? '' : '*'} <em>(${bat.balls})</em></span>`);
+  if (bowl) parts.push(`<span><b>${esc(shortName(bowl.name))}</b> ${bowl.wickets}/${bowl.runs} <em>(${bowl.overs})</em></span>`);
   return parts.join('');
 }
 
@@ -231,13 +231,13 @@ function renderCrease(batters, bowler){
     const fresh = before.length && !before.includes(b.name);
     return `<div class="sb-bat-row${b.onStrike ? ' on' : ''}${fresh ? ' fresh' : ''}${b.runs >= 50 ? ' landmark' : ''}${b.you ? ' you' : ''}">
       <span class="sb-strike" aria-label="${b.onStrike ? 'on strike' : ''}">${b.onStrike ? '▸' : ''}</span>
-      <b>${esc(b.name)}${youTag(b.you)}</b>
+      <b>${esc(shortName(b.name))}${youTag(b.you)}</b>
       <span class="sb-fig"><strong>${b.runs}${b.out ? '' : '*'}</strong> <em>(${b.balls})</em></span>
       <span class="sb-extra">${bits.join(' ')}${bits.length ? ' · ' : ''}SR ${sr}</span>
     </div>`;
   });
   const bowl = bowler
-    ? `<div class="sb-bowl-row${bowler.you ? ' you' : ''}"><span>Bowling</span><b>${esc(bowler.name)}${youTag(bowler.you)}</b>
+    ? `<div class="sb-bowl-row${bowler.you ? ' you' : ''}"><span>Bowling</span><b>${esc(shortName(bowler.name))}${youTag(bowler.you)}</b>
         <span class="sb-fig"><strong>${bowler.wickets}-${bowler.runs}</strong>
         <em>(${oversText(bowler.balls)} ov)</em></span></div>`
     : '';
@@ -317,7 +317,7 @@ function renderOverStep(){
   $('#overScoreLine').textContent = `${o.runs}/${o.wickets}`;
   $('#sbOvers').textContent = `${oversText(o.balls)} ov · RR ${runRate(o.runs, o.balls)}`;
   $('#overLastLine').textContent =
-    `Over ${o.over + 1} · ${o.bowler} · ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
+    `Over ${o.over + 1} · ${shortName(o.bowler)} · ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}` +
     (o.over_wickets ? `, ${o.over_wickets} wicket${o.over_wickets === 1 ? '' : 's'}` : '');
   $('#overOversBar').style.width = (100 * Math.min(1, o.balls / 120)) + '%';
   renderChaseLine(priorContext, o.runs, o.balls, false);
@@ -512,9 +512,9 @@ function scorecardInnings(side, score, inn){
     // zero: a column of noughts is what makes a scorecard hard to scan, and the two
     // batters who did hit boundaries are the ones the column exists to find.
     return b.faced_any
-    ? `<tr class="${isTop ? 'top-bat' : ''}${b.you ? ' you-row' : ''}"><td>${esc(b.name)}${b.out ? '' : ' *'}${impactTag(b.is_impact)}${youTag(b.you)}</td><td class="n">${b.runs}</td>
+    ? `<tr class="${isTop ? 'top-bat' : ''}${b.you ? ' you-row' : ''}"><td>${nameSwap(b.name)}${b.out ? '' : ' *'}${impactTag(b.is_impact)}${youTag(b.you)}</td><td class="n">${b.runs}</td>
         <td class="n">${b.balls}</td>${bdyCell(b.fours)}${bdyCell(b.sixes)}<td class="n">${b.strike_rate}</td></tr>`
-    : `<tr class="tail${b.you ? ' you-row' : ''}"><td>${esc(b.name)}${impactTag(b.is_impact)}${youTag(b.you)}</td>
+    : `<tr class="tail${b.you ? ' you-row' : ''}"><td>${nameSwap(b.name)}${impactTag(b.is_impact)}${youTag(b.you)}</td>
         <td class="n" colspan="5" style="font-style:italic">did not bat</td></tr>`;
   }).join('');
   // Boundaries CONCEDED ride in the row's tooltip rather than as two more columns. Seven
@@ -522,7 +522,7 @@ function scorecardInnings(side, score, inn){
   // the primary one, economy, is already there.
   const bowling = inn.bowling.map(bo => `<tr class="${bo.you ? 'you-row' : ''}" title="${bo.fours} four${
       bo.fours === 1 ? '' : 's'} and ${bo.sixes} six${bo.sixes === 1 ? '' : 'es'} conceded">
-    <td>${esc(bo.name)}${impactTag(bo.is_impact)}${youTag(bo.you)}</td>
+    <td>${nameSwap(bo.name)}${impactTag(bo.is_impact)}${youTag(bo.you)}</td>
     <td class="n">${bo.overs}</td><td class="n">${bo.runs}</td>
     <td class="n">${bo.wickets}</td><td class="n">${bo.economy}</td></tr>`).join('');
   const fow = inn.commentary.length ? `<div class="fow">${inn.commentary.join('\n')}</div>` : '';

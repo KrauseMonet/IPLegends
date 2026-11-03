@@ -210,13 +210,13 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
         LeaderRow(person_id=pid, name=name, total=total)
         for pid, name, total in conn.execute(
             """
-            select p.person_id, p.primary_name, sum(grp.sim_bat_runs) as total_runs
+            select p.person_id, coalesce(p.display_name, p.primary_name), sum(grp.sim_bat_runs) as total_runs
               from game_result_players grp
               join game_results gr on gr.game_result_id = grp.game_result_id
               join people p on p.person_id = grp.person_id
              where gr.account_id = %s and grp.sim_bat_runs is not null
-             group by p.person_id, p.primary_name
-             order by total_runs desc, p.primary_name
+             group by p.person_id
+             order by total_runs desc, 2
              limit 5
             """,
             (account_id,),
@@ -227,13 +227,13 @@ def profile_stats(conn, account_id: int) -> ProfileStats:
         LeaderRow(person_id=pid, name=name, total=total)
         for pid, name, total in conn.execute(
             """
-            select p.person_id, p.primary_name, sum(grp.sim_bowl_wickets) as total_wickets
+            select p.person_id, coalesce(p.display_name, p.primary_name), sum(grp.sim_bowl_wickets) as total_wickets
               from game_result_players grp
               join game_results gr on gr.game_result_id = grp.game_result_id
               join people p on p.person_id = grp.person_id
              where gr.account_id = %s and grp.sim_bowl_wickets is not null
-             group by p.person_id, p.primary_name
-             order by total_wickets desc, p.primary_name
+             group by p.person_id
+             order by total_wickets desc, 2
              limit 5
             """,
             (account_id,),

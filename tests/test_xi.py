@@ -101,11 +101,11 @@ def test_the_2016_final_matches_the_public_record(sides, players):
     def line(side, name):
         (row,) = [r for r in side.players if players[r.person_id].name == name]
         return row
-    w = line(srh, "DA Warner")
+    w = line(srh, "David Warner")
     assert (w.position, w.runs, w.balls, w.out) == (1, 69, 38, True)
-    c = line(srh, "BCJ Cutting")
+    c = line(srh, "Ben Cutting")
     assert (c.runs, c.balls, c.out) == (39, 15, False)
-    g, k = line(rcb, "CH Gayle"), line(rcb, "V Kohli")
+    g, k = line(rcb, "Chris Gayle"), line(rcb, "Virat Kohli")
     assert (g.position, g.runs, g.balls) == (1, 76, 38)
     assert (k.position, k.runs, k.balls) == (2, 54, 35)
 

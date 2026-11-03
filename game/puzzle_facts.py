@@ -36,7 +36,7 @@ from etl.franchise_map import canonical
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "puzzle_facts.json.gz"
 
 # Bumped only when the FILE FORMAT changes, not when the data does (A107's rule).
-FORMAT_VERSION = 4   # [A185] matches were added for Name the XI (v3: squads, v2: role, country, style)
+FORMAT_VERSION = 5   # [A252] aka (v4: Name the XI's matches, v3: squads, v2: role, country, style)
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,9 @@ class PlayerFacts:
     # franchise). Two players are TEAMMATES if they share one -- the same club in the same
     # season, which is how a fan remembers a dressing room. Not "played in the same match".
     squads: tuple[str, ...] = ()
+    # [A252] The archive's own name for him (Cricsheet's initials form, "PWH de Silva"),
+    # kept so a search box finds him by either. `name` is the one a fan knows.
+    aka: str = ""
 
     @property
     def prominence(self) -> int:
@@ -133,6 +136,7 @@ def _doc_row(p: PlayerFacts) -> dict:
         "mr": p.best_season_runs, "mw": p.best_season_wickets, "h": p.hundreds,
         "f": p.fifties, "w4": p.four_wicket_hauls, "s6": p.sixes,
         "role": p.role, "ctry": p.country, "bs": p.bowling_style, "sq": list(p.squads),
+        "aka": p.aka,
     }
 
 
@@ -142,7 +146,7 @@ def _from_row(d: dict) -> PlayerFacts:
         overseas=d["over"], keeper=d["keeper"], runs=d["runs"], wickets=d["wk"],
         best_season_runs=d["mr"], best_season_wickets=d["mw"], hundreds=d["h"],
         fifties=d["f"], four_wicket_hauls=d["w4"], sixes=d["s6"],
-        role=d["role"], country=d["ctry"], bowling_style=d["bs"], squads=tuple(d["sq"]))
+        role=d["role"], country=d["ctry"], bowling_style=d["bs"], squads=tuple(d["sq"]), aka=d.get("aka", ""))
 
 
 # When two roles tie across a career, the more specific wins: a man who is half all-rounder
@@ -216,6 +220,7 @@ def build_players(conn, deck) -> list[PlayerFacts]:
          where runs_batter = 6 and not is_super_over group by 1""")
 
     role_of = _career_roles(conn)
+    archive_name = {pid: n for pid, n in conn.execute("select person_id, primary_name from people")}
     country = {pid: ctry for pid, ctry in conn.execute(
         "select person_id, nationality from people where nationality is not null")}
 
@@ -234,7 +239,8 @@ def build_players(conn, deck) -> list[PlayerFacts]:
             four_wicket_hauls=hauls.get(pid, 0), sixes=sixes.get(pid, 0),
             role=career_role(role_of.get(pid), keeper[pid]),
             country=country.get(pid), bowling_style=style.get(pid),
-            squads=tuple(sorted(squad_of[pid]))))
+            squads=tuple(sorted(squad_of[pid])),
+            aka=archive_name.get(pid, "") if archive_name.get(pid) != name[pid] else ""))
     return out
 
 

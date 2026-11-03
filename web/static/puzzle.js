@@ -63,7 +63,10 @@ let PZ_PLAYERS = null;
 async function pzPlayers(){
   if (!PZ_PLAYERS){
     const list = await api('/api/puzzles/players');
-    PZ_PLAYERS = list.map(p => ({id: p.id, name: p.name, words: pzNorm(p.name).split(/\s+/)}));
+    // [A252] Either name finds him: the one shown, or the archive's initials form.
+    PZ_PLAYERS = list.map(p => ({id: p.id, name: p.name,
+                                 forms: [p.name, p.aka].filter(Boolean)
+                                   .map(n => pzNorm(n).split(/\s+/))}));
   }
   return PZ_PLAYERS;
 }
@@ -79,13 +82,17 @@ function pzMatches(query, whyNot){
   const toks = q.split(/\s+/);
   const scored = [];
   for (const p of PZ_PLAYERS){
-    let score = 0;
-    for (const t of toks){
-      const k = p.words.findIndex(w => w.startsWith(t));
-      if (k < 0){ score = -1; break; }
-      score += k === p.words.length - 1 ? 0 : 1;      // a surname match ranks first
+    let best = -1;
+    for (const words of p.forms){
+      let score = 0;
+      for (const t of toks){
+        const k = words.findIndex(w => w.startsWith(t));
+        if (k < 0){ score = -1; break; }
+        score += k === words.length - 1 ? 0 : 1;      // a surname match ranks first
+      }
+      if (score >= 0 && (best < 0 || score < best)) best = score;
     }
-    if (score >= 0) scored.push({p, score});
+    if (best >= 0) scored.push({p, score: best});
   }
   scored.sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name));
   const list = scored.slice(0, 8).map(x => ({p: x.p, why: whyNot ? whyNot(x.p) : ''}));

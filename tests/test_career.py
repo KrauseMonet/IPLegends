@@ -895,7 +895,7 @@ def test_a_spinners_mentor_is_a_spinner_who_bowled_that_season(deck):
     gl = next(fs for fs, v in deck.cards_by_fs.items()
               if v[0].franchise == "Gujarat Lions" and v[0].season_year == 2017)
     you = Card(fs_id=gl, person_id=C.YOU_ID, name="me", role="bowler", bowling_style="spin")
-    assert C.event_name(deck, mentor, gl, 2017, you) == "RA Jadeja"
+    assert C.event_name(deck, mentor, gl, 2017, you) == "Ravindra Jadeja"
 
 
 def test_a_finals_line_names_its_real_top_scorer_you_included(deck, model):

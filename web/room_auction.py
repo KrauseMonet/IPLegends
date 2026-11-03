@@ -16,12 +16,22 @@ first. With several people bidding against each other a lot is a sequence of eve
     {"k": "skip_set", "seat": host, "lot": i, "r": round}           the HOST skips the rest of
                                                                     this set for everybody
     {"k": "skip_all", "seat": host, "lot": i, "r": round}           ...or everything left
+    {"k": "skip_lot", "seat": host, "lot": i, "r": round}           ...or just this player [A249]
     {"k": "pass_set" | "pass_all", ...}                             one player's own skip: no
                                                                     longer accepted (A171), still
                                                                     replayed from older logs
     {"k": "close", "lot": i, "r": round}                            the lot's clock ran out
     {"k": "fill",  "seat": pid, "i": n}                             a fill-round choice
     {"k": "twelve", "seat": pid, "order": [...11], "impact": n}     the chosen twelve
+
+[A249] The host can PAUSE the room in any phase. A pause and its resume are CONTROL moves:
+they carry wall-clock times and change only the clock, so `replay` leaves them out and the
+auction they describe is the one it was before the pause:
+
+    {"k": "pause", "seat": host, "left": s, "at": t}                stop the clock with s left
+    {"k": "resume", "seat": host, "at": t}                          start it again (no seat:
+                                                                    resumed by itself after
+                                                                    PAUSE_MAX_S)
 
 [A174] With the room's trade window on (`rooms.trades`) and two or more people bidding,
 the fill round is followed by a trade window before the twelves:
@@ -69,6 +79,10 @@ RTM_SECONDS = 15         # [A140] each Right to Match decision: play, raise, mat
 TRADE_SECONDS = 120      # [A174] the trade window, closed early by the host or by everyone ready
 TRADES_PER_TEAM = 2      # [A174] ratified by the user
 MAX_OPEN_OFFERS = 3      # [A174] one seat's open offers at once, so nobody floods the others
+PAUSE_MAX_S = 300        # [A249] ratified: a pause resumes by itself after five minutes, so a
+                         # host who closes the tab cannot freeze the room (A122's reasoning)
+RESUME_FLOOR = BID_WINDOW   # [A249] a resume leaves at least this long on the clock
+CONTROL_KINDS = ("pause", "resume")
 
 AUCTION_GAMES = ("auction", "mega")   # 'mega' adds retentions and Right to Match [A140]
 
@@ -288,7 +302,8 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     if hit is not None:
         _CACHE.move_to_end(key)
         return hit
-    result = _replay(room.seed, humans, room.moves, deck, mega, trades, legends)
+    moves = [m for m in room.moves if m.get("k") not in CONTROL_KINDS]   # [A249]
+    result = _replay(room.seed, humans, moves, deck, mega, trades, legends)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
@@ -522,6 +537,13 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 if kind == "close":
                     closed = True
                     break
+                if kind == "skip_lot":
+                    # [A249] The host skips this one player for the whole room: every human
+                    # is out of the lot and nobody bids again. Nothing else needs undoing --
+                    # every reply already ran the automatic bidding (computer teams and
+                    # human limits alike) to its end -- so a human leading keeps him there.
+                    state.passed.update(human_idx)
+                    continue
                 if kind in ("skip_set", "skip_all"):
                     # [A171] The host's skip is the ROOM's: every human passes this lot and
                     # the rest of the set (or everything), so nobody is left half-in a set
@@ -870,11 +892,46 @@ def pass_lot(room, deck: Deck, player_id: str, scope: str, lot: int | None = Non
         return r                              # already passed: a retried request
     if scope != "lot" and player_id != room.host_id:
         # [A171] Skipping a set or skipping to the end moves the whole room on, so it is
-        # the host's call alone, like advancing a round.
+        # the host's call alone, like advancing a round. [A249] So is skipping one player.
         raise AuctionRoomError("only the host can skip ahead")
-    kind = {"lot": "pass", "set": "skip_set", "all": "skip_all"}[scope]
+    kind = {"lot": "pass", "set": "skip_set", "all": "skip_all", "player": "skip_lot"}[scope]
     return record(room, deck, {"k": kind, "seat": player_id, "lot": r.lot.index,
                                "r": r.round_no})
+
+
+def pause_state(room) -> dict | None:
+    """[A249] The pause the room is in, or None: the latest control move, if a pause."""
+    for mv in reversed(room.moves):
+        if mv.get("k") in CONTROL_KINDS:
+            return mv if mv["k"] == "pause" else None
+    return None
+
+
+def _resume(room, at: float) -> None:
+    left = pause_state(room)["left"]
+    room.moves = room.moves + [{"k": "resume", "at": at}]
+    room.turn_started_at = at + max(left, RESUME_FLOOR)
+
+
+def set_paused(room, deck: Deck, player_id: str, on: bool, now: float | None = None):
+    """[A249] The host pauses or resumes the room. While paused `turn_started_at` holds the
+    moment it resumes by itself, so a poll finds nothing overdue until then and takes no
+    lock (A92); the time that was left is kept on the pause move. A repeat is a no-op, so
+    a resent request cannot pause a room its first copy already resumed."""
+    if player_id != room.host_id:
+        raise AuctionRoomError("only the host can pause the auction")
+    now = time.time() if now is None else now
+    r = replay(room, deck)
+    if on == (pause_state(room) is not None):
+        return r
+    if on:
+        left = max(0.0, room.turn_started_at - now)
+        room.moves = room.moves + [{"k": "pause", "seat": player_id, "left": round(left, 3),
+                                    "at": now}]
+        room.turn_started_at = now + PAUSE_MAX_S
+    else:
+        _resume(room, now)
+    return r
 
 
 def fill(room, deck: Deck, player_id: str, index: int) -> RoomAuctionReplay:
@@ -1065,6 +1122,13 @@ def resolve(room, deck: Deck, now: float | None = None) -> bool:
     # [A146] Closed only once the grace is also gone, so a bid made in the lot's last
     # second still lands on it rather than finding the next lot open.
     while room.status == "auctioning" and now > room.turn_started_at + CLOCK_GRACE_S:
+        paused = pause_state(room)
+        if paused is not None:
+            # [A249] The pause ran out: resume as of the moment it should have, then carry
+            # on, so time the room was paused is never charged to a lot.
+            _resume(room, paused["at"] + PAUSE_MAX_S)
+            changed = True
+            continue
         r = replay(room, deck)
         if r.phase == "failed":
             _fail(room, r)
@@ -1121,6 +1185,8 @@ def submit(conn, code: str, deck: Deck, action, player_id: str, *args):
     try:
         if room.status != "auctioning":
             raise AuctionRoomError("the auction is over")
+        if action is not set_paused and pause_state(room) is not None:
+            raise AuctionRoomError("the auction is paused")      # [A249]
         action(room, deck, player_id, *args)
     except AuctionRoomError as exc:
         room.moves, room.status, room.turn_started_at = caught_up

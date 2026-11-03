@@ -264,7 +264,8 @@ def test_the_room_page_resends_polls_and_only_the_moves_it_already_retries():
     assert re.search(r"/match\?player_id=[^;]*hedge:\s*true", src)                  # the match poll
     retryable = re.search(r"AUCTION_RETRYABLE = new Set\(\[([^\]]*)\]\)", src).group(1)
     assert sorted(re.findall(r"'(\w+)'", retryable)) == sorted(
-        ["bid", "limit", "pass", "rtm", "offer", "answer", "withdraw", "ready"])
+        ["bid", "limit", "pass", "rtm", "offer", "answer", "withdraw", "ready",
+         "pause"])   # [A249] a repeat pause or resume is a no-op on the server
     for unsafe in ("fill", "twelve", "retain"):
         assert f"'{unsafe}'" not in retryable
 

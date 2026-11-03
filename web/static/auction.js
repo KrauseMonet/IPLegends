@@ -141,6 +141,7 @@ async function apply(d, animate){
   else if (animate && prev && (isRtm(prev.phase) || prev.phase === 'rtm_watch'))
     await stampAfterRtm(prev, d);
   A = d;
+  renderPauseBar(d);
   // [A232] The hammer has fallen for the last time: the morning-after paper, once, as it
   // happens. A reload does not repeat it; the button on the twelve screen opens it again.
   if (prev && !squadsFull(prev) && squadsFull(d)) openAuctionReport(reportUrl());
@@ -840,11 +841,13 @@ function renderBidControls(){
     else if (d.you_done) note.textContent = 'You passed on this one.';
     $('#aucPassBtn').disabled = d.you_done || d.leader === d.you;
     // [A171] Skipping a set or to the end moves the whole room on: the host's call alone.
+    // [A249] So does skipping one player.
     const host = window.roomIsHost && window.roomIsHost();
-    for (const id of ['#aucSkipSetBtn', '#aucSkipAllBtn']){
+    for (const id of ['#aucSkipLotBtn', '#aucSkipSetBtn', '#aucSkipAllBtn']){
       const b = $(id);
       if (b) b.classList.toggle('hide', !host);
     }
+    if (d.paused) note.textContent = 'Paused by the host.';
     // In a room the clock is everyone's, whichever way you bid.
     startCountdown();
     return;
@@ -916,6 +919,8 @@ function limitBid(ctrl){ send('bid', {ceiling: LIMIT, done: true}, ctrl); }
 function passLot(scope, ctrl){
   if (AUCTION_ROOM && scope === 'set'
       && !confirm('Skip the rest of this set for everyone in the room?')) return;
+  if (scope === 'player' && !confirm(`Skip ${A.lot ? A.lot.card.name : 'this player'} for everyone? `
+      + 'Every player passes and the computer teams finish the bidding.')) return;
   send('pass', {scope}, ctrl);
 }
 function skipRest(ctrl){
@@ -923,6 +928,40 @@ function skipRest(ctrl){
       ? 'Skip to the end for everyone? Every player passes on all the lots left, and the fill round completes each squad at ₹30L a player.'
       : 'Pass on every player left? The fill round will complete your squad at ₹30L each.')) return;
   send('pass', {scope: 'all'}, ctrl);
+}
+
+// [A249] The host's pause. While paused nobody can act, so every button but the host's
+// Resume is dimmed (`.paused`), and every clock on the page reads the time that was left.
+let PAUSE_TICK = null;
+function renderPauseBar(d){
+  const bar = $('#aucPauseBar');
+  if (!bar) return;
+  clearInterval(PAUSE_TICK); PAUSE_TICK = null;
+  const host = !!(window.roomIsHost && window.roomIsHost());
+  const live = d.phase !== 'complete';
+  $('#roomAuction').classList.toggle('paused', !!d.paused);
+  bar.classList.toggle('hide', !(d.paused || (host && live)));
+  bar.classList.toggle('on', !!d.paused);
+  const btn = $('#aucPauseBtn');
+  btn.classList.toggle('hide', !host);
+  btn.textContent = d.paused ? 'Resume' : 'Pause the auction';
+  const text = $('#aucPauseText');
+  if (!d.paused){ text.textContent = 'Host controls'; return; }
+  const tick = () => {
+    const s = Math.max(0, Math.ceil(window.roomAuctionDeadline()));
+    text.textContent = `Paused by the host · carries on by itself in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  PAUSE_TICK = setInterval(tick, 1000);
+}
+// The seconds left on the current stage: frozen at what was left while paused.
+function stageLeft(){ return A && A.paused ? A.paused_left : window.roomAuctionDeadline(); }
+async function togglePause(ctrl){
+  if (!A) return;
+  ctrl.disabled = true;
+  try { await window.roomAuctionPost('pause', {on: !A.paused}); }
+  catch(e){ slip(e.message); }
+  finally { ctrl.disabled = false; }
 }
 
 // Live mode's countdown. Only the human is waited on -- the computer teams have already
@@ -959,11 +998,12 @@ function startRoomCountdown(){
   fill.style.strokeDasharray = C;
   let lastWhole = null;
   const tick = () => {
-    const left = Math.max(0, window.roomAuctionDeadline());
+    const left = Math.max(0, stageLeft());
     fill.style.strokeDashoffset = C * (1 - Math.min(1, left / total));
     num.textContent = Math.ceil(left);
     const whole = Math.ceil(left);
-    if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); showClosing(whole); }
+    if (A.paused) clearClosing();
+    else if (whole !== lastWhole && whole > 0 && whole <= 3){ play('tick'); announceClosing(whole); showClosing(whole); }
     if (whole > 3) clearClosing();
     lastWhole = whole;
     ring.classList.toggle('urgent', left < 4);
@@ -1320,7 +1360,7 @@ function startPhaseClock(sel, urgentAt, fmt){
   const draw = () => {
     const el = $(sel);
     if (!el || !window.roomAuctionDeadline) return;
-    const left = Math.max(0, Math.ceil(window.roomAuctionDeadline()));
+    const left = Math.max(0, Math.ceil(stageLeft()));
     el.textContent = fmt(left);
     el.classList.toggle('urgent', left <= urgentAt);
   };

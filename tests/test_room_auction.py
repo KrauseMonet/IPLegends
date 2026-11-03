@@ -1113,3 +1113,127 @@ def test_a_seat_s_suggested_twelve_is_worked_out_once_per_state(deck, clock, mon
     out2 = web_app._room_state_out(room, deck, caller_id=host)
     assert asked == [ra.replay(room, deck).team_of[host]]
     assert out1.auction.suggestion == out2.auction.suggestion is not None
+
+
+# --- [A249] the host's pause and skip-player ------------------------------------------------
+
+def test_only_the_host_can_pause(deck, clock):
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    before = list(load(conn, code).moves)
+    with pytest.raises(ra.AuctionRoomError, match="only the host"):
+        ra.submit(conn, code, deck, ra.set_paused, guest, True)
+    assert load(conn, code).moves == before
+
+
+def test_a_pause_stops_the_clock_and_a_resume_gives_the_time_back(deck, clock):
+    """Time spent paused is never charged to the lot: the lot survives far longer than its
+    fifteen seconds, and resuming leaves what was left (topped up to the floor)."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    lot = ra.replay(load(conn, code), deck).lot.index
+    clock.now += 3                                     # 12 s left
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    clock.now += ra.PAUSE_MAX_S - 10                   # well past the lot's own deadline
+    rooms.room_state(conn, code, deck)
+    room = load(conn, code)
+    assert ra.pause_state(room) is not None
+    assert ra.replay(room, deck).lot.index == lot
+    ra.submit(conn, code, deck, ra.set_paused, host, False)
+    room = load(conn, code)
+    assert ra.pause_state(room) is None
+    assert room.turn_started_at == pytest.approx(clock.now + 12, abs=0.01)
+
+
+def test_a_resume_leaves_at_least_the_floor(deck, clock):
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    clock.now += ra.LOT_SECONDS - 1                    # 1 s left
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    clock.now += 30
+    ra.submit(conn, code, deck, ra.set_paused, host, False)
+    assert load(conn, code).turn_started_at == pytest.approx(clock.now + ra.RESUME_FLOOR)
+
+
+def test_nobody_can_act_while_paused(deck, clock):
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    r = ra.replay(load(conn, code), deck)
+    before = list(load(conn, code).moves)
+    for pid in (host, guest):
+        with pytest.raises(ra.AuctionRoomError, match="paused"):
+            ra.submit(conn, code, deck, ra.bid, pid, r.next_price)
+        with pytest.raises(ra.AuctionRoomError, match="paused"):
+            ra.submit(conn, code, deck, ra.pass_lot, pid, "lot")
+    assert load(conn, code).moves == before
+
+
+def test_a_pause_resumes_by_itself_after_the_cap(deck, clock):
+    """A host who closes the tab cannot freeze the room: the pause ends at PAUSE_MAX_S,
+    and the clock carries on from what was left, as of that moment."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    clock.now += 5                                     # 10 s left
+    paused_at = clock.now
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    clock.now = paused_at + ra.PAUSE_MAX_S + rooms.CLOCK_GRACE_S + 1
+    rooms.room_state(conn, code, deck)
+    room = load(conn, code)
+    assert ra.pause_state(room) is None
+    assert room.moves[-1] == {"k": "resume", "at": paused_at + ra.PAUSE_MAX_S}
+    assert room.turn_started_at == pytest.approx(paused_at + ra.PAUSE_MAX_S + 10, abs=0.01)
+
+
+def test_a_repeated_pause_or_resume_records_nothing(deck, clock):
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    ra.submit(conn, code, deck, ra.set_paused, host, False)
+    assert load(conn, code).moves == []
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    assert [m["k"] for m in load(conn, code).moves] == ["pause"]
+
+
+def test_a_paused_auction_replays_as_the_same_auction(deck, clock):
+    """The control moves change only the clock: the auction with them is the auction
+    without them, lot for lot and sale for sale."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    ra.submit(conn, code, deck, ra.set_paused, host, True)
+    ra.submit(conn, code, deck, ra.set_paused, host, False)
+    ra.submit(conn, code, deck, ra.pass_lot, host, "set")
+    room = load(conn, code)
+    humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
+    bare = ra._replay(room.seed, humans, [m for m in room.moves if m["k"] == "skip_set"], deck)
+    got = ra.replay(room, deck)
+    assert [(s.lot.index, s.winner, s.price) for s in got.auction.sales] == \
+        [(s.lot.index, s.winner, s.price) for s in bare.auction.sales]
+
+
+def test_only_the_host_can_skip_a_player(deck, clock):
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    with pytest.raises(ra.AuctionRoomError, match="only the host"):
+        ra.submit(conn, code, deck, ra.pass_lot, guest, "player")
+    assert load(conn, code).moves == []
+
+
+def test_the_host_skipping_a_player_skips_only_that_lot_for_everybody(deck, clock):
+    """Every human is out of the lot and the lot is decided at once; a human whose limit
+    leads keeps him at that bid. The next lot opens with everyone back in."""
+    conn = FakeConn()
+    code, host, guest = two_human_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    ra.submit(conn, code, deck, ra.limit, guest, r.auction.teams[r.team_of[guest]].max_bid())
+    held = len(ra.replay(load(conn, code), deck).bids)
+    assert held, "the fixture's limit never bid"
+    ra.submit(conn, code, deck, ra.pass_lot, host, "player")
+    after = ra.replay(load(conn, code), deck)
+    sale = next(s for s in after.auction.sales if s.lot.index == r.lot.index)
+    people = set(r.team_of.values())
+    assert not [b for b in sale.bids[held:] if b.team in people], \
+        "somebody bid after the host skipped the player"
+    assert after.phase == "bid" and after.lot.index != r.lot.index
+    assert after.passed == set() and after.skipping(after.team_of[host]) is None
+    assert [m["k"] for m in load(conn, code).moves] == ["limit", "skip_lot"]

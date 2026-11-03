@@ -4442,3 +4442,12 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
   .auc-rep-table .wide{min-width:150px}
   .auc-rep-table{font-size:12px}
 }
+
+/* [A249] The host's pause bar, and a paused room's dimmed controls. */
+.auc-pausebar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;
+  padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);
+  font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2)}
+.auc-pausebar.on{border-color:var(--gold,#d4a843);color:var(--ink);
+  background:color-mix(in srgb,var(--gold,#d4a843) 14%,var(--panel))}
+.auc-pausebar .act{flex:none}
+#roomAuction.paused section .act{opacity:.35;pointer-events:none}

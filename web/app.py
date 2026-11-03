@@ -2401,6 +2401,10 @@ class AuctionOut(BaseModel):
                                      "or 'all' when an earlier Skip is passing this lot for "
                                      "you; a bid or limit cancels it")
     waiting_on: list[str] = Field(default=[], description="auction rooms: who is deciding")
+    paused: bool = Field(default=False, description="auction rooms [A249]: the host has "
+                         "paused the room; every move but the host's resume is refused")
+    paused_left: float | None = Field(default=None, description="auction rooms [A249]: "
+                                      "seconds that were left on the clock when it paused")
     suggestion: list[int] | None = Field(
         default=None, description="squad indexes: eleven in batting order, then Impact")
     twelve: list[int] | None = None
@@ -3182,6 +3186,9 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         top_price=_top_price(a),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
+    pause = room_auction.pause_state(room)
+    if pause is not None:
+        out.paused, out.paused_left = True, pause["left"]
     if you is not None:
         out.brief = _brief_out(auction_report.judge(
             auction_report.board_brief(deck, room.seed, you.short, room.game == "mega"),
@@ -4031,7 +4038,12 @@ class RoomLimitIn(_LotMoveIn):
 
 
 class RoomPassIn(_LotMoveIn):
-    scope: Literal["lot", "set", "all"]
+    scope: Literal["lot", "set", "all", "player"]    # 'player': the host skips this lot [A249]
+
+
+class RoomPauseIn(BaseModel):
+    player_id: str
+    on: bool
 
 
 class RoomFillIn(BaseModel):
@@ -4136,6 +4148,12 @@ def room_auction_limit(code: str, body: RoomLimitIn):
 def room_auction_pass(code: str, body: RoomPassIn):
     return _auction_move(code, body.player_id, room_auction.pass_lot, body.scope, body.lot,
                          body.round)
+
+
+@app.post("/api/rooms/{code}/auction/pause", response_model=RoomStateOut)
+def room_auction_pause(code: str, body: RoomPauseIn):
+    """[A249] The host pauses (`on`) or resumes the room's auction. A repeat is a no-op."""
+    return _auction_move(code, body.player_id, room_auction.set_paused, body.on)
 
 
 @app.post("/api/rooms/{code}/auction/fill", response_model=RoomStateOut)

@@ -909,8 +909,9 @@ function renderRoomAuction(r){
 // Only these are retried: each names its lot, so a repeat can never land on another one.
 // [A174] The trade moves are safe to repeat too: the server treats a repeat as already done.
 // [A241] And a Right to Match answer, which names its lot, round and question.
+// [A249] And the host's pause: a repeat of either way is a no-op on the server.
 const AUCTION_RETRYABLE = new Set(['bid', 'limit', 'pass', 'rtm', 'offer', 'answer', 'withdraw',
-                                   'ready']);
+                                   'ready', 'pause']);
 
 // The two hooks auction.js calls in room mode.
 window.roomAuctionPost = async (path, body) => {

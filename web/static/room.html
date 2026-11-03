@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=fd238906d7">
+<link rel="stylesheet" href="/static/style.css?v=733b8c23b8">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -183,6 +183,11 @@
          draws all three in room mode (window.AUCTION_ROOM), so there is one floor to keep
          working, not two. -->
     <div id="roomAuction" class="hide">
+    <!-- [A249] Paused, for everyone; the host's Pause / Resume, in every phase. -->
+    <div id="aucPauseBar" class="auc-pausebar hide">
+      <span id="aucPauseText"></span>
+      <button class="act minor" id="aucPauseBtn" onclick="togglePause(this)">Pause</button>
+    </div>
     <!-- ============ THE FLOOR ============ -->
     <section id="aucFloor" class="hide">
       <div class="auc-floor">
@@ -235,6 +240,7 @@
             <div class="actions minor-row">
               <button class="act minor" id="aucPassBtn" onclick="passLot('lot', this)">Not interested</button>
               <!-- [A171] Host only: these skip for the whole room. -->
+              <button class="act minor hide" id="aucSkipLotBtn" onclick="passLot('player', this)" title="Every player passes on this one; the computer teams finish the bidding">Skip player for everyone</button>
               <button class="act minor hide" id="aucSkipSetBtn" onclick="passLot('set', this)" title="Every player passes on the rest of this set">Skip set for everyone</button>
               <button class="act minor hide" id="aucSkipAllBtn" onclick="skipRest(this)" title="Every player passes on everything left; the fill round completes each squad">Skip to the end for everyone</button>
             </div>
@@ -548,9 +554,9 @@
 <script src="/static/reveal.js?v=73e8407a59"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=51c414f9a7"></script>
+<script src="/static/room.js?v=1d5bc6177b"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
 <script src="/static/auction_report.js?v=26ea24b6dc"></script>
-<script src="/static/auction.js?v=0dddb80b47"></script>
+<script src="/static/auction.js?v=08062b8015"></script>
 </body>
 </html>

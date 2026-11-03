@@ -171,3 +171,110 @@ def test_seasons_at_the_club_are_part_of_the_season_cache_key(deck, model, monke
     C.auto_career(deck, model, 6, C.Setup("Tester", "middle", 2010, True), "loyal")
     assert seen and all(key[-1] == tenure for tenure, key in seen)
     assert max(t for t, _ in seen) >= C.SETTLED_SEASONS
+
+
+# ---- [A250] being left out waits for poor form -------------------------------------------
+
+@pytest.fixture(scope="module")
+def deck():
+    return deck_from(DOC)
+
+
+@pytest.fixture(scope="module")
+def model():
+    return model_from(DOC)
+
+
+def _newcomer(deck, fs, role="opener", overseas=False):
+    start, ceiling = C.spin(deck, 4, role)
+    c0 = deck.cards_by_fs[fs][0]
+    return C.ability(start, ceiling, 0.5, setup=C.Setup("Tester", role, 2014, overseas),
+                     fs_id=fs, year=c0.season_year, franchise=c0.franchise)
+
+
+def _book_after(year, mine, n):
+    """The form book straight after your n-th league match (1-based)."""
+    book = C.FormBook(year.roster)
+    book.add(year.results[:mine[n - 1] + 1])
+    return book
+
+
+def _poor(year, mine, n):
+    """Recomputed here rather than read off `left_out_now`: last three in the worst third,
+    the season so far in the worst quarter (a match on average against your kind), from
+    your fifth match played."""
+    book, key = _book_after(year, mine, n), (C.YOU_ID, id(year.yours))
+    games = book.games.get(key, [])
+    if len(games) < 5:
+        return False
+    kind = book.kind(key)
+    peers = book._peers(key, kind, lambda gs: len(gs) >= 3)
+
+    def rank(mine_, pool):
+        return sum(p < mine_ for p in pool) / max(1, len(pool) - 1)
+    last = rank(sum(book.score(kind, g) for g in games[-3:]),
+                [sum(book.score(kind, g) for g in book.games[k][-3:]) for k in peers])
+    avg = lambda gs: sum(book.score(kind, g) for g in gs) / len(gs)
+    season = rank(avg(games), [avg(book.games[k]) for k in peers])
+    return last < 1 / 3 and season < 1 / 4
+
+
+def _seasons(deck, model, captain=False):
+    """(year, mine, expected block, reason) for new arrivals across 2014 and 2018."""
+    out = []
+    for yr in (2014, 2018):
+        for fs in C.year_fs_ids(deck, yr)[:4]:
+            for overseas in (False, True):
+                you = _newcomer(deck, fs, overseas=overseas)
+                for seed in range(6):
+                    year = C.simulate_year(deck, model, seed, 1, you, rating=78, tenure=0,
+                                           captain=captain)
+                    mine = [i for i, r in enumerate(year.results)
+                            if r.stage == "league" and year.yours in (r.home, r.away)]
+                    block, reason = C.absence(seed, 1, len(mine), False, 0,
+                                              C.FORM_DROP_RATE["batter"], 78, overseas,
+                                              "batter", 0)
+                    out.append((year, mine, block, reason))
+    return out
+
+
+@pytest.fixture(scope="module")
+def seasons(deck, model):
+    return _seasons(deck, model)
+
+
+def test_a_newcomer_is_left_out_only_straight_after_his_form_turns_poor(seasons):
+    waited = never = 0
+    for year, mine, block, reason in seasons:
+        if reason not in C.FORM_LEFT_OUT:
+            continue
+        if not year.absent:
+            assert year.absence_reason is None
+            never += 1
+            # never out of form at any reading he played behind
+            for n in range(1, len(mine)):
+                assert not _poor(year, mine, n)
+            continue
+        s = year.absent[0]                        # league index the block starts at
+        assert year.absent == list(range(s, min(s + len(block), len(mine))))
+        assert year.absence_reason == reason
+        assert _poor(year, mine, s)
+        for n in range(1, s):                     # and not at any reading before it
+            assert not _poor(year, mine, n)
+        waited += 1
+    assert waited >= 5 and never >= 5             # both happen in this sample
+
+
+def test_other_absences_still_fall_where_they_were_drawn(seasons):
+    seen = 0
+    for year, mine, block, reason in seasons:
+        if reason and reason not in C.FORM_LEFT_OUT:
+            assert year.absent == list(block) and year.absence_reason == reason
+            seen += 1
+    assert seen >= 3
+
+
+def test_a_captain_is_never_left_out_for_selection(deck, model):
+    for year, mine, block, reason in _seasons(deck, model, captain=True):
+        if reason in C.FORM_LEFT_OUT:
+            assert year.absent == [] and year.absence_reason is None

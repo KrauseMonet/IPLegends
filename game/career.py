@@ -226,6 +226,21 @@ SHORT_ABSENCE = 2
 SHORT_REASONS = (("rested", 0.30), ("illness", 0.15), ("a family matter", 0.10))
 LEFT_OUT = ("team balance", "rotation")
 LEFT_OUT_OVERSEAS = ("the overseas combination", "team balance")
+# [A250] ...and a side leaves out a player who is not performing, not one who is. A216/A226
+# placed the block at random before a ball was bowled, so a newcomer making 80, 70 and 60
+# could then be "rotated out". These reasons now WAIT: the block (same length, same draw)
+# starts at the first league match after a form reading in the worst third of your kind
+# (FORM_POOR, the form line's own reading), and a player never out of form loses nothing to
+# selection. A captain is never left out this way (A245). Illness, a family matter and
+# international duty stay where they fall: they have nothing to do with form.
+# A three-match reading alone was MEASURED too noisy to carry it: over 300 newcomer seasons
+# 96% dip into the worst third at some reading, and even the worst tenth caught 65%. So it
+# also needs your season so far in the worst quarter, from your fifth match: then 87% of
+# seasons that end in the bottom third are left out, and 23% of ones that end in the top
+# half -- those only after a genuinely poor start. Declared bars, like FORM_POOR.
+FORM_LEFT_OUT = frozenset(LEFT_OUT + LEFT_OUT_OVERSEAS + ("rested",))
+LEFT_OUT_FROM = 5                    # your matches played before you can be left out
+LEFT_OUT_SEASON = 0.25               # ... with your season so far in this worst share
 NOT_SELECTED = "not selected"        # a squad season's absence: he is not in the eleven
 
 # [A198] Form decides whether you keep your place, ratified by the user: real careers are
@@ -427,12 +442,36 @@ class FormBook:
                 for k in self._peers(key, kind, lambda gs: len(gs) >= FORM_MATCHES)]
         return self._rank(sum(self.score(kind, g) for g in games[-FORM_MATCHES:]), pool)
 
+    def season_rank(self, key: tuple[str, int]) -> float | None:
+        """Your season so far, a match on average, against everyone of your kind who has
+        played FORM_MATCHES or more; None before you have (A250)."""
+        kind, games = self.kind(key), self.games.get(key, [])
+        if kind is None or len(games) < FORM_MATCHES:
+            return None
+
+        def avg(gs):
+            return sum(self.score(kind, g) for g in gs) / len(gs)
+        pool = [avg(self.games[k]) for k in self._peers(key, kind,
+                                                        lambda gs: len(gs) >= FORM_MATCHES)]
+        return self._rank(avg(games), pool)
+
     def last_match_rank(self, key: tuple[str, int]) -> float:
         """Your latest match against every match played by anyone of your kind so far."""
         kind = self.kind(key)
         pool = [self.score(kind, g) for k in self._peers(key, kind, bool)
                 for g in self.games[k]]
         return self._rank(self.score(kind, self.games[key][-1]), pool)
+
+
+def left_out_now(book: FormBook, key: tuple[str, int]) -> bool:
+    """Whether a newcomer's waiting left-out block starts at this match [A250]: his last
+    three in the worst third of his kind AND his season so far in the worst quarter, from
+    his LEFT_OUT_FROM-th match."""
+    if len(book.games.get(key, [])) < LEFT_OUT_FROM:
+        return False
+    lean, season = book.form_rank(key), book.season_rank(key)
+    return (lean is not None and lean < FORM_POOR
+            and season is not None and season < LEFT_OUT_SEASON)
 
 
 def form_word(rank: float | None) -> str | None:
@@ -2479,7 +2518,7 @@ def absence_words(reason: str, missed: int, first: int) -> str:
     if reason == "international duty":
         return f"You missed {missed} {plural} on international duty ({span})."
     if reason == "rested":
-        return f"You were rested for {missed} {plural} ({span})."
+        return f"You were rested for {missed} {plural} after a lean run ({span})."
     if reason == "illness":
         return f"Illness kept you out of {missed} {plural} ({span})."
     if reason == "a family matter":
@@ -2487,8 +2526,8 @@ def absence_words(reason: str, missed: int, first: int) -> str:
     if reason == NOT_SELECTED:
         return f"Not selected for {missed} {plural} ({span})."
     if reason == "rotation":
-        return f"Rotated out for {missed} {plural} ({span})."
-    return f"Left out for {missed} {plural} for {reason} ({span})."
+        return f"Rotated out for {missed} {plural} after a lean run ({span})."
+    return f"Left out for {missed} {plural} for {reason} after a lean run ({span})."
 
 
 # [A230] Each line has a few wordings, taken in turn by season, so a long career does not say
@@ -3094,6 +3133,12 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                                  rating, bool(you.overseas), kind_of_injury, tenure)
     if block and absence_why is None:
         absence_why = extra_reason or None        # the event card's own absence
+    waiting = 0                                    # a left-out block waiting for poor form (A250)
+    if absence_why in FORM_LEFT_OUT and not squad:
+        waiting = 0 if captain else len(block)
+        block = range(0)
+        if not waiting:
+            absence_why = None
     out = set(block)
     dropped: set[int] = set()                      # league indices you were dropped for
     dropped_seen: list[int] = []                   # ... as your match numbers, for the feed
@@ -3273,7 +3318,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         return [mine(c) for c in xi], impact
 
     def league_hook(a: Side, b: Side, season, stage: str) -> None:
-        nonlocal played, seen, breaks, pending_break
+        nonlocal played, seen, breaks, pending_break, waiting
         if yours is a or yours is b:
             # Form is read as it stood straight after your own last match -- the moment the
             # feed shows it -- never shifted by other sides' matches played since.
@@ -3294,6 +3339,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                 last, last_opp = _your_match(season.results[mine[-1]], yours)
                 if last.played:
                     recent_balls.append(last.bowl_balls)
+            quiet = incident is None                   # nothing has been asked yet this season
             if incident is None and inc_key is not None and not benched and mine:
                 inc = incidents.INCIDENTS[inc_key]
                 if inc.trigger != "form":
@@ -3307,6 +3353,13 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                         ask("slump", ", ".join(form_figure(_kind(me), g) for g in games),
                             last_opp, idx)
                 benched = idx in out or idx in dropped
+            if waiting and not benched and mine and (incident is None or not quiet):
+                # [A250] left out only once your form says so; never straight after the
+                # incident you have just answered, which is how you chose to meet it
+                if left_out_now(book, you_key):
+                    out.update(range(idx, min(idx + waiting, league_matches)))
+                    waiting = 0
+                    benched = True
             yours.xi, yours.impact = without if benched else lineup(idx)
             yours.breakdown = None
             if cover_from is not None and not cover_set[0] and not benched and idx >= cover_from:
@@ -3345,6 +3398,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         yours.breakdown = None
     if answers is not None and used < len(answers):
         raise CareerError("more answers than the season had moments")
+    if waiting:
+        absence_why = None                         # never out of form: never left out (A250)
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
                 absent=sorted(set(out) - set(incident_out)), absence_reason=absence_why,
                 incident=incident, incident_out=incident_out,

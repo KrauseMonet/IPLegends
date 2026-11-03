@@ -392,9 +392,10 @@ def test_a_trusted_player_is_retained_a_little_below_the_bar(monkeypatch):
 @needs_deck
 def test_a_trusted_club_keeps_you_through_a_poor_season(deck, model, monkeypatch):
     setup = C.Setup("Ann Example", "opener", 2012)
-    car, _ = C.auto_career(deck, model, 3, setup, "loyal")
+    # seed re-found after A250 (form-gated absences moved the old one)
+    car, _ = C.auto_career(deck, model, 1, setup, "loyal")
     base = C.Checkpoint.from_dict(car.checkpoint.to_dict())
-    k = 5                                   # 2017 at Kolkata, where 2016 was played: a stay
+    k = 3                                   # 2015 at the club 2014 was played for: a stay
     assert C.canonical(base.seasons[k - 1].franchise) == C.canonical(base.seasons[k].franchise)
     monkeypatch.setattr(C, "form_after", lambda squad, pct, bar=None: (True, False))
     # nothing else may move the standing this season: a quiet card, no incident
@@ -410,7 +411,7 @@ def test_a_trusted_club_keeps_you_through_a_poor_season(deck, model, monkeypatch
         resume.squad, resume.standing, resume.threads = False, standing, []
         moves = []
         while True:
-            c = C.play_career(deck, model, 3, setup, moves, resume=resume)
+            c = C.play_career(deck, model, 1, setup, moves, resume=resume)
             if len(c.checkpoint.seasons) > k:
                 return c.checkpoint
             moves.append(C.policy_move(c, "loyal", __import__("random").Random(1)))
@@ -633,3 +634,23 @@ def test_an_incident_a_career_has_used_up_does_not_come_again(deck, model):
         C.simulate_year(deck, model, seed, K, you, answers=(), spent=("hamstring",))
     except C._NeedMoment as need:
         assert not need.prompt or need.prompt["key"] != "hamstring"
+
+
+def test_you_are_not_left_out_in_the_match_you_have_just_met_a_slump_in(deck, model):
+    """[A250] A newcomer's waiting left-out block never starts at the match a slump was
+    answered in: grinding it out is how he chose to meet it. In this season, found by
+    search, the block would otherwise start right there (league index 6)."""
+    start, ceil = C.spin(deck, 4, "opener")
+    c0 = deck.cards_by_fs[96][0]
+    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=96,
+                    year=c0.season_year, franchise=c0.franchise)
+    ans = []
+    while True:
+        try:
+            year = C.simulate_year(deck, model, 29, 1, you, rating=78, tenure=0,
+                                   answers=tuple(ans))
+            break
+        except C._NeedMoment as e:
+            ans.append(("i", 0) if e.prompt else 1)
+    assert year.incident["key"] == "slump" and year.incident["at"] == 7
+    assert not year.absent or year.absent[0] != 6

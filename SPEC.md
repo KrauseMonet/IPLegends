@@ -2965,6 +2965,15 @@ matches, move his form for a while, set a call he keeps for the season, give him
 overs, change how the club sees him, or cost something for good. Injuries keep A226's rates
 per career, now as one chance a season by role.
 
+**[A250] A newcomer is left out only when his form says so.** In his first two seasons at a
+club a player may still lose a block of league matches to selection (team balance, rotation,
+the overseas combination, a rest), its length drawn from what real newcomers missed (A216).
+The block waits: it starts at the first league match after one where his last three matches
+are in the worst third of his kind AND his season so far is in the worst quarter, from his
+fifth match on. A player who never reaches that loses nothing to selection, and a captain is
+never left out this way. Illness, a family matter and international duty fall where they are
+drawn, since they have nothing to do with form.
+
 The club's view of the player (its standing) is hidden and never a number. It rises and falls
 with his answers and starts again at a new club. A club that trusts him keeps him in the side
 through one poor season, retains him a little below the usual bar at a mega auction, and its

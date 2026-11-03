@@ -29,3 +29,5 @@ SPEC.md
 CREDITS.md
 # Crest sources: the site serves the built copies in web/static/crests/, never these.
 assets/
+# [A248] Build a Career's phase leans. Without it every career plays with no lean.
+!data/phase_skill.json.gz

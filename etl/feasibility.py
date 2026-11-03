@@ -204,6 +204,10 @@ class Card:
     # widening. Only `web.daily` reads it, so a day scored before A244 replays under the
     # rule it was scored under. None means "the same as `keeper_eligible`".
     keeper_ipl: bool | None = None
+    # [A248] A phase lean (powerplay, middle, death) in runs a ball, set only on Build a
+    # Career's own player; None on every real card, which therefore plays as it always did.
+    phase_bat: tuple[float, float, float] | None = None
+    phase_bowl: tuple[float, float, float] | None = None
 
     @property
     def strike_rate(self) -> float | None:

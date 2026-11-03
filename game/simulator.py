@@ -142,6 +142,11 @@ class Player:
     bat_dismissal: float = 1.0
     bowl_scoring: float = 0.0
     bowl_dismissal: float = 1.0
+    # [A248] A lean by phase (powerplay, middle, death), runs a ball added to the scoring
+    # half (batting) or the runs saved (bowling) in that phase only. None for everybody but
+    # Build a Career's own player, so every other ball is the ball it always was.
+    phase_bat: tuple[float, float, float] | None = None
+    phase_bowl: tuple[float, float, float] | None = None
 
 
 @dataclass
@@ -706,6 +711,7 @@ def change_bowler(bowlers: list[BowlerCard], chosen: BowlerCard,
 
 
 PLAN_PHASES = ("powerplay", "middle", "death")
+PHASE_INDEX = {p: i for i, p in enumerate(PLAN_PHASES)}
 
 
 def phase_of_over(over: int) -> str:
@@ -833,9 +839,16 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
             probs, values = model.state(
                 over if state_over is None else state_over, innings.wickets)
+            aim = striker.player.bat_scoring - bowler.player.bowl_scoring
+            if striker.player.phase_bat or bowler.player.phase_bowl:
+                # [A248] only Build a Career's own player carries a phase lean
+                ph = PHASE_INDEX[phase_of_over(over if state_over is None else state_over)]
+                if striker.player.phase_bat:
+                    aim += striker.player.phase_bat[ph]
+                if bowler.player.phase_bowl:
+                    aim -= bowler.player.phase_bowl[ph]
             dist = split_ball(
-                probs, values,
-                striker.player.bat_scoring - bowler.player.bowl_scoring,
+                probs, values, aim,
                 striker.player.bat_dismissal * bowler.player.bowl_dismissal,
             )
             outcome = draw(dist, rng)

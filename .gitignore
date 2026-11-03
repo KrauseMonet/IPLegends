@@ -20,3 +20,5 @@ __pycache__/
 # local Claude Code settings
 .claude/settings.local.json
 .vercel
+# [A248] Build a Career's phase leans, ~15 kB. Without it every career plays with no lean.
+!/data/phase_skill.json.gz

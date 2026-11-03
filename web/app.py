@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from etl.feasibility import (BOWLERS_IN_TWELVE, OVERSEAS_CAP, REROLL_KINDS, TWELVE_SIZE,
                              XI_SIZE, Card, reads_as_keeper, team_rating)
-from game import analysis, auction, auction_report, quiz, records
+from game import analysis, auction, auction_report, phase_skill, quiz, records
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -1515,6 +1515,9 @@ def health() -> dict:
         # data/puzzle_facts.json.gz did not reach the deployment (A107's silent-packaging
         # trap), and every Bingo route would answer 503.
         "puzzles": bingo_routes._facts() is not None,
+        # [A248] whether Build a Career's phase leans reached the deployment (A107's lesson:
+        # a missing file falls back silently to no lean, so it has to show from outside)
+        "phase": bool(phase_skill.table()),
         # Connection reuse, for the same reason: it is invisible when it works, so a
         # process that had silently stopped reusing (and gone back to paying a connect on
         # every request) would look like nothing more than a slower site. `reused` far

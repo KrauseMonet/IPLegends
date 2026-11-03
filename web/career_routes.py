@@ -803,7 +803,8 @@ def _trait_words(career: C.Career) -> list[str]:
     if career.checkpoint is None:
         return []
     role = career.role_now or career.setup.role
-    return ct.words(career.checkpoint.traits, bowler=C.role_kind(role) == "bowler")
+    return (ct.words(career.checkpoint.traits, bowler=C.role_kind(role) == "bowler")
+            + career.phase_words)                                   # [A248]
 
 
 def _rating_now(career: C.Career) -> int:

@@ -3088,3 +3088,32 @@ that does not fit gives way to one that does.
 The guardrail is measured, not argued: on paired careers (`tools.career_traits_report`), all
 the right choices lift a peak Rating about five points, all the wrong ones lower it, and a
 careless player lands close to a career with the traits switched off.
+
+## 25. Phase specialisation, in Build a Career only [A248]
+
+Your player leans toward a phase: he scores faster (or concedes less) in the powerplay or at
+the death than his own average, and a little less elsewhere. **Only runs lean.** Measured in
+the archive first: a real player's lean in economy and scoring carries over between seasons
+and between the odd and even years of a career (r about 0.25-0.35), while his lean in wickets
+or dismissals carries over not at all (r about 0). The true spread of a real lean is
+0.045-0.073 runs a ball.
+
+- **Where it comes from.** `etl.phase_skill` measures every real player's career lean
+  against his own average, each season against that season's par in the phase, shrunk by
+  pseudo-balls MEASURED from the split-half covariance (600-1,200 by phase). It is frozen to
+  `data/phase_skill.json.gz` (`tools.snapshot_phase`, with `--check`). Your player's lean is
+  the two real players behind his spins, `t` of the way from start to ceiling.
+- **The coach.** From the second season, on its own stream (30% a pre-season, twice a career),
+  when he has no other offer, the coach asks you to make a phase your job: an opener the
+  powerplay, a batter lower down the death, a bowler his clearer lean of the powerplay and the
+  death (a seamer the death, a spinner the new ball when he has none). Yes adds 0.03 runs a ball
+  there and costs 0.01 in each other phase, to at most 0.09 from his work. Taking the death
+  overs in the mid-season incident is the same step.
+- **Where you bowl.** When you are not the captain setting a plan, your side bowls you in your
+  clearly stronger phase (a lean 0.03 above your weakest). A captain sets his own plan (A213).
+- **Words.** A lean of 0.05 or more shows on the player card: Powerplay hitter, Dangerous at
+  the death, New-ball bowler, Death-overs specialist. Never numbers.
+
+Every other player, in every mode and in your own career's other sides, plays exactly as
+before (verified by fingerprinting historical leagues on the old and new engine). A saved
+legend brings no lean into a friends' auction room.

@@ -109,7 +109,8 @@ def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
                   # ball either) bowls as average; anyone else has his own.
                   bowl_scoring=card.bowl_scoring if card.bowl_scoring is not None else 0.0,
                   bowl_dismissal=(card.bowl_dismissal if card.bowl_dismissal is not None
-                                  else 1.0))
+                                  else 1.0),
+                  phase_bat=card.phase_bat, phase_bowl=card.phase_bowl)
 
 
 OVERSEAS_LIMIT = 4

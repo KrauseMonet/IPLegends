@@ -51,7 +51,8 @@ from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
-from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, Model
+from game import phase_skill as phase_data
+from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model
 
 # --- who you can be ------------------------------------------------------------------
 
@@ -1257,6 +1258,138 @@ def squad_need(deck: Deck, you: Card, fs_id: int) -> str | None:
         regular = sum((c.bat_balls or 0) >= BAT_MIN_BALLS and c.role != "bowler" for c in twelve)
         return "bat" if regular < NEED_BATTERS else None
     return None
+
+
+# --- phase specialisation [A248] -------------------------------------------------------------
+# Your player leans toward a phase -- scoring faster (or conceding less) in the powerplay or at
+# the death than his own average, and a little less elsewhere. Measured in the archive first:
+# a real player's lean in economy and scoring carries over between seasons and between halves
+# of a career (r about 0.25-0.35), his lean in wickets or dismissals does not (r about 0), so
+# only runs lean; the true spread of a real lean is 0.045-0.073 runs a ball. The lean starts
+# from the real players behind your two spins (`etl.phase_skill`, shrunk by measured pseudo-
+# balls) and the coach can offer to sharpen it. Only your own player ever carries one, so
+# every other player, here and in every other mode, plays exactly as before. Declared steps.
+PHASE_ON = True
+PHASE_STEP = 0.03                    # runs a ball gained in the phase you work on...
+PHASE_COST = 0.01                    # ...and given up in each of the other two
+PHASE_MAX = 0.09                     # the most the coach's work can add to one phase
+PHASE_OFFER_CHANCE = 0.3             # an eligible pre-season's chance of the coach asking
+PHASE_OFFERS_MAX = 2
+PHASE_OFFER_FROM = 1                 # from the second season
+PLACE_LEAN = 0.03                    # a bowling lean this clear and your side bowls you there
+WORD_LEAN = 0.05                     # ...and this clear, the player card says so
+LEAN_PHASES = (0, 2)                 # the powerplay and the death: the middle does not persist
+PHASE_WORDS = {("bat", 0): "Powerplay hitter", ("bat", 2): "Dangerous at the death",
+               ("bowl", 0): "New-ball bowler", ("bowl", 2): "Death-overs specialist"}
+PHASE_TEXT = {
+    ("bowl", 2): "The coach pulls you aside. \"I want someone who owns the death overs. Yorkers, "
+                 "slower balls, nerve. Be that bowler?\"",
+    ("bowl", 0): "The coach pulls you aside. \"I want you with the new ball, keeping it tight "
+                 "while the field is up. Make it your job?\"",
+    ("bat", 0): "The coach pulls you aside. \"Take on the fielding restrictions. I want you "
+                "scoring at the top in the first six.\"",
+    ("bat", 2): "The coach pulls you aside. \"I want a finisher. The last five overs are yours: "
+                "clear the ropes.\"",
+}
+PHASE_TAKE = {("bowl", 2): "Own the death overs", ("bowl", 0): "Take the new ball",
+              ("bat", 0): "Attack the powerplay", ("bat", 2): "Become the finisher"}
+
+
+def phase_after(built: dict, disc: str, idx: int) -> dict:
+    """The coach's work on one phase, added to what is built: +PHASE_STEP there, -PHASE_COST
+    in each other phase, never past PHASE_MAX in the phase worked on."""
+    cur = list(built.get(disc, (0.0, 0.0, 0.0)))
+    gain = min(PHASE_STEP, max(0.0, PHASE_MAX - cur[idx]))
+    if not gain:
+        return dict(built)
+    cost = PHASE_COST * gain / PHASE_STEP
+    cur = [round(v + (gain if i == idx else -cost), 6) for i, v in enumerate(cur)]
+    return {**built, disc: cur}
+
+
+def phase_lean(start: Card, top: Card, t: float, built: dict, disc: str) -> tuple[float, ...]:
+    """Your lean in one discipline: the real players behind your two spins, `t` of the way
+    from the start to the ceiling, plus what the coach's work has built."""
+    a, b = phase_data.lean(start.person_id, disc), phase_data.lean(top.person_id, disc)
+    extra = built.get(disc, (0.0, 0.0, 0.0))
+    return tuple(round(_lin(x, y, max(0.0, min(1.0, t))) + e, 6) for x, y, e in zip(a, b, extra))
+
+
+def with_phase(card: Card, start: Card, top: Card, t: float, built: dict) -> Card:
+    """Your card with its phase lean, in the disciplines it has. Nothing at all when phases
+    are off, or the lean is nothing: the card plays exactly as before."""
+    if not PHASE_ON:
+        return card
+    bat = phase_lean(start, top, t, built, "bat") if card.bat_scoring is not None else None
+    bowl = phase_lean(start, top, t, built, "bowl") if card.bowl_scoring is not None else None
+    return dataclasses.replace(card, phase_bat=bat if bat and any(bat) else None,
+                               phase_bowl=bowl if bowl and any(bowl) else None)
+
+
+def phase_job(card: Card) -> tuple[str, int]:
+    """Which phase the coach would make your job. A batter's follows where he bats -- an
+    opener's is the powerplay, anyone lower the death -- because a real top-order batter's
+    death lean is a SET batter's (Kohli is +1 run an over there) and no reason to make him a
+    finisher. A spinner's is the new ball (the Narine and Ashwin job): a real spinner's death
+    lean is mostly selection -- captains bowl only their best spinner at the death -- and
+    making spinners death bowlers lifted their career wickets 34% (measured). A seamer's is
+    his clearer lean of the powerplay and the death, the death when he has none."""
+    if _kind(card) == "batter":
+        return "bat", 0 if TOP_SLOTS & set(card.positions or ()) else 2
+    if card.bowling_style == "spin":
+        return "bowl", 0
+    lean = card.phase_bowl or (0.0, 0.0, 0.0)
+    return "bowl", 0 if lean[0] > lean[2] else 2
+
+
+def phase_card(seed: int, k: int, cp: "Checkpoint", you: Card, squad: bool) -> dict | None:
+    """The coach's offer to make a phase your job, if he asks this pre-season: its own
+    stream, from the second season, twice a career at most."""
+    if (not (COACH_ON and PHASE_ON) or squad or k < PHASE_OFFER_FROM
+            or cp.phase_offers >= PHASE_OFFERS_MAX
+            or random.Random(f"{seed}:phase:{k}").random() >= PHASE_OFFER_CHANCE):
+        return None
+    disc, idx = phase_job(you)
+    if disc == "bowl" and you.bowl_scoring is None:
+        return None
+    if cp.phase.get(disc, (0.0, 0.0, 0.0))[idx] >= PHASE_MAX:
+        return None
+    where = "there" if disc == "bowl" else "in that phase"
+    return {"key": "phase", "title": "The coach has a job for you", "target": "",
+            "text": PHASE_TEXT[(disc, idx)], "phase": [disc, idx],
+            "options": [
+                _opt(PHASE_TAKE[(disc, idx)],
+                     f"You will be sharper {where}, a little less so elsewhere"
+                     + (", and the side will bowl you there." if disc == "bowl" else "."),
+                     f"You made the {('death overs' if idx == 2 else 'powerplay')} your job.",
+                     True),
+                dict(_opt("Stay an all-phase player", "Keep your game even across the innings.",
+                          "You kept your game even across the innings.", False), neutral=True)]}
+
+
+def phase_words(card: Card) -> list[str]:
+    """The player card's words for a clear lean: never numbers."""
+    out = []
+    for disc, lean in (("bat", card.phase_bat), ("bowl", card.phase_bowl)):
+        for i in LEAN_PHASES:
+            if lean and lean[i] >= WORD_LEAN and (disc, i) in PHASE_WORDS:
+                out.append(PHASE_WORDS[(disc, i)])
+    return out
+
+
+def phase_placement(card: Card, built: dict | None = None) -> str | None:
+    """Where your side bowls you, when you are not the captain setting a plan: the phase you
+    CHOSE to make your job (the coach's offer, or taking the death), when your lean there is
+    clearly your strongest -- never from the spins' templates alone. Measured: placing every
+    bowler by his templates put 11 of 12 pace careers at the death and lifted career wickets
+    15-30%, because death overs fall more wickets whoever bowls them; the lean is the small part."""
+    lean, chose = card.phase_bowl, (built or {}).get("bowl")
+    if not lean or not chose:
+        return None
+    best = max(LEAN_PHASES, key=lambda i: lean[i])
+    if chose[best] <= 0 or lean[best] - min(lean) < PLACE_LEAN:
+        return None
+    return PLAN_PHASES[best]
 
 
 # --- a teammate breaks down, and you bowl [A247] --------------------------------------------
@@ -2638,6 +2771,8 @@ class SeasonRecord:
     # runs, wickets, good}.
     cover_ok: bool = False
     cover: dict | None = None
+    # [A248] the phase work you chose, as the season was played with it (an input)
+    phase_built: dict = field(default_factory=dict)
     rival: list | None = None
     extra_earnings: int = 0
     # [A238] The changed role this season was played in (`role_state`, None for the role you
@@ -2915,7 +3050,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   rating: int | None = None, extra_reason: str = "", tenure: int = 0,
                   rival: tuple[str, str] | None = None, spent: tuple[str, ...] = (),
                   full_time: bool = False, captain: bool = False,
-                  traits: dict | None = None, cover_ok: bool = False) -> Year:
+                  traits: dict | None = None, cover_ok: bool = False,
+                  phase_built: dict | None = None) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -2938,6 +3074,10 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     with_you = (yours.xi, yours.impact)
     without = opposition_twelve(list(deck.cards_by_fs[you.fs_id]))
     me = next(c for c in yours.xi if c.person_id == YOU_ID)
+    if yours.bowling_plan is None and PHASE_ON:
+        where = phase_placement(me, phase_built)   # [A248] where you chose to specialise
+        if where:
+            yours.bowling_plan = {YOU_ID: where}
     roster = {id(s): {c.person_id: c for c in deck.cards_by_fs[
         next(fs for fs in year_fs_ids(deck, you.season_year)
              if deck.cards_by_fs[fs][0].franchise == s.franchise)]} for s in sides}
@@ -3059,6 +3199,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                     "age": opt.age, "thread": opt.thread, "tone": tone,
                     "injuries": [x for x in (opt.injury, turn.injury if turn else "") if x],
                     "traits": [list(x) for x in opt.traits],
+                    "death_job": bool(opt.death),
                     "out": len([i for i in incident_out])}
 
     def moment(a: Side, b: Side, season, stage: str, left: int,
@@ -3520,7 +3661,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                          record.tenure, tuple(record.rival) if record.rival else None, spent,
                          full_time=bool(record.role and record.role.get("full_time")),
                          captain=record.captain, traits=record.traits or None,
-                         cover_ok=record.cover_ok)
+                         cover_ok=record.cover_ok, phase_built=record.phase_built or None)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -3732,6 +3873,7 @@ class Career:
     # trial season's differs from it.
     role_now: str = ""
     season_role: str = ""
+    phase_words: list[str] = field(default_factory=list)   # a clear phase lean, in words (A248)
 
     @property
     def potential_points(self) -> float:
@@ -3941,6 +4083,8 @@ class Checkpoint:
     # where that discipline grows toward. Empty on a checkpoint from before A245.
     traits: dict = field(default_factory=dict)
     coach_mentor: dict = field(default_factory=dict)
+    phase: dict = field(default_factory=dict)          # [A248] the coach's work, by discipline
+    phase_offers: int = 0
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -3969,7 +4113,9 @@ class Checkpoint:
                    trials=d.get("trials", 0), coach_declined=d.get("coach_declined", -9),
                    role_since=d.get("role_since", -1),
                    traits=dict(d.get("traits") or {}),
-                   coach_mentor=dict(d.get("coach_mentor") or {}))
+                   coach_mentor=dict(d.get("coach_mentor") or {}),
+                   phase={k: list(v) for k, v in (d.get("phase") or {}).items()},
+                   phase_offers=d.get("phase_offers", 0))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -4369,6 +4515,15 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                            fs_id=offer.fs_id, year=year, franchise=offer.franchise, role=rd)
             need = squad_need(deck, here, offer.fs_id)
         coach = coach_card(seed, setup, start, cp, k, squad_now, need)
+        # [A248] Your lean going into the season, as the player card says it and as the coach
+        # reads it when he has no other offer to make.
+        leaning = with_phase(ability(start, top, career_t(cp, start, top, shape), setup=setup,
+                                     fs_id=offer.fs_id, year=year, franchise=offer.franchise,
+                                     role=rd), start, top, career_t(cp, start, top, shape),
+                             cp.phase)
+        career.phase_words = phase_words(leaning)
+        if coach is None:
+            coach = phase_card(seed, k, cp, leaning, squad_now)
         if coach is not None:
             coach = with_coach_mentor(deck, coach, offer.fs_id, start, cp)
         coach_said, coach_rec = None, None
@@ -4390,6 +4545,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 if pick["take"]:
                     cp.roles.append(coach["target"])
                     cp.role_since = k
+            elif coach["key"] == "phase":
+                cp.phase_offers += 1
+                if pick["take"]:
+                    cp.phase = phase_after(cp.phase, *coach["phase"])
             elif coach["key"] == "specialise":
                 if pick["take"]:
                     cp.roles.append(coach["target"])
@@ -4524,8 +4683,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         absence_label = (event.title.lower() if option.injury or (now and now.missed) or
                          event.key in ("workload", "home_league") and extra else
                          "an injury that came back" if landed_missed else "")
-        you = ct.styled(ability(start, top, t, setup=setup, fs_id=offer.fs_id, year=year,
-                                franchise=offer.franchise, role=rd), traits)
+        you = with_phase(ct.styled(ability(start, top, t, setup=setup, fs_id=offer.fs_id,
+                                           year=year, franchise=offer.franchise, role=rd),
+                                   traits), start, top, t, cp.phase)
+        career.phase_words = phase_words(you)
         captain_now = option.captain or (already and not squad_now)
         plan: tuple[tuple[str, str], ...] = ()
         bowlers: list[Card] = plan_bowlers(deck, you, offer.fs_id) if captain_now else []
@@ -4550,7 +4711,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                               rating=rating_at(start, top, t), absence=absence_label,
                               tenure=tenure_at(cp.seasons, offer.franchise),
                               role=rd, coach=coach_rec, traits=traits,
-                              cover_ok=cover_eligible(setup, cp, k, squad_now))
+                              cover_ok=cover_eligible(setup, cp, k, squad_now),
+                              phase_built=dict(cp.phase))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
@@ -4566,7 +4728,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
                                                    (setup, start, top, offer, option, t,
                                                     squad_now, ct.key(traits), captain_now,
-                                                    record.cover_ok, role_key(rd), record.tenure),
+                                                    record.cover_ok, you.phase_bat, you.phase_bowl,
+                                                    tuple(sorted((d, tuple(v)) for d, v in cp.phase.items())),
+                                                    role_key(rd), record.tenure),
                                                    answers, plan,
                                                    incidents_spent(cp.seasons))
         except _NeedMoment as need:
@@ -4604,6 +4768,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if inc["thread"]:
                 cp.threads.append({"k": inc["thread"], "year": year})
             trait_moves += [tuple(x) for x in inc.get("traits", ())]
+            if inc.get("death_job") and PHASE_ON:
+                cp.phase = phase_after(cp.phase, "bowl", 2)   # [A248] you took the death
         if played.cover:
             say(cover_words(played.cover) + (" The coach noticed." if played.cover["good"]
                                              else " It was expensive, but you stepped up."),

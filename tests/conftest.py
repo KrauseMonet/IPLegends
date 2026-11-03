@@ -43,3 +43,16 @@ def career_seeds_open(monkeypatch):
     from web import career_routes as R
 
     monkeypatch.setattr(R, "seed_allowed", lambda request: True)
+
+
+@pytest.fixture(autouse=True)
+def phase_off(request, monkeypatch):
+    """Phase specialisation (A248) gives every career player a lean from his templates, which
+    moves every seeded season the older career tests pin. It is off for every test except a
+    module that sets `PHASE_TESTS = True` (`test_career_phase.py`). The season cache needs no
+    clearing: the lean is part of its key."""
+    if getattr(request.module, "PHASE_TESTS", False):
+        return
+    from game import career as C
+
+    monkeypatch.setattr(C, "PHASE_ON", False)

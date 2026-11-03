@@ -4245,6 +4245,7 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-inc-li{list-style:none;font-size:12.5px;color:var(--ink-2);padding:6px 10px;margin:4px 0;
   border-left:2px solid var(--mint);background:rgba(255,255,255,.03)}
 .cr-inc-li::before{content:"⚑ ";color:var(--mint)}
+.cr-cover-li::before{content:"● ";color:var(--mint)}
 .cr-standing{font-size:12.5px;color:var(--ink-2);font-style:italic}
 /* [A245] who your choices have made you: words only */
 .cr-traits{display:flex;flex-wrap:wrap;gap:5px}

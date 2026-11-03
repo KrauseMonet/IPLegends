@@ -800,7 +800,9 @@ function crFeedAppend(){
   l.clipped = clips.length > 0;
   // [A230] What happened before this match, and what you did about it.
   const told = l.incident ? `<li class="cr-inc-li">${esc(l.incident)}</li>` : '';
-  $('#crFeedList').insertAdjacentHTML('beforeend', told + crFeedRow(l, f.n) + crFeedMilestones(l)
+  // [A247] A teammate pulled up mid-spell and you bowled his overs.
+  const cover = l.cover ? `<li class="cr-inc-li cr-cover-li">${esc(l.cover)}</li>` : '';
+  $('#crFeedList').insertAdjacentHTML('beforeend', told + crFeedRow(l, f.n) + cover + crFeedMilestones(l)
     + clips.map(c => `<li class="cr-np-li">${crClip(c, 'mini')}</li>`).join(''));
   crFeedPanel(l);
   return l;

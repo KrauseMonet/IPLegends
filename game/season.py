@@ -284,6 +284,10 @@ class Side:
     # A captain's phase plan for this side's bowlers (A213), person id -> "powerplay" |
     # "middle" | "death". Only a Build a Career side ever has one.
     bowling_plan: dict[str, str] | None = None
+    # [A247] A frontline bowler who pulls up mid-spell in this side's next match, and who
+    # covers his overs: (injured person id, overs he bowls first, the cover's Card). Only
+    # Build a Career ever sets one, for one match.
+    breakdown: tuple[str, int, Card] | None = None
 
 
 @dataclass
@@ -754,6 +758,17 @@ def _finish_result(model: Model, rng: random.Random,
     return r
 
 
+def _breakdown(side: Side, model: Model):
+    """[A247] `side.breakdown` as the simulator takes it, or None."""
+    if side.breakdown is None:
+        return None
+    from game.__main__ import to_player
+    from game.simulator import Breakdown
+
+    injured, after, cover = side.breakdown
+    return Breakdown(injured, after, to_player(cover, model))
+
+
 def play(model: Model, home: Side, away: Side, rng: random.Random,
          stage: str = "league", track: Side | None = None,
          stats: JourneyAccumulator | None = None) -> Result:
@@ -792,7 +807,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     away_bowl_impact_1 = away.impact if away_forced else None
     first = play_innings(model, lineup(home.xi, model, None),
                           attack(away_bowling_1, model, away_bowl_impact_1), rng,
-                          plan=away.bowling_plan)
+                          plan=away.bowling_plan, breakdown=_breakdown(away, model))
 
     home_target = None if home.impact is None else decide_impact(home, away, "bowl", first)
     away_target = (None if away.impact is None or away_forced
@@ -804,7 +819,8 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     home_bowl_impact = home.impact if home_target is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
-                          rng, target=first.runs, plan=home.bowling_plan)
+                          rng, target=first.runs, plan=home.bowling_plan,
+                          breakdown=_breakdown(home, model))
 
     if stats is not None and track is not None:
         if track is home:

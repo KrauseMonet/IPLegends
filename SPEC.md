@@ -3027,6 +3027,21 @@ The archive does NOT say real sides behave like this -- real squads cover a weak
 all-rounders, not batters (2.2% of overs from batters in the weakest-attack quartile against
 1.7% in the strongest) -- so the reason is the game's own engine, not realism.
 
+**A teammate breaks down [A247].** In a batter's season (opener or middle order, where a trial
+could follow next season), one league match may bring a breakdown: one of his side's five
+frontline bowlers pulls up after one, two or three overs and bowls no more, and the batter bowls
+the overs he had left -- with his own bowling, or the pooled level of real part-time bowlers if
+he never bowled. The match row and the season card say so ("Z Khan pulled up after two overs
+against Kolkata Knight Riders, and you bowled the rest of his spell: 1/14 in 2 overs"). The next
+pre-season the coach, who saw it, offers the bowling trial for certain, naming the match: warmly
+after a good spell (a wicket, or under ten an over), doubtfully after a bad one. It is an
+ordinary trial offer and counts toward the two a career. The chance is **6.5% of eligible
+seasons**, set at the archive's upper bound: in full-length innings a regular batter took the
+ball after a regular bowler stopped at two overs or fewer by the fourteenth in 53 of 818 regular
+batter seasons, and that counts tactical changes as well as injuries. It is drawn on its own
+stream. With no breakdown, a match plays exactly as before (`play_innings`' `breakdown` is None
+in every other mode).
+
 ## 24. Who your player becomes [A245]
 
 Every choice in a career makes something of the player, for good. Four TRAITS, each a number

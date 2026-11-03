@@ -17,6 +17,7 @@ def no_incidents():
         C._SEASON_CACHE.clear()
         mp.setattr(I, "candidate", lambda *a, **kw: (None, 0))
         mp.setattr(I, "SLUMP_CHANCE", 0.0)
+        mp.setattr(C, "COVER_CHANCE", 0.0)   # a teammate's breakdown (A247) is one too
         yield
     C._SEASON_CACHE.clear()
 

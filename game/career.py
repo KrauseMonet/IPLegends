@@ -51,7 +51,7 @@ from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
-from game.simulator import Model
+from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, Model
 
 # --- who you can be ------------------------------------------------------------------
 
@@ -1186,6 +1186,14 @@ def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
         if prev.bowl_rank >= SPECIALISE_BOWL or fading:
             card = COACH_FADING if fading and prev.bowl_rank < SPECIALISE_BOWL else COACH_SPECIALISE
             return dict(card, target=FULL_TIME)
+    # [A247] A cover spell last season: the coach saw it, and asks. Certain, not drawn.
+    if (prev is not None and prev.cover and origin == "batter"
+            and trial_eligible(setup, cp, k, squad)):
+        c = prev.cover
+        card = dict(COACH_TRIAL_BOWL if style else COACH_TRIAL_STYLE, target="allrounder")
+        text = COVER_TEXT[c["good"]].format(who=c["injured"], opp=c["opp"],
+                                            fig=cover_figures(c))
+        return dict(card, text=text, cover=True)
     # [A246] The side's need, when it is the job this player would take up, raises the
     # chance; the draw is the same stream, so with no need nothing changes.
     needed = need == ("bat" if origin == "bowler" else "bowl")
@@ -1249,6 +1257,95 @@ def squad_need(deck: Deck, you: Card, fs_id: int) -> str | None:
         regular = sum((c.bat_balls or 0) >= BAT_MIN_BALLS and c.role != "bowler" for c in twelve)
         return "bat" if regular < NEED_BATTERS else None
     return None
+
+
+# --- a teammate breaks down, and you bowl [A247] --------------------------------------------
+# A batter is handed the ball mid-match when a frontline bowler pulls up and cannot finish his
+# spell, and bowls the overs he had left; at the season's end the coach, who saw it, asks
+# whether to make bowling part of his game. The archive cannot say WHY a bowler stopped, so it
+# bounds the rate from above: in full-length innings, a regular batter (100+ balls) took the
+# ball after a regular bowler (150+) stopped at two overs or fewer by the 14th, in 53 of 818
+# regular batter seasons (6.5%) -- and that counts tactical changes as well as injuries. The
+# chance is set at that bound; it is declared game design, not a measured injury rate.
+COVER_CHANCE = 0.065
+COVER_AFTER = (1, 2, 3)              # overs the injured bowler bowls before he pulls up
+FRONTLINE = 5                        # whom it may be: the side's five frontline bowlers
+COVER_GOOD_ECON = 10.0               # a spell is good with a wicket, or under ten an over
+COVER_TEXT = {
+    True: "The coach catches you after the last match. \"When {who} pulled up against {opp}, "
+          "you got us out of a hole: {fig}. I want to see more of that. A season as an "
+          "all-rounder?\"",
+    False: "The coach catches you after the last match. \"You went for some when {who} pulled "
+           "up against {opp}: {fig}. But you took the ball when we needed someone. Want to "
+           "find out if there is more in it?\"",
+}
+
+
+def cover_eligible(setup: Setup, cp: "Checkpoint", k: int, squad: bool) -> bool:
+    """Whether a breakdown can hand you the ball in season `k`: only when the coach could
+    then offer a trial in the season after (`trial_eligible`), which is what it leads to."""
+    return (COACH_ON and role_kind(setup.role) == "batter"
+            and trial_eligible(setup, cp, k + 1, squad))
+
+
+def cover_breakdown(deck: Deck, model: Model, yours: Side, after: int, pick: int):
+    """`Side.breakdown` for this match: one of your side's frontline bowlers, you covering
+    with your own bowling (or the pooled part-timers', A238, if you have none). None when you
+    are already one of the five, or the side has nobody else to lose."""
+    from game.__main__ import attack
+
+    me = next((c for c in yours.xi if c.person_id == YOU_ID), None)
+    if me is None:
+        return None
+    five = attack(yours.xi, model, yours.impact)[:FRONTLINE]
+    if any(p.person_id == YOU_ID for p in five) or not five:
+        return None
+    injured = five[pick % len(five)]
+    if me.bowl_scoring is None or me.bowl_dismissal is None:
+        s, d = part_time_bowling(deck)
+        me = dataclasses.replace(me, bowl_scoring=s, bowl_dismissal=d, bowl=bowl_value(s, d))
+    return (injured.person_id, after, me)
+
+
+def cover_spell(season, yours: Side) -> dict | None:
+    """The cover spell you bowled this season, read off the scorecard: whom you covered,
+    against whom, and your figures. None if no breakdown handed you the ball."""
+    n = 0
+    for r in season.results:
+        if yours not in (r.home, r.away):
+            continue
+        n += 1
+        inn, opp = (r.away_innings, r.away) if r.home is yours else (r.home_innings, r.home)
+        if inn is None or inn.breakdown_at is None:
+            continue
+        mine = next((b for b in inn.bowling if b.player.person_id == YOU_ID), None)
+        if mine is None or not mine.balls:
+            return None
+        hurt = next((b for b in inn.bowling if b.player.person_id != YOU_ID and not b.change
+                     and b.max_overs < MAX_OVERS_PER_BOWLER), None)
+        good = mine.wickets > 0 or mine.runs * BALLS_PER_OVER < COVER_GOOD_ECON * mine.balls
+        return {"at": n, "opp": opp.name.rsplit(" ", 1)[0], "opp_short": opp.short,
+                "injured": hurt.player.name if hurt else "a bowler",
+                "after": hurt.max_overs if hurt else 0, "balls": mine.balls,
+                "runs": mine.runs, "wickets": mine.wickets, "good": good}
+    return None
+
+
+def cover_figures(c: dict) -> str:
+    """A cover spell as a scorecard says it: "1/22 in 3 overs"."""
+    whole, part = divmod(c["balls"], BALLS_PER_OVER)
+    overs = f"{whole}.{part}" if part else f"{whole}"
+    return f"{c['wickets']}/{c['runs']} in {overs} over{'' if c['balls'] == BALLS_PER_OVER else 's'}"
+
+
+_COVER_N = {1: "one", 2: "two", 3: "three"}
+
+
+def cover_words(c: dict) -> str:
+    """The season card's and the feed's line."""
+    return (f"{c['injured']} pulled up after {_COVER_N.get(c['after'], c['after'])} "
+            f"over{'s' if c['after'] != 1 else ''} against {c['opp']}, and you bowled the "
+            f"rest of his spell: {cover_figures(c)}.")
 
 
 def asked_by_need(card: dict) -> dict:
@@ -2536,6 +2633,11 @@ class SeasonRecord:
     # side can say so), and money beyond the contract.
     tones: list[str] = field(default_factory=list)
     incident: dict | None = None
+    # [A247] Whether a teammate's breakdown may hand you the ball this season (an input, set
+    # by the career loop), and the cover spell if it did: {at, opp, injured, after, balls,
+    # runs, wickets, good}.
+    cover_ok: bool = False
+    cover: dict | None = None
     rival: list | None = None
     extra_earnings: int = 0
     # [A238] The changed role this season was played in (`role_state`, None for the role you
@@ -2645,6 +2747,7 @@ class Year:
     absence_reason: str | None = None                # why, or None for an event card's own
     incident: dict | None = None                     # the season's incident and your answer (A230)
     incident_out: dict = field(default_factory=dict) # league index -> why it kept you out (A230)
+    cover: dict | None = None                        # a cover spell you bowled (A247)
 
 
 def availability_shares(tenure: int | None, overseas: bool) -> tuple[float, ...]:
@@ -2812,7 +2915,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   rating: int | None = None, extra_reason: str = "", tenure: int = 0,
                   rival: tuple[str, str] | None = None, spent: tuple[str, ...] = (),
                   full_time: bool = False, captain: bool = False,
-                  traits: dict | None = None) -> Year:
+                  traits: dict | None = None, cover_ok: bool = False) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -2887,6 +2990,16 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     kept_call: list[int] = []                      # an approach kept for the rest of the season
     season_over = [False]
     recent_balls: list[int] = []
+    # [A247] A frontline bowler's breakdown that hands you the ball: in the first match you
+    # play from `cover_from` on, he pulls up after `cover_after` overs. Its own stream.
+    cover_from = cover_after = cover_pick = None
+    cover_set = [False]
+    if cover_ok and not squad:
+        crng = random.Random(f"{seed}:cover:{k}")
+        if crng.random() < COVER_CHANCE:
+            cover_from = crng.randrange(league_matches)
+            cover_after = crng.choice(COVER_AFTER)
+            cover_pick = crng.randrange(FRONTLINE)
 
     def form_at(idx: int) -> int:
         return sum(lv for a, b, lv in forms if a <= idx and (b is None or idx < b))
@@ -3054,6 +3167,10 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                             last_opp, idx)
                 benched = idx in out or idx in dropped
             yours.xi, yours.impact = without if benched else lineup(idx)
+            yours.breakdown = None
+            if cover_from is not None and not cover_set[0] and not benched and idx >= cover_from:
+                yours.breakdown = cover_breakdown(deck, model, yours, cover_after, cover_pick)
+                cover_set[0] = yours.breakdown is not None
             played += 1
             seen += 1
             if idx in dropped:
@@ -3073,6 +3190,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     def playoff_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal seen
         if yours is a or yours is b:
+            yours.breakdown = None
             yours.xi, yours.impact = without if squad or season_over[0] else lineup(10 ** 6)
             seen += 1
             moment(a, b, season, stage, 0)
@@ -3083,11 +3201,13 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
         season = run_playoffs(model, season, rng, before_match=playoff_hook)
     finally:
         yours.xi, yours.impact = with_you
+        yours.breakdown = None
     if answers is not None and used < len(answers):
         raise CareerError("more answers than the season had moments")
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
                 absent=sorted(set(out) - set(incident_out)), absence_reason=absence_why,
-                incident=incident, incident_out=incident_out)
+                incident=incident, incident_out=incident_out,
+                cover=cover_spell(season, yours))
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
     return year
@@ -3143,6 +3263,7 @@ class MatchLine:
     stop: str | None = None             # what kind of key moment: must_win, playoff, make_or_break
     verdict: str | None = None          # a make-or-break's outcome: "kept" | "dropped" (A205)
     incident: str | None = None         # what happened before this match, and your answer (A230)
+    cover: str | None = None            # a teammate broke down and you bowled his overs (A247)
     dropped: bool = False               # left out for form (A205)
     form: list[str] = field(default_factory=list)   # your last FORM_SHOWN matches, oldest first
     form_word: str | None = None        # In form / Steady / Out of form, after this match
@@ -3354,6 +3475,8 @@ def season_detail(year: "Year", complete: bool = True) -> SeasonDetail:
         line.dropped = n in year.dropped
         if year.incident and year.incident["at"] == n:
             line.incident = f"{year.incident['title']}: {year.incident['choice']}"
+        if year.cover and year.cover["at"] == n:
+            line.cover = cover_words(year.cover)
         if not line.played and not line.dropped and r.stage == "league":
             if n - 1 in year.incident_out:
                 line.absence = year.incident_out[n - 1]
@@ -3396,12 +3519,14 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                          plan, record.rating if record.rating else None, record.absence,
                          record.tenure, tuple(record.rival) if record.rival else None, spent,
                          full_time=bool(record.role and record.role.get("full_time")),
-                         captain=record.captain, traits=record.traits or None)
+                         captain=record.captain, traits=record.traits or None,
+                         cover_ok=record.cover_ok)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
     record.dropped = len(year.dropped)
     record.incident = year.incident
+    record.cover = year.cover
     record.absence = year.absence_reason or ""
     record.absent_from = year.absent[0] + 1 if year.absent else 0
     key = (YOU_ID, id(yours))
@@ -4257,7 +4382,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             pick = coach["options"][_index(move, "t", len(coach["options"]))]
             coach_said = (pick["story"], "up" if pick["take"] else "")
             coach_rec = {"key": coach["key"], "choice": pick["label"], "take": pick["take"],
-                         "need": bool(coach.get("need"))}
+                         "need": bool(coach.get("need")), "cover": bool(coach.get("cover"))}
             cp.standing += pick.get("standing", 0)
             trial = False
             if coach["key"] == "switch":
@@ -4424,7 +4549,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                              if cp.contract else 0),
                               rating=rating_at(start, top, t), absence=absence_label,
                               tenure=tenure_at(cp.seasons, offer.franchise),
-                              role=rd, coach=coach_rec, traits=traits)
+                              role=rd, coach=coach_rec, traits=traits,
+                              cover_ok=cover_eligible(setup, cp, k, squad_now))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
@@ -4440,7 +4566,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             played, career.detail = _cached_season(deck, model, seed, k, you, record,
                                                    (setup, start, top, offer, option, t,
                                                     squad_now, ct.key(traits), captain_now,
-                                                    role_key(rd), record.tenure),
+                                                    record.cover_ok, role_key(rd), record.tenure),
                                                    answers, plan,
                                                    incidents_spent(cp.seasons))
         except _NeedMoment as need:
@@ -4478,6 +4604,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if inc["thread"]:
                 cp.threads.append({"k": inc["thread"], "year": year})
             trait_moves += [tuple(x) for x in inc.get("traits", ())]
+        if played.cover:
+            say(cover_words(played.cover) + (" The coach noticed." if played.cover["good"]
+                                             else " It was expensive, but you stepped up."),
+                "up" if played.cover["good"] else "")
         # [A245] Every key-moment call is a little of who you are: three the same way make a
         # step. Captaincy builds the leader in you, and a captain who takes his side into the
         # playoffs grows into the big occasions.

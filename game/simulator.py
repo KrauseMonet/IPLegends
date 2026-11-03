@@ -627,10 +627,22 @@ class Innings:
     over_log: list[OverSnapshot] = field(default_factory=list)
     milestones: list[Milestone] = field(default_factory=list)
     chased: bool = False
+    # [A247] The over (0-based) a breakdown's bowler pulled up before, if he did.
+    breakdown_at: int | None = None
 
     @property
     def overs(self) -> str:
         return f"{self.balls // BALLS_PER_OVER}.{self.balls % BALLS_PER_OVER}"
+
+
+@dataclass(frozen=True)
+class Breakdown:
+    """[A247] A frontline bowler (`injured`, a person id) who pulls up after `after` overs
+    and bowls no more; `cover` bowls the overs he had left. Build a Career's alone."""
+
+    injured: str
+    after: int
+    cover: Player
 
 
 def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
@@ -658,8 +670,14 @@ def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
                  if b.balls < b.max_overs * BALLS_PER_OVER and b is not previous]
     default = lambda b: (b.balls + BALLS_PER_OVER * b.taken_off, -(b.player.bowl or 0.0))
     if not available:                     # never reached by a legal attack; never crash
-        return min((b for b in bowlers if b.balls < b.max_overs * BALLS_PER_OVER
-                    and b is not previous), key=default)
+        rest = [b for b in bowlers if b.balls < b.max_overs * BALLS_PER_OVER
+                and b is not previous]
+        if not rest:
+            # [A247] A breakdown can leave only the man who just bowled with overs in hand.
+            # A captain would bowl somebody; this bowls him again rather than stop the match.
+            # Never past anyone's cap: a short attack still raises (A133's guard).
+            rest = [b for b in bowlers if b.balls < b.max_overs * BALLS_PER_OVER]
+        return min(rest, key=default)
     if not plan or over is None:
         return min(available, key=default)
     phase = phase_of_over(over)
@@ -727,7 +745,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                  rng: random.Random, target: int | None = None, *,
                  overs: int = OVERS, max_wickets: int = WICKETS,
                  state_over: int | None = None,
-                 plan: dict[str, str] | None = None) -> Innings:
+                 plan: dict[str, str] | None = None,
+                 breakdown: "Breakdown | None" = None) -> Innings:
     """One innings. The three keyword-only parameters exist for the super over and
     nothing else; every one of them defaults to an ordinary twenty-over innings, so a
     caller that does not name them gets exactly the behaviour this function has always
@@ -745,12 +764,28 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     the same bucket and the second one ends the innings. Every ball of every super over
     therefore resolves to one single state. Said plainly because the code looks like the
     wicket dimension is live and it is not.
+
+    [A247] `breakdown` is a frontline bowler who cannot finish his spell: after `after`
+    overs he bowls no more, and `cover` bowls the overs he had left. Only Build a Career
+    ever passes one; with none, this is exactly the innings it always was.
     """
     cards = [BatterCard(p) for p in batting]
     # [A239] Past the first five, a change bowler on a shorter cap.
     attack = [BowlerCard(p) if i < FRONTLINE_BOWLERS
               else BowlerCard(p, change=True, max_overs=CHANGE_MAX_OVERS)
               for i, p in enumerate(bowling)]
+    injured = cover = None
+    if breakdown is not None:
+        injured = next((b for b in attack[:FRONTLINE_BOWLERS]
+                        if b.player.person_id == breakdown.injured), None)
+        if injured is not None:
+            cover = next((b for b in attack if b.player.person_id == breakdown.cover.person_id),
+                         None)
+            if cover is None:
+                cover = BowlerCard(breakdown.cover)
+                attack.append(cover)
+            # until the breakdown he is not in the rotation, and never a change bowler
+            cover.change, cover.max_overs = False, 0
     innings = Innings(cards, attack)
 
     striker, non_striker, next_in = cards[0], cards[1], 2
@@ -762,6 +797,13 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
     streak: dict[int, int] = {}
 
     for over in range(overs):
+        if (injured is not None and innings.breakdown_at is None
+                and breakdown.after < injured.max_overs
+                and injured.balls >= breakdown.after * BALLS_PER_OVER):
+            # [A247] he pulls up: his overs left are the cover's
+            cover.max_overs = cover.balls // BALLS_PER_OVER + injured.max_overs - breakdown.after
+            injured.max_overs = breakdown.after
+            innings.breakdown_at = over
         # A captain's phase plan (A213) is for a full twenty only; a super over has none.
         # A super over has one bowler and no change of bowling (A239).
         full = overs == OVERS

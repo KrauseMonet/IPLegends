@@ -65,6 +65,26 @@ MAX_SEASONS = 19                     # a 2008 debut can run to 2026, as Kohli an
 TOP_SLOTS = frozenset({1, 2, 3})        # A76's batting roles, as `Card.positions` holds them
 MIDDLE_SLOTS = frozenset({3, 4, 5})
 FINISHER_SLOTS = frozenset({5, 6, 7})
+# [A251] Your player's batting number is his own: he bats there at every club, and the
+# side's order is arranged around him. Before this he took whatever place the side's sort
+# left him, so one band could bat anywhere from 3 to 7 as squads changed. A keeper or
+# all-rounder goes by his band, which is where his start spin really batted, and so does a
+# bowler whose spin batted 5-7; the tail is not pinned.
+#
+# He RISES to it, as the user asked: a debut at the foot of his band (FIRST_NUMBER), one
+# place up for each mark his Rating clears (PROMOTE_AT), between seasons only and never in a
+# poor one, to the band's home number (HOME_NUMBER). Measured over the 86 real batters with
+# five or more regular seasons: 29% debuted a place or more below where they settled (15%
+# above), year to year 80% stayed within a place, and a rising card only nudged promotion
+# (16% moved up against 10% when flat) -- so the marks are declared game design, not fitted.
+# A place once held is a legacy: after three seasons at one place real batters moved down
+# 4% of the time, and only 4-6% even 8-12+ below their peak. So a step back down comes only
+# on a sharp decline: past your peak, a poor season, your Rating DEMOTE_DROP below the best
+# you have had.
+HOME_NUMBER = {TOP_SLOTS: 1, MIDDLE_SLOTS: 4, FINISHER_SLOTS: 6}
+FIRST_NUMBER = {TOP_SLOTS: 3, MIDDLE_SLOTS: 5, FINISHER_SLOTS: 7}
+PROMOTE_AT = (80, 84)                # the Rating that earns the first promotion, the second
+DEMOTE_DROP = 10
 
 # What each creation choice means, as a filter on real cards. The role and band are the
 # archive's own (A26, A76); a template carries his band, batting positions and bowling style
@@ -76,9 +96,9 @@ ROLES: dict[str, dict] = {
     # `blurb` is the create screen's one line per role [A219]. Every claim in it is a rule
     # in this file: the slots, the 15% bar, INJURY_RISK, ALLROUNDER_BOWL_SHARE.
     "opener":     {"label": "Opening batter", "role": ("batter",), "slots": TOP_SLOTS,
-                   "blurb": "Bats 1 to 3: the new ball, and the most balls to score from."},
+                   "blurb": "Comes in at 3 and works up to opening: the new ball, and the most balls."},
     "middle":     {"label": "Middle-order batter", "role": ("batter",), "slots": MIDDLE_SLOTS,
-                   "blurb": "Bats 3 to 5 and holds the innings together."},
+                   "blurb": "Comes in at 5, works up to 4, and holds the innings together."},
     # A finisher's templates are anybody who batted regularly in the finisher band, his
     # BATTING only (A198): only 22 real cards in nineteen years are batters there, too few
     # to spin from, and real finishers are mostly all-rounders. Your finisher still does not
@@ -89,7 +109,7 @@ ROLES: dict[str, dict] = {
     # place), but it made the role unplayable.
     "finisher":   {"label": "Finisher", "role": ("batter", "keeper", "allrounder"),
                    "slots": FINISHER_SLOTS, "batting_only": True, "poor_percentile": 0.15,
-                   "blurb": "Bats 5 to 7, fast at the end. The hardest place to lose."},
+                   "blurb": "Comes in at 7, works up to 6. Fast at the end; the hardest place to lose."},
     "keeper":     {"label": "Wicketkeeper-batter", "role": ("keeper",),
                    "blurb": "Keeps wicket and bats. Every side needs one."},
     "pace":       {"label": "Fast bowler", "role": ("bowler",), "style": "pace",
@@ -1849,7 +1869,8 @@ def double_at_for(n: int) -> tuple[int, ...]:
     return DOUBLE_AT if n == 10 else tuple(range(1, n // 2 + 1))
 
 
-def xi_with(you: Card, squad: list[Card]) -> tuple[list[Card], Card | None]:
+def xi_with(you: Card, squad: list[Card],
+            number: int | None = None) -> tuple[list[Card], Card | None]:
     """Your franchise's eleven with you in it, then its Impact Player by the opposition's
     own rule. If the squad's normal selection leaves you out, you replace the lowest-rated
     player whose departure keeps the eleven legal (a keeper, five bowlers, four overseas)."""
@@ -1866,15 +1887,64 @@ def xi_with(you: Card, squad: list[Card]) -> tuple[list[Card], Card | None]:
         if not swaps:
             raise CareerError("no legal eleven has room for you")
         xi = min(swaps, key=lambda s: s[:2])[2]
+    home = number if number is not None else home_number(you)
     if not bowls_for_you(you):
-        return twelve_from_xi(xi, pool)
+        order, impact = twelve_from_xi(xi, pool)
+        return at_home(order, home), impact
     xi, you = _in_the_attack(xi, you)
     # The bench never holds a better bowler than you, or a bowling Impact Player would
     # take your overs in the matches he plays.
     # Your own original card leaves the pool too: the ranked copy in the eleven is you,
     # and the original on the bench would otherwise be your side's Impact Player.
     pool = [c for c in pool if c.person_id != YOU_ID and (c in xi or not _outbowls(c, you))]
-    return twelve_from_xi(xi, pool + [you])
+    order, impact = twelve_from_xi(xi, pool + [you])
+    return at_home(order, home), impact
+
+
+def home_number(card: Card) -> int | None:
+    """The top of your player's rise (A251), from his batting band; None for the tail."""
+    return HOME_NUMBER.get(frozenset(card.positions or ()))
+
+
+def batting_number(card: Card, promotions: int) -> int | None:
+    """Where your player bats with `promotions` earned: the foot of his band, one place up
+    for each, never above its home number. None for the tail."""
+    band = frozenset(card.positions or ())
+    if band not in HOME_NUMBER:
+        return None
+    return max(HOME_NUMBER[band], FIRST_NUMBER[band] - promotions)
+
+
+def promotions_for(rating: int | None) -> int:
+    """The promotions a Rating has earned, for a career saved before the rise (A251)."""
+    return sum(rating is not None and rating >= mark for mark in PROMOTE_AT)
+
+
+def earned(cp: "Checkpoint") -> int:
+    """The promotions a career carries; one saved before the rise is read off its Rating."""
+    if cp.promotions is not None:
+        return cp.promotions
+    return promotions_for(cp.seasons[-1].rating if cp.seasons else None)
+
+
+def next_promotions(promotions: int, rating: int, peak: int, poor: bool,
+                    declining: bool) -> int:
+    """After a season: one place up for a mark cleared in a season that was not poor, one
+    down only on a sharp decline, never more than one either way (A251)."""
+    if not poor and promotions < len(PROMOTE_AT) and rating >= PROMOTE_AT[promotions]:
+        return promotions + 1
+    if poor and declining and promotions > 0 and rating <= peak - DEMOTE_DROP:
+        return promotions - 1
+    return promotions
+
+
+def at_home(order: list[Card], number: int | None) -> list[Card]:
+    """`order` with your player moved to his home number and everyone else closed up."""
+    me = next((c for c in order if c.person_id == YOU_ID), None)
+    if me is None or number is None:
+        return order
+    rest = [c for c in order if c is not me]
+    return rest[:number - 1] + [me] + rest[number - 1:]
 
 
 def bowls_for_you(you: Card) -> bool:
@@ -1919,7 +1989,8 @@ def _side(cards: list[Card], xi: list[Card], impact: Card | None) -> Side:
                 xi=xi, impact=impact, franchise=c.franchise, year=c.season_year)
 
 
-def year_sides(deck: Deck, year: int, you: Card | None = None) -> tuple[list[Side], Side | None]:
+def year_sides(deck: Deck, year: int, you: Card | None = None,
+               number: int | None = None) -> tuple[list[Side], Side | None]:
     """Every real team of `year`, yours with you in it. Returns (sides, yours)."""
     from game.__main__ import opposition_twelve
 
@@ -1927,8 +1998,10 @@ def year_sides(deck: Deck, year: int, you: Card | None = None) -> tuple[list[Sid
     for fs in year_fs_ids(deck, year):
         squad = list(deck.cards_by_fs[fs])
         if you is not None and fs == you.fs_id:
-            side = _side(squad, *xi_with(you, squad))
+            side = _side(squad, *xi_with(you, squad, number))
             side.you = True
+            home = number if number is not None else home_number(you)
+            side.pinned = {YOU_ID: home} if home else None
             yours = side
         else:
             side = _side(squad, *opposition_twelve(squad))
@@ -2444,10 +2517,11 @@ def next_captain(captain_now: bool, poor: bool, club: str) -> str | None:
     return club if captain_now and not poor else None
 
 
-def where_you_play(deck: Deck, you: Card, fs_id: int) -> tuple[int, int | None]:
+def where_you_play(deck: Deck, you: Card, fs_id: int,
+                   number: int | None = None) -> tuple[int, int | None]:
     """(batting position, place in the attack or None) for you in that franchise's eleven,
     by the same selection the season itself makes."""
-    xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]))
+    xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]), number)
     position = next(i for i, c in enumerate(xi, 1) if c.person_id == YOU_ID)
     if not you.has_bowl:
         return position, None
@@ -2812,6 +2886,7 @@ class SeasonRecord:
     cover: dict | None = None
     # [A248] the phase work you chose, as the season was played with it (an input)
     phase_built: dict = field(default_factory=dict)
+    bat_at: int | None = None              # [A251] the batting number this season was played at
     rival: list | None = None
     extra_earnings: int = 0
     # [A238] The changed role this season was played in (`role_state`, None for the role you
@@ -3090,7 +3165,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   rival: tuple[str, str] | None = None, spent: tuple[str, ...] = (),
                   full_time: bool = False, captain: bool = False,
                   traits: dict | None = None, cover_ok: bool = False,
-                  phase_built: dict | None = None) -> Year:
+                  phase_built: dict | None = None, bat_at: int | None = None) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -3105,7 +3180,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     a drop then adds to it."""
     from game.__main__ import opposition_twelve
 
-    sides, yours = year_sides(deck, you.season_year, you)
+    sides, yours = year_sides(deck, you.season_year, you, bat_at)
     yours.bowling_plan = dict(plan) or None          # a captain's plan (A213)
     rng = random.Random(f"{seed}:season:{k}")
     rng.shuffle(sides)                  # who meets twice in a ten-team year is the draw's
@@ -3716,7 +3791,8 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                          record.tenure, tuple(record.rival) if record.rival else None, spent,
                          full_time=bool(record.role and record.role.get("full_time")),
                          captain=record.captain, traits=record.traits or None,
-                         cover_ok=record.cover_ok, phase_built=record.phase_built or None)
+                         cover_ok=record.cover_ok, phase_built=record.phase_built or None,
+                         bat_at=record.bat_at)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -4140,6 +4216,7 @@ class Checkpoint:
     coach_mentor: dict = field(default_factory=dict)
     phase: dict = field(default_factory=dict)          # [A248] the coach's work, by discipline
     phase_offers: int = 0
+    promotions: int | None = None       # [A251] places earned up the order; None before the rise
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -4170,7 +4247,7 @@ class Checkpoint:
                    traits=dict(d.get("traits") or {}),
                    coach_mentor=dict(d.get("coach_mentor") or {}),
                    phase={k: list(v) for k, v in (d.get("phase") or {}).items()},
-                   phase_offers=d.get("phase_offers", 0))
+                   phase_offers=d.get("phase_offers", 0), promotions=d.get("promotions"))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -4492,7 +4569,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
                                    fs_id=mo.retain.fs_id, year=year, franchise=mo.retain.franchise,
                                    role=rd)
-                    pos, rank = where_you_play(deck, here, mo.retain.fs_id)
+                    pos, rank = where_you_play(deck, here, mo.retain.fs_id,
+                                               batting_number(here, earned(cp)))
                     mo = dataclasses.replace(mo, retain=dataclasses.replace(
                         mo.retain, position=pos, attack_rank=rank))
                 career.pending = Pending("mega", year, k, squad=cp.squad, mega=mo)
@@ -4538,7 +4616,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 placed = []
                 for o in offers:
                     pos, rank = where_you_play(deck, dataclasses.replace(
-                        here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id)
+                        here, fs_id=o.fs_id, franchise=o.franchise), o.fs_id,
+                        batting_number(here, earned(cp)))
                     placed.append(dataclasses.replace(o, position=pos, attack_rank=rank))
                 career.pending = Pending("offer", year, k, offers=placed, squad=cp.squad,
                                          cold=cold)
@@ -4767,7 +4846,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                               tenure=tenure_at(cp.seasons, offer.franchise),
                               role=rd, coach=coach_rec, traits=traits,
                               cover_ok=cover_eligible(setup, cp, k, squad_now),
-                              phase_built=dict(cp.phase))
+                              phase_built=dict(cp.phase),
+                              bat_at=batting_number(you, earned(cp)))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
         record.plan = [[c.name, dict(plan)[c.person_id]] for c in bowlers
@@ -4785,7 +4865,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                                     squad_now, ct.key(traits), captain_now,
                                                     record.cover_ok, you.phase_bat, you.phase_bowl,
                                                     tuple(sorted((d, tuple(v)) for d, v in cp.phase.items())),
-                                                    role_key(rd), record.tenure),
+                                                    record.bat_at, role_key(rd), record.tenure),
                                                    answers, plan,
                                                    incidents_spent(cp.seasons))
         except _NeedMoment as need:
@@ -4909,6 +4989,18 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             block = played.missed - played.dropped - (inc["out"] if inc else 0)
             if block > 0:
                 say(absence_words(played.absence, block, played.absent_from))
+        # [A251] Up the order, or (rarely) back down, for next season.
+        if played.bat_at is not None:
+            have = earned(cp)
+            peak = max(r.rating for r in cp.seasons if r.rating)
+            cp.promotions = next_promotions(have, played.rating, peak,
+                                            played.percentile < poor_bar(season_role),
+                                            shape.declining(clock))
+            now_at = batting_number(you, cp.promotions)
+            if now_at < played.bat_at:
+                say(f"Promoted to No. {now_at} for next season.", "up")
+            elif now_at > played.bat_at:
+                say(f"Moved down to No. {now_at} for next season.", "down")
         # [A224] Set on the PLAYED record, never on `record` before the season: the season
         # cache shares a record between careers that reach it with different clocks.
         played.potential, played.clock = cp.potential, clock

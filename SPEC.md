@@ -2974,6 +2974,15 @@ fifth match on. A player who never reaches that loses nothing to selection, and 
 never left out this way. Illness, a family matter and international duty fall where they are
 drawn, since they have nothing to do with form.
 
+**[A251] Your player has his own batting number and rises to it.** He debuts at the foot of
+his batting band (top order 3, middle order 5, finisher 7) and moves up one place each time
+his Rating clears a mark (80, then 84) in a season that was not poor, to the band's home
+number (1, 4, 6). It moves between seasons only, one place at a time. A place he has earned
+is kept: he moves back down only past his peak, in a poor season, with his Rating ten below
+his best. Every club bats him at his number and arranges the rest around him, and an Impact
+Player never moves him. A keeper or all-rounder goes by his band; a player in the tail is not
+pinned.
+
 The club's view of the player (its standing) is hidden and never a number. It rises and falls
 with his answers and starts again at a new club. A club that trusts him keeps him in the side
 through one poor season, retains him a little below the usual bar at a mega auction, and its

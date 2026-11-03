@@ -206,9 +206,9 @@ def _age(event: str, choice: str) -> float:
 
 
 # Found by search: one of each kind of shape, between them a slowed and a sped-up clock
-# (re-found after A239's sixth bowler moved every season).
+# (re-found after A239's sixth bowler moved every season, and A251's home batting number).
 CLOCK_FIXTURES = ((0, C.Shape("early", "steep")), (15, C.Shape("late", "gentle")),
-                  (5, C.Shape("standard", "standard")))
+                  (10, C.Shape("standard", "standard")))
 
 
 @pytest.fixture(scope="module")

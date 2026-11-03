@@ -22,7 +22,8 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # [A214] Re-found when clubs began pricing on your Rating blended with last season's grade.
 # [A224] seed 12, found by search again when the career shapes moved every curve; [A239] seed 41
 # [A230] the same seed, now with its 2010 card answered (nearly every card asks)
-UNSOLD = (41, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
+# [A251] seed 3, re-found when your batting number became your own
+UNSOLD = (3, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
 
 
 @pytest.fixture(scope="module")

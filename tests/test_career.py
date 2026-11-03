@@ -788,7 +788,7 @@ def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
             assert (1 <= o.attack_rank <= 5) if role == "pace" else o.attack_rank in (None, 6)
             you = C.ability(c.start, c.ceiling, C.arc_point(0, 0.0, 0.0), setup=_setup(role),
                             fs_id=o.fs_id, year=2012, franchise=o.franchise)
-            _, yours = C.year_sides(deck, 2012, you)
+            _, yours = C.year_sides(deck, 2012, you, C.batting_number(you, 0))   # a debut (A251)
             assert next(i for i, x in enumerate(yours.xi, 1) if x.person_id == C.YOU_ID) == o.position
             from game.__main__ import attack
             ids = [p.person_id for p in attack(yours.xi, model)]
@@ -1334,9 +1334,9 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 123, "kept": 26}     # "dropped" re-found after A239
-MOB_SEED = {"dropped": 143, "kept": 3}
-SIXTH = (26, 0)    # Chennai 2019 (re-found after A239): see test_a_make_or_break_is_failed_only_in_the_worst_sixth
+MOB_FS = {"dropped": 101, "kept": 123}    # both re-found after A251's home number
+MOB_SEED = {"dropped": 0, "kept": 0}
+SIXTH = (50, 1)    # re-found after A251: see test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
 
 def _mob_you(deck, fs, role="opener"):

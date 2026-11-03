@@ -23,7 +23,7 @@ CSK_2019 = 26
 K = 4
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
 OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 9, "wedding": 12, "collapse": 20}
-PACE = {"press": 8, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239
+PACE = {"press": 67, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239, A251
 
 
 @pytest.fixture(scope="module")
@@ -392,8 +392,8 @@ def test_a_trusted_player_is_retained_a_little_below_the_bar(monkeypatch):
 @needs_deck
 def test_a_trusted_club_keeps_you_through_a_poor_season(deck, model, monkeypatch):
     setup = C.Setup("Ann Example", "opener", 2012)
-    # seed re-found after A250 (form-gated absences moved the old one)
-    car, _ = C.auto_career(deck, model, 1, setup, "loyal")
+    # seed re-found after A250 (form-gated absences) and A251 (the home batting number)
+    car, _ = C.auto_career(deck, model, 4, setup, "loyal")
     base = C.Checkpoint.from_dict(car.checkpoint.to_dict())
     k = 3                                   # 2015 at the club 2014 was played for: a stay
     assert C.canonical(base.seasons[k - 1].franchise) == C.canonical(base.seasons[k].franchise)
@@ -411,7 +411,7 @@ def test_a_trusted_club_keeps_you_through_a_poor_season(deck, model, monkeypatch
         resume.squad, resume.standing, resume.threads = False, standing, []
         moves = []
         while True:
-            c = C.play_career(deck, model, 1, setup, moves, resume=resume)
+            c = C.play_career(deck, model, 4, setup, moves, resume=resume)
             if len(c.checkpoint.seasons) > k:
                 return c.checkpoint
             moves.append(C.policy_move(c, "loyal", __import__("random").Random(1)))

@@ -242,7 +242,8 @@ def decide_impact(side: "Side", opponent: "Side", discipline: str,
     return target if score >= IMPACT_SIT_OUT_BAR else None
 
 
-def _insert_batting_impact(xi: list[Card], target: Card, impact: Card) -> list[Card]:
+def _insert_batting_impact(xi: list[Card], target: Card, impact: Card,
+                           pinned: dict[str, int] | None = None) -> list[Card]:
     """`target` (a tailender bowler) drops out of the eleven; `impact` is inserted at HIS
     OWN natural batting position -- the lowest slot of his A76 batting-role band -- not
     at the slot `target` vacated. Everyone from that point down to where `target` used to
@@ -251,14 +252,23 @@ def _insert_batting_impact(xi: list[Card], target: Card, impact: Card) -> list[C
     into his actual role rather than just taking over the dropped man's exact spot."""
     without_target = [c for c in xi if c is not target]
     insertion = min(min(impact.positions) - 1, len(without_target))
-    return without_target[:insertion] + [impact] + without_target[insertion:]
+    order = without_target[:insertion] + [impact] + without_target[insertion:]
+    # [A251] A pinned player (a career's own, at his home number) keeps his place: the
+    # order closes up around him instead.
+    for pid, number in (pinned or {}).items():
+        me = next((c for c in order if c.person_id == pid), None)
+        if me is not None:
+            order.remove(me)
+            order.insert(min(number - 1, len(order)), me)
+    return order
 
 
 def _apply_batting_impact(xi: list[Card], target: Card | None,
-                          impact: Card | None) -> list[Card]:
+                          impact: Card | None,
+                          pinned: dict[str, int] | None = None) -> list[Card]:
     if target is None or impact is None:
         return xi
-    return _insert_batting_impact(xi, target, impact)
+    return _insert_batting_impact(xi, target, impact, pinned)
 
 
 def _apply_bowling_impact(xi: list[Card], target: Card | None,
@@ -288,6 +298,9 @@ class Side:
     # covers his overs: (injured person id, overs he bowls first, the cover's Card). Only
     # Build a Career ever sets one, for one match.
     breakdown: tuple[str, int, Card] | None = None
+    # [A251] person id -> the batting number he always bats at, whoever comes in as Impact
+    # Player. Only Build a Career sets it, for its own player.
+    pinned: dict[str, int] | None = None
 
 
 @dataclass
@@ -813,7 +826,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     away_target = (None if away.impact is None or away_forced
                     else decide_impact(away, home, "bat", first))
 
-    away_batting = _apply_batting_impact(away.xi, away_target, away.impact)
+    away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
     home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
     home_bowl_impact = home.impact if home_target is not None else None
@@ -1006,7 +1019,7 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
     else:
         home_target, away_target = opp_target, human_target
 
-    away_batting = _apply_batting_impact(away.xi, away_target, away.impact)
+    away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
     home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
     home_bowl_impact = home.impact if home_target is not None else None
@@ -1103,7 +1116,7 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
     home_target = _decide(home, away, "bowl", forced=False)
     away_target = _decide(away, home, "bat", forced=away_forced)
 
-    away_batting = _apply_batting_impact(away.xi, away_target, away.impact)
+    away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
     home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
     home_bowl_impact = home.impact if home_target is not None else None

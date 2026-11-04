@@ -2983,6 +2983,14 @@ his best. Every club bats him at his number and arranges the rest around him, an
 Player never moves him. A keeper or all-rounder goes by his band; a player in the tail is not
 pinned.
 
+**[A255] The band, and the peak rung.** A keeper's or all-rounder's band is his CEILING spin's,
+the player he can become, not his start's (the start keeps its own numbers; only where he bats
+moves). A career begun before keeps its start's band. A middle-order batter whose Rating clears
+90 moves up once more, to No. 3, and a finisher to No. 5 -- the place in each band that faces the
+most balls. A promotion counts the same in every band, so the middle order's and finisher's
+second mark (84) still keeps them at 4 and 6, and the peak is a third mark on top. It is earned
+and lost like the others.
+
 The club's view of the player (its standing) is hidden and never a number. It rises and falls
 with his answers and starts again at a new club. A club that trusts him keeps him in the side
 through one poor season, retains him a little below the usual bar at a mega auction, and its
@@ -3001,8 +3009,8 @@ become an all-rounder and then a full-time bowler; a spinner or fast bowler can 
 order and become an all-rounder; an all-rounder can become a full-time bowler. A FULL-TIME
 BOWLER bowls his four overs every match and keeps his place in the batting order: an
 all-rounder who is never rested from the attack (an all-rounder bowls in about six matches in
-ten). Finishers and
-keepers do not change role.
+ten). A batter can also be asked to keep wicket (below). Finishers and keepers do not
+otherwise change role.
 
 The way in is a TRIAL SEASON. From the second season to the tenth, a player still in the role
 he was created in has a declared 25% chance a season of the coach offering one, at most twice a
@@ -3020,7 +3028,9 @@ archive's own pattern, where an all-rounder becomes a bowler when his batting fa
 when his bowling shines. Turned down, that offer is not repeated the next season.
 
 Where he bats follows the job: an all-rounder or full-time bowler made from a batter keeps his
-place in the order, one made from a bowler bats at five to seven, and an all-rounder who
+place in the order, one made from a bowler bats in the band his club's squad is weaker in that
+season [A255] -- the middle order (3-5) or five to seven, judged by each band's best regular
+batter's batting value, ties to five to seven -- and is coached by that band's best batter; an all-rounder who
 becomes a full-time bowler bats where he did. The
 discipline he took up starts from his own start card's numbers in it, or, where it has none,
 from the pooled level of those like him (real part-time bowlers for a batter, the finisher
@@ -3044,6 +3054,16 @@ and some leadership. With no need the offer, its chance and its answers are exac
 The archive does NOT say real sides behave like this -- real squads cover a weak attack with
 all-rounders, not batters (2.2% of overs from batters in the weakest-attack quartile against
 1.7% in the strongest) -- so the reason is the game's own engine, not realism.
+
+**Taking the gloves [A255].** An opener, middle-order batter or finisher still in the role he
+was created in may be asked, from his second season, to keep wicket, when the keeper his club
+would pick is outbatted (A160's batting value) by five or more of its regular batters and by
+him: true of 36 of the 166 real squads. The coach asks on his own stream at 15% of such seasons,
+once a career at most (lowered from 35% and twice at the user's request, once measured). Saying yes is for good: no trial and no way back; he bats where he did,
+never bowls again, and is offered no bowling trial. His side keeps him behind the stumps, and its
+own keepers are picked, if at all, as batters -- as a career created as a wicketkeeper-batter
+now is too (before, he kept only when his card outranked the squad's own keeper). The engine has
+no keeping skill, so the change is one of selection only. Every constant is declared game design.
 
 **A teammate breaks down [A247].** In a batter's season (opener or middle order, where a trial
 could follow next season), one league match may bring a breakdown: one of his side's five

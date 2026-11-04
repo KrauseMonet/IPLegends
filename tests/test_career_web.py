@@ -416,7 +416,7 @@ def test_your_player_and_only_him_is_marked_in_every_scorecard(client, deck, mod
     engine's own player is the career's (by person id, never the name), so the lists line
     up one to one with the engine's -- including the rule that a bowler with no ball has no
     row. Checked on an all-rounder, so both kinds of mark have somewhere to be."""
-    d, moves = _season_with_moves(client, "allrounder", 1)   # re-found after A251
+    d, moves = _season_with_moves(client, "allrounder", 2)   # re-found after A251, A255
     seed, setup, _, _ = R.read_token(d["token"])
     detail = C.play_career(deck, model, seed, setup, moves).detail
     sp = d["season_play"]
@@ -557,7 +557,10 @@ def test_every_role_line_states_a_rule_the_game_has(client):
         assert f"Comes in at {C.FIRST_NUMBER[band]}" in roles[role]["blurb"]
     assert C.HOME_NUMBER[C.TOP_SLOTS] == 1 and "up to opening" in roles["opener"]["blurb"]
     assert f"up to {C.HOME_NUMBER[C.MIDDLE_SLOTS]}," in roles["middle"]["blurb"]
-    assert f"up to {C.HOME_NUMBER[C.FINISHER_SLOTS]}." in roles["finisher"]["blurb"]
+    assert f"up to {C.HOME_NUMBER[C.FINISHER_SLOTS]}," in roles["finisher"]["blurb"]
+    # [A255] and the peak rung
+    for role, band in (("middle", C.MIDDLE_SLOTS), ("finisher", C.FINISHER_SLOTS)):
+        assert f"at {C.PEAK_AT} bats at {C.PEAK_NUMBER[band]}" in roles[role]["blurb"]
     # "the hardest place to lose": the finisher's own bar is the most forgiving
     assert "hardest place to lose" in roles["finisher"]["blurb"]
     assert C.ROLES["finisher"]["poor_percentile"] < C.POOR_PERCENTILE

@@ -85,6 +85,13 @@ HOME_NUMBER = {TOP_SLOTS: 1, MIDDLE_SLOTS: 4, FINISHER_SLOTS: 6}
 FIRST_NUMBER = {TOP_SLOTS: 3, MIDDLE_SLOTS: 5, FINISHER_SLOTS: 7}
 PROMOTE_AT = (80, 84)                # the Rating that earns the first promotion, the second
 DEMOTE_DROP = 10
+# [A255] One rung more for the two bands below the top: a middle-order batter rated 90 or more
+# bats at 3, a finisher at 5 -- the place in each band that faces the most balls (measured over
+# 2,421 full-length innings: No. 3 faces 19.5 balls to No. 4's 17.4, No. 5 13.8 to No. 6's
+# 9.5). An opener already reaches No. 1. Earned like the others, between seasons and not in a
+# poor one, and lost only on A251's sharp decline: a legacy.
+PEAK_NUMBER = {MIDDLE_SLOTS: 3, FINISHER_SLOTS: 5}
+PEAK_AT = 90
 
 # What each creation choice means, as a filter on real cards. The role and band are the
 # archive's own (A26, A76); a template carries his band, batting positions and bowling style
@@ -98,7 +105,7 @@ ROLES: dict[str, dict] = {
     "opener":     {"label": "Opening batter", "role": ("batter",), "slots": TOP_SLOTS,
                    "blurb": "Comes in at 3 and works up to opening: the new ball, and the most balls."},
     "middle":     {"label": "Middle-order batter", "role": ("batter",), "slots": MIDDLE_SLOTS,
-                   "blurb": "Comes in at 5, works up to 4, and holds the innings together."},
+                   "blurb": "Comes in at 5, works up to 4, and at 90 bats at 3. Holds the innings together."},
     # A finisher's templates are anybody who batted regularly in the finisher band, his
     # BATTING only (A198): only 22 real cards in nineteen years are batters there, too few
     # to spin from, and real finishers are mostly all-rounders. Your finisher still does not
@@ -109,9 +116,9 @@ ROLES: dict[str, dict] = {
     # place), but it made the role unplayable.
     "finisher":   {"label": "Finisher", "role": ("batter", "keeper", "allrounder"),
                    "slots": FINISHER_SLOTS, "batting_only": True, "poor_percentile": 0.15,
-                   "blurb": "Comes in at 7, works up to 6. Fast at the end; the hardest place to lose."},
+                   "blurb": "Comes in at 7, works up to 6, and at 90 bats at 5. The hardest place to lose."},
     "keeper":     {"label": "Wicketkeeper-batter", "role": ("keeper",),
-                   "blurb": "Keeps wicket and bats. Every side needs one."},
+                   "blurb": "Keeps wicket and bats where his best season did. Every side needs one."},
     "pace":       {"label": "Fast bowler", "role": ("bowler",), "style": "pace",
                    "blurb": "Pace, up to four overs a match. The most injury-prone job."},
     "spin":       {"label": "Spinner", "role": ("bowler",), "style": "spin",
@@ -955,6 +962,20 @@ def spin(deck: Deck, seed: int, role: str) -> tuple[Card, Card]:
     return start, max(ceilings, key=lambda c: main_rating(c, role))
 
 
+# [A255] A keeper's or an all-rounder's batting band comes from the CEILING spin, the player
+# he can become, not the start. Only these two roles draw their spins without a band filter,
+# and over 2,000 seeds the two spins put a keeper in different bands 58% of the time and an
+# all-rounder 65%: a keeper with an opener's ceiling batted in the middle order all career.
+BAND_FROM_CEILING = frozenset({"keeper", "allrounder"})
+
+
+def banded(start: Card, ceiling: Card, role: str) -> Card:
+    """The start spin carrying the band it will play in: the ceiling's, for the roles above."""
+    if role not in BAND_FROM_CEILING:
+        return start
+    return dataclasses.replace(start, positions=ceiling.positions, band=ceiling.band)
+
+
 # --- ability ---------------------------------------------------------------------------
 
 
@@ -1037,6 +1058,18 @@ TRIAL_ROLES = ("opener", "middle", "pace", "spin")   # finisher and keeper do no
 # the coach's bowling offer. (First built as a bowler batting eight to eleven, and corrected.)
 FULL_TIME = "fulltime"
 FULL_TIME_LABEL = "Full-time bowler"
+# [A255] A batter can be asked to keep wicket when his side's keeper is a weak batter, and a
+# batter who takes the gloves keeps them: no trial, no way back, never a bowler. Measured
+# over the 166 real squads: the keeper the side would pick is outbatted (A160's batting value)
+# by five or more of its regular batters in 36 (22%), so that is the bar. The engine has no
+# keeping skill, so the change is one of selection: you are the keeper the side picks, and it
+# plays one more batter in place of the old one. Every constant here is declared game design.
+KEEPER = "keeper"
+KEEPER_ROLES = ("opener", "middle", "finisher")
+WEAK_KEEPER = 5                      # regular batters who outbat the side's keeper
+KEEPER_ASK_CHANCE = 0.15             # a season's chance of the coach asking, when the bar holds
+KEEPER_OFFERS_MAX = 1
+KEEPER_FROM = 1                      # from the second season
 
 
 def role_kind(role: str) -> str:
@@ -1078,12 +1111,13 @@ def part_time_bowling(deck: Deck) -> tuple[float, float]:
     return hit
 
 
-def finisher_batting(model: Model, year: int) -> tuple[float, float]:
-    """Where a bowler who moves up to six or seven starts with the bat: the finisher band's
-    pooled level (A48), centred on the season as the engine's own `bat_split` does. His own
-    batting numbers are measured against tail-end par, so at six they would play him as an
-    average number six (A208)."""
-    raw, dismissal = model.unrated_split["finisher"]
+def finisher_batting(model: Model, year: int, band: str = "finisher") -> tuple[float, float]:
+    """Where a bowler who moves up the order starts with the bat: the pooled level of the
+    band he moves into (A48; the finisher band unless the squad needs him in the middle,
+    A255), centred on the season as the engine's own `bat_split` does. His own batting
+    numbers are measured against tail-end par, so at six they would play him as an average
+    number six (A208)."""
+    raw, dismissal = model.unrated_split[band]
     return raw - model.season_mean_scoring[("batting", year)], dismissal
 
 
@@ -1095,8 +1129,8 @@ def _second_pool(deck: Deck, add: str, style: str | None) -> list[Card]:
             cards = [c for cs in deck.cards_by_fs.values() for c in cs
                      if c.role in ("bowler", "allrounder") and c.bowl_scoring is not None
                      and (c.bowl_balls or 0) >= BOWL_REGULAR_BALLS and c.bowling_style == style]
-        else:
-            cards = [c for cs in deck.cards_by_fs.values() for c in cs if _fits(c, "finisher")]
+        else:                                  # `style` holds the band for batting (A255)
+            cards = [c for cs in deck.cards_by_fs.values() for c in cs if _fits(c, style or "finisher")]
         hit = _SECOND_POOL[key] = sorted(cards, key=lambda c: (c.season_year, c.fs_id, c.person_id))
     return hit
 
@@ -1113,17 +1147,21 @@ def second_ceiling(deck: Deck, seed: int, add: str, style: str | None,
     better = [c for c in _second_pool(deck, add, style) if value(*halves(c)) > value(*base)]
     if not better:
         return base
-    return halves(random.Random(f"{seed}:second:{add}:{style}").choice(better))
+    # a finisher's stream keeps its old name (style None), so no career in progress moves
+    key = None if add == "bat" and style == "finisher" else style
+    return halves(random.Random(f"{seed}:second:{add}:{key}").choice(better))
 
 
 def role_state(deck: Deck, model: Model, seed: int, setup: Setup, start: Card, role: str,
                second: float, style: str, year: int, trial: bool = False,
-               mentor: dict | None = None) -> dict | None:
+               mentor: dict | None = None, bat_band: str = "") -> dict | None:
     """The changed role you play this season, as a plain dict a season record can keep, or
     None for the role you were created in. Where you bat follows the job: an all-rounder
-    made from a batter keeps his place in the order, one made from a bowler bats at five to
-    seven, and a full-time bowler bats in the tail. The discipline you took up (`add`) runs
-    from `base` toward `top`, `second` of the way."""
+    made from a batter keeps his place in the order, one made from a bowler bats in the band
+    his squad lacked when he moved up (`bat_band`, A255; five to seven before), a full-time
+    bowler keeps his place, and a batter who took the gloves (A255) keeps his place and never
+    bowls. The discipline you took up (`add`) runs from `base` toward `top`, `second` of the
+    way."""
     if not role or role == setup.role:
         return None
     origin = _kind(start)
@@ -1131,10 +1169,17 @@ def role_state(deck: Deck, model: Model, seed: int, setup: Setup, start: Card, r
         role = FULL_TIME                       # a checkpoint saved before the correction
     now = role_kind(role)
     full_time = role == FULL_TIME
+    bat_band = bat_band if bat_band in BOWLER_BANDS else "finisher"
+    # a finisher's start can be a real all-rounder's season (drawn on batting alone), so
+    # whether he is a batter is read off the role he was created in, not the template
+    if role == KEEPER and setup.role in KEEPER_ROLES:
+        return {"role": role, "kind": "keeper", "positions": sorted(start.positions),
+                "band": start.band, "style": None, "add": "", "base": None, "top": None,
+                "second": 0.0, "trial": False, "full_time": False}
     if now == "allrounder" and origin == "batter":
         positions, band = start.positions, start.band
     elif now == "allrounder" and origin == "bowler":
-        positions, band = FINISHER_SLOTS, "finisher"
+        positions, band = BOWLER_BANDS[bat_band], bat_band
     elif full_time and origin == "allrounder":
         positions, band = start.positions, start.band
     else:
@@ -1147,9 +1192,9 @@ def role_state(deck: Deck, model: Model, seed: int, setup: Setup, start: Card, r
                 else part_time_bowling(deck))
     elif origin == "bowler":
         add = "bat"
-        base = finisher_batting(model, year)
+        base = finisher_batting(model, year, bat_band)
     if add:
-        top = second_ceiling(deck, seed, add, style if add == "bowl" else None, base)
+        top = second_ceiling(deck, seed, add, style if add == "bowl" else bat_band, base)
         # [A245] A teammate who coached you into it: you grow toward the player HE was that
         # season, where that is better than where you start -- his real numbers, his style.
         value = bowl_value if add == "bowl" else bat_value
@@ -1172,6 +1217,9 @@ def apply_role(card: Card, rd: dict | None, t: float) -> Card:
                   bowling_style=rd["style"] or card.bowling_style)
     if rd["kind"] in ("allrounder", "bowler"):
         fields["bowl_balls"] = None           # no longer a part-timer (A206): you bowl
+    if rd["kind"] == "keeper":                # [A255] the gloves, and no bowling ever again
+        fields.update(keeper_eligible=True, bowl=None, bowl_scoring=None, bowl_dismissal=None,
+                      bowl_balls=None, bowling_style=None)
     if rd["add"]:
         ts = max(ABILITY_FLOOR, min(rd["second"], t))
         s = _lin(rd["base"][0], rd["top"][0], ts)
@@ -1223,10 +1271,12 @@ def discipline_rank(lines: dict, key: tuple, disc: str) -> float | None:
 
 
 def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
-               squad: bool, need: str | None = None) -> dict | None:
+               squad: bool, need: str | None = None, keeper: str | None = None) -> dict | None:
     """What the coach offers before this season, if anything: the full-time role after a
-    good trial, a full-time bowler's job to an all-rounder whose bowling carries him, or a
-    trial. One a season, in that order. Its own random stream, so it never moves a match."""
+    good trial, a full-time bowler's job to an all-rounder whose bowling carries him, the
+    trial a cover spell earned, the gloves when the side's keeper is a weak batter (`keeper`,
+    his name, A255), or a trial. One a season, in that order. Its own random stream, so it
+    never moves a match."""
     if not COACH_ON:
         return None
     now = cp.roles[-1] if cp.roles else setup.role
@@ -1254,6 +1304,11 @@ def coach_card(seed: int, setup: Setup, start: Card, cp: "Checkpoint", k: int,
         text = COVER_TEXT[c["good"]].format(who=c["injured"], opp=c["opp"],
                                             fig=cover_figures(c))
         return dict(card, text=text, cover=True)
+    # [A255] The side's keeper is a weak batter (`weak_keeper`, his name): its own stream, so
+    # a season the coach does not ask is the season it always was.
+    if (keeper and keeper_eligible(setup, cp, k, squad)
+            and random.Random(f"{seed}:keeper:{k}").random() < KEEPER_ASK_CHANCE):
+        return dict(COACH_KEEPER, text=COACH_KEEPER["text"].format(keeper=keeper))
     # [A246] The side's need, when it is the job this player would take up, raises the
     # chance; the draw is the same stream, so with no need nothing changes.
     needed = need == ("bat" if origin == "bowler" else "bowl")
@@ -1317,6 +1372,32 @@ def squad_need(deck: Deck, you: Card, fs_id: int) -> str | None:
         regular = sum((c.bat_balls or 0) >= BAT_MIN_BALLS and c.role != "bowler" for c in twelve)
         return "bat" if regular < NEED_BATTERS else None
     return None
+
+
+def keeper_eligible(setup: Setup, cp: "Checkpoint", k: int, squad: bool) -> bool:
+    """Whether the coach could ask you to keep this season (A255): a batter by creation, still
+    in that role, a regular, from the second season, offered fewer than the most."""
+    return (COACH_ON and setup.role in KEEPER_ROLES and not cp.roles and not squad
+            and k >= KEEPER_FROM and cp.keeper_offers < KEEPER_OFFERS_MAX)
+
+
+def weak_keeper(deck: Deck, you: Card, fs_id: int) -> str | None:
+    """The name of the keeper this squad would pick, if he is a weak batter: outbatted by
+    WEAK_KEEPER or more of its regular batters, and by you. None otherwise."""
+    from game.__main__ import BAT_MIN_BALLS
+
+    squad = [c for c in deck.cards_by_fs.get(fs_id, []) if c.person_id != YOU_ID]
+    keepers = [c for c in squad if c.role == "keeper"]
+    if not keepers or you.bat_scoring is None:
+        return None
+    keeper = max(keepers, key=lambda c: c.rating)
+    mine = bat_value(you.bat_scoring, you.bat_dismissal)
+    his = (bat_value(keeper.bat_scoring, keeper.bat_dismissal)
+           if keeper.bat_scoring is not None else -9.9)
+    better = sum(c is not keeper and c.role != "bowler" and c.bat_scoring is not None
+                 and (c.bat_balls or 0) >= BAT_MIN_BALLS
+                 and bat_value(c.bat_scoring, c.bat_dismissal) > his for c in squad)
+    return keeper.name if better >= WEAK_KEEPER and mine > his else None
 
 
 # --- phase specialisation [A248] -------------------------------------------------------------
@@ -1586,6 +1667,15 @@ COACH_TRIAL_BAT = {
                      "You moved up the order for the season, bat and ball both.", True),
                 _opt("Stay at the tail", "Bowling is your job. Leave the runs to others.",
                      "You told the coach bowling is your job.", False)]}
+COACH_KEEPER = {
+    "key": "keeper", "title": "The coach has an idea", "target": KEEPER,
+    "text": "\"{keeper} is not getting the runs we need. You have kept in the nets, and you "
+            "can bat. Take the gloves, and we play an extra batter.\"",
+    "options": [_opt("Take the gloves", "You keep wicket from now on, at the same place in "
+                     "the order. A keeper does not bowl.", "You took the gloves: a "
+                     "wicketkeeper-batter from now on.", True),
+                _opt("Stay a batter", "Keep your mind on your batting.",
+                     "You told the coach you would rather stay a batter.", False)]}
 COACH_SWITCH = {
     "key": "switch", "title": "The coach makes an offer",
     "text": "\"The trial worked. I want you as a full-time all-rounder.\"",
@@ -1606,11 +1696,37 @@ COACH_FADING = dict(COACH_SPECIALISE, text="\"The runs have dried up, but your b
                     "carry you. I want your four overs every game.\"")
 
 
-def coach_mentor(deck: Deck, fs_id: int, add: str, style: str | None) -> dict | None:
+# [A255] Where a bowler who moves up the order bats: the band his squad is weaker in, by its
+# best regular batter there (A33's volume floor) -- the middle order (3-5) or the finisher's
+# place (5-7). The top order is not offered: a bowler opening is the rare Narine career, and
+# the user chose these two. A band with no regular batter at all is the weakest; a tie keeps
+# the finisher's place, where every bowler went before.
+BOWLER_BANDS = {"finisher": FINISHER_SLOTS, "middle": MIDDLE_SLOTS}
+BAND_WORDS = {"finisher": {"at": "six or seven", "order": "the lower middle order"},
+              "middle": {"at": "four or five", "order": "the middle order"}}
+
+
+def lacking_band(deck: Deck, fs_id: int) -> str:
+    """The band of `BOWLER_BANDS` this squad's batting is weaker in, by its best regular
+    batter's batting value (A160's halves) -- not his card, which carries an all-rounder's
+    bowling as well. Over the 166 real squads it is the middle in 65 and the finisher's
+    place in 101 (35 squads have no regular batter at five to seven at all)."""
+    best = {b: -9.9 for b in BOWLER_BANDS}
+    for c in deck.cards_by_fs.get(fs_id, []):
+        band = next((b for b, slots in BOWLER_BANDS.items()
+                     if frozenset(c.positions or ()) == slots), None)
+        if (band and c.person_id != YOU_ID and c.role != "bowler" and c.bat_scoring is not None
+                and (c.bat_balls or 0) >= BAT_REGULAR_BALLS):
+            best[band] = max(best[band], bat_value(c.bat_scoring, c.bat_dismissal))
+    return min(BOWLER_BANDS, key=lambda b: best[b])
+
+
+def coach_mentor(deck: Deck, fs_id: int, add: str, style: str | None,
+                 band: str = "finisher") -> dict | None:
     """The teammate who would coach you into a new discipline [A245]: your squad's best
-    regular bowler of that style (A33's volume floor), or its best batter at five to seven
-    (the best batter, if nobody there batted regularly). His real numbers that season come
-    with him. None when the squad has nobody who did the job."""
+    regular bowler of that style (A33's volume floor), or its best batter of the band you
+    move into (A255; the best batter, if nobody there batted regularly). His real numbers
+    that season come with him. None when the squad has nobody who did the job."""
     cards = [c for c in deck.cards_by_fs.get(fs_id, []) if c.person_id != YOU_ID
              and c.display is not None]
     if add == "bowl":
@@ -1620,7 +1736,7 @@ def coach_mentor(deck: Deck, fs_id: int, add: str, style: str | None) -> dict | 
     else:
         regular = [c for c in cards if (c.bat_balls or 0) >= BAT_REGULAR_BALLS
                    and c.bat_scoring is not None]
-        pool = [c for c in regular if set(c.positions or ()) & FINISHER_SLOTS] or regular
+        pool = [c for c in regular if frozenset(c.positions or ()) == BOWLER_BANDS[band]] or regular
         halves = (lambda c: (c.bat_scoring, c.bat_dismissal))
     best = max(pool, key=lambda c: (c.display, c.person_id), default=None)
     if best is None:
@@ -1655,8 +1771,15 @@ def with_coach_mentor(deck: Deck, coach: dict, fs_id: int, start: Card,
     spinner."""
     key = coach["key"]
     if key == "trial_bat":
-        m = coach_mentor(deck, fs_id, "bat", None)
-        return dict(coach, options=[_mentored(o, m, "bat") for o in coach["options"]])
+        band = lacking_band(deck, fs_id)
+        m = coach_mentor(deck, fs_id, "bat", None, band)
+        where = BAND_WORDS[band]
+        opts = [dict(_mentored(o, m, "bat"), band=band) if o["take"] else o
+                for o in coach["options"]]
+        opts = [dict(o, hint=o["hint"].replace("the lower middle order", where["order"]))
+                for o in opts]
+        return dict(coach, band=band, text=coach["text"].replace("six or seven", where["at"]),
+                    options=opts)
     if key != "trial_bowl":
         return coach
     style = start.bowling_style or cp.style or None
@@ -1876,6 +1999,10 @@ def xi_with(you: Card, squad: list[Card],
     player whose departure keeps the eleven legal (a keeper, five bowlers, four overseas)."""
     from game.__main__ import OVERSEAS_LIMIT, opposition_xi, twelve_from_xi, viable
 
+    if you.role == "keeper":
+        # [A255] You keep: the squad's own keepers are picked, if at all, as batters.
+        squad = [dataclasses.replace(c, role="batter") if c.role == "keeper" else c
+                 for c in squad]
     pool = squad + [you]
     xi = opposition_xi(pool)
     if you not in xi:
@@ -1906,12 +2033,27 @@ def home_number(card: Card) -> int | None:
     return HOME_NUMBER.get(frozenset(card.positions or ()))
 
 
+def peak_number(card: Card) -> int | None:
+    """The rung above the home number, for a band that has one (A255)."""
+    return PEAK_NUMBER.get(frozenset(card.positions or ()))
+
+
+def marks_for(card: Card) -> tuple[int, ...]:
+    """The Rating each promotion needs. A promotion counts the same in every band, as A251
+    counted it (a middle-order batter's second mark kept him at 4), so a career in progress
+    keeps its number; the peak rung is one more mark on top."""
+    return PROMOTE_AT + ((PEAK_AT,) if peak_number(card) is not None else ())
+
+
 def batting_number(card: Card, promotions: int) -> int | None:
     """Where your player bats with `promotions` earned: the foot of his band, one place up
-    for each, never above its home number. None for the tail."""
+    for each, never above its home number -- then the peak rung, for every mark cleared
+    (A255). None for the tail."""
     band = frozenset(card.positions or ())
     if band not in HOME_NUMBER:
         return None
+    if promotions > len(PROMOTE_AT) and band in PEAK_NUMBER:
+        return PEAK_NUMBER[band]
     return max(HOME_NUMBER[band], FIRST_NUMBER[band] - promotions)
 
 
@@ -1928,10 +2070,11 @@ def earned(cp: "Checkpoint") -> int:
 
 
 def next_promotions(promotions: int, rating: int, peak: int, poor: bool,
-                    declining: bool) -> int:
+                    declining: bool, marks: tuple[int, ...] = PROMOTE_AT) -> int:
     """After a season: one place up for a mark cleared in a season that was not poor, one
-    down only on a sharp decline, never more than one either way (A251)."""
-    if not poor and promotions < len(PROMOTE_AT) and rating >= PROMOTE_AT[promotions]:
+    down only on a sharp decline, never more than one either way (A251). `marks` is the
+    band's own ladder (`marks_for`, A255)."""
+    if not poor and promotions < len(marks) and rating >= marks[promotions]:
         return promotions + 1
     if poor and declining and promotions > 0 and rating <= peak - DEMOTE_DROP:
         return promotions - 1
@@ -4217,6 +4360,12 @@ class Checkpoint:
     phase: dict = field(default_factory=dict)          # [A248] the coach's work, by discipline
     phase_offers: int = 0
     promotions: int | None = None       # [A251] places earned up the order; None before the rise
+    # [A255] Whether the batting band comes from the ceiling spin (False on a checkpoint from
+    # before, so a career in progress does not change band halfway), the band a bowler made
+    # an all-rounder bats in, and the keeper offers made so far.
+    ceiling_band: bool = True
+    bat_band: str = ""
+    keeper_offers: int = 0
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -4247,7 +4396,9 @@ class Checkpoint:
                    traits=dict(d.get("traits") or {}),
                    coach_mentor=dict(d.get("coach_mentor") or {}),
                    phase={k: list(v) for k, v in (d.get("phase") or {}).items()},
-                   phase_offers=d.get("phase_offers", 0), promotions=d.get("promotions"))
+                   phase_offers=d.get("phase_offers", 0), promotions=d.get("promotions"),
+                   ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
+                   keeper_offers=d.get("keeper_offers", 0))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -4511,6 +4662,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     setup.check()
     start, ceiling = spin(deck, seed, setup.role)
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
+    if cp.ceiling_band:                    # [A255] a career from before keeps its start's band
+        start = banded(start, ceiling, setup.role)
     shape = draw_shape(seed) if cp.shaped else STANDARD
     legend = potential_legend(deck, setup.role, ceiling)
     career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
@@ -4553,7 +4706,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         captained = cp.captain is not None and cp.captain == cp.current
         # [A238] the changed role you go into the season in, before the coach says anything
         rd = role_state(deck, model, seed, setup, start, cp.roles[-1] if cp.roles else "",
-                        cp.second, cp.style, year, mentor=cp.coach_mentor)
+                        cp.second, cp.style, year, mentor=cp.coach_mentor,
+                        bat_band=cp.bat_band)
         career.role_now = career.season_role = cp.roles[-1] if cp.roles else setup.role
         market = market_for(start, ceiling, cp, shape, legend)
         if year in MEGA_YEARS and k > 0:
@@ -4648,7 +4802,12 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
                            fs_id=offer.fs_id, year=year, franchise=offer.franchise, role=rd)
             need = squad_need(deck, here, offer.fs_id)
-        coach = coach_card(seed, setup, start, cp, k, squad_now, need)
+        weak = None
+        if keeper_eligible(setup, cp, k, squad_now):
+            here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
+                           fs_id=offer.fs_id, year=year, franchise=offer.franchise, role=rd)
+            weak = weak_keeper(deck, here, offer.fs_id)
+        coach = coach_card(seed, setup, start, cp, k, squad_now, need, weak)
         # [A248] Your lean going into the season, as the player card says it and as the coach
         # reads it when he has no other offer to make.
         leaning = with_phase(ability(start, top, career_t(cp, start, top, shape), setup=setup,
@@ -4679,6 +4838,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 if pick["take"]:
                     cp.roles.append(coach["target"])
                     cp.role_since = k
+            elif coach["key"] == "keeper":
+                cp.keeper_offers += 1
+                if pick["take"]:
+                    cp.roles.append(KEEPER)
+                    cp.role_since = k
             elif coach["key"] == "phase":
                 cp.phase_offers += 1
                 if pick["take"]:
@@ -4696,10 +4860,15 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     cp.style = pick["style"] or cp.style
                     if pick.get("mentor"):
                         cp.coach_mentor = dict(pick["mentor"])
+                    if pick.get("band"):           # [A255] the band the squad needed
+                        cp.bat_band = pick["band"]
+                        if cp.promotions is None:  # ...and the foot of it, to rise from
+                            cp.promotions = 0
             trait_moves += [tuple(x) for x in pick.get("traits", ())]
             rd = role_state(deck, model, seed, setup, start,
                             coach["target"] if trial else (cp.roles[-1] if cp.roles else ""),
-                            cp.second, cp.style, year, trial=trial, mentor=cp.coach_mentor)
+                            cp.second, cp.style, year, trial=trial, mentor=cp.coach_mentor,
+                            bat_band=cp.bat_band)
             career.role_now = cp.roles[-1] if cp.roles else setup.role
             career.season_role = rd["role"] if rd else setup.role
         probe = ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id, year=year,
@@ -4995,7 +5164,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             peak = max(r.rating for r in cp.seasons if r.rating)
             cp.promotions = next_promotions(have, played.rating, peak,
                                             played.percentile < poor_bar(season_role),
-                                            shape.declining(clock))
+                                            shape.declining(clock), marks_for(you))
             now_at = batting_number(you, cp.promotions)
             if now_at < played.bat_at:
                 say(f"Promoted to No. {now_at} for next season.", "up")

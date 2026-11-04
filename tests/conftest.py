@@ -56,3 +56,15 @@ def phase_off(request, monkeypatch):
     from game import career as C
 
     monkeypatch.setattr(C, "PHASE_ON", False)
+
+
+@pytest.fixture(autouse=True)
+def keeper_off(request, monkeypatch):
+    """The coach's offer to take the gloves (A255) is a new question in a batter's season, so
+    the coach tests' seeded careers from before it would meet it. Off for every test except a
+    module that sets `KEEPER_TESTS = True` (`test_career_bands.py`)."""
+    if getattr(request.module, "KEEPER_TESTS", False):
+        return
+    from game import career as C
+
+    monkeypatch.setattr(C, "KEEPER_ASK_CHANCE", 0.0)

@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=4460d984a9">
+<link rel="stylesheet" href="/static/style.css?v=b2064af8b2">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -70,10 +70,11 @@
       <a href="/faq">FAQ</a>
       <a href="/terms">Terms</a>
       <a href="/privacy" class="sel">Privacy</a>
+      <a href="/contact">Contact</a>
     </nav>
 
     <div class="prose">
-      <div class="stamp">Last updated 30 September 2026</div>
+      <div class="stamp">Last updated 4 November 2026</div>
 
       <h2>If you don't create an account</h2>
       <p>Drafting, playing a solo season, and playing in a room all work without
@@ -85,6 +86,18 @@
       play it signed out: a random ID in your browser decides your deal, your result is
       worked out and shown to you, and nothing about it is stored.</p>
 
+      <p>Your progress in games is kept in your own browser's local storage: an
+      unfinished puzzle, your puzzle streak, a saved room seat, your chosen settings.
+      It stays on your device, and clearing your browser's site data removes it.</p>
+
+      <p>When you finish a daily puzzle signed out, the players you picked are counted,
+      under a random ID made by your browser, so the game can tell everyone how rare a
+      pick was. That count is never linked to a name or an account. And when a request
+      to the server fails, your browser sends a short technical report (the page, the
+      kind of failure, how long it waited and the type of connection) so outages can be
+      found and fixed; it carries nothing that identifies you, and is deleted after 30
+      days.</p>
+
       <h2>If you create an account</h2>
       <p>Registering stores a <strong>username</strong>, an <strong>email
       address</strong>, and a <strong>password</strong>. The password is never stored
@@ -92,9 +105,9 @@
       saved, so even we can't read it back. Signing in sets one cookie that identifies
       your session; it carries no tracking purpose and isn't shared with anyone.</p>
 
-      <p>If you play the daily challenge while signed in, your result goes on that day's
-      public leaderboard under your <strong>username</strong>, which anyone visiting the
-      site can see. Your email address is never shown.</p>
+      <p>If you play the daily challenge or a daily puzzle while signed in, your result
+      goes on that day's public leaderboard under your <strong>username</strong>, which
+      anyone visiting the site can see. Your email address is never shown.</p>
 
       <h2>If you save a game while signed in</h2>
       <p>Saving is something you (or the site, on your behalf, once you've completed
@@ -105,8 +118,32 @@
       you play anonymously, and nothing is backfilled after the fact.</p>
 
       <h2>Cookies</h2>
-      <p>The site sets exactly one cookie, for staying signed in. There are no ads, and no
-      analytics or tracking cookies, on any page.</p>
+      <p>The site itself sets one cookie, for staying signed in. It sets no analytics or
+      tracking cookies of its own.</p>
+
+      <h2>Advertising</h2>
+      <p>Fine Leg XI is free, and is supported by advertising served by
+      <strong>Google AdSense</strong>. Where ads appear, they are chosen and delivered by
+      Google, not by this site:</p>
+      <ul>
+        <li>Third-party vendors, including Google, use cookies to serve ads based on your
+        previous visits to this website and to other websites.</li>
+        <li>Google's use of advertising cookies enables it and its partners to serve ads to
+        you based on your visits to this site and to other sites on the internet.</li>
+        <li>You can opt out of personalised advertising by visiting Google's
+        <a href="https://adssettings.google.com/" target="_blank" rel="noopener">Ads
+        Settings</a>. You can also opt out of some third-party vendors' use of cookies for
+        personalised advertising at
+        <a href="https://www.aboutads.info/choices/" target="_blank" rel="noopener">aboutads.info</a>.</li>
+        <li>How Google uses information from sites that show its ads is described in
+        <a href="https://policies.google.com/technologies/partner-sites" target="_blank"
+        rel="noopener">How Google uses information from sites or apps that use our
+        services</a>.</li>
+      </ul>
+      <p>Where the law requires it, for example in the European Economic Area, the United
+      Kingdom and Switzerland, Google's consent message asks for your choice before
+      personalised ads are shown, and you can change it at any time. Ads never receive your account details: this site does not
+      pass your username, email or game history to Google or anyone else.</p>
 
       <h2>If you send a tip</h2>
       <p>Tipping is by UPI, and it happens entirely inside your own UPI app — the QR and the
@@ -117,9 +154,9 @@
 
       <h2>Who this is shared with</h2>
       <p>Nobody buys or sells anything here. Data is held with the infrastructure
-      providers needed to run the site — a hosting platform and a database provider —
-      and, for ad delivery on the home page, Google. It isn't shared for any other
-      purpose.</p>
+      providers needed to run the site — a hosting platform and a database provider.
+      Google, as the advertising provider, sets its own cookies as described above. Your
+      account information isn't shared with anyone, for any purpose.</p>
 
       <h2>Deleting your data</h2>
       <p>There's no self-service deletion yet. Email
@@ -185,8 +222,9 @@
   <!-- shell:footer -->
 <footer class="imprint">
   <div class="imprint-links">
-    <a href="/about">About</a><a href="/faq">FAQ</a><a href="/records">Records</a>
-    <a href="/puzzles">Puzzles</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
+    <a href="/seasons">Seasons</a><a href="/teams">Teams</a><a href="/records">Records</a>
+    <a href="/guides">Guides</a><a href="/puzzles">Puzzles</a><a href="/about">About</a>
+    <a href="/faq">FAQ</a><a href="/contact">Contact</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
   </div>
   <div id="footStats"></div>
   <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the

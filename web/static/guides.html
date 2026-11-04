@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google-adsense-account" content="ca-pub-2624074910535553">
+<title>Guides · Fine Leg XI</title>
+<meta name="description" content="Guides to every Fine Leg XI game: the draft, the auction, Build a Career, the daily puzzles, and how the player ratings work.">
+<link rel="canonical" href="https://fineleg.app/guides">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=658f8f5eb0">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png?v=6734ff71dc">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png?v=7cf719835b">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fine Leg XI">
+<meta property="og:title" content="Fine Leg XI">
+<meta property="og:description" content="Guides to every Fine Leg XI game: the draft, the auction, Build a Career, the daily puzzles, and how the player ratings work.">
+<meta property="og:image" content="https://fineleg.app/static/og-image.png">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://fineleg.app/static/og-image.png">
+<link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
+<link rel="stylesheet" href="/static/style.css?v=b2064af8b2">
+<link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
+</head>
+<body>
+<!-- shell:nav -->
+<nav class="topnav" aria-label="Main">
+  <div class="topnav-in">
+    <a class="brand" href="/" data-home>
+      <img src="/static/logo-emblem.webp?v=6a1d0cc41c" alt="" width="34" height="36">
+      <span>Fine Leg <b>XI</b></span>
+    </a>
+    <div class="topnav-links">
+      <a href="/draft" data-match="/draft /season">Draft</a>
+      <a href="/auction" data-match="/auction">Auction</a>
+      <a href="/career" data-match="/career">Career</a>
+      <a href="/rooms" data-match="/rooms">Rooms</a>
+      <a href="/daily" data-match="/daily">Daily</a>
+      <a href="/puzzles" data-match="/puzzles /bingo /guess /common /xi /trio /flashback">Puzzles</a>
+    </div>
+    <div class="topnav-r">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add Fine Leg XI to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
+  </div>
+</nav>
+<!-- /shell:nav -->
+<div class="sheet">
+  <article class="prose-page hx">
+    <div class="report">
+      <div class="over-line">FINE LEG XI</div>
+      <h1 class="call">Guides</h1>
+    </div>
+<section class="hx-sec">
+<h2>Guides</h2>
+<p>Fine Leg XI is a set of cricket games built on the real ball-by-ball record of every IPL season from
+2008 to 2026. These guides explain how each one works, in plain words, and how the player ratings behind
+all of them are worked out.</p>
+<div class="hx-cards"><a class="hx-card" href="/guides/ratings"><b>How the ratings work</b><span>How every Fine Leg XI card is rated from 70 to 99: the ball-by-ball state model, shrinkage for small samples, comparing eras, and what the match engine plays.</span></a><a class="hx-card" href="/guides/draft"><b>How to draft and play a season</b><span>How the Fine Leg XI draft works: twelve picks from real IPL squads, the rules of a legal side, the IPL playoff format, and advice for a better twelve.</span></a><a class="hx-card" href="/guides/auction"><b>How the auction works</b><span>How the Fine Leg XI auction works: a ₹120 crore purse, retentions and Right to Match, live and limit bidding, squad rules and tips.</span></a><a class="hx-card" href="/guides/career"><b>How Build a Career works</b><span>How Build a Career works: create a player, sign contracts, play real IPL seasons ball by ball, and chase titles, caps and records.</span></a><a class="hx-card" href="/guides/puzzles"><b>How to play the puzzles</b><span>How to play the Fine Leg XI daily IPL puzzles: Bingo, Guess the Player, Common Ground, Name the XI, Three to Make and the Flashback quiz.</span></a></div>
+<p>For the record itself, see <a href="/seasons">every IPL season</a>, <a href="/teams">every
+franchise</a> and the <a href="/records">record book</a>. Questions not answered here may be in the
+<a href="/faq">FAQ</a>, or you can <a href="/contact">get in touch</a>.</p>
+</section>
+
+  </article>
+
+  <!-- shell:auth -->
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
+  </div>
+<!-- /shell:auth -->
+
+  <!-- shell:footer -->
+<footer class="imprint">
+  <div class="imprint-links">
+    <a href="/seasons">Seasons</a><a href="/teams">Teams</a><a href="/records">Records</a>
+    <a href="/guides">Guides</a><a href="/puzzles">Puzzles</a><a href="/about">About</a>
+    <a href="/faq">FAQ</a><a href="/contact">Contact</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
+  </div>
+  <div id="footStats"></div>
+  <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the
+    BCCI, the IPL or any franchise. Team names and logos belong to their owners and appear
+    only to identify the teams. Ball-by-ball data from
+    <a href="https://cricsheet.org/" rel="noopener">Cricsheet</a> (ODbL).</p>
+</footer>
+<!-- /shell:footer -->
+</div>
+
+<script src="/static/common.js?v=e24a4d67b6"></script>
+<script src="/static/auth.js?v=bf7bef535d"></script>
+<script src="/static/info.js?v=29305b2217"></script>
+</body>
+</html>

@@ -42,6 +42,8 @@
     { "src": "/sw.js", "dest": "/web/static/sw.js", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/manifest.webmanifest", "dest": "/web/static/manifest.webmanifest", "headers": { "cache-control": "public, max-age=3600" } },
     { "src": "/ads.txt", "dest": "/web/static/ads.txt", "headers": { "cache-control": "public, max-age=3600", "content-type": "text/plain; charset=utf-8" } },
+    { "src": "/sitemap.xml", "dest": "/web/static/sitemap.xml", "headers": { "cache-control": "public, max-age=3600", "content-type": "application/xml; charset=utf-8" } },
+    { "src": "/robots.txt", "dest": "/web/static/robots.txt", "headers": { "cache-control": "public, max-age=3600", "content-type": "text/plain; charset=utf-8" } },
     { "src": "/offline.html", "dest": "/web/static/offline.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
 
     { "src": "/api/(.*)", "dest": "api/index.py" },
@@ -71,6 +73,13 @@
     { "src": "/faq", "dest": "/web/static/faq.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/terms", "dest": "/web/static/terms.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/privacy", "dest": "/web/static/privacy.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/contact", "dest": "/web/static/contact.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/seasons", "dest": "/web/static/seasons.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/seasons/(20[0-9][0-9])", "dest": "/web/static/seasons/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/teams", "dest": "/web/static/teams.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/teams/([a-z-]+)", "dest": "/web/static/teams/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/guides", "dest": "/web/static/guides.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/guides/([a-z-]+)", "dest": "/web/static/guides/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
 
     { "src": "/(.*)", "dest": "api/index.py" }
   ]

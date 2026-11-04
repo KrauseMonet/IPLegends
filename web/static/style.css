@@ -4453,3 +4453,45 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
   background:color-mix(in srgb,var(--gold,#d4a843) 14%,var(--panel))}
 .auc-pausebar .act{flex:none}
 #roomAuction.paused section .act{opacity:.35;pointer-events:none}
+
+/* --- history pages (tools.build_history) and guides: written record, plain HTML --- */
+.hx .report h1.call{margin:0;font-size:24px;letter-spacing:.16em;color:var(--ink)}
+.hx-sec{max-width:880px;margin:0 auto 30px;position:relative;z-index:1}
+.hx-sec h2{font-family:var(--sans);font-size:14.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--gold);margin:34px 0 12px;font-weight:800}
+.hx-sec h3{font-family:var(--sans);font-size:15.5px;font-weight:750;color:var(--ink);margin:24px 0 8px}
+.hx-sec p,.hx-sec ul,.hx-sec ol{font-size:15.5px;line-height:1.75;color:var(--ink-2);margin:0 0 16px}
+.hx-sec ul,.hx-sec ol{padding-left:22px}
+.hx-sec li{margin-bottom:7px}
+.hx-sec a{color:var(--gold);text-decoration:none}
+.hx-sec a:hover{text-decoration:underline}
+.hx-sec strong{color:var(--ink)}
+.hx-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);
+  border-radius:10px;background:var(--panel)}
+.hx-table{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+.hx-table th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:10px 12px;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+.hx-table td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink-2);white-space:nowrap}
+.hx-table tr:last-child td{border-bottom:0}
+.hx-table .n{text-align:right;font-family:var(--mono)}
+.hx-table b{color:var(--ink)}
+.hx-table a{color:var(--ink)}
+.hx-team{display:inline-flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none}
+.hx-team:hover span{text-decoration:underline}
+.hx-crest{width:22px;height:22px;object-fit:contain;flex:none;vertical-align:middle;margin-right:6px}
+.hx-team .hx-crest{margin-right:0}
+.hx-note{font-size:12.5px!important;line-height:1.6!important;color:var(--ink-3)!important;margin-top:10px!important}
+.hx-list{list-style:none;padding:0!important;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 18px}
+.hx-pager{justify-content:center;padding:6px 0 30px}
+.hx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin:0 0 16px}
+.hx-card{display:block;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:16px 18px;
+  text-decoration:none!important}
+.hx-card:hover{border-color:var(--gold)}
+.hx-card b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
+.hx-card span{color:var(--ink-2);font-size:13.5px;line-height:1.55}
+@media (max-width:560px){
+  .hx-table{font-size:12.5px}
+  .hx-table td,.hx-table th{padding:7px 9px}
+  .hx .report h1.call{font-size:19px}
+}

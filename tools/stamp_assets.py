@@ -53,24 +53,34 @@ def _hash(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:10]
 
 
+def stamp_text(text: str, name: str = "") -> str:
+    """One page's text with every asset reference stamped. Shared with `tools.build_history`,
+    which writes pages already stamped."""
+    def rewrite(m: re.Match) -> str:
+        head, rel = m.group(1), m.group(2)
+        target = STATIC / rel
+        if not target.exists():
+            # A reference to a file that is not there is a real error, not something
+            # to paper over with a hash of nothing.
+            raise SystemExit(f"{name}: references missing asset /static/{rel}")
+        return f'{head}?v={_hash(target)}"'
+
+    return REF.sub(rewrite, text)
+
+
+def pages() -> list[pathlib.Path]:
+    """Every page, the generated history pages in their folders included."""
+    return sorted(STATIC.rglob("*.html"))
+
+
 def stamp(check: bool = False) -> int:
     stale: list[str] = []
     changed: list[str] = []
 
-    files = sorted(STATIC.glob("*.html")) + sorted(PARTIALS.glob("*.html"))
+    files = pages() + sorted(PARTIALS.glob("*.html"))
     for page in files:
         text = page.read_text()
-
-        def rewrite(m: re.Match) -> str:
-            head, rel = m.group(1), m.group(2)
-            target = STATIC / rel
-            if not target.exists():
-                # A reference to a file that is not there is a real error, not something
-                # to paper over with a hash of nothing.
-                raise SystemExit(f"{page.name}: references missing asset /static/{rel}")
-            return f'{head}?v={_hash(target)}"'
-
-        new = REF.sub(rewrite, text)
+        new = stamp_text(text, page.name)
         if new != text:
             (stale if check else changed).append(page.name)
             if not check:

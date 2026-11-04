@@ -19,7 +19,7 @@ from tools import build_brand
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
 PARTIALS = ROOT / "web" / "partials"
-PAGES = sorted(STATIC.glob("*.html"))
+PAGES = sorted(STATIC.rglob("*.html"))   # the history pages and guides in their folders too
 
 
 def text(path) -> str:

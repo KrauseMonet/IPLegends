@@ -39,7 +39,7 @@ def _block(name: str) -> re.Pattern:
 
 
 def _pages() -> list[pathlib.Path]:
-    return [p for p in sorted(STATIC.glob("*.html")) if p.name not in EXCLUDED]
+    return [p for p in sorted(STATIC.rglob("*.html")) if p.name not in EXCLUDED]
 
 
 def sync(check: bool = False) -> int:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime
 import os
 import pathlib
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -420,6 +421,60 @@ def guess_page() -> FileResponse:
 @app.get("/about", include_in_schema=False)
 def about_page() -> FileResponse:
     return FileResponse(STATIC / "about.html")
+
+
+@app.get("/contact", include_in_schema=False)
+def contact_page() -> FileResponse:
+    return FileResponse(STATIC / "contact.html")
+
+
+# The written record and the guides: plain pages a reader (and a crawler) can read without
+# running the game. `tools.build_history` writes the seasons and teams; the guides are by hand.
+@app.get("/seasons", include_in_schema=False)
+def seasons_page() -> FileResponse:
+    return FileResponse(STATIC / "seasons.html")
+
+
+@app.get("/seasons/{year}", include_in_schema=False)
+def season_history_page(year: int) -> FileResponse:
+    return _subpage("seasons", str(year))
+
+
+@app.get("/teams", include_in_schema=False)
+def teams_page() -> FileResponse:
+    return FileResponse(STATIC / "teams.html")
+
+
+@app.get("/teams/{slug}", include_in_schema=False)
+def team_history_page(slug: str) -> FileResponse:
+    return _subpage("teams", slug)
+
+
+@app.get("/guides", include_in_schema=False)
+def guides_page() -> FileResponse:
+    return FileResponse(STATIC / "guides.html")
+
+
+@app.get("/guides/{slug}", include_in_schema=False)
+def guide_page(slug: str) -> FileResponse:
+    return _subpage("guides", slug)
+
+
+def _subpage(folder: str, name: str) -> FileResponse:
+    # A name is a year or a lowercase slug, never a path: nothing outside the folder is served.
+    if not re.fullmatch(r"[a-z0-9-]+", name) or not (STATIC / folder / f"{name}.html").is_file():
+        raise HTTPException(404, "no such page")
+    return FileResponse(STATIC / folder / f"{name}.html")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml() -> FileResponse:
+    return FileResponse(STATIC / "sitemap.xml", media_type="application/xml")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt() -> FileResponse:
+    return FileResponse(STATIC / "robots.txt", media_type="text/plain")
 
 
 @app.get("/faq", include_in_schema=False)

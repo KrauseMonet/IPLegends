@@ -106,16 +106,16 @@ def test_nobody_is_limited_unless_an_account_is_named(no_limit_env):
 
 def test_the_named_accounts_are_limited_and_others_are_not(no_limit_env, monkeypatch):
     monkeypatch.setenv(admin.LEGEND_LIMIT_ACCOUNT_IDS, " 17, 4 ,x, ")
-    assert admin.legend_limit(17) == 5 == admin.legend_limit(4) == admin.LEGEND_PICKS
+    assert admin.legend_limit(17) == 1 == admin.legend_limit(4) == admin.LEGEND_PICKS
     # "7" is inside "17": whole ids only
     assert admin.legend_limit(7) is None and admin.legend_limit(1) is None
 
 
 def test_the_admin_accounts_are_limited_when_no_list_is_set(no_limit_env, monkeypatch):
     monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, "9")
-    assert admin.legend_limit(9) == 5 and admin.legend_limit(8) is None
+    assert admin.legend_limit(9) == 1 and admin.legend_limit(8) is None
     monkeypatch.setenv(admin.LEGEND_LIMIT_ACCOUNT_IDS, "8")      # an explicit list replaces it
-    assert admin.legend_limit(8) == 5 and admin.legend_limit(9) is None
+    assert admin.legend_limit(8) == 1 and admin.legend_limit(9) is None
 
 
 def test_me_reports_the_limit_for_that_account_only(no_limit_env, monkeypatch):
@@ -132,7 +132,7 @@ def test_me_reports_the_limit_for_that_account_only(no_limit_env, monkeypatch):
             got[account] = client.get("/api/auth/me").json()["legend_limit"]
         client.cookies.clear()
         got[None] = client.get("/api/auth/me").json()["legend_limit"]
-    assert got == {7: 5, 8: None, None: None}
+    assert got == {7: 1, 8: None, None: None}
 
 
 def _picker_js(call: str) -> list:
@@ -143,26 +143,41 @@ def _picker_js(call: str) -> list:
     return json.loads(out)
 
 
-HALL7 = [{"key": k, "legend": True, "legend_value": v, "name": k.upper(),
-          "card": {"legend": {"year": 2012, "rating": 99}}}
+# [A254] seven legends in three roles: by value a 9.0, 8.0, 7.0, 6.0, 5.0, 3.0, 1.0
+ROLE = {"a": "Opening batter", "b": "Spinner", "c": "Spinner", "d": "Opening batter",
+        "e": "Opening batter", "f": "Fast bowler", "g": "Spinner"}
+HALL7 = [{"key": k, "legend": True, "legend_value": v, "name": k.upper(), "role_label": "Finisher",
+          "card": {"legend": {"year": 2012, "rating": 99, "role_label": ROLE[k]}}}
          for k, v in zip("abcdefg", (9.0, 3.0, 8.0, 7.0, 1.0, 6.0, 5.0))]
 
 
+def _groups(mine, limit):
+    return _picker_js(f"legendChoices({json.dumps(HALL7)}, {json.dumps(mine)}, {limit})"
+                      ".map(g => [g.role, g.total, g.items.map(c => c.key)])")
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_a_limited_picker_lists_the_best_few_and_keeps_the_one_you_brought():
-    def run(mine, limit):
-        return _picker_js(f"legendChoices({json.dumps(HALL7)}, {json.dumps(mine)}, {limit})"
-                          ".map(c => c.key)")
-    assert run(None, 5) == ["a", "c", "d", "f", "g"]
-    assert run({"name": "B", "year": 2012, "rating": 99}, 5) == ["a", "c", "d", "f", "g", "b"]
-    assert run({"name": "A", "year": 2012, "rating": 99}, 5) == ["a", "c", "d", "f", "g"]
+def test_the_picker_groups_by_the_legend_s_role_best_role_first():
+    # the season's role decides the group, not the career's creation role ("Finisher")
+    assert _groups(None, "null") == [["Opening batter", 3, ["a", "d", "e"]],
+                                     ["Spinner", 3, ["c", "g", "b"]],
+                                     ["Fast bowler", 1, ["f"]]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_a_limited_picker_lists_the_best_in_each_role_and_keeps_the_one_you_brought():
+    assert _groups(None, 1) == [["Opening batter", 3, ["a"]], ["Spinner", 3, ["c"]],
+                                ["Fast bowler", 1, ["f"]]]
+    assert _groups({"name": "B", "year": 2012, "rating": 99}, 1) == [
+        ["Opening batter", 3, ["a"]], ["Spinner", 3, ["c", "b"]], ["Fast bowler", 1, ["f"]]]
+    assert _groups(None, 2)[0] == ["Opening batter", 3, ["a", "d"]]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_an_unlimited_picker_lists_every_legend():
-    for limit in ("null", "undefined"):
-        got = _picker_js(f"legendChoices({json.dumps(HALL7)}, null, {limit}).map(c => c.key)")
-        assert got == ["a", "c", "d", "f", "g", "b", "e"]
+    got = _picker_js(f"legendChoices({json.dumps(HALL7)}, null, undefined)"
+                     ".flatMap(g => g.items.map(c => c.key))")
+    assert sorted(got) == list("abcdefg")
 
 
 def test_the_lobby_picker_is_fed_through_the_account_s_limit():

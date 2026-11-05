@@ -85,7 +85,7 @@ def ipl_keeper_deck(full: Deck) -> Deck:
 # that no longer replays. A day before the date keeps the old value. Set to the day after
 # the change ships; move it if it ships later.
 NATIONALITY_FIXES: dict[str, tuple[datetime.date, bool]] = {
-    "557153ca": (datetime.date(2026, 11, 6), False),   # KK Cooper: India -> West Indies
+    "557153ca": (datetime.date(2026, 11, 7), False),   # KK Cooper: India -> West Indies
 }
 
 _OLD_NATIONALITY_DECKS: dict[tuple, Deck] = {}
@@ -115,7 +115,7 @@ def nationality_deck(full: Deck, challenge_date) -> Deck:
 # with A160's numbers, and its page rebuilds the match from them, so it keeps them -- read from
 # the frozen pin `tools.pin_engine_a160` wrote before the change, never from the database,
 # which no longer knows them. Set to the day after the change ships; move it if it ships later.
-ENGINE_TWO_LEVEL_FROM = datetime.date(2026, 11, 6)
+ENGINE_TWO_LEVEL_FROM = datetime.date(2026, 11, 7)
 ENGINE_A160_PIN = Path(__file__).resolve().parent.parent / "data" / "engine_a160.json.gz"
 
 
@@ -162,7 +162,7 @@ def a160_model(model: Model) -> Model:
 # [A260, A261] The first day played with situations: the settling-in curve, every card's
 # measured leans, and chasing intent. A day before it keeps the engine without them. Separate from A259's date
 # so the two can ship on different days; set to the day after this ships.
-SITUATIONS_FROM = datetime.date(2026, 11, 6)
+SITUATIONS_FROM = datetime.date(2026, 11, 7)
 SITUATION_FIELDS = ("phase_bat", "phase_bowl", "style_bat", "burn", "settle_offset",
                     "phase_wkt")
 _PLAIN_DECKS: dict[int, Deck] = {}

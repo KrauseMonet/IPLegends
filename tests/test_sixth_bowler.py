@@ -193,6 +193,7 @@ def test_a_daily_keeps_the_five_man_attack_it_was_scored_under(monkeypatch):
     monkeypatch.setattr(daily, "a160_deck", lambda deck: deck)
     monkeypatch.setattr(daily, "a160_model", lambda model: model)
     monkeypatch.setattr(daily, "plain_deck", lambda deck: deck)       # A260 too
+    monkeypatch.setattr(daily, "nationality_deck", lambda deck, day: deck)  # A262
     monkeypatch.setattr(daily, "plain_model", lambda model: model)
     monkeypatch.setattr(daily, "_play_and_score",
                         lambda full, model, day, player, state: len(attack(xi, model_from(DOC))))

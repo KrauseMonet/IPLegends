@@ -77,6 +77,40 @@ def ipl_keeper_deck(full: Deck) -> Deck:
     return deck
 
 
+# [A262] Nationality corrections made after days were played: person_id -> (the first day
+# on which the correction applies, the `overseas` value his cards carried before it). A
+# player's overseas flag decides which cards the overseas cap offers, so an old day's stored
+# state would replay to a different twelve -- or not at all: measured for Kevon Cooper, 6
+# of the 51 results on days that dealt his Rajasthan squads changed, 5 of them to a state
+# that no longer replays. A day before the date keeps the old value. Set to the day after
+# the change ships; move it if it ships later.
+NATIONALITY_FIXES: dict[str, tuple[datetime.date, bool]] = {
+    "557153ca": (datetime.date(2026, 11, 6), False),   # KK Cooper: India -> West Indies
+}
+
+_OLD_NATIONALITY_DECKS: dict[tuple, Deck] = {}
+
+
+def nationality_deck(full: Deck, challenge_date) -> Deck:
+    """`full` with every nationality correction not yet in force on `challenge_date`
+    undone. Returns `full` itself when every correction applies, which is every day from
+    the newest correction's date on."""
+    old = {pid: was for pid, (since, was) in NATIONALITY_FIXES.items()
+           if challenge_date < since}
+    if not old:
+        return full
+    key = (id(full), frozenset(old.items()))
+    deck = _OLD_NATIONALITY_DECKS.get(key)
+    if deck is None or deck.fs_ids != full.fs_ids:
+        deck = Deck(
+            cards_by_fs={fs: [replace(c, overseas=old[c.person_id])
+                              if c.person_id in old else c for c in cards]
+                         for fs, cards in full.cards_by_fs.items()},
+            fs_ids=list(full.fs_ids))
+        _OLD_NATIONALITY_DECKS[key] = deck
+    return deck
+
+
 # [A259] The first day played with the two-level engine numbers. A day before it was scored
 # with A160's numbers, and its page rebuilds the match from them, so it keeps them -- read from
 # the frozen pin `tools.pin_engine_a160` wrote before the change, never from the database,
@@ -212,6 +246,7 @@ def replay_day(full: Deck, challenge_date, player: int | str, deck_fs_ids,
     quietly papered over."""
     if challenge_date < KEEPER_TRADE_FROM:
         full = ipl_keeper_deck(full)
+    full = nationality_deck(full, challenge_date)
     return sess.replay(
         deck_for_day(full, deck_fs_ids),
         player_seed(challenge_date, player),
@@ -422,6 +457,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
 
+    # [A262] Before `side_for_fs` reads it: an opposition eleven obeys the overseas cap too.
+    full = nationality_deck(full, day.challenge_date)
     if day.challenge_date < SITUATIONS_FROM:
         full, model = plain_deck(full), plain_model(model)
     if day.challenge_date < ENGINE_TWO_LEVEL_FROM:

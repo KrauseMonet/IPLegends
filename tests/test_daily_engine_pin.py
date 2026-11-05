@@ -70,7 +70,9 @@ def test_play_and_score_switches_engine_on_the_day(deck_model, monkeypatch, offs
     assert D.play_and_score(deck, model, day, 1, "state") == "played"
     if pinned:
         # [A260] an old day gets both pins: no situations, and the pre-A259 numbers
-        assert seen["deck"] is D.a160_deck(D.plain_deck(deck))
+        # [A262] and a nationality corrected later is undone first
+        assert seen["deck"] is D.a160_deck(D.plain_deck(
+            D.nationality_deck(deck, day.challenge_date)))
         assert seen["model"].season_mean_scoring != model.season_mean_scoring
         assert seen["model"].settle == {} and seen["model"].intent == {}
     else:
@@ -109,5 +111,5 @@ def test_the_situations_switch_on_their_own_day(deck_model, monkeypatch, offset,
     monkeypatch.setattr(D, "ENGINE_TWO_LEVEL_FROM", datetime.date(2000, 1, 1))
     day = SimpleNamespace(challenge_date=D.SITUATIONS_FROM + datetime.timedelta(days=offset))
     D.play_and_score(deck, model, day, 1, "state")
-    assert (seen["deck"] is D.plain_deck(deck)) == plain
+    assert (seen["deck"] is D.plain_deck(D.nationality_deck(deck, day.challenge_date))) == plain
     assert (seen["model"].intent == {}) == plain

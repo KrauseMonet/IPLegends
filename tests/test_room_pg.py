@@ -118,3 +118,27 @@ def test_a_poll_of_a_quiet_room_leaves_no_transaction_open(pg):
                       "where code = %s", (CODE,)).fetchone()[0]
     pg.rollback()
     assert idle < 60, "the heartbeat must still have been written"
+
+
+def test_a_reroll_that_swaps_two_franchises_passes_the_unique_index(pg):
+    """Two seats trading franchises in one write would trip migration 033's unique index
+    on the first row, since Postgres checks it row by row. `randomise_franchises` clears
+    first; this is the case a fake connection cannot see."""
+    import psycopg
+    setup = psycopg.connect(SCRATCH, autocommit=True)
+    setup.execute("update rooms set game = 'auction', format = 'league' where code = %s",
+                  (CODE,))
+    room = rooms._load_room(setup, CODE, lock=False)
+    room.players["g"] = rooms.RoomPlayer("g", "Guest", False)
+    room.players["h"].franchise, room.players["g"].franchise = "MI", "CSK"
+    rooms._save_room(setup, room)
+    setup.close()
+
+    class Swap:
+        def sample(self, pool, n):
+            return ["CSK", "MI"]
+
+    rooms.randomise_franchises(pg, CODE, "h", rng=Swap())
+    pg.commit()
+    held = {pid: p.franchise for pid, p in rooms._load_room(pg, CODE, lock=False).players.items()}
+    assert held == {"h": "CSK", "g": "MI"}

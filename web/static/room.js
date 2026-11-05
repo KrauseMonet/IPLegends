@@ -733,6 +733,23 @@ function renderLobbyFranchises(r){
       `<span class="auc-fr-owner">${owner ? esc(owner.name) : ''}</span>`)
       .replace('class="auc-fr ', `class="auc-fr${mine ? ' sel' : ''}${taken ? ' taken' : ''} `);
   }).join('');
+  $('#lobbyFranchiseRandom').classList.toggle('hide', MY_PID !== r.host_id);
+}
+
+// The host may hand every person a random franchise in one go, and reroll it; nobody has
+// to, and anyone can still choose their own afterwards.
+async function randomiseRoomFranchises(ctrl){
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/franchise/random`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
 }
 
 // [A174] The host switches the trade window on or off until the auction starts; everyone

@@ -555,6 +555,41 @@ def choose_franchise(conn, code: str, player_id: str, short: str) -> Room:
     return room
 
 
+def randomise_franchises(conn, code: str, player_id: str, rng=None) -> Room:
+    """The host hands every person in an auction room's lobby a random franchise, all at
+    once. Optional and repeatable: anyone may still pick their own afterwards, and pressing
+    it again rerolls. A reroll never hands back the exact assignment already held, so the
+    button always visibly does something.
+
+    The franchises are cleared before the new ones are written, because two seats swapping
+    franchises in one statement would trip migration 033's unique index on the first row
+    -- Postgres checks a non-deferrable unique index row by row, not at the statement's
+    end. Both writes are in this request's one transaction, so nobody sees the gap."""
+    from game.auction import FRANCHISES
+    rng = rng or random.SystemRandom()
+    room = _load_room(conn, code)
+    if room.game == "draft":
+        raise RoomError("only an auction room has franchises")
+    if player_id != room.host_id:
+        raise RoomError("only the host can hand out franchises")
+    if room.status != "lobby":
+        raise RoomError("franchises are chosen in the lobby")
+    people = list(room.players)   # a lobby holds only people; computer seats come at start
+    shorts = [s for s, _ in FRANCHISES]
+    before = {pid: room.players[pid].franchise for pid in people}
+    for _ in range(20):
+        drawn = dict(zip(people, rng.sample(shorts, len(people))))
+        if drawn != before:
+            break
+    conn.execute("update room_players set franchise = null where room_code = %s",
+                 (room.code,))
+    for pid, short in drawn.items():
+        room.players[pid].franchise = short
+    room.loaded_seats = None   # the clear above makes every seat row a change to write
+    _save_room(conn, room)
+    return room
+
+
 def set_trades(conn, code: str, player_id: str, on: bool) -> Room:
     """[A174] The host turns an auction room's trade window on or off -- in the lobby
     only, because a window decided after bidding began would change the rules of an

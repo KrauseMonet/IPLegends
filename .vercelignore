@@ -31,3 +31,5 @@ CREDITS.md
 assets/
 # [A248] Build a Career's phase leans. Without it every career plays with no lean.
 !data/phase_skill.json.gz
+# [A258] Career skills and season roles. Without it no card shows a skill.
+!data/player_skills.json.gz

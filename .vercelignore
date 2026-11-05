@@ -33,3 +33,5 @@ assets/
 !data/phase_skill.json.gz
 # [A258] Career skills and season roles. Without it no card shows a skill.
 !data/player_skills.json.gz
+# [A259] The engine numbers before A259: past daily challenges replay with them.
+!data/engine_a160.json.gz

@@ -97,6 +97,10 @@ def test_a_daily_keeps_the_batting_it_was_scored_under(monkeypatch):
     def probe(full, model, day, player, state):
         return batting_choice(thin), [c.name for c in opposition_order([by_role, by_band])]
 
+    # [A259] This test is about its own pin; A259's engine-number pin is tested in
+    # tests/test_daily_engine_pin.py, and the deck and model here are placeholders.
+    monkeypatch.setattr(daily, "a160_deck", lambda deck: deck)
+    monkeypatch.setattr(daily, "a160_model", lambda model: model)
     monkeypatch.setattr(daily, "_play_and_score", probe)
     before = SimpleNamespace(challenge_date=daily.BATTING_ORDER_FROM - datetime.timedelta(days=1))
     after = SimpleNamespace(challenge_date=daily.BATTING_ORDER_FROM)

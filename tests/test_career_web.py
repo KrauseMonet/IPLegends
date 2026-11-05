@@ -416,7 +416,9 @@ def test_your_player_and_only_him_is_marked_in_every_scorecard(client, deck, mod
     engine's own player is the career's (by person id, never the name), so the lists line
     up one to one with the engine's -- including the rule that a bowler with no ball has no
     row. Checked on an all-rounder, so both kinds of mark have somewhere to be."""
-    d, moves = _season_with_moves(client, "allrounder", 2)   # re-found after A251, A255
+    # seed re-found after A251, A255 and A259 (seed 2's first season no longer reaches a
+    # watched playoff match; seed 1 watches four, bowling and at the crease in them)
+    d, moves = _season_with_moves(client, "allrounder", 1)
     seed, setup, _, _ = R.read_token(d["token"])
     detail = C.play_career(deck, model, seed, setup, moves).detail
     sp = d["season_play"]

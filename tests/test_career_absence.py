@@ -259,8 +259,13 @@ def test_a_newcomer_is_left_out_only_straight_after_his_form_turns_poor(seasons)
         assert year.absent == list(range(s, min(s + len(block), len(mine))))
         assert year.absence_reason == reason
         assert _poor(year, mine, s)
-        for n in range(1, s):                     # and not at any reading before it
-            assert not _poor(year, mine, n)
+        # and not at any reading before it -- unless he was DROPPED from the next match
+        # (A205): he cannot be left out of a match he is already out of, so the block waits
+        # for his return, and a drop adds to it rather than standing in for it (A206).
+        # Before A259 this sample never put a drop at that moment; A259 found one
+        # (Sunrisers 2018, seed 3: poor after matches 9 and 10, dropped for 10 and 11).
+        for n in range(1, s):
+            assert not _poor(year, mine, n) or (n + 1) in year.dropped
         waited += 1
     assert waited >= 5 and never >= 5             # both happen in this sample
 

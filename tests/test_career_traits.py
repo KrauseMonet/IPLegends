@@ -299,15 +299,18 @@ def test_traits_reach_the_season_and_its_cache_key(deck, model, monkeypatch):
         return real(deck_, model_, seed, k, you, record, key, *a, **kw)
     monkeypatch.setattr(C, "_cached_season", spy)
     setup = C.Setup("Key", "opener", 2012)
-    _, moves = C.auto_career(deck, model, 2, setup, "loyal")
+    # seed 2 -> 26 re-found after A259: the hot season must still pause where the plain one
+    # did (the moves replayed are the plain career's), and season one must leave no trait
+    seed = 26
+    _, moves = C.auto_career(deck, model, seed, setup, "loyal")
     cut = next(i for i in range(len(moves))
-               if len(C.play_career(deck, model, 2, setup, moves[:i]).seasons) == 1)
-    cp = C.play_career(deck, model, 2, setup, moves[:cut]).checkpoint
+               if len(C.play_career(deck, model, seed, setup, moves[:i]).seasons) == 1)
+    cp = C.play_career(deck, model, seed, setup, moves[:cut]).checkpoint
     hot = dataclasses.replace(cp, traits={"temper": 3.0})
     runs = []
     for resume in (cp, hot):
         keys.clear(), cards.clear()
-        C.play_career(deck, model, 2, setup, moves[cut:], resume=resume)
+        C.play_career(deck, model, seed, setup, moves[cut:], resume=resume)
         runs.append((keys[0], cards[0]))
     assert runs[0][0] != runs[1][0]
     assert runs[1][1].bat_scoring == pytest.approx(runs[0][1].bat_scoring + 3 * ct.TEMPER_STEP)
@@ -345,9 +348,10 @@ def test_a_captain_meets_the_captains_row(deck, model, monkeypatch):
     start, ceiling = C.spin(deck, 3, "opener")
     you = C.ability(start, ceiling, 0.5, setup=C.Setup("R", "opener", 2019), fs_id=26,
                     year=2019, franchise=deck.cards_by_fs[26][0].franchise)
+    # seed 7 -> 8 re-found after A259: the row must come before any key moment, for both
     for captain, want in ((True, "Call a team meeting"), (False, "Back the captain")):
         try:
-            C.simulate_year(deck, model, 7, 2, you, answers=(), captain=captain)
+            C.simulate_year(deck, model, 8, 2, you, answers=(), captain=captain)
         except C._NeedMoment as need:
             assert need.prompt is not None
             assert need.prompt["options"][0].label == want

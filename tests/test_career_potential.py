@@ -206,8 +206,11 @@ def _age(event: str, choice: str) -> float:
 
 
 # Found by search: one of each kind of shape, between them a slowed and a sped-up clock
-# (re-found after A239's sixth bowler moved every season, and A251's home batting number).
-CLOCK_FIXTURES = ((0, C.Shape("early", "steep")), (15, C.Shape("late", "gentle")),
+# (re-found after A239's sixth bowler moved every season, and A251's home batting number;
+# the late/gentle seed 15 -> 29 re-found after A259, when the three stopped speeding one up).
+# The careers are built with the coach, phases and the gloves ON: a module fixture is set up
+# before conftest's per-test switches, so the search ran with them on too.
+CLOCK_FIXTURES = ((0, C.Shape("early", "steep")), (29, C.Shape("late", "gentle")),
                   (10, C.Shape("standard", "standard")))
 
 

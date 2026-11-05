@@ -139,15 +139,21 @@ def test_a_season_is_played_at_the_number_it_is_given(deck, model):
     assert C.where_you_play(deck, you, fs, 5)[0] == 5
 
 
+# Seed 1 until A259; re-found after A259 re-estimated every card's engine numbers (seed 1's
+# opener now stalls at No. 3 for five seasons). Seed 5 goes 3, 3, 3, 3, 2, then No. 1 for
+# seven seasons and back to 2 in the last, with nine pre-season offers.
+RISEN_SEED = 5
+
+
 @pytest.fixture(scope="module")
 def risen(no_incidents, deck, model):
     """An opener's career that climbs to No. 1 and falls back, found by search. Built here
     with the coach and phases off: a module fixture is set up before conftest's per-test
-    switches, and the tests replay it with them off."""
+    switches, and the tests replay it with them off. Seed RISEN_SEED (re-found after A259)."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(C, "COACH_ON", False)
         mp.setattr(C, "PHASE_ON", False)
-        car, moves = C.auto_career(deck, model, 1, C.Setup("T", "opener", 2010, False),
+        car, moves = C.auto_career(deck, model, RISEN_SEED, C.Setup("T", "opener", 2010, False),
                                    "strength")
     car.moves = moves
     return car
@@ -159,7 +165,7 @@ def test_offers_say_where_you_would_bat_at_the_number_you_have_earned(deck, mode
     setup = C.Setup("T", "opener", 2010, False)
     checked = 0
     for n in range(len(risen.moves)):
-        c = C.play_career(deck, model, 1, setup, risen.moves[:n])
+        c = C.play_career(deck, model, RISEN_SEED, setup, risen.moves[:n])
         if c.pending is not None and c.pending.kind == "offer":
             season = risen.seasons[len(c.seasons)]
             assert {o.position for o in c.pending.offers} == {season.bat_at}, season.year
@@ -177,7 +183,7 @@ def test_the_number_is_part_of_the_seasons_cache_key(deck, model, monkeypatch):
         keys.append((record.bat_at, key))
         return real(deck_, model_, seed, k, you, record, key, *a, **kw)
     monkeypatch.setattr(C, "_cached_season", spy)
-    C.auto_career(deck, model, 1, C.Setup("T", "opener", 2010, False), "strength")
+    C.auto_career(deck, model, RISEN_SEED, C.Setup("T", "opener", 2010, False), "strength")
     assert keys and all(bat in key for bat, key in keys)
     assert len({bat for bat, _ in keys}) > 1
 

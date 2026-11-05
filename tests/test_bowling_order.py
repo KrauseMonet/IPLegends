@@ -80,6 +80,10 @@ def test_a_daily_keeps_the_order_it_was_scored_under(monkeypatch):
 
     thin = Card(fs_id=1, person_id="t", name="t", bowl=0.5, bowl_balls=6)
     seen = {}
+    # [A259] This test is about its own pin; A259's engine-number pin is tested in
+    # tests/test_daily_engine_pin.py, and the deck and model here are placeholders.
+    monkeypatch.setattr(daily, "a160_deck", lambda deck: deck)
+    monkeypatch.setattr(daily, "a160_model", lambda model: model)
     monkeypatch.setattr(daily, "_play_and_score",
                         lambda full, model, day, player, state: bowling_order(thin))
     before = SimpleNamespace(challenge_date=daily.BOWLING_ORDER_FROM - datetime.timedelta(days=1))

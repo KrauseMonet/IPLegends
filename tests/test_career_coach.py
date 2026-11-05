@@ -463,10 +463,10 @@ def test_turning_the_coach_down_changes_no_match(deck, model, monkeypatch):
 
 def test_a_batter_who_takes_the_trial_bowls_and_one_who_passes_is_offered_the_role(deck, model):
     setup = C.Setup("Test", "opener", 2010, False)
-    # seed re-found after A245 (traits move later seasons), A250 and A251
-    career, moves = _drive(deck, model, 3, setup, lambda c: 0)
+    # seed re-found after A245 (traits move later seasons), A250 and A251; 3 -> 0 re-found after A259
+    career, moves = _drive(deck, model, 0, setup, lambda c: 0)
     trials = [r for r in career.seasons if r.role and r.role["trial"]]
-    assert trials, "seed 3's opener is offered a trial"
+    assert trials, "seed 0's opener is offered a trial"
     for r in trials:
         assert r.bowl_balls > 0                     # a trial season really bowls
     passed = [r for r in trials if r.bowl_rank is not None and r.bowl_rank >= C.TRIAL_PASS]

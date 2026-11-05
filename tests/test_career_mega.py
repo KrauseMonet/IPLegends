@@ -23,7 +23,9 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # [A224] seed 12, found by search again when the career shapes moved every curve; [A239] seed 41
 # [A230] the same seed, now with its 2010 card answered (nearly every card asks)
 # [A251] seed 3, re-found when your batting number became your own
-UNSOLD = (3, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
+# [A259] seed 60, re-found after A259 re-estimated every card's engine numbers (best market
+# ceiling ₹1.39 cr); its 2010 now pauses at two key moments, hence the second call
+UNSOLD = (60, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
 
 
 @pytest.fixture(scope="module")

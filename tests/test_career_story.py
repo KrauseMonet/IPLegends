@@ -22,8 +22,10 @@ needs_deck = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 CSK_2019 = 26
 K = 4
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
-OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 9, "wedding": 12, "collapse": 20}
-PACE = {"press": 67, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239, A251
+# hamstring 9 -> 14 re-found after A259: the season must stop at the hamstring before any key
+# moment, since test_an_incident_a_career_has_used_up_does_not_come_again plays it with no answers
+OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 14, "wedding": 12, "collapse": 20}
+PACE = {"press": 73, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239, A251; press re-found after A259
 
 
 @pytest.fixture(scope="module")
@@ -640,14 +642,16 @@ def test_you_are_not_left_out_in_the_match_you_have_just_met_a_slump_in(deck, mo
     """[A250] A newcomer's waiting left-out block never starts at the match a slump was
     answered in: grinding it out is how he chose to meet it. In this season, found by
     search, the block would otherwise start right there (league index 6)."""
+    # Mumbai 2014 seed 29 -> Delhi 2014 (fs 45) seed 111, re-found after A259: the slump is
+    # asked at league index 6 and left_out_now is true there (checked when searching)
     start, ceil = C.spin(deck, 4, "opener")
-    c0 = deck.cards_by_fs[96][0]
-    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=96,
+    c0 = deck.cards_by_fs[45][0]
+    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=45,
                     year=c0.season_year, franchise=c0.franchise)
     ans = []
     while True:
         try:
-            year = C.simulate_year(deck, model, 29, 1, you, rating=78, tenure=0,
+            year = C.simulate_year(deck, model, 111, 1, you, rating=78, tenure=0,
                                    answers=tuple(ans))
             break
         except C._NeedMoment as e:

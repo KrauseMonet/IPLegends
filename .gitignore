@@ -24,3 +24,5 @@ __pycache__/
 !/data/phase_skill.json.gz
 # [A258] Career skills and season roles, ~26 kB. Without it no card shows a skill.
 !/data/player_skills.json.gz
+# [A259] The engine numbers before A259, frozen once, for past daily challenges.
+!/data/engine_a160.json.gz

@@ -128,9 +128,11 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    SEED = 1
+    SEED = 4
     # seed 1, found by search (again after A230 made nearly every card ask, and after A239's
     # sixth bowler): a hat-trick, so the count has something to agree with
+    # [A259] seed 4, re-found after A259 re-estimated every card's engine numbers: two
+    # hat-tricks, so the count is a sum and not just one
     career, moves = C.auto_career(deck, model, SEED, setup, "strength")
     seasons, checked = career.seasons, 0
     assert sum(r.hat_tricks for r in seasons) >= 1, "the fixture must take a hat-trick"

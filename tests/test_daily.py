@@ -1427,7 +1427,10 @@ def test_the_match_is_played_with_the_rearranged_order(monkeypatch):
     with pytest.raises(Stop):
         daily.play_and_score(FULL, MODEL, day_obj, 1,
                              sess.encode(daily.player_seed(DAY, 1), arranged))
-    assert seen["xi"] == list(want.order) and seen["impact"] is want.impact
+    # By person: an old day plays its cards with the pinned pre-A259 engine numbers (A259),
+    # so the objects differ from `want`'s while the order is exactly the same.
+    assert [c.person_id for c in seen["xi"]] == [c.person_id for c in want.order]
+    assert seen["impact"].person_id == want.impact.person_id
 
 
 # --- claiming a signed-out attempt [A194] -------------------------------------------------

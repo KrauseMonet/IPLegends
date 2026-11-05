@@ -24,9 +24,12 @@ Three things ARE specific to a day and live here:
 from __future__ import annotations
 
 import datetime
+import functools
+import gzip
 import json
 import random
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from etl.feasibility import Deck
 from game.scenarios import (
@@ -72,6 +75,54 @@ def ipl_keeper_deck(full: Deck) -> Deck:
         _IPL_KEEPER_DECKS.clear()
         _IPL_KEEPER_DECKS[id(full)] = deck
     return deck
+
+
+# [A259] The first day played with the two-level engine numbers. A day before it was scored
+# with A160's numbers, and its page rebuilds the match from them, so it keeps them -- read from
+# the frozen pin `tools.pin_engine_a160` wrote before the change, never from the database,
+# which no longer knows them. Set to the day after the change ships; move it if it ships later.
+ENGINE_TWO_LEVEL_FROM = datetime.date(2026, 11, 6)
+ENGINE_A160_PIN = Path(__file__).resolve().parent.parent / "data" / "engine_a160.json.gz"
+
+
+@functools.lru_cache(maxsize=1)
+def engine_a160() -> dict:
+    """The frozen pre-A259 numbers. Missing or unreadable is an ERROR, not an empty pin: an
+    old day replayed on the new engine would quietly disagree with its stored score."""
+    with gzip.open(ENGINE_A160_PIN, "rt") as fh:
+        doc = json.load(fh)
+    if doc.get("format") != 1:
+        raise RuntimeError(f"{ENGINE_A160_PIN.name}: unknown format")
+    return doc
+
+
+_A160_DECKS: dict[int, Deck] = {}
+
+
+def a160_deck(full: Deck) -> Deck:
+    """`full` with every card's four engine numbers as they were before A259. Cached per
+    deck object, as `ipl_keeper_deck` is."""
+    deck = _A160_DECKS.get(id(full))
+    if deck is None or deck.fs_ids != full.fs_ids:
+        pin = engine_a160()
+        names = pin["fields"]
+
+        def old(c):
+            vals = pin["cards"].get(str(c.fs_id), {}).get(c.person_id)
+            return c if vals is None else replace(c, **dict(zip(names, vals)))
+
+        deck = Deck(cards_by_fs={fs: [old(c) for c in cards]
+                                 for fs, cards in full.cards_by_fs.items()},
+                    fs_ids=list(full.fs_ids))
+        _A160_DECKS.clear()
+        _A160_DECKS[id(full)] = deck
+    return deck
+
+
+def a160_model(model: Model) -> Model:
+    """`model` with the pre-A259 season average an unrated batter is centred on."""
+    old = {(d, int(y)): float(m) for d, y, m in engine_a160()["season_mean_scoring"]}
+    return replace(model, season_mean_scoring=old)
 
 
 def deck_for_day(full: Deck, fs_ids) -> Deck:
@@ -345,6 +396,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
 
+    if day.challenge_date < ENGINE_TWO_LEVEL_FROM:
+        full, model = a160_deck(full), a160_model(model)
     with (old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM),
           old_batting_order(day.challenge_date < BATTING_ORDER_FROM),
           five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM)):

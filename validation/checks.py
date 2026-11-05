@@ -1064,8 +1064,10 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
 
     1. **The engine plays the season's own halves.** `scoring_per_ball` and
        `dismissal_multiplier` are recomputed here from `player_season_impact`'s raw columns
-       -- shrunk with k = 100 toward each half's own prior, centred on the UNWEIGHTED mean
-       of gate-passing seasons, and NOT cohort-adjusted -- and must match the view. A view
+       -- [A259] each half its band prior plus a two-level estimate of the season's excess
+       over it (the rest of the player's career, then the season, by the measured
+       pseudo-ball counts; k = 100 toward the prior until A259), centred on the UNWEIGHTED
+       mean of gate-passing seasons, and NOT cohort-adjusted -- and must match the view. A view
        that folded the card's extras back in, applied a cohort offset, or centred on the
        wrong population fails here, on the rows it moved.
     2. **The card is still self-consistent.** `rated_per_ball` integrates to
@@ -1078,7 +1080,11 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
         return skipped(22, title, "player_season_rating absent - apply migration 011")
 
     REF_BALLS_PER_MATCH = {"batting": 18.0, "bowling": 24.0}
-    K = 100.0
+    # [A259] (career k, season k) per discipline and half, measured by tools.engine_spread;
+    # None is "no season spread". Written out again here rather than read from the view, so
+    # the check is a second, independent statement of the rule.
+    K = {("batting", "runs"): (441.0, 359.0), ("batting", "outs"): (735.0, 3771.0),
+         ("bowling", "runs"): (577.0, 482.0), ("bowling", "outs"): (3242.0, None)}
     offenders: list[str] = []
 
     # --- 1. the engine's halves, from the raw columns ------------------------------------
@@ -1090,12 +1096,29 @@ def check_22_the_card_and_the_engine_agree(conn) -> Result:
         join franchise_seasons f using (franchise_season_id)
         where i.balls > 0
     """)
+    career: dict[tuple, list[float]] = {}           # (person, discipline) -> sums
+    for (fs, pid, disc, year, balls, runs, runs_prior, outs, outs_prior, expected,
+         reason) in raw:
+        t = career.setdefault((pid, disc), [0.0, 0.0, 0.0])
+        t[0] += balls
+        t[1] += runs - balls * runs_prior
+        t[2] += outs - balls * outs_prior
+
+    def two_level(n, x, rest_balls, rest_sum, kc, ks):
+        c = rest_sum / (rest_balls + kc)
+        prior_var = 1.0 / (rest_balls + kc) + (1.0 / ks if ks else 0.0)
+        return c + prior_var / (prior_var + 1.0 / n) * (x - c)
+
     shrunk = {}
     level: dict[tuple, list[list[float]]] = {}
     for (fs, pid, disc, year, balls, runs, runs_prior, outs, outs_prior, expected,
          reason) in raw:
-        r = (runs + K * runs_prior) / (balls + K)
-        o = (outs + K * outs_prior) / (balls + K)
+        t = career[(pid, disc)]
+        xr, xo = runs / balls - runs_prior, outs / balls - outs_prior
+        r = runs_prior + two_level(balls, xr, t[0] - balls, t[1] - balls * xr,
+                                   *K[(disc, "runs")])
+        o = outs_prior + two_level(balls, xo, t[0] - balls, t[2] - balls * xo,
+                                   *K[(disc, "outs")])
         shrunk[(fs, pid, disc)] = (year, r, o, expected / balls)
         if reason is None:
             level.setdefault((disc, year), []).append([r, o])

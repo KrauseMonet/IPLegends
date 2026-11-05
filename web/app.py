@@ -4137,6 +4137,17 @@ def room_franchise(code: str, body: FranchiseIn) -> RoomStateOut:
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
 
 
+@app.post("/api/rooms/{code}/franchise/random", response_model=RoomStateOut)
+def room_franchise_random(code: str, body: HostActionIn) -> RoomStateOut:
+    """The host hands every person a random franchise, in the lobby; again to reroll."""
+    with _db() as conn:
+        try:
+            room = rooms.randomise_franchises(conn, code, body.player_id)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
 @app.post("/api/rooms/{code}/kit", response_model=RoomStateOut)
 def room_kit(code: str, body: RoomKitIn) -> RoomStateOut:
     """[A151] A draft room seat chooses its team kit -- until the matches start."""

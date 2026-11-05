@@ -100,6 +100,10 @@
         <div id="lobbyFranchiseWrap" class="lb-block hide">
           <div class="pf-head">Your franchise <em>unchosen ones bid as computer teams</em></div>
           <div id="lobbyFranchises" class="auc-franchises auc-lobby-franchises"></div>
+          <div id="lobbyFranchiseRandom" class="hide" style="margin-top:10px">
+            <button class="room-choice" onclick="randomiseRoomFranchises(this)">Randomise franchises</button>
+            <span class="note">Optional. Gives everyone here a random franchise; press again to reroll. Anyone can still pick their own.</span>
+          </div>
         </div>
         <div class="actions lb-actions">
           <button class="act lead" id="lobbyStartBtn" onclick="startRoomDraft(this)">Start draft</button>
@@ -555,7 +559,7 @@
 <script src="/static/reveal.js?v=e5b06bebca"></script>
 <script src="/static/analysis.js?v=660256fadc"></script>
 <script>window.AUCTION_ROOM = true;</script>
-<script src="/static/room.js?v=8ca8f978b6"></script>
+<script src="/static/room.js?v=eb31cdc516"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
 <script src="/static/auction_report.js?v=26ea24b6dc"></script>
 <script src="/static/auction.js?v=bd72d1872c"></script>

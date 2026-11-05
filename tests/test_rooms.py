@@ -168,6 +168,13 @@ class FakeConn:
                                         kn, km, kc)
             return FakeCursor([])
 
+        if sql_norm.startswith("update room_players set franchise = null"):
+            (code,) = params
+            seats = self.players.get(code, {})
+            for pid, row in seats.items():
+                seats[pid] = row[:4] + (None,) + row[5:]
+            return FakeCursor([])
+
         if sql_norm.startswith("delete from room_players"):
             code, player_id = params
             self.players.get(code, {}).pop(player_id, None)

@@ -88,6 +88,70 @@ def test_two_seats_cannot_hold_the_same_franchise(deck):
         rooms.choose_franchise(conn, room.code, guest, "MI")
 
 
+class Fixed:
+    """An rng whose `sample` returns a scripted sequence of draws, one per call."""
+    def __init__(self, *draws):
+        self.draws = list(draws)
+        self.calls = 0
+
+    def sample(self, pool, n):
+        self.calls += 1
+        out = self.draws.pop(0)
+        assert len(out) == n and set(out) <= set(pool)
+        return list(out)
+
+
+def three_in_lobby(conn, deck):
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="auction")
+    _, ben = rooms.join_room(conn, room.code, "Ben", deck)
+    _, cat = rooms.join_room(conn, room.code, "Cat", deck)
+    return room.code, host, ben, cat
+
+
+def test_the_host_hands_everyone_a_distinct_random_franchise(deck):
+    conn = FakeConn()
+    code, host, ben, cat = three_in_lobby(conn, deck)
+    rooms.choose_franchise(conn, code, ben, "RR")   # overwritten, not kept
+    rooms.randomise_franchises(conn, code, host, rng=Fixed(["KKR", "MI", "CSK"]))
+    held = {pid: p.franchise for pid, p in load(conn, code).players.items()}
+    assert held == {host: "KKR", ben: "MI", cat: "CSK"}
+
+
+def test_a_reroll_never_hands_back_the_same_assignment(deck):
+    conn = FakeConn()
+    code, host, ben, cat = three_in_lobby(conn, deck)
+    rooms.randomise_franchises(conn, code, host, rng=Fixed(["KKR", "MI", "CSK"]))
+    rng = Fixed(["KKR", "MI", "CSK"], ["MI", "KKR", "CSK"])
+    rooms.randomise_franchises(conn, code, host, rng=rng)
+    assert rng.calls == 2
+    held = [load(conn, code).players[p].franchise for p in (host, ben, cat)]
+    assert held == ["MI", "KKR", "CSK"]
+
+
+def test_only_the_host_randomises_and_only_in_an_auction_lobby(deck, clock):
+    conn = FakeConn()
+    code, host, ben, cat = three_in_lobby(conn, deck)
+    with pytest.raises(rooms.RoomError, match="only the host"):
+        rooms.randomise_franchises(conn, code, ben)
+    assert all(p.franchise is None for p in load(conn, code).players.values())
+    draft, dhost = rooms.create_room(conn, "league", 30, "Asha")
+    with pytest.raises(rooms.RoomError, match="auction"):
+        rooms.randomise_franchises(conn, draft.code, dhost)
+    started, shost, _ = two_human_room(conn, deck, clock)
+    with pytest.raises(rooms.RoomError, match="lobby"):
+        rooms.randomise_franchises(conn, started, shost)
+
+
+def test_a_randomised_room_starts_with_those_franchises(deck, clock):
+    conn = FakeConn()
+    code, host, ben, cat = three_in_lobby(conn, deck)
+    rooms.randomise_franchises(conn, code, host, rng=Fixed(["PBKS", "DC", "SRH"]))
+    rooms.start_room(conn, code, host, deck)
+    room = load(conn, code)
+    assert [room.players[p].franchise for p in (host, ben, cat)] == ["PBKS", "DC", "SRH"]
+    assert sorted(p.franchise for p in room.players.values()) == sorted(s for s, _ in au.FRANCHISES)
+
+
 def test_a_draft_room_has_no_franchises(deck):
     conn = FakeConn()
     room, host = rooms.create_room(conn, "league", 30, "Asha")
@@ -1237,3 +1301,14 @@ def test_the_host_skipping_a_player_skips_only_that_lot_for_everybody(deck, cloc
     assert after.phase == "bid" and after.lot.index != r.lot.index
     assert after.passed == set() and after.skipping(after.team_of[host]) is None
     assert [m["k"] for m in load(conn, code).moves] == ["limit", "skip_lot"]
+
+
+def test_a_reroll_that_can_only_draw_the_same_assignment_still_keeps_it(deck):
+    """If every draw matches what is held, the room keeps that assignment -- the clear
+    before the write must never leave seats with no franchise."""
+    conn = FakeConn()
+    code, host, ben, cat = three_in_lobby(conn, deck)
+    rooms.randomise_franchises(conn, code, host, rng=Fixed(["KKR", "MI", "CSK"]))
+    rooms.randomise_franchises(conn, code, host, rng=Fixed(*[["KKR", "MI", "CSK"]] * 20))
+    held = [load(conn, code).players[p].franchise for p in (host, ben, cat)]
+    assert held == ["KKR", "MI", "CSK"]

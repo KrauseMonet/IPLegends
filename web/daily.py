@@ -85,7 +85,7 @@ def ipl_keeper_deck(full: Deck) -> Deck:
 # that no longer replays. A day before the date keeps the old value. Set to the day after
 # the change ships; move it if it ships later.
 NATIONALITY_FIXES: dict[str, tuple[datetime.date, bool]] = {
-    "557153ca": (datetime.date(2026, 11, 7), False),   # KK Cooper: India -> West Indies
+    "557153ca": (datetime.date(2026, 11, 6), False),   # KK Cooper: India -> West Indies
 }
 
 _OLD_NATIONALITY_DECKS: dict[tuple, Deck] = {}

@@ -97,6 +97,8 @@ def test_a_daily_keeps_the_batting_it_was_scored_under(monkeypatch):
     def probe(full, model, day, player, state):
         return batting_choice(thin), [c.name for c in opposition_order([by_role, by_band])]
 
+    monkeypatch.setattr(daily, "nationality_deck", lambda deck, day: deck)  # A262
+
     monkeypatch.setattr(daily, "_play_and_score", probe)
     before = SimpleNamespace(challenge_date=daily.BATTING_ORDER_FROM - datetime.timedelta(days=1))
     after = SimpleNamespace(challenge_date=daily.BATTING_ORDER_FROM)

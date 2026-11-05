@@ -80,6 +80,7 @@ def test_a_daily_keeps_the_order_it_was_scored_under(monkeypatch):
 
     thin = Card(fs_id=1, person_id="t", name="t", bowl=0.5, bowl_balls=6)
     seen = {}
+    monkeypatch.setattr(daily, "nationality_deck", lambda deck, day: deck)  # A262
     monkeypatch.setattr(daily, "_play_and_score",
                         lambda full, model, day, player, state: bowling_order(thin))
     before = SimpleNamespace(challenge_date=daily.BOWLING_ORDER_FROM - datetime.timedelta(days=1))

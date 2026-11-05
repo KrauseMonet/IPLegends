@@ -188,6 +188,7 @@ def test_a_daily_keeps_the_five_man_attack_it_was_scored_under(monkeypatch):
     xi = [Card(fs_id=1, person_id=f"p{i}", name=f"p{i}", bat=0.0, season_year=2020,
                bowl=0.1 - i / 100, bowl_balls=300)
           for i in range(7)]
+    monkeypatch.setattr(daily, "nationality_deck", lambda deck, day: deck)  # A262
     monkeypatch.setattr(daily, "_play_and_score",
                         lambda full, model, day, player, state: len(attack(xi, model_from(DOC))))
     before = SimpleNamespace(challenge_date=daily.SIXTH_BOWLER_FROM - datetime.timedelta(days=1))

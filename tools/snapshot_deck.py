@@ -56,25 +56,32 @@ import psycopg
 from dotenv import load_dotenv
 
 from etl.feasibility import Card, Deck, load_deck
-from game.simulator import Model, build_model, model_inputs
+from game.simulator import with_intent, Model, build_model, model_inputs
 
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "deck_snapshot.json.gz"
 
 # Bumped only when the FILE FORMAT changes -- not when the data does. A loader seeing an
 # unknown version falls back to the database rather than guessing at the layout.
-FORMAT_VERSION = 2   # [A160] cards carry the two engine halves; model inputs gained two lists
+FORMAT_VERSION = 3   # [A160] cards carry the two engine halves; model inputs gained two lists
+                     # [A260] cards carry situation leans; model inputs gained the settling table
 
 
 def _card_doc(c: Card) -> dict:
     d = {f.name: getattr(c, f.name) for f in fields(c)}
     d["positions"] = sorted(d["positions"])      # frozenset is not JSON
+    # [A260] a lean is a tuple in memory and a list in JSON: compare like with like
+    for k, v in d.items():
+        if isinstance(v, tuple):
+            d[k] = list(v)
     return d
 
 
 def _card_from(d: dict) -> Card:
     # `Card(**d)` on purpose: an unknown or missing field raises TypeError here, which is
     # the schema guard. Never `for k in d: setattr(...)`, which would swallow both.
-    return Card(**{**d, "positions": frozenset(d["positions"])})
+    # [A260] a lean is a list in JSON and a tuple on the card: cards are frozen and hashed
+    return Card(**{**{k: tuple(v) if isinstance(v, list) else v for k, v in d.items()},
+                   "positions": frozenset(d["positions"])})
 
 
 def build_document(conn) -> dict:
@@ -93,7 +100,7 @@ def build_document(conn) -> dict:
             "cards_by_fs": {str(k): [_card_doc(c) for c in v]
                             for k, v in deck.cards_by_fs.items()},
         },
-        "model_inputs": _sorted_inputs(model_inputs(conn)),
+        "model_inputs": _sorted_inputs(with_intent(conn, model_inputs(conn))),
         "unrated": _unrated_doc(conn),
     }
 

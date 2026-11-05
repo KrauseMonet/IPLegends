@@ -1052,16 +1052,17 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
     assert C.approach_card(batter, 2).bowl_scoring is None
 
 
-# Chennai Super Kings 2019, seed 10 (re-found for A214, A239 and A259; Delhi 2019 seed 29
-# before): found by search because it exercises every moment rule at once -- two league
-# matches that would be must-win without MUST_WIN_MAX, playoff matches, and a called league
+# Chennai Super Kings 2019, seed 3 (re-found for A214, A239, A259 and A261; Delhi 2019 seed 29
+# before): found by search because it exercises every moment rule at once -- three league
+# matches (two before A261) that would be must-win without MUST_WIN_MAX, playoff matches, and a called league
 # match that is the SECOND meeting with its opponent. The first fixture these tests used
 # (the first franchise that paused) had no league moment and no repeat meeting, so three
 # rules could be broken without any test failing. These seasons are
 # pinned to the engine, so an engine change can move them (A208 moved every one of them,
 # Kings XI 2019 before this); re-find them by search rather than loosening a guard.
 MOMENT_FS = 26
-MOMENT_SEED = 10  # re-found after A239 moved seed 1 (to 2), and after A259 (2 -> 10)
+MOMENT_SEED = 3   # re-found after A239 moved seed 1 (to 2), after A259 (2 -> 10), and
+                  # re-found after A261 (10 -> 3)
 EDGE = (26, 0)    # Chennai 2019: see test_every_league_stop_and_only_those_is_a_close_race
 
 
@@ -1334,10 +1335,13 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 77, "kept": 50}     # both re-found after A251's home number (101, 123),
-                                          # and after A259 (77, 50)
-MOB_SEED = {"dropped": 0, "kept": 0}
-SIXTH = (50, 2)    # re-found after A251, and after A259 (seed 1 -> 2): see
+MOB_FS = {"dropped": 77, "kept": 140}    # both re-found after A251's home number (101, 123),
+                                          # after A259 (77, 50), and re-found after A261 (77, 140)
+MOB_SEED = {"dropped": 105, "kept": 0}   # "dropped" re-found after A261 (0 -> 105): seeds whose
+                                          # squad season reaches poor form AND whose regular
+                                          # season holds a block beside the drop are rare
+SIXTH = (140, 5)   # re-found after A251, after A259 (seed 1 -> 2), and re-found after A261
+                   # ((50, 2) -> (140, 5)): see
                    # test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
 
@@ -1380,7 +1384,7 @@ def _poor_points(year, late: bool = False) -> list[int]:
 def test_a_make_or_break_comes_the_first_time_your_form_turns_poor(deck, model, fixture):
     """Form as it stood straight after your own last match. "kept" is where it matters,
     found by search: reading it later, after other sides' matches, moves the first poor
-    reading from match 13 to match 12."""
+    reading from match 4 to match 5."""
     year = C.simulate_year(deck, model, MOB_SEED[fixture], 2, _mob_you(deck, MOB_FS[fixture]), answers=None)
     poor = _poor_points(year)
     assert poor, "the fixture must reach poor form"
@@ -1391,7 +1395,9 @@ def test_a_make_or_break_comes_the_first_time_your_form_turns_poor(deck, model, 
 
 def test_one_make_or_break_a_season(deck, model, monkeypatch):
     you = _mob_you(deck, MOB_FS["dropped"])
-    assert len(C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=None).verdicts) == C.MAKE_OR_BREAK_MAX
+    # One, written out: A205 ratified one a season, and comparing with C.MAKE_OR_BREAK_MAX
+    # moves with the constant (found re-checking A261, A207's trap again)
+    assert len(C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=None).verdicts) == 1
     monkeypatch.setattr(C, "MAKE_OR_BREAK_MAX", 99)
     assert len(C.simulate_year(deck, model, MOB_SEED["dropped"], 2, you, answers=None).verdicts) > 1   # it binds
 
@@ -1538,7 +1544,7 @@ def test_a_batter_bowls_in_the_five_only_when_his_side_lacks_five_real_bowlers(d
 def test_a_make_or_break_is_failed_only_in_the_worst_sixth(deck, model):
     """A207: the fail bar is the worst sixth of your kind's matches, not the worst third
     that marks you out of form. SIXTH, found by search, has its make-or-break match between
-    the two bars (ranked 0.237): kept now, dropped under the old bar."""
+    the two bars (ranked 0.223): kept now, dropped under the old bar."""
     year = C.simulate_year(deck, model, SIXTH[1], 2, _mob_you(deck, SIXTH[0]), answers=None)
     (k, verdict), = year.verdicts.items()
     rank = _single_rank(year, k)

@@ -642,16 +642,18 @@ def test_you_are_not_left_out_in_the_match_you_have_just_met_a_slump_in(deck, mo
     """[A250] A newcomer's waiting left-out block never starts at the match a slump was
     answered in: grinding it out is how he chose to meet it. In this season, found by
     search, the block would otherwise start right there (league index 6)."""
-    # Mumbai 2014 seed 29 -> Delhi 2014 (fs 45) seed 111, re-found after A259: the slump is
-    # asked at league index 6 and left_out_now is true there (checked when searching)
+    # Mumbai 2014 seed 29 -> Delhi 2014 (fs 45) seed 111 (after A259) -> Kolkata 2014
+    # (fs 72) seed 22, re-found after A261: the slump is asked at league index 6, the waiting
+    # block's reason is a left-out one ("rested") and left_out_now is true there (checked
+    # when searching), so without the rule the block would start at index 6
     start, ceil = C.spin(deck, 4, "opener")
-    c0 = deck.cards_by_fs[45][0]
-    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=45,
+    c0 = deck.cards_by_fs[72][0]
+    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=72,
                     year=c0.season_year, franchise=c0.franchise)
     ans = []
     while True:
         try:
-            year = C.simulate_year(deck, model, 111, 1, you, rating=78, tenure=0,
+            year = C.simulate_year(deck, model, 22, 1, you, rating=78, tenure=0,
                                    answers=tuple(ans))
             break
         except C._NeedMoment as e:

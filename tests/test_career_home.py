@@ -142,14 +142,17 @@ def test_a_season_is_played_at_the_number_it_is_given(deck, model):
 # Seed 1 until A259; re-found after A259 re-estimated every card's engine numbers (seed 1's
 # opener now stalls at No. 3 for five seasons). Seed 5 goes 3, 3, 3, 3, 2, then No. 1 for
 # seven seasons and back to 2 in the last, with nine pre-season offers.
-RISEN_SEED = 5
+# 5 -> 0 re-found after A261 (seed 5 now ends its career at No. 1): seed 0 goes 3, 3, 2, 2, then
+# No. 1 for eight seasons, then 2, 2, 3, 3, 3.
+RISEN_SEED = 0
 
 
 @pytest.fixture(scope="module")
 def risen(no_incidents, deck, model):
     """An opener's career that climbs to No. 1 and falls back, found by search. Built here
     with the coach and phases off: a module fixture is set up before conftest's per-test
-    switches, and the tests replay it with them off. Seed RISEN_SEED (re-found after A259)."""
+    switches, and the tests replay it with them off. Seed RISEN_SEED (re-found after A259,
+    and again after A261)."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(C, "COACH_ON", False)
         mp.setattr(C, "PHASE_ON", False)

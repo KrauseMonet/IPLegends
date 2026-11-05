@@ -264,12 +264,20 @@ def accumulate(balls: list[Ball]) -> dict:
     return acc
 
 
-def _edge(a: Acc | None) -> tuple[float, float, int] | None:
+# [A260] The per-ball variance of a residual across EVERY ball of a discipline, set by
+# `measure` before it reads any value. A handful of balls cannot estimate their own spread:
+# three sixes in a row have none, so a sample variance read the noise of a three-ball season
+# as zero and shrank it not at all (leans of -11 runs an over were the symptom). A season's
+# noise is never less than an ordinary ball's.
+POOLED_VAR: dict[str, float] = {}
+
+
+def _edge(a: Acc | None, disc: str | None = None) -> tuple[float, float, int] | None:
     """(runs an over, noise variance, balls)."""
     if a is None or a.n < 2:
         return None
     mean = a.resid / a.n
-    var = max(a.sq / a.n - mean * mean, 1e-9)
+    var = max(a.sq / a.n - mean * mean, POOLED_VAR.get(disc, 0.0), 1e-9)
     return mean * 6, var * 36 / a.n, a.n
 
 
@@ -284,12 +292,12 @@ def value(m: Metric, d: dict) -> tuple[float, float, int] | None:
     """(value, noise variance, balls in the situation) for some stretch of play, or None if
     he never faced (or bowled) a ball there."""
     if m.kind == "edge":
-        return _edge(d.get(m.tag))
+        return _edge(d.get(m.tag), m.disc)
     if m.kind == "lean":
         if m.tag == "set":
-            here, there = _edge(d.get("set")), _edge(d.get("new"))
+            here, there = _edge(d.get("set"), m.disc), _edge(d.get("new"), m.disc)
         else:
-            here, there = _edge(d.get(m.tag)), _edge(_rest(d, m.tag))
+            here, there = _edge(d.get(m.tag), m.disc), _edge(_rest(d, m.tag), m.disc)
         if here is None or there is None:
             return None
         return here[0] - there[0], here[1] + there[1], min(here[2], there[2])
@@ -349,6 +357,16 @@ def measure(acc: dict) -> dict[str, Measured]:
     spread -- so a season the archive cannot tell from luck reads as his career, and a
     season that really was different reads as different."""
     careers = {k: _add(p[2] for p in seasons.values()) for k, seasons in acc.items()}
+    for disc in ("bat", "bowl"):
+        tot = Acc()
+        for (p, d), car in careers.items():
+            a = car.get("all")
+            if d == disc and a is not None:
+                tot.n += a.n
+                tot.resid += a.resid
+                tot.sq += a.sq
+        if tot.n:
+            POOLED_VAR[disc] = tot.sq / tot.n - (tot.resid / tot.n) ** 2
     halves = {k: (_add(p[2] for s, p in seasons.items() if s % 2),
                   _add(p[2] for s, p in seasons.items() if not s % 2))
               for k, seasons in acc.items()}

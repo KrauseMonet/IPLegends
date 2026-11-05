@@ -108,7 +108,10 @@ def test_a_lean_moves_the_ball_only_in_its_own_phase(monkeypatch, model, disc):
     else:
         bowl = dataclasses.replace(bowl, phase_bowl=(0.0, 0.0, 0.2))
         extra = -0.2
-    pairs = _aims_by_over(monkeypatch, model, bat, bowl)
+    # [A260] without the settling curve and chasing intent, which add to every ball's aim:
+    # what this pins is that a lean moves only its own phase
+    plain = dataclasses.replace(model, settle={}, intent={})
+    pairs = _aims_by_over(monkeypatch, plain, bat, bowl)
     assert any(S.phase_of_over(o) == "death" for o, _ in pairs)
     for over, aim in pairs:
         want = 0.1 - 0.05 + (extra if S.phase_of_over(over) == "death" else 0.0)

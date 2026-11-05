@@ -125,6 +125,32 @@ def a160_model(model: Model) -> Model:
     return replace(model, season_mean_scoring=old)
 
 
+# [A260, A261] The first day played with situations: the settling-in curve, every card's
+# measured leans, and chasing intent. A day before it keeps the engine without them. Separate from A259's date
+# so the two can ship on different days; set to the day after this ships.
+SITUATIONS_FROM = datetime.date(2026, 11, 6)
+SITUATION_FIELDS = ("phase_bat", "phase_bowl", "style_bat", "burn", "settle_offset")
+_PLAIN_DECKS: dict[int, Deck] = {}
+
+
+def plain_deck(full: Deck) -> Deck:
+    """`full` with no card carrying a situation lean (A260)."""
+    deck = _PLAIN_DECKS.get(id(full))
+    if deck is None or deck.fs_ids != full.fs_ids:
+        none = dict.fromkeys(SITUATION_FIELDS)
+        deck = Deck(cards_by_fs={fs: [replace(c, **none) for c in cards]
+                                 for fs, cards in full.cards_by_fs.items()},
+                    fs_ids=list(full.fs_ids))
+        _PLAIN_DECKS.clear()
+        _PLAIN_DECKS[id(full)] = deck
+    return deck
+
+
+def plain_model(model: Model) -> Model:
+    """`model` with no settling-in curve (A260) and no chasing intent (A261)."""
+    return replace(model, settle={}, intent={})
+
+
 def deck_for_day(full: Deck, fs_ids) -> Deck:
     """The day's deck: the given squads only, over the whole archive's cards.
 
@@ -396,6 +422,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
 
+    if day.challenge_date < SITUATIONS_FROM:
+        full, model = plain_deck(full), plain_model(model)
     if day.challenge_date < ENGINE_TWO_LEVEL_FROM:
         full, model = a160_deck(full), a160_model(model)
     with (old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM),

@@ -25,7 +25,9 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # [A251] seed 3, re-found when your batting number became your own
 # [A259] seed 60, re-found after A259 re-estimated every card's engine numbers (best market
 # ceiling ₹1.39 cr); its 2010 now pauses at two key moments, hence the second call
-UNSOLD = (60, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
+# [A261] seed 3 again, re-found after A261 (settling-in, situation leans and chasing intent
+# moved every seeded season): best market ceiling ₹1.23 cr, one key moment in 2010
+UNSOLD = (3, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
 
 
 @pytest.fixture(scope="module")

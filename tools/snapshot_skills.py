@@ -23,7 +23,9 @@ from tools.snapshot_deck import read_document as read_deck
 
 def main(argv: list[str]) -> int:
     with connect() as conn:
-        doc = {"format": FORMAT, **skills.build(skills.load(conn))}
+        # [A260] on settle-adjusted par, the same balls the engine's leans are measured on
+        from etl import situations
+        doc = {"format": FORMAT, **skills.build(situations.build(conn)["balls"])}
     # The blocks are read off the COMMITTED deck, the cards players actually see (A107).
     deck = deck_from(read_deck())
     cards = [c for cs in deck.cards_by_fs.values() for c in cs]

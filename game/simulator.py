@@ -67,7 +67,16 @@ import random
 from dataclasses import dataclass, field
 
 from etl.impact import Cell, Costs, Grid
+from etl.intent import at as intent_at
+from etl.intent import pressure as intent_pressure
+from etl.intent import table as intent_table
+from etl.settling import faced_bucket
+from etl.skills import SETTLED
 from etl.state_model import FITTING_SET, bucket_of
+
+STYLE_INDEX = {"spin": 0, "pace": 1}       # [A260] `Player.style_bat`'s order
+# [A261] the intent table is keyed by `etl.skills.phase_of`'s short names
+INTENT_PHASE = {"powerplay": "pp", "middle": "mid", "death": "death"}
 
 # Off-the-bat outcomes, in the order the tilt's arrays use. Index 0 is the dismissal, whose
 # value is not a constant -- it is minus the wicket cost of the state the ball was bowled in.
@@ -147,6 +156,12 @@ class Player:
     # Build a Career's own player, so every other ball is the ball it always was.
     phase_bat: tuple[float, float, float] | None = None
     phase_bowl: tuple[float, float, float] | None = None
+    # [A260] Situation leans, measured per player-season (etl.situations); None plays the
+    # ball exactly as before. Against spin and pace; before and once set; and his own mean
+    # settling adjustment, taken back out of his level because his level already holds it.
+    style_bat: tuple[float, float] | None = None
+    burn: tuple[float, float] | None = None
+    settle_offset: tuple[float, float] | None = None
 
 
 @dataclass
@@ -167,6 +182,12 @@ class Model:
     # ball and pooled dismissal multiplier, and the scoring half's own centring constant.
     unrated_split: dict[str, tuple[float, float]] = field(default_factory=dict)
     season_mean_scoring: dict[tuple[str, int], float] = field(default_factory=dict)
+    # [A260] The settling-in curve, centred within each state: (over, wicket bucket, faced
+    # bucket) -> (runs a ball to add, dismissal multiplier). Empty is the engine before A260.
+    settle: dict[tuple[int, str, int], tuple[float, float]] = field(default_factory=dict)
+    # [A261] Chasing intent by phase: [(pressure, runs a ball, dismissal multiplier)], read by
+    # `etl.intent.at`. Empty is the engine before A261, which chased blind.
+    intent: dict[str, list[tuple[float, float, float]]] = field(default_factory=dict)
 
     def state(self, over: int, wickets: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """The eight outcome probabilities and their values, for one (over, wickets)."""
@@ -294,7 +315,32 @@ def model_inputs(conn) -> dict:
                 """
             )
         ],
+        # [A260] The settling-in curve, centred within each state (etl.settling).
+        "settling": _settling_table(conn),
     }
+
+
+def _settling_table(conn) -> dict:
+    from etl import situations
+    return situations.build(conn)["table"]
+
+
+def with_intent(conn, inputs: dict) -> dict:
+    """[A261] Add the chasing-intent table, measured against the engine built from the rest
+    of `inputs` -- pressure and par must be the engine's own, so it needs the model first."""
+    from etl import intent
+    model = build_model(inputs)
+    rows = conn.execute(INTENT_SQL).fetchall()
+    return {**inputs, "intent": intent.measure(rows, model, model.settle)}
+
+
+INTENT_SQL = """
+  select d.match_id, m.season_year, d.innings_no, d.over_no, d.ball_no, d.batter_id,
+         d.runs_batter, d.runs_extras, d.extra_wides, d.extra_noballs, d.player_out_id,
+         d.wicket_kind
+    from deliveries d join matches m using (match_id)
+   where d.innings_no in (1, 2) and not d.is_super_over and d.innings_scheduled_balls = 120
+   order by d.match_id, d.innings_no, d.over_no, d.ball_no"""
 
 
 def build_model(inputs: dict) -> Model:
@@ -345,12 +391,16 @@ def build_model(inputs: dict) -> Model:
         extras_rate=extras_on_faced / balls_faced,
         unrated_bat=unrated_bat, season_mean=season_mean,
         unrated_split=unrated_split, season_mean_scoring=season_mean_scoring,
+        # [A260] absent from inputs made before A260: then there is no curve, as before
+        settle={(o, wb, fb): (r, m)
+                for o, wb, fb, r, m in inputs.get("settling", {}).get("cells", [])},
+        intent=intent_table(inputs.get("intent", {})),
     )
 
 
 def load_model(conn) -> Model:
     """Fetch and build in one call -- every existing caller's own entry point, unchanged."""
-    return build_model(model_inputs(conn))
+    return build_model(with_intent(conn, model_inputs(conn)))
 
 
 def tilt(probs: tuple[float, ...], values: tuple[float, ...],
@@ -840,17 +890,47 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
             probs, values = model.state(
                 over if state_over is None else state_over, innings.wickets)
             aim = striker.player.bat_scoring - bowler.player.bowl_scoring
+            odds = striker.player.bat_dismissal * bowler.player.bowl_dismissal
             if striker.player.phase_bat or bowler.player.phase_bowl:
-                # [A248] only Build a Career's own player carries a phase lean
+                # [A248, A260] a phase lean, centred over the player's own balls
                 ph = PHASE_INDEX[phase_of_over(over if state_over is None else state_over)]
                 if striker.player.phase_bat:
                     aim += striker.player.phase_bat[ph]
                 if bowler.player.phase_bowl:
                     aim -= bowler.player.phase_bowl[ph]
-            dist = split_ball(
-                probs, values, aim,
-                striker.player.bat_dismissal * bowler.player.bowl_dismissal,
-            )
+            sp = striker.player
+            settle = getattr(model, "settle", None)      # a test's stand-in may have none
+            if settle and state_over is None:
+                # [A260] the league's settling-in curve, centred within this state, so a
+                # new batter is slower and safer and a set one faster and riskier while
+                # the state's own total stays as fitted. Not in a super over: the curve was
+                # measured in twenty-over innings, where a batter can afford to play himself
+                # in, and in a one-over game nobody does (with it on, super overs fell to
+                # 0.069 wickets a ball against the archive's 0.177). His own settled share
+                # and his slow-burn lean go with it, since both are terms of the same curve.
+                cell = settle.get((over, bucket_of(innings.wickets),
+                                         faced_bucket(striker.balls)))
+                if cell is not None:
+                    aim += cell[0]
+                    odds *= cell[1]
+                if sp.settle_offset:
+                    aim -= sp.settle_offset[0]
+                    odds *= math.exp(-sp.settle_offset[1])
+                if sp.burn:
+                    aim += sp.burn[0] if striker.balls < SETTLED else sp.burn[1]
+            intent = getattr(model, "intent", None)
+            if target is not None and state_over is None and intent:
+                # [A261] a chase reads the scoreboard: behind the rate it attacks, ahead it
+                # holds back, along the same runs-for-risk trade the archive measures
+                curve = intent.get(INTENT_PHASE[phase_of_over(over)])
+                if curve:
+                    r, m = intent_at(curve, intent_pressure(
+                        model, target, innings.runs, innings.balls, innings.wickets))
+                    aim += r
+                    odds *= m
+            if sp.style_bat and bowler.player.bowling_style in STYLE_INDEX:
+                aim += sp.style_bat[STYLE_INDEX[bowler.player.bowling_style]]
+            dist = split_ball(probs, values, aim, odds)
             outcome = draw(dist, rng)
             expected = sum(q * v for q, v in zip(dist[1:], values[1:]))
             striker.exp_runs += expected

@@ -26,7 +26,7 @@ import argparse
 import os
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import replace, dataclass, field
 
 import psycopg
 from dotenv import load_dotenv
@@ -204,10 +204,20 @@ class Card:
     # widening. Only `web.daily` reads it, so a day scored before A244 replays under the
     # rule it was scored under. None means "the same as `keeper_eligible`".
     keeper_ipl: bool | None = None
-    # [A248] A phase lean (powerplay, middle, death) in runs a ball, set only on Build a
-    # Career's own player; None on every real card, which therefore plays as it always did.
+    # [A248, A260] A phase lean (powerplay, middle, death) in runs a ball, centred over the
+    # player's own balls so it moves only WHERE his runs come. Build a Career's player had it
+    # from A248; since A260 every real card carries its measured season lean (etl.situations).
     phase_bat: tuple[float, float, float] | None = None
     phase_bowl: tuple[float, float, float] | None = None
+    # [A260] Against spin and against pace, runs a ball, centred over his own spin/pace balls.
+    style_bat: tuple[float, float] | None = None
+    # [A260] How slowly he settles beyond the league's own curve: runs a ball added before he
+    # is set and once set, centred over his own balls.
+    burn: tuple[float, float] | None = None
+    # [A260] His own mean settling adjustment over his real balls (runs a ball, and the mean
+    # log dismissal multiplier). His level already holds how often he was set, so the engine
+    # takes this back out before it adds the league curve ball by ball.
+    settle_offset: tuple[float, float] | None = None
 
     @property
     def strike_rate(self) -> float | None:
@@ -412,8 +422,30 @@ def load_deck(conn) -> Deck:
                  keeper_ipl=None if keeper_ipl == keeper_eligible else keeper_ipl)
         )
 
+    attach_situations(conn, cards_by_fs)
     all_fs = [r[0] for r in conn.execute("select franchise_season_id from franchise_seasons")]
     return Deck(dict(cards_by_fs), sorted(all_fs))
+
+
+def attach_situations(conn, cards_by_fs) -> None:
+    """[A260] Each card's measured leans and settled share (etl.situations), only for the
+    disciplines it has. A card with no ball in a discipline gets no lean in it."""
+    from etl import situations
+    players = situations.build(conn)["players"]
+    for fs, cards in cards_by_fs.items():
+        for i, c in enumerate(cards):
+            got = players.get((c.person_id, c.season_year))
+            if not got:
+                continue
+            bat = c.bat_scoring is not None
+            fields = {"phase_bat": got.get("phase_bat") if bat else None,
+                      "style_bat": got.get("style_bat") if bat else None,
+                      "burn": got.get("burn") if bat else None,
+                      "settle_offset": got.get("settle_offset") if bat else None,
+                      "phase_bowl": got.get("phase_bowl") if c.bowl_scoring is not None
+                      else None}
+            cards[i] = replace(c, **{k: tuple(v) if v is not None else None
+                                     for k, v in fields.items()})
 
 
 # --- the legality algebra --------------------------------------------------------------

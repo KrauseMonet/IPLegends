@@ -69,8 +69,10 @@ def test_play_and_score_switches_engine_on_the_day(deck_model, monkeypatch, offs
         challenge_date=D.ENGINE_TWO_LEVEL_FROM + datetime.timedelta(days=offset))
     assert D.play_and_score(deck, model, day, 1, "state") == "played"
     if pinned:
-        assert seen["deck"] is D.a160_deck(deck)
+        # [A260] an old day gets both pins: no situations, and the pre-A259 numbers
+        assert seen["deck"] is D.a160_deck(D.plain_deck(deck))
         assert seen["model"].season_mean_scoring != model.season_mean_scoring
+        assert seen["model"].settle == {} and seen["model"].intent == {}
     else:
         assert seen["deck"] is deck and seen["model"] is model
 
@@ -83,3 +85,29 @@ def test_a_missing_pin_is_an_error_not_an_empty_pin(monkeypatch, tmp_path):
             D.engine_a160()
     finally:
         D.engine_a160.cache_clear()
+
+
+def test_an_old_day_plays_with_no_situations(deck_model):
+    """[A260, A261] No card carries a lean and the model has no curve and no intent."""
+    deck, model = deck_model
+    plain = D.plain_deck(deck)
+    cards = [c for cs in plain.cards_by_fs.values() for c in cs]
+    assert all(getattr(c, f) is None for c in cards for f in D.SITUATION_FIELDS)
+    now = [c for cs in deck.cards_by_fs.values() for c in cs]
+    assert sum(c.phase_bat is not None for c in now) > 2000      # the pin really clears them
+    pm = D.plain_model(model)
+    assert pm.settle == {} and pm.intent == {} and model.settle and model.intent
+    assert pm.grid is model.grid
+
+
+@pytest.mark.parametrize("offset, plain", [(-1, True), (0, False)])
+def test_the_situations_switch_on_their_own_day(deck_model, monkeypatch, offset, plain):
+    deck, model = deck_model
+    seen = {}
+    monkeypatch.setattr(D, "_play_and_score",
+                        lambda full, mdl, day, player, state: seen.update(deck=full, model=mdl))
+    monkeypatch.setattr(D, "ENGINE_TWO_LEVEL_FROM", datetime.date(2000, 1, 1))
+    day = SimpleNamespace(challenge_date=D.SITUATIONS_FROM + datetime.timedelta(days=offset))
+    D.play_and_score(deck, model, day, 1, "state")
+    assert (seen["deck"] is D.plain_deck(deck)) == plain
+    assert (seen["model"].intent == {}) == plain

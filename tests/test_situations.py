@@ -1,0 +1,196 @@
+"""[A260, A261] The engine's situations: the settling-in curve, each card's leans, and chasing
+intent. Pure functions on hand-built inputs where the answer is obvious; the engine wiring on
+the committed model with deliberately large effects, so a direction cannot hide in noise."""
+
+from __future__ import annotations
+
+import dataclasses
+import random
+
+import pytest
+
+import game.simulator as S
+from etl import intent as I
+from etl import settling as T
+from etl import situations as X
+from etl.skills import Ball
+from tools.snapshot_deck import model_from, read_document
+
+
+@pytest.fixture(scope="module")
+def model():
+    return model_from(read_document())
+
+
+def players(n=11, **kw):
+    return [dataclasses.replace(S.Player(f"p{i}", 0.0, 0.0), **kw) for i in range(n)]
+
+
+def runs(model, batting, bowling, n=300, seed=5, **kw):
+    rng = random.Random(seed)
+    return sum(S.play_innings(model, batting, bowling, rng, **kw).runs for _ in range(n)) / n
+
+
+def flat(model, value):
+    """Every state and faced bucket given the same adjustment."""
+    return {(o, wb, fb): value for o in range(20) for wb in ("0-1", "2-3", "4-5", "6+")
+            for fb in range(len(T.FACED_BUCKETS))}
+
+
+# --------------------------------------------------------------------------- the curve
+
+def test_faced_buckets_are_the_declared_ones():
+    assert [T.faced_bucket(f) for f in (0, 1, 2, 3, 4, 5, 9, 10, 14, 15, 80)] == \
+        [0, 1, 2, 3, 3, 4, 4, 5, 5, 6, 6]
+
+
+def test_the_curve_is_centred_within_every_state_on_its_own_mix():
+    curve = {(ph, fb): (fb - 3) * 0.1 for ph in ("pp", "mid", "death") for fb in range(7)}
+    ratio = {(ph, fb): 0.5 + fb * 0.2 for ph in ("pp", "mid", "death") for fb in range(7)}
+    mix = {(0, "0-1"): {0: 0.7, 1: 0.3}, (12, "2-3"): {0: 0.1, 4: 0.4, 6: 0.5}}
+    runs_ = T.centred(curve, mix, ratio=False)
+    outs = T.centred(ratio, mix, ratio=True)
+    for (o, wb), shares in mix.items():
+        assert sum(sh * runs_[(o, wb, fb)] for fb, sh in shares.items()) == pytest.approx(0)
+        assert sum(sh * outs[(o, wb, fb)] for fb, sh in shares.items()) == pytest.approx(1)
+    assert runs_[(0, "0-1", 0)] < 0 < runs_[(0, "0-1", 1)]     # new slower than set
+
+
+def test_settling_moves_par_by_the_cell_for_its_state_and_balls_faced():
+    b = Ball("m", 2016, 1, 12, 2, "a", "b", "x", None, 1, False, False, 0, 0, 3, 12, 1, None,
+             par_runs=1.2, par_out=0.05)
+    table = {"cells": [[12, "2-3", 0, -0.3, 0.4]]}
+    X.apply_settling([b], table)
+    assert b.par_runs == pytest.approx(0.9) and b.par_out == pytest.approx(0.02)
+
+
+# --------------------------------------------------------------------------- intent
+
+def test_pressure_buckets_and_interpolation():
+    # a bucket holds its lower edge, as the measurement's ranges do: -5 is "-5 to +5"
+    assert [I.bucket(p) for p in (-60, -40, -21, -6, -5, 0, 5, 19, 20, 99)] == \
+        [0, 1, 1, 2, 3, 3, 4, 4, 5, 6]
+    curve = [(-30.0, -0.2, 0.8), (0.0, 0.0, 1.0), (30.0, 0.3, 1.25)]
+    assert I.at(curve, -99) == (-0.2, 0.8) and I.at(curve, 99) == (0.3, 1.25)   # flat beyond
+    r, m = I.at(curve, 15.0)
+    assert r == pytest.approx(0.15) and m == pytest.approx(1.25 ** 0.5)          # log scale
+
+
+def test_a_thin_cell_is_left_out_of_the_table():
+    doc = {"centres": list(I.CENTRES),
+           "cells": [["death", 0, 0.2, 1.3, 230], ["death", 1, -0.25, 0.74, 2816]]}
+    assert I.table(doc) == {"death": [(I.CENTRES[1], -0.25, 0.74)]}
+
+
+def test_pressure_is_needed_runs_less_what_the_engine_expects(model):
+    p = I.pressure(model, 160, 50, 60, 3)
+    assert p == pytest.approx(111 - I.expected_remaining(model, 60, 3))
+    assert I.expected_remaining(model, 120, 3) == 0 and I.expected_remaining(model, 60, 10) == 0
+    assert I.expected_remaining(model, 0, 0) > I.expected_remaining(model, 60, 0) > \
+        I.expected_remaining(model, 60, 6)
+
+
+# --------------------------------------------------------------------------- leans
+
+def test_leans_are_centred_over_his_own_balls():
+    class M:
+        def __init__(self, season):
+            self.season, self.career = season, {}
+    balls = []
+    for i, over in enumerate([1] * 30 + [10] * 60 + [17] * 10):
+        balls.append(Ball("m", 2016, 1, over, 0, "a", "b", "x", "spin" if i % 3 else "pace",
+                          1, False, False, i, 0, 1, 0, 1, None))
+    measured = {k: M({("a", 2016): v}) for k, v in
+                (("pp", 1.2), ("mid", -0.6), ("death", 3.0), ("spin", 0.9), ("pace", -0.3),
+                 ("slow_burn", 1.8), ("pp_econ", 0.0), ("mid_econ", 0.0), ("death_econ", 0.0))}
+    got = X.leans(balls, measured)[("a", 2016)]
+    shares = (0.3, 0.6, 0.1)
+    assert sum(s * v for s, v in zip(shares, got["phase_bat"])) == pytest.approx(0, abs=1e-6)
+    assert got["phase_bat"][2] > 0 > got["phase_bat"][1]
+    new = 10 / 100
+    assert new * got["burn"][0] + (1 - new) * got["burn"][1] == pytest.approx(0, abs=1e-6)
+    assert got["burn"][1] - got["burn"][0] == pytest.approx(1.8 / 6, abs=1e-6)
+
+
+# --------------------------------------------------------------------------- the engine
+
+def test_neutral_tables_play_exactly_the_old_ball(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    zero = dataclasses.replace(model, settle=flat(model, (0.0, 1.0)),
+                               intent={ph: [(0.0, 0.0, 1.0)] for ph in ("pp", "mid", "death")})
+    a, b = players(), players()
+    for kw in ({}, {"target": 170}):
+        x = S.play_innings(plain, a, b, random.Random(3), **kw)
+        y = S.play_innings(zero, a, b, random.Random(3), **kw)
+        assert (x.runs, x.wickets, x.balls) == (y.runs, y.wickets, y.balls)
+
+
+def test_the_settling_curve_reaches_the_ball(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    slow = dataclasses.replace(plain, settle=flat(model, (-0.5, 1.0)))
+    assert runs(slow, players(), players()) < runs(plain, players(), players()) - 30
+
+
+def test_the_curve_is_off_in_a_super_over(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    slow = dataclasses.replace(plain, settle=flat(model, (-0.5, 1.0)))
+    kw = dict(overs=1, max_wickets=2, state_over=19)
+    assert runs(slow, players(3), players(1), **kw) == runs(plain, players(3), players(1), **kw)
+
+
+def test_his_settled_share_comes_off_his_level_only_with_the_curve(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    zero = dataclasses.replace(plain, settle=flat(model, (0.0, 1.0)))
+    off = players(settle_offset=(0.4, 0.0))
+    assert runs(zero, off, players()) < runs(zero, players(), players()) - 30
+    assert runs(plain, off, players()) == runs(plain, players(), players())
+
+
+def test_a_slow_burner_is_slower_new_and_faster_set(model, monkeypatch):
+    """By TIMING, read off each ball's scoring target: a total-runs test cannot tell a lean
+    applied before he is set from one applied after."""
+    zero = dataclasses.replace(model, settle=flat(model, (0.0, 1.0)), intent={})
+    seen, faced = {"new": [], "set": []}, {}
+    real_fb, real_split = S.faced_bucket, S.split_ball
+
+    def fb(balls):
+        faced["n"] = balls
+        return real_fb(balls)
+
+    def split(probs, values, aim, odds):
+        seen["new" if faced["n"] < S.SETTLED else "set"].append(aim)
+        return real_split(probs, values, aim, odds)
+
+    monkeypatch.setattr(S, "faced_bucket", fb)
+    monkeypatch.setattr(S, "split_ball", split)
+    runs(zero, players(burn=(-0.6, 0.2)), players(), n=60)
+    new, set_ = (sum(v) / len(v) for v in (seen["new"], seen["set"]))
+    assert new == pytest.approx(-0.6) and set_ == pytest.approx(0.2)
+
+
+def test_a_spin_lean_bites_only_against_spin(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    basher = players(style_bat=(0.6, 0.0))
+    spin = players(5, bowling_style="spin", bowl=0.0)
+    pace = players(5, bowling_style="pace", bowl=0.0)
+    assert runs(plain, basher, spin) > runs(plain, players(), spin) + 30
+    assert runs(plain, basher, pace) == runs(plain, players(), pace)
+
+
+def test_a_chase_reads_the_scoreboard_and_only_a_chase(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    hurry = dataclasses.replace(plain, intent={ph: [(0.0, 0.5, 1.0)]
+                                               for ph in ("pp", "mid", "death")})
+    a, b = players(), players()
+    assert runs(hurry, a, b, target=400) > runs(plain, a, b, target=400) + 30
+    assert runs(hurry, a, b) == runs(plain, a, b)                     # no target, no intent
+    kw = dict(overs=1, max_wickets=2, state_over=19, target=50)
+    assert runs(hurry, players(3), players(1), **kw) == runs(plain, players(3), players(1), **kw)
+
+
+def test_the_committed_model_carries_the_curve_and_intent(model):
+    assert len(model.settle) > 500
+    assert set(model.intent) == {"pp", "mid", "death"}
+    behind = I.at(model.intent["mid"], 45.0)
+    ahead = I.at(model.intent["mid"], -30.0)
+    assert behind[0] > 0 > ahead[0] and behind[1] > 1 > ahead[1]

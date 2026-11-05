@@ -95,14 +95,16 @@ def test_pressure_is_needed_runs_less_what_the_engine_expects(model):
 def test_leans_are_centred_over_his_own_balls():
     class M:
         def __init__(self, season):
-            self.season, self.career = season, {}
+            self.season, self.career = {**season, ("x", 2016): list(season.values())[0]}, {}
     balls = []
     for i, over in enumerate([1] * 30 + [10] * 60 + [17] * 10):
         balls.append(Ball("m", 2016, 1, over, 0, "a", "b", "x", "spin" if i % 3 else "pace",
-                          1, False, False, i, 0, 1, 0, 1, None))
+                          1, False, False, i, 0, 1, 0, 1, None,
+                          par_wkt=0.08 if over >= 15 else 0.02))
     measured = {k: M({("a", 2016): v}) for k, v in
                 (("pp", 1.2), ("mid", -0.6), ("death", 3.0), ("spin", 0.9), ("pace", -0.3),
-                 ("slow_burn", 1.8), ("pp_econ", 0.0), ("mid_econ", 0.0), ("death_econ", 0.0))}
+                 ("slow_burn", 1.8), ("pp_econ", 0.0), ("mid_econ", 0.0), ("death_econ", 0.0),
+                 ("death_wkt_lean", 0.4))}
     got = X.leans(balls, measured)[("a", 2016)]
     shares = (0.3, 0.6, 0.1)
     assert sum(s * v for s, v in zip(shares, got["phase_bat"])) == pytest.approx(0, abs=1e-6)
@@ -110,6 +112,25 @@ def test_leans_are_centred_over_his_own_balls():
     new = 10 / 100
     assert new * got["burn"][0] + (1 - new) * got["burn"][1] == pytest.approx(0, abs=1e-6)
     assert got["burn"][1] - got["burn"][0] == pytest.approx(1.8 / 6, abs=1e-6)
+    # [A265] where his wickets come: death against the rest by the lean, centred over his
+    # own EXPECTED wickets by phase (not his balls) so his overall rate is untouched
+    wk = X.leans(balls, measured)[("x", 2016)]["phase_wkt"]       # x bowled them
+    xw = (30 * 0.02, 60 * 0.02, 10 * 0.08)                   # par_wkt set below
+    assert sum(w * v for w, v in zip(xw, wk)) == pytest.approx(0, abs=1e-6)
+    assert wk[2] - wk[0] == pytest.approx(0.4, abs=1e-6) and wk[0] == wk[1] < 0 < wk[2]
+
+
+def test_a_ratio_lean_is_the_tag_against_everything_else():
+    """[A265] death wickets against par, minus the rest of his overs' wickets against par,
+    each as log (events + 0.5) / (expected + 0.5)."""
+    import math
+    from etl import skills as K
+    m = K.METRIC_BY_KEY["death_wkt_lean"]
+    d = {"all": K.Acc(n=120, events=8.0, expected=6.0),
+         "death": K.Acc(n=24, events=4.0, expected=1.5)}
+    v, noise, balls = K.value(m, d)
+    assert v == pytest.approx(math.log(4.5 / 2.0) - math.log(4.5 / 5.0))
+    assert noise == pytest.approx(1 / 2.0 + 1 / 5.0) and balls == 24
 
 
 # --------------------------------------------------------------------------- the engine
@@ -186,6 +207,52 @@ def test_a_chase_reads_the_scoreboard_and_only_a_chase(model):
     assert runs(hurry, a, b) == runs(plain, a, b)                     # no target, no intent
     kw = dict(overs=1, max_wickets=2, state_over=19, target=50)
     assert runs(hurry, players(3), players(1), **kw) == runs(plain, players(3), players(1), **kw)
+
+
+def test_a_death_wicket_lean_moves_his_wickets_to_the_death(model, monkeypatch):
+    """[A265] Counted per phase off the over log, with a lean large enough that luck
+    cannot hide it: more wickets at the death, fewer before, and with a centred lean about
+    the same in all."""
+    plain = dataclasses.replace(model, settle={}, intent={})
+
+    def wickets(lean):
+        attack = players(5, phase_wkt=lean)
+        by = {"early": 0, "death": 0}
+        for s in range(400):
+            inn = S.play_innings(plain, players(), attack, random.Random(s))
+            for o in inn.over_log:
+                by["death" if o.over >= 15 else "early"] += o.over_wickets
+        return by
+
+    flat = wickets(None)
+    f = flat["death"] / (flat["death"] + flat["early"])
+    # centred on where his wickets fall, as etl.situations centres a real lean
+    lean = wickets((-0.6 * f, -0.6 * f, 0.6 * (1 - f)))
+    assert lean["death"] > flat["death"] * 1.25
+    assert lean["early"] < flat["early"] * 0.9
+    assert sum(lean.values()) == pytest.approx(sum(flat.values()), rel=0.05)
+
+
+def test_a_zero_death_wicket_lean_plays_the_old_ball(model):
+    plain = dataclasses.replace(model, settle={}, intent={})
+    for kw in ({}, {"target": 170}):
+        x = S.play_innings(plain, players(), players(), random.Random(9), **kw)
+        y = S.play_innings(plain, players(), players(phase_wkt=(0.0, 0.0, 0.0)),
+                           random.Random(9), **kw)
+        assert (x.runs, x.wickets, x.balls) == (y.runs, y.wickets, y.balls)
+
+
+def test_a_card_carries_its_death_wicket_lean_into_the_engine(model):
+    """[A265] the committed deck has the lean on its bowling cards, and `to_player` passes
+    it to the ball."""
+    from game.__main__ import to_player
+    from tools.snapshot_deck import deck_from
+    cards = [c for cs in deck_from(read_document()).cards_by_fs.values() for c in cs]
+    leaned = [c for c in cards if c.phase_wkt is not None]
+    assert len(leaned) > 2000
+    assert all(c.bowl_scoring is not None for c in leaned)
+    c = max(leaned, key=lambda c: c.phase_wkt[2])
+    assert to_player(c, model).phase_wkt == c.phase_wkt
 
 
 def test_the_committed_model_carries_the_curve_and_intent(model):

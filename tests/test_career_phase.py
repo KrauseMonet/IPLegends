@@ -201,27 +201,30 @@ def _season(deck, model, phase_bowl, fs=None, seed=4, built=None):
     return C.simulate_year(deck, model, seed, 2, you, phase_built=built)
 
 
-def _death_share(y):
+def _pooled_share(deck, model, lean, built=None):
+    """Death share over three seeded seasons: one season is ~30 overs, where an over and a
+    half is five points of share (A265 measured exactly that), so one season measures
+    luck as much as the rule."""
     death = total = 0
-    for r in y.season.results:
-        for inn in (r.home_innings, r.away_innings):
-            for o in inn.over_log:
-                if o.bowler_id == C.YOU_ID:
-                    total += 1
-                    death += S.phase_of_over(o.over) == "death"
+    for seed in (4, 5, 6):
+        for r in _season(deck, model, lean, seed=seed, built=built).season.results:
+            for inn in (r.home_innings, r.away_innings):
+                for o in inn.over_log:
+                    if o.bowler_id == C.YOU_ID:
+                        total += 1
+                        death += S.phase_of_over(o.over) == "death"
     return death / total
 
 
 def test_a_placed_specialist_really_bowls_at_the_death(deck, model):
-    plain = _death_share(_season(deck, model, None))
+    plain = _pooled_share(deck, model, None)
     lean = (-0.03, -0.03, 0.09)
     # [A259] Not exact equality: a lean changes the runs he concedes, so innings end at other
     # times and the change bowler (A239) comes on at other moments, and an over or two
-    # moves by chance (19.4% against 18.4% at the death when this was written). What must
-    # not happen is the PLACEMENT, which moves nearly all of them (96% below).
-    assert abs(_death_share(_season(deck, model, lean)) - plain) < 0.05, \
+    # moves by chance. What must not happen is the PLACEMENT, which moves nearly all of them.
+    assert abs(_pooled_share(deck, model, lean) - plain) < 0.05, \
         "a lean you did not choose moves no overs"
-    placed = _death_share(_season(deck, model, lean, built={"bowl": [-0.02, -0.02, 0.06]}))
+    placed = _pooled_share(deck, model, lean, built={"bowl": [-0.02, -0.02, 0.06]})
     assert placed > plain + 0.3, (plain, placed)
 
 

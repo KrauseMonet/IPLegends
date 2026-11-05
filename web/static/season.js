@@ -306,7 +306,7 @@ function impactTile(c, slot, suggested){
       data-slot="${slot}" onclick="pickImpactSlot(${slot})">
     <span class="ib-slot">${slot}</span>
     <span class="ib-who">${kind}<b>${esc(c.name)}</b>${keeperBadge(c)}
-      <em>${c.season_year || ''}${c.has_bowl && c.kind !== 'bowler' && c.kind !== 'allrounder' ? ' · bowls' : ''}</em></span>
+      <em>${c.season_year || ''}${c.has_bowl && c.kind !== 'bowler' && c.kind !== 'allrounder' ? ' · bowls' : ''}</em>${skillChips(c, true)}</span>
     ${ratingBadge(c, true)}
     ${slot === suggested ? '<span class="ib-sugg">Algorithm</span>' : ''}
   </button>`;

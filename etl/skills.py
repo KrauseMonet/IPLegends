@@ -164,8 +164,9 @@ def add_par(balls: list[Ball]) -> None:
 @dataclass(frozen=True)
 class Metric:
     """One measurable quantity. `kind` is "edge" (runs an over against par; for bowling,
-    runs SAVED), "lean" (edge in `tag` minus edge in everything else) or "ratio" (log of
-    events against par's expectation, signed so that higher is better)."""
+    runs SAVED), "lean" (edge in `tag` minus edge in everything else), "ratio" (log of
+    events against par's expectation, signed so that higher is better) or "ratio_lean"
+    (a ratio in `tag` minus the same ratio in everything else)."""
     key: str
     disc: str               # "bat" | "bowl"
     kind: str
@@ -193,6 +194,10 @@ METRICS: tuple[Metric, ...] = (
     Metric("mid_econ_lean", "bowl", "lean", "mid"),
     Metric("death_econ_lean", "bowl", "lean", "death"),
     Metric("death_wkts", "bowl", "ratio", "death"),
+    # [A265] where his wickets come: the death against the rest of his overs. The engine
+    # plays it (`phase_wkt`) centred over his own balls, so it moves WHEN he strikes and
+    # never how often -- his overall rate stays his dismissal multiplier's (A259).
+    Metric("death_wkt_lean", "bowl", "ratio_lean", "death"),
 )
 METRIC_BY_KEY = {m.key: m for m in METRICS}
 
@@ -301,6 +306,11 @@ def value(m: Metric, d: dict) -> tuple[float, float, int] | None:
         if here is None or there is None:
             return None
         return here[0] - there[0], here[1] + there[1], min(here[2], there[2])
+    if m.kind == "ratio_lean":
+        here, there = _ratio(d.get(m.tag)), _ratio(_rest(d, m.tag))
+        if here is None or there is None:
+            return None
+        return here[0] - there[0], here[1] + there[1], min(here[2], there[2])
     a = d.get(m.tag)
     if a is None or a.n < 2 or a.expected <= 0:
         return None
@@ -309,6 +319,13 @@ def value(m: Metric, d: dict) -> tuple[float, float, int] | None:
     # takes wickets.
     v = math.log((a.events + 0.5) / (a.expected + 0.5))
     return (-v if m.disc == "bat" else v), 1.0 / (a.expected + 0.5), a.n
+
+
+def _ratio(a: Acc | None) -> tuple[float, float, int] | None:
+    """(log events against expected, its noise, balls), a bowler's sign: higher is more."""
+    if a is None or a.n < 2 or a.expected <= 0:
+        return None
+    return (math.log((a.events + 0.5) / (a.expected + 0.5)), 1.0 / (a.expected + 0.5), a.n)
 
 
 def _cov(xs, ys) -> float:

@@ -111,6 +111,7 @@ def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:
                   bowl_dismissal=(card.bowl_dismissal if card.bowl_dismissal is not None
                                   else 1.0),
                   phase_bat=card.phase_bat, phase_bowl=card.phase_bowl,
+                  phase_wkt=card.phase_wkt,
                   style_bat=card.style_bat, burn=card.burn,
                   settle_offset=card.settle_offset)
 

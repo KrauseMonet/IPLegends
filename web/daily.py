@@ -163,7 +163,8 @@ def a160_model(model: Model) -> Model:
 # measured leans, and chasing intent. A day before it keeps the engine without them. Separate from A259's date
 # so the two can ship on different days; set to the day after this ships.
 SITUATIONS_FROM = datetime.date(2026, 11, 6)
-SITUATION_FIELDS = ("phase_bat", "phase_bowl", "style_bat", "burn", "settle_offset")
+SITUATION_FIELDS = ("phase_bat", "phase_bowl", "style_bat", "burn", "settle_offset",
+                    "phase_wkt")
 _PLAIN_DECKS: dict[int, Deck] = {}
 
 

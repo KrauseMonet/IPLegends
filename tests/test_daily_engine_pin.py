@@ -95,6 +95,8 @@ def test_an_old_day_plays_with_no_situations(deck_model):
     plain = D.plain_deck(deck)
     cards = [c for cs in plain.cards_by_fs.values() for c in cs]
     assert all(getattr(c, f) is None for c in cards for f in D.SITUATION_FIELDS)
+    # [A265] named, not read off the tuple, so dropping it from the tuple cannot pass
+    assert all(c.phase_wkt is None for c in cards)
     now = [c for cs in deck.cards_by_fs.values() for c in cs]
     assert sum(c.phase_bat is not None for c in now) > 2000      # the pin really clears them
     pm = D.plain_model(model)

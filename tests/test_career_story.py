@@ -21,11 +21,14 @@ DOC = read_document()
 needs_deck = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 CSK_2019 = 26
 K = 4
+SLUMP = (72, 52)   # (squad, seed): see test_you_are_not_left_out_in_the_match...; 22 -> 52
+                   # after A265, chosen because it FAILS with the rule removed (the first
+                   # four seasons found passed with or without it)
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
 # hamstring 9 -> 14 re-found after A259: the season must stop at the hamstring before any key
 # moment, since test_an_incident_a_career_has_used_up_does_not_come_again plays it with no answers
-OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 14, "wedding": 12, "collapse": 20}
-PACE = {"press": 73, "side_strain": 3, "hamstring": 1, "back": 9, "death": 19, "wedding": 25}   # A239, A251; press re-found after A259
+OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 34, "wedding": 12, "collapse": 20}   # hamstring 14 -> 34 after A265
+PACE = {"press": 21, "side_strain": 3, "hamstring": 1, "back": 68, "death": 19, "wedding": 25}   # A239, A251; press re-found after A259; press 73 -> 21, back 9 -> 68 after A265
 
 
 @pytest.fixture(scope="module")
@@ -643,17 +646,17 @@ def test_you_are_not_left_out_in_the_match_you_have_just_met_a_slump_in(deck, mo
     answered in: grinding it out is how he chose to meet it. In this season, found by
     search, the block would otherwise start right there (league index 6)."""
     # Mumbai 2014 seed 29 -> Delhi 2014 (fs 45) seed 111 (after A259) -> Kolkata 2014
-    # (fs 72) seed 22, re-found after A261: the slump is asked at league index 6, the waiting
+    # (fs 72) seed 22, re-found after A261, then seed 52 after A265 (SLUMP): the slump is asked, the waiting
     # block's reason is a left-out one ("rested") and left_out_now is true there (checked
     # when searching), so without the rule the block would start at index 6
     start, ceil = C.spin(deck, 4, "opener")
-    c0 = deck.cards_by_fs[72][0]
-    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=72,
+    c0 = deck.cards_by_fs[SLUMP[0]][0]
+    you = C.ability(start, ceil, 0.5, setup=C.Setup("T", "opener", 2014, False), fs_id=SLUMP[0],
                     year=c0.season_year, franchise=c0.franchise)
     ans = []
     while True:
         try:
-            year = C.simulate_year(deck, model, 22, 1, you, rating=78, tenure=0,
+            year = C.simulate_year(deck, model, SLUMP[1], 1, you, rating=78, tenure=0,
                                    answers=tuple(ans))
             break
         except C._NeedMoment as e:

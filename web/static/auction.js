@@ -617,6 +617,7 @@ function renderFloor(){
         <div class="auc-card-name">${c.name}</div>
         <div class="auc-card-meta">${ICON[c.kind] || ''}${keeperBadge(c)}
           <span>${roleLabel(c)}</span>${tag}</div>
+        ${skillChips(c, true)}
       </div>
       <div class="auc-card-rating">${ratingBadge(c, true)}</div>
     </div>
@@ -1069,7 +1070,7 @@ function renderRetain(){
     return `<div class="auc-retain-row${kept ? ' kept' : ''}">
       ${ICON[c.kind] || ''}${keeperBadge(c)}
       <span class="auc-retain-name" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
-        ${c.overseas ? '<em class="auc-tag os">Overseas</em>' : ''}</span>
+        ${c.overseas ? '<em class="auc-tag os">Overseas</em>' : ''}${skillChips(c, true)}</span>
       ${choose}${ratingBadge(c, true)}
       <button class="act minor" onclick="toggleRetain(${cur.index})">${kept ? 'Release' : 'Keep'}</button>
     </div>`;
@@ -1343,6 +1344,7 @@ function renderFill(){
             <span class="rt">${ratingBadge(c, true)}</span></div>
           <div class="nm" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
             <em>${[roleLabel(c), [c.franchise, c.season_year].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</em></div>
+          ${skillChips(c, true)}
           ${fills.length ? `<div class="fills">Fills: ${fills.join(' + ')}</div>` : ''}
           <button class="act minor" onclick="takeFill(${i}, this)">Take · ₹30L</button>
         </div>`; }).join('')}</div>

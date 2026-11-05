@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from etl.feasibility import (BOWLERS_IN_TWELVE, OVERSEAS_CAP, REROLL_KINDS, TWELVE_SIZE,
                              XI_SIZE, Card, reads_as_keeper, team_rating)
 from game import analysis, auction, auction_report, phase_skill, quiz, records
+from game import skills as skill_book
 from game.__main__ import overseas_status
 from game.season import (
     MATCHES_EACH, TEAMS, ImpactPick, JourneyAccumulator, Side, TossElect, tournament_leaders,
@@ -494,6 +495,16 @@ def privacy_page() -> FileResponse:
 
 # --- wire format ----------------------------------------------------------------------
 
+class SkillOut(BaseModel):
+    """[A265] One skill a card shows (A258), lowest tier first: 1 style, 2 special,
+    3 elite. Each was checked to show in the engine before it was shown here."""
+    key: str
+    label: str
+    tier: int
+    disc: str = Field(description="bat | bowl")
+    blurb: str
+
+
 class CardOut(BaseModel):
     person_id: str
     name: str
@@ -524,6 +535,10 @@ class CardOut(BaseModel):
     bowl_runs: int | None = None
     bowl_balls: int | None = None
     bowl_economy: float | None = None
+    skills: list[SkillOut] = Field(
+        default_factory=list,
+        description="[A265] what this season earned, as many as its rating or the "
+                    "player's career standing opens (A258); empty for most cards")
 
 
 class DealOut(BaseModel):
@@ -812,6 +827,7 @@ class JourneySquadEntryOut(BaseModel):
     sim_bowl_wickets: int | None = None
     sim_bowl_runs: int | None = None
     sim_bowl_balls: int | None = None
+    skills: list[SkillOut] = Field(default_factory=list, description="[A265] as on his card")
 
 
 class PendingTossOut(BaseModel):
@@ -1481,6 +1497,22 @@ def _kind(card: Card) -> str:
     return card.role or "unrated"
 
 
+def _standing() -> dict[str, int]:
+    """[A258] each player's career standing (his second-best season card), once per deck."""
+    deck = STATE.get("deck")
+    if "standing" not in STATE or STATE.get("standing_of") is not deck:
+        cards = [c for cs in deck.cards_by_fs.values() for c in cs] if deck else []
+        STATE["standing"], STATE["standing_of"] = skill_book.standing(cards), deck
+    return STATE["standing"]
+
+
+def _skills(card: Card) -> list[SkillOut]:
+    shown = skill_book.card_skills(card.person_id, card.season_year, card.role,
+                                   card.display, _standing().get(card.person_id, 0))
+    return [SkillOut(key=s.key, label=s.label, tier=s.tier, disc=s.disc, blurb=s.blurb)
+            for s in shown]
+
+
 def _card(card: Card, blocked: str | None = None) -> CardOut:
     return CardOut(
         person_id=card.person_id, name=card.name, franchise=card.franchise,
@@ -1491,7 +1523,7 @@ def _card(card: Card, blocked: str | None = None) -> CardOut:
         positions=sorted(card.positions), blocked=blocked,
         bat_runs=card.bat_runs, bat_balls=card.bat_balls, bat_strike_rate=card.strike_rate,
         bowl_wickets=card.bowl_wickets, bowl_runs=card.bowl_runs, bowl_balls=card.bowl_balls,
-        bowl_economy=card.economy,
+        bowl_economy=card.economy, skills=_skills(card),
     )
 
 
@@ -1507,7 +1539,7 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
         sim_bat_runs=acc.runs.get(pid), sim_bat_balls=acc.balls_faced.get(pid),
         sim_bat_fours=acc.fours.get(pid), sim_bat_sixes=acc.sixes.get(pid),
         sim_bowl_wickets=acc.wickets.get(pid), sim_bowl_runs=acc.runs_conceded.get(pid),
-        sim_bowl_balls=acc.balls_bowled.get(pid),
+        sim_bowl_balls=acc.balls_bowled.get(pid), skills=_skills(card),
     )
 
 
@@ -1570,6 +1602,9 @@ def health() -> dict:
         # data/puzzle_facts.json.gz did not reach the deployment (A107's silent-packaging
         # trap), and every Bingo route would answer 503.
         "puzzles": bingo_routes._facts() is not None,
+        # [A265] a deployment that forgot the skills snapshot shows no skills anywhere and
+        # raises nothing (A107's shape), so say so
+        "skills": bool(skill_book.document().get("skills")),
         # [A248] whether Build a Career's phase leans reached the deployment (A107's lesson:
         # a missing file falls back silently to no lean, so it has to show from outside)
         "phase": bool(phase_skill.table()),

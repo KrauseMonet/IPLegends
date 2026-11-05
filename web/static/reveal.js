@@ -1077,7 +1077,7 @@ async function drawJourneyCard(d, header, side){
     ctx.fillText(fitText(ctx, c.name, rx - chipW - 12 - nx, 700, 27, CARD_BODY, 16), nx, yy + 48);
     ctx.fillStyle = ink3;
     ctx.font = `500 15px ${CARD_FIGS}`;
-    ctx.fillText(fitText(ctx, [c.franchise, c.season_year].filter(Boolean).join(' · ') || '—',
+    ctx.fillText(fitText(ctx, [c.franchise, c.season_year, topSkill(c)].filter(Boolean).join(' · ') || '—',
                          rx - lx, 500, 15, CARD_FIGS, 11), lx, yy + 82);
 
     const fig = simFigures(c);

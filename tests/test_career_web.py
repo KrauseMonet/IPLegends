@@ -19,6 +19,7 @@ from game import press as P
 from web import career_routes as R
 
 DOC = read_document()
+MARK_SEED = 2   # 1 -> 2 after A265; see test_your_player_and_only_him_is_marked_in_every_scorecard
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
 
@@ -418,7 +419,7 @@ def test_your_player_and_only_him_is_marked_in_every_scorecard(client, deck, mod
     row. Checked on an all-rounder, so both kinds of mark have somewhere to be."""
     # seed re-found after A251, A255 and A259 (seed 2's first season no longer reaches a
     # watched playoff match; seed 1 watches four, bowling and at the crease in them)
-    d, moves = _season_with_moves(client, "allrounder", 1)
+    d, moves = _season_with_moves(client, "allrounder", MARK_SEED)
     seed, setup, _, _ = R.read_token(d["token"])
     detail = C.play_career(deck, model, seed, setup, moves).detail
     sp = d["season_play"]

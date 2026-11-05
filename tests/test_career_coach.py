@@ -18,6 +18,7 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 
 COACH_TESTS = True          # conftest's `coach_off` leaves the coach on for this module
 DOC = read_document()
+TRIAL_SEED = 3   # 1 -> 3 after A265; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
 
@@ -465,9 +466,9 @@ def test_a_batter_who_takes_the_trial_bowls_and_one_who_passes_is_offered_the_ro
     setup = C.Setup("Test", "opener", 2010, False)
     # seed re-found after A245 (traits move later seasons), A250 and A251; 3 -> 0 re-found after A259;
     # 0 -> 1 re-found after A261 (seed 0's two trials no longer pass)
-    career, moves = _drive(deck, model, 1, setup, lambda c: 0)
+    career, moves = _drive(deck, model, TRIAL_SEED, setup, lambda c: 0)
     trials = [r for r in career.seasons if r.role and r.role["trial"]]
-    assert trials, "seed 1's opener is offered a trial"
+    assert trials, "the seed's opener is offered a trial"
     for r in trials:
         assert r.bowl_balls > 0                     # a trial season really bowls
     passed = [r for r in trials if r.bowl_rank is not None and r.bowl_rank >= C.TRIAL_PASS]

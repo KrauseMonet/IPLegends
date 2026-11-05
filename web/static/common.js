@@ -532,6 +532,25 @@ function ratingBadge(card, forceReveal){
     ? `<span class="rating-badge${ratingTier(card.rating)}">${card.rating}</span>` : '';
 }
 
+// [A265] A card's skills (A258), lowest tier first, as small chips coloured by tier. Gated
+// exactly like the rating: in memory mode a skill would give away the rating that mode
+// hides, since a tier only opens at a rating.
+const SKILL_TIER = {1: 'Style', 2: 'Special', 3: 'Elite'};
+function skillChips(card, forceReveal){
+  const sk = card && card.skills;
+  if (!sk || !sk.length) return '';
+  const shown = forceReveal || (typeof effectiveDraftMode === 'function' && effectiveDraftMode() === 'stat');
+  if (!shown) return '';
+  return `<span class="skills">${sk.map(s =>
+    `<span class="sk t${s.tier}" title="${esc(SKILL_TIER[s.tier] + ' skill: ' + s.blurb)}">${esc(s.label)}</span>`).join('')}</span>`;
+}
+
+// The card's best skill as plain words, for places that have room for one (a canvas).
+function topSkill(card){
+  const sk = card && card.skills;
+  return sk && sk.length ? sk[sk.length - 1].label : null;
+}
+
 // Shared by solo's finished-draft screen and a room's squad-review screen -- both sit on
 // an object exposing the same three fields (`overall_rating`/`batting_rating`/
 // `bowling_rating`), from `SessionOut` and `RoomPlayerOut` respectively. `--` for a null

@@ -180,6 +180,7 @@ function render(s){
         <span class="nm${nmClick}>${ICON[card.kind] || ''}${keeperBadge(card)}<span class="flag ${card.overseas ? '' : 'home'}"
           title="${card.overseas ? 'overseas' : 'domestic'}"></span>${card.name}${ratingBadge(card)}</span>
         <span class="picks"><button class="take" onclick="take(${i}, this)">${pending ? 'Choose a row' : 'Take'}</button></span>
+        ${skillChips(card)}
       </div>`;
     }).join('');
     // The rest of the squad, greyed with the reason. Kept on the sheet rather than
@@ -192,6 +193,7 @@ function render(s){
       <div class="entry off">
         <span class="nm${nmClick}>${ICON[b.kind] || ''}${keeperBadge(b)}<span class="flag ${b.overseas ? '' : 'home'}"></span>${b.name}${ratingBadge(b)}</span>
         <span class="why">${b.blocked || ''}</span>
+        ${skillChips(b)}
       </div>`;
       }).join('') : '';
     $('#options').innerHTML = live + dead;

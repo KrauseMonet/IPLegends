@@ -18,7 +18,8 @@ One scan of the deliveries feeds all of it, so the order of operations is fixed 
 Card fields it fills (runs a ball unless said otherwise): `phase_bat`/`phase_bowl` (powerplay,
 middle, death; bowling is runs SAVED), `style_bat` (against spin, against pace), `burn`
 (added before he is set, and once set) and `settle_offset` (his own mean curve adjustment
-in runs, and its mean log dismissal multiplier, over his real balls).
+in runs, and its mean log dismissal multiplier, over his real balls), and [A265]
+`phase_wkt` (a bowler's log dismissal multiplier by phase: where his wickets come).
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ def leans(balls: list[skills.Ball], measured: dict) -> dict[tuple[str, int], dic
     """{(person, season): {field: value}} for every player-season with balls in a discipline."""
     n_bat: dict = defaultdict(Counter)
     n_bowl: dict = defaultdict(Counter)
+    x_wkt: dict = defaultdict(Counter)              # [A265] his expected wickets by phase
     for b in balls:
         nb = n_bat[(b.batter, b.season)]
         nb[skills.phase_of(b.over)] += 1
@@ -61,6 +63,7 @@ def leans(balls: list[skills.Ball], measured: dict) -> dict[tuple[str, int], dic
             nb[b.style] += 1
         nb["set" if b.faced >= skills.SETTLED else "new"] += 1
         n_bowl[(b.bowler, b.season)][skills.phase_of(b.over)] += 1
+        x_wkt[(b.bowler, b.season)][skills.phase_of(b.over)] += b.par_wkt
 
     def value(metric: str, p: str, season: int) -> float:
         m = measured[metric]
@@ -91,6 +94,17 @@ def leans(balls: list[skills.Ball], measured: dict) -> dict[tuple[str, int], dic
         lean = _centred({ph: value(ph + "_econ", p, season) for ph in PHASES},
                         {ph: n[ph] / tot for ph in PHASES})
         out[(p, season)]["phase_bowl"] = [round(lean[ph] / 6, 6) for ph in PHASES]
+        # [A265] where his wickets come: the death against the rest, as log dismissal
+        # multipliers centred over his own EXPECTED WICKETS by phase -- not his balls, since
+        # a death ball falls more wickets and a lean centred on balls would add some -- so
+        # his wickets move toward (or away from) the death and his total stays his
+        # dismissal multiplier's
+        dl = value("death_wkt_lean", p, season)
+        xw = x_wkt[(p, season)]
+        xt = sum(xw.values())
+        sd = xw["death"] / xt if xt > 0 else n["death"] / tot
+        out[(p, season)]["phase_wkt"] = [round(-dl * sd, 6), round(-dl * sd, 6),
+                                         round(dl * (1 - sd), 6)]
     return dict(out)
 
 

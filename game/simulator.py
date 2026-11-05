@@ -156,6 +156,8 @@ class Player:
     # Build a Career's own player, so every other ball is the ball it always was.
     phase_bat: tuple[float, float, float] | None = None
     phase_bowl: tuple[float, float, float] | None = None
+    # [A265] a bowler's log dismissal multiplier by phase, centred over his own balls
+    phase_wkt: tuple[float, float, float] | None = None
     # [A260] Situation leans, measured per player-season (etl.situations); None plays the
     # ball exactly as before. Against spin and pace; before and once set; and his own mean
     # settling adjustment, taken back out of his level because his level already holds it.
@@ -891,13 +893,17 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 over if state_over is None else state_over, innings.wickets)
             aim = striker.player.bat_scoring - bowler.player.bowl_scoring
             odds = striker.player.bat_dismissal * bowler.player.bowl_dismissal
-            if striker.player.phase_bat or bowler.player.phase_bowl:
+            if (striker.player.phase_bat or bowler.player.phase_bowl
+                    or bowler.player.phase_wkt):
                 # [A248, A260] a phase lean, centred over the player's own balls
                 ph = PHASE_INDEX[phase_of_over(over if state_over is None else state_over)]
                 if striker.player.phase_bat:
                     aim += striker.player.phase_bat[ph]
                 if bowler.player.phase_bowl:
                     aim -= bowler.player.phase_bowl[ph]
+                if bowler.player.phase_wkt:
+                    # [A265] where his wickets come
+                    odds *= math.exp(bowler.player.phase_wkt[ph])
             sp = striker.player
             settle = getattr(model, "settle", None)      # a test's stand-in may have none
             if settle and state_over is None:

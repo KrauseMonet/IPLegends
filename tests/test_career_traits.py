@@ -11,6 +11,9 @@ from game import career_traits as ct
 from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
+# Seeded seasons, found by search; an engine change can move them (re-find, never loosen)
+KEY_SEED = 20      # 2 -> 26 after A259, 26 -> 20 after A265
+NERVE_SEED = 9      # 3 -> 9 after A265: two playoff calls and one league moment
 pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 
 
@@ -301,7 +304,7 @@ def test_traits_reach_the_season_and_its_cache_key(deck, model, monkeypatch):
     setup = C.Setup("Key", "opener", 2012)
     # seed 2 -> 26 re-found after A259: the hot season must still pause where the plain one
     # did (the moves replayed are the plain career's), and season one must leave no trait
-    seed = 26
+    seed = KEY_SEED
     _, moves = C.auto_career(deck, model, seed, setup, "loyal")
     cut = next(i for i in range(len(moves))
                if len(C.play_career(deck, model, seed, setup, moves[:i]).seasons) == 1)
@@ -323,12 +326,12 @@ def test_nerve_is_applied_at_key_moments_and_nowhere_else(deck, model, monkeypat
     start, ceiling = C.spin(deck, 3, "opener")
     you = C.ability(start, ceiling, 0.5, setup=C.Setup("N", "opener", 2019), fs_id=26,
                     year=2019, franchise=deck.cards_by_fs[26][0].franchise)
-    year = C.simulate_year(deck, model, 3, 2, you, answers=None, traits={"nerve": 2.0})
+    year = C.simulate_year(deck, model, NERVE_SEED, 2, you, answers=None, traits={"nerve": 2.0})
     playoffs = sum(1 for r in year.season.playoffs if year.yours in (r.home, r.away))
     assert len(calls) >= playoffs
     assert len(calls) <= playoffs + C.MUST_WIN_MAX + C.MAKE_OR_BREAK_MAX
-    calm = C.simulate_year(deck, model, 3, 2, you, answers=None, traits=ct.empty())
-    plain = C.simulate_year(deck, model, 3, 2, you, answers=None)
+    calm = C.simulate_year(deck, model, NERVE_SEED, 2, you, answers=None, traits=ct.empty())
+    plain = C.simulate_year(deck, model, NERVE_SEED, 2, you, answers=None)
     assert [r.home_innings.runs for r in calm.results] == [r.home_innings.runs for r in plain.results]
 
 

@@ -218,6 +218,10 @@ class Card:
     # log dismissal multiplier). His level already holds how often he was set, so the engine
     # takes this back out before it adds the league curve ball by ball.
     settle_offset: tuple[float, float] | None = None
+    # [A265] Where a bowler's wickets come, as log dismissal multipliers by phase
+    # (powerplay, middle, death), centred over his own balls: a death wicket-taker strikes
+    # more at the death and less earlier, and takes no more wickets overall.
+    phase_wkt: tuple[float, float, float] | None = None
 
     @property
     def strike_rate(self) -> float | None:
@@ -443,6 +447,8 @@ def attach_situations(conn, cards_by_fs) -> None:
                       "burn": got.get("burn") if bat else None,
                       "settle_offset": got.get("settle_offset") if bat else None,
                       "phase_bowl": got.get("phase_bowl") if c.bowl_scoring is not None
+                      else None,
+                      "phase_wkt": got.get("phase_wkt") if c.bowl_scoring is not None
                       else None}
             cards[i] = replace(c, **{k: tuple(v) if v is not None else None
                                      for k, v in fields.items()})

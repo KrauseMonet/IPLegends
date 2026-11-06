@@ -30,7 +30,7 @@ def test_an_average_card_is_worth_nothing():
 def test_batting_is_worth_more_higher_up_the_order():
     top = card(bat_scoring=0.2)
     finisher = card(bat_scoring=0.2, positions=frozenset({5, 6, 7}))
-    assert C.legend_value(top) == pytest.approx(0.2 * (21.3 + 21.9 + 19.5) / 3)
+    assert C.legend_value(top) == pytest.approx(0.2 * (21.6 + 22.1 + 20.3) / 3)   # A269's table at 1.0
     assert C.legend_value(top) > C.legend_value(finisher) > 0
 
 
@@ -38,6 +38,46 @@ def test_getting_out_more_costs_a_batter_and_taking_more_wickets_pays_a_bowler()
     assert C.legend_value(card(bat_dismissal=1.5)) < 0
     bowler = card(bat=None, bat_scoring=None, bowl=0.1, bowl_scoring=0.0, bowl_dismissal=1.5)
     assert C.legend_value(bowler) == pytest.approx(0.5 * C.LEAGUE_OUT_RATE * C.WICKET_RUNS * 24)
+
+
+# [A269] An anchor faces more balls than his position's average, so his scoring counts over
+# more of them -- the shortcut A234 used (one exposure a position, a linear wicket price)
+# missed by up to 6 runs a match once A267 replayed real seasons.
+
+def test_getting_out_less_also_means_facing_more_balls():
+    anchor = card(bat_scoring=0.3, bat_dismissal=0.5)
+    assert C.legend_value(anchor) > C.legend_value(card(bat_scoring=0.3)) + C.legend_value(
+        card(bat_dismissal=0.5))      # the two halves are not additive: survival multiplies
+    assert C._at_dismissal(C.BALLS_FACED_BY[1], 0.1) == C.BALLS_FACED_BY[1][0]   # flat beyond
+    assert C._at_dismissal(C.BALLS_FACED_BY[1], 9.0) == C.BALLS_FACED_BY[1][-1]
+    mid = C._at_dismissal(C.BALLS_FACED_BY[1], (0.85 * 1.0) ** 0.5)               # log midpoint
+    assert mid == pytest.approx((C.BALLS_FACED_BY[1][5] + C.BALLS_FACED_BY[1][6]) / 2)
+
+
+def test_the_value_is_what_the_engine_plays():
+    """External to the formula: the batter played in an otherwise average side, paired
+    against an average player on the same random draws, lands on the table's value and not
+    on the old shortcut's (9.5 here, against the table's 15.1)."""
+    import random
+    import statistics
+    from game.simulator import Player, play_innings, match_conditions
+    from tools.snapshot_deck import read_document, model_from
+
+    doc = read_document()
+    if doc is None:
+        pytest.skip("no deck snapshot")
+    model = model_from(doc)
+    anchor = card(bat_scoring=0.3, bat_dismissal=0.5, positions=frozenset({1}))
+    diffs = []
+    for i in range(800):
+        xi = [Player(f"b{k}", 0.0, 0.0) for k in range(11)]
+        cond = match_conditions(random.Random(i * 7 + 1))
+        base = play_innings(model, xi, xi[:5], random.Random(i), conditions=cond).runs
+        xi[0] = Player("L", 0.0, 0.0, bat_scoring=0.3, bat_dismissal=0.5)
+        diffs.append(play_innings(model, xi, xi[:5], random.Random(i), conditions=cond).runs - base)
+    old_shortcut = (0.3 - (0.5 - 1) * C.LEAGUE_OUT_RATE * C.WICKET_RUNS) * 21.3
+    assert statistics.fmean(diffs) == pytest.approx(C.legend_value(anchor), abs=1.5)
+    assert abs(statistics.fmean(diffs) - old_shortcut) > 3
 
 
 def test_thin_bowling_is_not_counted_because_he_would_not_bowl():
@@ -58,7 +98,8 @@ def test_the_hall_route_carries_each_legends_value(monkeypatch):
     row = {"key": "k", "name": "T", "role": "opener", "debut": 2016, "overseas": False,
            "seasons": 1, "matches": 14, "runs": 500, "wickets": 0, "titles": 0,
            "peak_card": 90, "peak_year": 2016, "ending": "archive",
-           "card": {"legend": {"rating": 90, "year": 2016, "card": _card_doc(good)}},
+           "card": {"legend": {"rating": 90, "year": 2016, "role": "opener",
+                               "card": _card_doc(good)}},
            "completed_at": datetime.datetime(2026, 10, 27)}
     plain = {**row, "key": "j", "card": {}}
     monkeypatch.setattr(R.db, "connection", contextlib.nullcontext)
@@ -67,8 +108,11 @@ def test_the_hall_route_carries_each_legends_value(monkeypatch):
     with TestClient(app) as client:
         client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(1))
         got = client.get("/api/career/hall").json()
-    assert got[0]["legend_value"] is None
+    assert got[0]["legend_value"] is None and got[0]["legend_group"] is None
     assert got[1]["legend_value"] == round(C.legend_value(good), 2)
+    # [A269] the halves and the group ride along; an opener has no bowling to count
+    assert got[1]["legend_bat"] == got[1]["legend_value"] and got[1]["legend_bowl"] is None
+    assert (got[1]["legend_group"], got[1]["legend_group_order"]) == ("Batters", 0)
 
 
 JS = pathlib.Path(__file__).resolve().parent.parent / "web" / "static" / "room.js"
@@ -106,16 +150,16 @@ def test_nobody_is_limited_unless_an_account_is_named(no_limit_env):
 
 def test_the_named_accounts_are_limited_and_others_are_not(no_limit_env, monkeypatch):
     monkeypatch.setenv(admin.LEGEND_LIMIT_ACCOUNT_IDS, " 17, 4 ,x, ")
-    assert admin.legend_limit(17) == 1 == admin.legend_limit(4) == admin.LEGEND_PICKS
+    assert admin.legend_limit(17) == 3 == admin.legend_limit(4) == admin.LEGEND_PICKS
     # "7" is inside "17": whole ids only
     assert admin.legend_limit(7) is None and admin.legend_limit(1) is None
 
 
 def test_the_admin_accounts_are_limited_when_no_list_is_set(no_limit_env, monkeypatch):
     monkeypatch.setenv(admin.ADMIN_ACCOUNT_IDS, "9")
-    assert admin.legend_limit(9) == 1 and admin.legend_limit(8) is None
+    assert admin.legend_limit(9) == 3 and admin.legend_limit(8) is None
     monkeypatch.setenv(admin.LEGEND_LIMIT_ACCOUNT_IDS, "8")      # an explicit list replaces it
-    assert admin.legend_limit(8) == 1 and admin.legend_limit(9) is None
+    assert admin.legend_limit(8) == 3 and admin.legend_limit(9) is None
 
 
 def test_me_reports_the_limit_for_that_account_only(no_limit_env, monkeypatch):
@@ -132,7 +176,7 @@ def test_me_reports_the_limit_for_that_account_only(no_limit_env, monkeypatch):
             got[account] = client.get("/api/auth/me").json()["legend_limit"]
         client.cookies.clear()
         got[None] = client.get("/api/auth/me").json()["legend_limit"]
-    assert got == {7: 1, 8: None, None: None}
+    assert got == {7: 3, 8: None, None: None}
 
 
 def _picker_js(call: str) -> list:
@@ -184,3 +228,103 @@ def test_the_lobby_picker_is_fed_through_the_account_s_limit():
     body = re.search(r"function renderLobbyLegends[\s\S]*?\n}\n", JS.read_text()).group(0)
     assert "legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit)" in body
     assert "legendsByValue(ROOM_HALL).map" not in body
+
+
+# --- [A269] the two halves apart, and five groups in a fixed order ---------------------------
+
+def test_the_two_halves_add_up_to_the_value_and_each_is_its_own_discipline():
+    allround = card(bat_scoring=0.2, bowl=0.1, bowl_scoring=0.1, bowl_dismissal=1.5)
+    bat, bowl = C.legend_values(allround)
+    assert bat == pytest.approx(C.legend_value(card(bat_scoring=0.2)))
+    assert bowl == pytest.approx((0.1 + 0.5 * C.LEAGUE_OUT_RATE * C.WICKET_RUNS) * C.BALLS_BOWLED)
+    assert C.legend_value(allround) == pytest.approx(bat + bowl)
+    # bowling that would not be bowled is None, not a zero that reads as average bowling
+    assert C.legend_values(card(bat_scoring=0.2))[1] is None
+    assert C.legend_values(card(bowl=0.1, bowl_scoring=0.3, bowl_dismissal=1.0, bowl_balls=40))[1] is None
+
+
+def test_every_career_role_has_a_group_and_a_full_time_bowler_is_an_all_rounder():
+    groups = {role: C.legend_group(role) for role in C.ROLES}
+    assert groups == {"opener": (0, "Batters"), "middle": (0, "Batters"),
+                      "finisher": (0, "Batters"), "keeper": (1, "Wicketkeeper-batters"),
+                      "allrounder": (2, "All-rounders"), "spin": (3, "Spinners"),
+                      "pace": (4, "Fast bowlers")}
+    # career_results.legend stores a full-time bowler's role as "allrounder" (A238)
+    assert C.legend_group("allrounder") == (2, "All-rounders")
+    assert C.legend_group("nonsense") == (5, "Other")
+
+
+GROUPED = [{"key": k, "legend": True, "legend_value": v, "name": k.upper(),
+            "legend_group": g, "legend_group_order": o,
+            "card": {"legend": {"year": 2012, "rating": 99}}}
+           for k, v, g, o in (("p", 12.0, "Fast bowlers", 4), ("b1", 3.0, "Batters", 0),
+                              ("a", 9.0, "All-rounders", 2), ("b2", 5.0, "Batters", 0),
+                              ("b3", 4.0, "Batters", 0), ("b4", 8.0, "Batters", 0))]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_the_groups_come_in_the_server_s_order_not_by_their_best_legend():
+    got = _picker_js(f"legendChoices({json.dumps(GROUPED)}, null, 3)"
+                     ".map(g => [g.role, g.total, g.items.map(c => c.key)])")
+    assert got == [["Batters", 4, ["b4", "b2", "b3"]], ["All-rounders", 1, ["a"]],
+                   ["Fast bowlers", 1, ["p"]]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_an_all_rounder_shows_his_batting_and_bowling_apart_and_others_one_value():
+    allr = {"legend_value": 10.3, "legend_bat": 6.1, "legend_bowl": 4.2,
+            "legend_group": "All-rounders"}
+    thin = {**allr, "legend_value": 6.1, "legend_bowl": None}
+    batter = {"legend_value": 8.0, "legend_bat": 8.0, "legend_bowl": None,
+              "legend_group": "Batters"}
+    got = _picker_js("[" + ",".join(f"legendValueText({json.dumps(c)})"
+                                    for c in (allr, thin, batter)) + "]")
+    assert got == [" · bat +6.1 · bowl +4.2 = +10.3 runs a match",
+                   " · bat +6.1 · bowl — = +6.1 runs a match",
+                   " · +8.0 runs a match"]
+
+
+# --- [A269] the legend you brought is marked by its career, not by name, year and rating ---
+
+def test_the_room_remembers_which_career_and_tells_only_its_own_seat(monkeypatch):
+    import types
+    from web import app as app_mod, auth, rooms
+
+    stored = {}
+
+    def capture(conn, code, player_id, legend):
+        stored.update(legend)
+        raise rooms.RoomError("stop here")
+    monkeypatch.setenv("SESSION_SECRET", "test-only-legend-secret")
+    monkeypatch.setattr(app_mod, "_db", contextlib.nullcontext)
+    monkeypatch.setattr(app_mod.career_results, "legend_of",
+                        lambda conn, account_id, key: {"name": "K", "rating": 99, "year": 2015,
+                                                       "role_label": "All-rounder", "card": {}})
+    monkeypatch.setattr(rooms, "set_legend", capture)
+    with TestClient(app_mod.app) as client:
+        client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(1))
+        r = client.post("/api/rooms/ABC123/legend", json={"player_id": "p1", "career": "a" * 64})
+    assert r.status_code == 400 and "stop here" in r.text, r.text
+    assert stored["career"] == "a" * 64
+
+    room = types.SimpleNamespace(players={"p1": 0, "p2": 0}, legends={
+        "p1": {**stored}, "p2": {**stored, "career": "b" * 64}, "gone": stored})
+    out = app_mod._room_legends_out(room, "p1")
+    assert out["p1"].career == "a" * 64 and out["p2"].career is None and "gone" not in out
+    assert app_mod._room_legends_out(room, None)["p1"].career is None
+
+
+SAME = [{"key": k, "legend": True, "legend_value": v, "name": "K", "legend_group": "All-rounders",
+         "legend_group_order": 2, "card": {"legend": {"year": 2015, "rating": 99}}}
+        for k, v in (("k1", 20.0), ("k2", 19.0), ("k3", 18.0), ("k4", 17.0))]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_one_of_several_alike_legends_is_marked_by_its_career_key():
+    mine = {"name": "K", "year": 2015, "rating": 99, "career": "k4"}
+    got = _picker_js(f"[legendChoices({json.dumps(SAME)}, {json.dumps(mine)}, 3)[0].items.map(c => c.key),"
+                     f" {json.dumps(SAME)}.filter(c => legendIsMine(c, {json.dumps(mine)})).map(c => c.key)]")
+    assert got == [["k1", "k2", "k3", "k4"], ["k4"]]
+    # a room from before the key still finds him by name, year and rating
+    old = {"name": "K", "year": 2015, "rating": 99}
+    assert _picker_js(f"{json.dumps(SAME)}.filter(c => legendIsMine(c, {json.dumps(old)})).length") == 4

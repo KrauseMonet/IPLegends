@@ -1068,6 +1068,9 @@ class RoomLegendOut(BaseModel):
     rating: int
     year: int
     role_label: str
+    # [A269] which saved career he came from, sent to his own seat only, so the lobby picker
+    # can mark the one you brought among several of the same name, year and rating
+    career: str | None = None
 
 
 class CreatedRoomOut(BaseModel):
@@ -3384,6 +3387,15 @@ def _trade_out(r, t, owners: dict) -> TradeOut:
         b_owner=owners.get(b.short), b_gave=_card(t.b_gave))
 
 
+def _room_legends_out(room, caller_id: str | None) -> dict[str, RoomLegendOut]:
+    """[A215] Each seat's legend as the lobby shows it. [A269] The career it came from goes to
+    its own seat only: nobody else's picker needs it."""
+    return {pid: RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"],
+                               year=v["year"], role_label=v["role_label"],
+                               career=v.get("career") if pid == caller_id else None)
+            for pid, v in (room.legends or {}).items() if pid in room.players}
+
+
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
     if room.game != "draft":
         return _auction_room_state_out(room, deck, caller_id)
@@ -3448,9 +3460,7 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
         server_now=time.time(), turn_started_at=room.turn_started_at,
         game=room.game, trades=room.trades, auction=auction_view,
         legends_on=room.legends is not None,
-        legends={pid: RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"], year=v["year"],
-                                    role_label=v["role_label"])
-                 for pid, v in (room.legends or {}).items() if pid in room.players})
+        legends=_room_legends_out(room, caller_id))
 
 
 # --- the daily challenge ------------------------------------------------------------------
@@ -4312,6 +4322,7 @@ def room_legend(code: str, body: RoomLegendIn, request: Request) -> RoomStateOut
             if legend is None:
                 raise HTTPException(status_code=400, detail="That career has no legend to bring "
                                     "(it was saved before legends existed).")
+            legend = {**legend, "career": body.career}     # [A269] which one, for the picker
         try:
             room = rooms.set_legend(conn, code, body.player_id, legend)
         except rooms.RoomError as exc:

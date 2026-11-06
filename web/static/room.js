@@ -794,24 +794,45 @@ function legendsByValue(hall){
   return hall.filter(c => c.legend)
     .sort((a, b) => (b.legend_value ?? -Infinity) - (a.legend_value ?? -Infinity));
 }
-// [A254] Grouped by the role the legend's season was played in (A238), each group most
-// valuable first, and the groups in order of their best legend. Some accounts have the
-// picker cut to their best few legends IN EACH ROLE (`ME.legend_limit`, set per account on
-// the server; null lists them all), so a long Hall of Fame is a short list to scroll. The
-// legend you have already brought stays listed even if it has since fallen outside them, so
-// the box never shows "No legend" over one you brought.
-function legendRole(c){ return (c.card && c.card.legend && c.card.legend.role_label) || c.role_label || 'Other'; }
+// [A254, A269] Grouped by the role the legend's season was played in (A238), each group most
+// valuable first. The groups are the server's (`legend_group`: batters, wicketkeeper-batters,
+// all-rounders -- full-time bowlers among them --, spinners, fast bowlers) in its order
+// (`legend_group_order`), so the page holds no second copy of which role goes where. Some
+// accounts have the picker cut to their best few legends IN EACH GROUP (`ME.legend_limit`,
+// set per account on the server; null lists them all), so a long Hall of Fame is a short
+// list to scroll. The legend you have already brought stays listed even if it has since
+// fallen outside them, so the box never shows "No legend" over one you brought.
+function legendRole(c){ return c.legend_group || (c.card && c.card.legend && c.card.legend.role_label) || c.role_label || 'Other'; }
+// [A269] The legend you brought, among your hall: by its career key, which the room sends your
+// own seat. Several saved careers can share a name, year and rating, and matching on those
+// marked them all, so the box showed whichever came last. A room from before the key falls
+// back to that match.
+function legendIsMine(c, mine){
+  if (!mine) return false;
+  if (mine.career) return mine.career === c.key;
+  const l = c.card.legend || {};
+  return mine.name === c.name && mine.year === l.year && mine.rating === l.rating;
+}
 function legendChoices(hall, mine, limit){
-  const same = c => { const l = c.card.legend || {};
-    return !!mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating; };
+  const same = c => legendIsMine(c, mine);
   const groups = [];
   for (const c of legendsByValue(hall)){
     let g = groups.find(g => g.role === legendRole(c));
-    if (!g) groups.push(g = {role: legendRole(c), all: []});
+    if (!g) groups.push(g = {role: legendRole(c), order: c.legend_group_order ?? 99, all: []});
     g.all.push(c);
   }
+  groups.sort((a, b) => a.order - b.order);    // stable: without an order, best group first
   return groups.map(g => ({role: g.role, total: g.all.length, items: limit == null ? g.all
     : g.all.slice(0, limit).concat(g.all.slice(limit).filter(same).slice(0, 1))}));
+}
+// [A269] What a legend adds, in runs a match. An all-rounder's batting and bowling are shown
+// apart, since a twelve may need one more than the other.
+function legendValueText(c){
+  if (c.legend_value == null) return '';
+  const f = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`;
+  if (c.legend_group === 'All-rounders' && c.legend_bat != null)
+    return ` · bat ${f(c.legend_bat)} · bowl ${c.legend_bowl == null ? '—' : f(c.legend_bowl)} = ${f(c.legend_value)} runs a match`;
+  return ` · ${f(c.legend_value)} runs a match`;
 }
 // --- end legendsByValue
 
@@ -841,9 +862,8 @@ function renderLobbyLegends(r){
          <option value="">No legend</option>
          ${legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit).map(g => `<optgroup label="${esc(g.role)}">${g.items.map(c => { const l = c.card.legend || {};
            // [A225] a legend is a season, so the season is what is named
-           const mine = r.legends[MY_PID];
-           return `<option value="${c.key}"${mine && mine.name === c.name && mine.year === l.year && mine.rating === l.rating ? ' selected' : ''}>
-           ${esc(c.name)} · ${l.year} · ${l.rating}${c.legend_value != null ? ` · ${c.legend_value >= 0 ? '+' : ''}${c.legend_value.toFixed(1)} runs a match` : ''}</option>`; }).join('')}</optgroup>`).join('')}
+           return `<option value="${c.key}"${legendIsMine(c, r.legends[MY_PID]) ? ' selected' : ''}>
+           ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}</option>`; }).join('')}</optgroup>`).join('')}
        </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>
        ${ME.legend_limit != null && legendChoices(ROOM_HALL, null, null).some(g => g.total > ME.legend_limit) ? `<div class="note" style="margin-top:4px">Your best ${ME.legend_limit === 1 ? 'legend' : ME.legend_limit} in each role, by runs a match, of ${legendsByValue(ROOM_HALL).length} legends.</div>` : ''}`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one

@@ -4232,29 +4232,110 @@ def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
 # 70-99 number on his card does not decide a match: the engine plays the card's four numbers
 # (A160), and sixteen of one account's legends, all rated 99, are worth +12.0 down to +2.4. So the
 # lobby picker orders legends by this, worked out when read, never stored.
-# Balls faced a team innings at each batting position, measured over the 2,421 full-length
-# innings of the archive (super overs excluded, a wide is not a ball faced, A22):
-BALLS_FACED_AT = {1: 21.3, 2: 21.9, 3: 19.5, 4: 17.4, 5: 13.8, 6: 9.5, 7: 6.2,
-                  8: 3.4, 9: 1.9, 10: 1.0, 11: 0.4}
+#
+# [A269] His batting is read off two tables MEASURED from the engine, one batter in an
+# otherwise average side and attack (3,000 paired innings a cell, match conditions on): the
+# balls he faces at each position and dismissal multiplier, and the runs his survival alone
+# adds to the side. A234 used one average exposure per position and a linear wicket price,
+# which assumed every batter faces his position's average; a batter who gets out less faces
+# more balls, so his scoring counts over more of them. Since A267 the engine replays each
+# season (dismissal multipliers 0.39-1.43 across one account's legends) and the old rule missed
+# by up to 6 runs a match (r 0.951 against simulated value, the miss correlating -0.84 with the
+# dismissal multiplier); the tables give r 0.9996, worst miss 0.9, slope 1.03. Value is
+# scoring x balls + survival, which the cells confirm is linear in scoring (within 5-8%).
+# Interpolated in log dismissal, held flat beyond the grid.
+BAT_DISMISSALS = (0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1.0, 1.15, 1.3, 1.5, 1.75)
+BALLS_FACED_BY = {                # balls he faces a team innings, by position, at each multiplier
+    1: (38.3, 34.4, 31.1, 28.5, 26.2, 24.0, 21.6, 19.8, 18.2, 16.2, 14.6),
+    2: (37.4, 33.8, 30.8, 28.4, 26.5, 24.7, 22.1, 19.8, 18.1, 16.4, 14.6),
+    3: (32.7, 29.7, 27.4, 25.4, 23.7, 22.0, 20.3, 18.6, 17.1, 15.5, 14.0),
+    4: (27.0, 25.0, 23.3, 22.1, 20.8, 19.7, 18.3, 17.0, 15.8, 14.6, 13.1),
+    5: (20.0, 18.8, 17.7, 16.9, 16.0, 15.3, 14.2, 13.4, 12.7, 11.8, 10.8),
+    6: (13.2, 12.7, 12.2, 11.7, 11.3, 10.8, 10.2, 9.7, 9.2, 8.7, 8.2),
+    7: (8.0, 7.6, 7.3, 7.0, 6.8, 6.6, 6.3, 6.0, 5.8, 5.5, 5.2),
+    8: (4.3, 4.1, 4.0, 3.9, 3.8, 3.7, 3.5, 3.3, 3.2, 3.1, 2.9),
+    9: (2.3, 2.2, 2.2, 2.1, 2.0, 2.0, 1.9, 1.8, 1.8, 1.7, 1.6),
+    10: (1.1, 1.1, 1.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.9, 0.9),
+    11: (0.5, 0.5, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4),
+}
+SURVIVAL_RUNS = {                 # runs a match his survival alone adds to the side
+    1: (8.1, 6.0, 4.6, 3.3, 2.2, 1.2, 0.0, -0.9, -1.8, -2.7, -3.6),
+    2: (7.7, 6.0, 4.4, 3.2, 2.2, 1.4, 0.0, -1.1, -1.9, -2.8, -3.8),
+    3: (6.3, 4.8, 3.7, 2.7, 1.8, 1.0, 0.0, -0.9, -1.6, -2.5, -3.3),
+    4: (3.9, 3.0, 2.3, 1.7, 1.1, 0.6, 0.0, -0.6, -1.1, -1.7, -2.3),
+    5: (3.0, 2.4, 1.9, 1.4, 1.0, 0.6, 0.0, -0.5, -0.9, -1.4, -1.9),
+    6: (1.7, 1.4, 1.1, 0.8, 0.6, 0.3, 0.0, -0.2, -0.4, -0.7, -1.0),
+    7: (1.2, 1.0, 0.7, 0.5, 0.4, 0.2, 0.0, -0.2, -0.3, -0.5, -0.7),
+    8: (0.4, 0.3, 0.2, 0.2, 0.1, 0.1, 0.0, -0.1, -0.2, -0.2, -0.3),
+    9: (0.4, 0.3, 0.2, 0.2, 0.1, 0.0, 0.0, 0.0, -0.1, -0.1, -0.2),
+    10: (0.2, 0.2, 0.1, 0.1, 0.1, 0.0, 0.0, 0.0, -0.1, -0.1, -0.2),
+    11: (0.2, 0.1, 0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, -0.1, -0.1),
+}
 BALLS_BOWLED = 24             # a bowler in the five bowls his four overs
 LEAGUE_OUT_RATE = 0.051       # dismissals a ball, the league's own (about 6 an innings)
 WICKET_RUNS = 5.8             # the engine's own price of a wicket (A160's Costs, weighted)
 
 
-def legend_value(c: Card) -> float:
-    """Runs a match this card adds over an average player: his batting at the average
-    exposure of the places he may bat, plus four overs of bowling unless his bowling is
-    thin, since a side with five real bowlers never bowls a thin one (A203)."""
+def _at_dismissal(values: tuple[float, ...], d: float) -> float:
+    """A table row at dismissal multiplier , linear in log d, flat beyond the grid."""
+    x = math.log(d)
+    xs = [math.log(v) for v in BAT_DISMISSALS]
+    if x <= xs[0]:
+        return values[0]
+    for i in range(1, len(xs)):
+        if x <= xs[i]:
+            f = (x - xs[i - 1]) / (xs[i] - xs[i - 1])
+            return values[i - 1] + f * (values[i] - values[i - 1])
+    return values[-1]
+
+
+def legend_bat_value(scoring: float, dismissal: float, positions) -> float:
+    """Runs a match a batter adds at the average of the places he may bat (A269)."""
+    return statistics.fmean(scoring * _at_dismissal(BALLS_FACED_BY[p], dismissal)
+                            + _at_dismissal(SURVIVAL_RUNS[p], dismissal) for p in positions)
+
+
+def legend_values(c: Card) -> tuple[float, float | None]:
+    """(batting, bowling) runs a match this card adds over an average player: his batting at
+    the average exposure of the places he may bat, and four overs of bowling -- None when
+    his bowling is not counted, because he has none or it is thin and a side with five real
+    bowlers never bowls a thin one (A203). [A269] Split so the lobby can show an all-rounder's
+    two halves apart."""
     from game.__main__ import ATTACK_MIN_BALLS
 
-    v = 0.0
+    bat = 0.0
     if c.bat_scoring is not None and c.positions:
-        faced = statistics.fmean(BALLS_FACED_AT[p] for p in c.positions)
-        v += (c.bat_scoring - (c.bat_dismissal - 1) * LEAGUE_OUT_RATE * WICKET_RUNS) * faced
+        bat = legend_bat_value(c.bat_scoring, c.bat_dismissal, c.positions)
     thin = c.bowl_balls is not None and c.bowl_balls < ATTACK_MIN_BALLS
+    bowl = None
     if c.bowl_scoring is not None and c.has_bowl and not thin:
-        v += (c.bowl_scoring + (c.bowl_dismissal - 1) * LEAGUE_OUT_RATE * WICKET_RUNS) * BALLS_BOWLED
-    return v
+        bowl = bowl_value(c.bowl_scoring, c.bowl_dismissal) * BALLS_BOWLED
+    return bat, bowl
+
+
+def legend_value(c: Card) -> float:
+    """Runs a match this card adds over an average player, both halves together (A234)."""
+    bat, bowl = legend_values(c)
+    return bat + (bowl or 0.0)
+
+
+# [A269] The lobby picker's role groups, in the order it lists them: a legend goes by the
+# role his best season was played in (`career_results.legend` stores a ROLES key, with a
+# full-time bowler stored as an all-rounder, A238), so a batter turned full-time bowler sits
+# with the all-rounders and shows his batting and bowling apart.
+LEGEND_GROUPS = (("Batters", ("opener", "middle", "finisher")),
+                 ("Wicketkeeper-batters", ("keeper",)),
+                 ("All-rounders", ("allrounder",)),
+                 ("Spinners", ("spin",)),
+                 ("Fast bowlers", ("pace",)))
+
+
+def legend_group(role: str) -> tuple[int, str]:
+    """(place in the picker, group name) for a legend's role; an unknown role goes last."""
+    for i, (name, roles) in enumerate(LEGEND_GROUPS):
+        if role in roles:
+            return i, name
+    return len(LEGEND_GROUPS), "Other"
 
 
 def all_time_rank(n: int, real: list[int]) -> int:

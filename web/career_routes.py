@@ -1058,17 +1058,27 @@ class HallOut(BaseModel):
     completed_at: str
     legend: bool = False          # can be brought into a friends' auction (A215)
     legend_value: float | None = None   # runs a match he adds to a twelve (A234)
+    legend_bat: float | None = None     # [A269] the two halves of it: batting
+    legend_bowl: float | None = None    # and bowling, None when his bowling is not counted
+    legend_group: str | None = None     # [A269] the picker's role group, and its place
+    legend_group_order: int | None = None
     honours: list[str] = []       # which induction honours it holds (A225)
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
 
 
-def _legend_value(card: dict) -> float | None:
+def _legend_fields(card: dict) -> dict:
     """[A234] Worked out when read from the stored legend, so every legend, old or new, is
-    valued by the same rule."""
+    valued by the same rule. [A269] With its batting and bowling apart and its role group."""
     from tools.snapshot_deck import _card_from
 
     leg = card.get("legend")
-    return round(C.legend_value(_card_from(leg["card"])), 2) if leg else None
+    if not leg:
+        return {}
+    bat, bowl = C.legend_values(_card_from(leg["card"]))
+    order, group = C.legend_group(leg.get("role", ""))
+    return {"legend_value": round(bat + (bowl or 0.0), 2), "legend_bat": round(bat, 2),
+            "legend_bowl": None if bowl is None else round(bowl, 2),
+            "legend_group": group, "legend_group_order": order}
 
 
 @router.get("/api/career/hall")
@@ -1099,7 +1109,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             runs=r["runs"], wickets=r["wickets"], titles=r["titles"],
             peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
             peak_rating=r["card"].get("peak_rating"), peak_rating_year=r["card"].get("peak_rating_year"),
-            legend=bool(r["card"].get("legend")), legend_value=_legend_value(r["card"]),
+            legend=bool(r["card"].get("legend")), **_legend_fields(r["card"]),
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
             completed_at=r["completed_at"].isoformat()))

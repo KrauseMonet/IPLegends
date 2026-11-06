@@ -71,7 +71,7 @@ def is_admin(account_id: int | None) -> bool:
 # player. Read at call time like the admin ids; when unset or empty the admin ids stand in,
 # so the owner's account has it with no new setting.
 LEGEND_LIMIT_ACCOUNT_IDS = "LEGEND_LIMIT_ACCOUNT_IDS"
-LEGEND_PICKS = 1             # [A254] per role: the best legend in each role
+LEGEND_PICKS = 3             # [A269] per role group: the best three (A254 had one)
 
 
 def legend_limit_ids() -> frozenset[str]:

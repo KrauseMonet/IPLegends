@@ -136,13 +136,17 @@ def test_what_a_match_must_do_to_make_the_papers(kw, kind):
 @needs_deck
 def test_every_hundred_and_five_for_of_a_season_is_a_story(careers):
     """Recounted from the season's own records: a hundred or a five-for is told unless the
-    same match was a hat-trick, which outranks it."""
+    same match made a bigger story -- a hat-trick outranks both, and a hundred outranks a
+    five-for (`match_fact`'s order). [A266] The all-rounder clause was missing until a
+    re-rated deck gave an opener a hundred and a five-for in one match."""
     for _seed, _setup, car, _ in careers:
         for r in car.seasons:
             kinds = Counter(f["k"] for f in r.press)
             hat = [f for f in r.press if f["k"] == "hattrick"]
+            ton = [f for f in r.press if f["k"] == "hundred"]
             assert kinds["hundred"] + sum(f["runs"] >= 100 for f in hat) == r.hundreds
-            assert kinds["five_for"] + sum(f["wickets"] >= 5 for f in hat) == r.five_fors
+            assert (kinds["five_for"] + sum(f["wickets"] >= 5 for f in hat + ton)
+                    == r.five_fors)
             assert kinds["hattrick"] == r.hat_tricks
 
 

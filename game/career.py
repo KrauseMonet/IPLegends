@@ -138,8 +138,10 @@ BOWL_REGULAR_BALLS = 150
 # how rare 99s really are.
 # [A214] A start is a YOUNGSTER's level, 70-75 (it was 72-80, so a debutant arrived at
 # about 79, already an established player, with ten points to grow).
-START_DISPLAY = (70, 75)
-CEILING_MIN_DISPLAY = 82
+# [A267] The card scale became 72-99 (72 + 27 x the same fraction, from 70 + 29), so these
+# move with it: 70-75 maps to 72-77 and 82 to 83. Above 85 the shift is under a point.
+START_DISPLAY = (72, 77)
+CEILING_MIN_DISPLAY = 83
 CEILING_REDRAWS = 50
 
 # The share of the way from START to CEILING, by career season. Declared game design (see
@@ -2379,7 +2381,7 @@ def quantile(sorted_values: list[int], p: float) -> int:
 
 
 def season_display(deck: Deck, year: int, card: Card, percentile: float) -> int:
-    return max(70, min(99, quantile(real_displays(deck, year, _kind(card)), percentile)))
+    return max(72, min(99, quantile(real_displays(deck, year, _kind(card)), percentile)))   # A267: 72-99
 
 
 # [A225] A season measured like a real card. A real card's two engine numbers per discipline
@@ -2982,8 +2984,8 @@ class SeasonRecord:
     missed: int = 0                    # league matches missed (A198)
     dropped: int = 0                   # of them, dropped for form after a make-or-break (A205)
     percentile: float = 0.0
-    form: int = 70                     # the season's own card, before the reputation floor
-    display: int = 70
+    form: int = 72                     # the season's own card, before the career's pull (A267)
+    display: int = 72
     position: int = 0
     playoffs: bool = False
     finalist: bool = False
@@ -4261,21 +4263,22 @@ def all_time_rank(n: int, real: list[int]) -> int:
     return 1 + sum(x > n for x in real)
 
 
-# [A198] Real cards carry a reputation floor (A159): a season below the player's own career
-# is lifted halfway back toward it. The career card applies the same rule, so a 91 here
-# still sits among real 91s -- with the career so far as the reference, since a career in
-# progress has no future seasons to look at. Real cards apply it to merit in runs; this
-# applies it to the 70-99 card, the scale the career has. A161's cap ("never above the
-# career") has nothing to do here: the floor is only taken when it beats the season's own
-# card, and halfway between a career and a LOWER season is always below the career.
-REPUTATION_WEIGHT = 0.5
+# [A198, A267] The career card follows the real card's rule, so a 91 here still sits among
+# real 91s, with the career so far as the reference (a career in progress has no future
+# seasons to look at). Since A267 that rule is a symmetric pull of CAREER_PULL_MATCHES
+# pseudo-matches toward the career -- a poor season lifted a little, a hot one held back a
+# little, the season's own matches outweighing it -- where it used to be a floor that lifted
+# a poor season halfway (A159; removed from real cards by A266). Applied to the 72-99 card.
+CAREER_PULL_MATCHES = 3
 
 
-def reputation_floor(previous: list[int], form: int) -> int:
+def reputation_floor(previous: list[int], form: int, matches: int = 14) -> int:
+    """The season's grade after the career's pull (the name is kept from A198's floor)."""
     if not previous:
         return form
     career = statistics.fmean(previous)
-    return max(form, round(REPUTATION_WEIGHT * career + (1 - REPUTATION_WEIGHT) * form))
+    w = CAREER_PULL_MATCHES / (max(matches, 0) + CAREER_PULL_MATCHES)
+    return round(form + w * (career - form))
 
 
 def poor_bar(role: str) -> float:
@@ -5057,7 +5060,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         # careers can reach one season having said different things to the coach.
         played.role, played.coach = rd, coach_rec
         played.traits = traits
-        played.display = reputation_floor([r.display for r in cp.seasons], played.display)
+        played.display = reputation_floor([r.display for r in cp.seasons], played.display,
+                                          played.matches)
         played.extra_earnings = money
         # [A230] What happened during the season, and what your answer set going.
         inc = played.incident

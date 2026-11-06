@@ -27,7 +27,9 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # ceiling ₹1.39 cr); its 2010 now pauses at two key moments, hence the second call
 # [A261] seed 3 again, re-found after A261 (settling-in, situation leans and chasing intent
 # moved every seeded season): best market ceiling ₹1.23 cr, one key moment in 2010
-UNSOLD = (3, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
+# [A267] seed 8, re-found after A267 (ratings on the 72-99 scale, the engine replaying each
+# season, match conditions): one key moment in 2010
+UNSOLD = (8, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
 
 
 @pytest.fixture(scope="module")

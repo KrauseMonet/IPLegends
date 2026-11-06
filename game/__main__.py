@@ -531,6 +531,7 @@ def validate(conn, model: Model, trials: int, seed: int) -> None:
 
     _validate_super_over(conn, model, trials, seed)
     _validate_sixth_bowler(conn, model, seed)
+    _validate_conditions(conn, model, trials, seed)
 
 
 def archive_bowler_use(conn) -> dict:
@@ -591,6 +592,58 @@ def _validate_sixth_bowler(conn, model: Model, seed: int, seasons: int = 16) -> 
     print(f"\n    reported, not asserted -- CHANGE_ECONOMY = {CHANGE_ECONOMY} was swept to fit "
           f"the first row\n    ({real['innings']:,} real innings); balls, not overs, on "
           "the simulated side.")
+
+
+# [A267] The archive's chase success by first-innings total, the same full-length matches
+# the conditions were measured on.
+ARCHIVE_CHASE_SQL = """
+  with inn as (
+    select match_id, innings_no,
+           sum(runs_batter + extra_wides + extra_noballs + extra_byes + extra_legbyes) as runs
+      from deliveries
+     where innings_no in (1, 2) and not is_super_over and innings_scheduled_balls = 120
+     group by 1, 2)
+  select a.runs, b.runs > a.runs from inn a join inn b
+      on b.match_id = a.match_id and a.innings_no = 1 and b.innings_no = 2"""
+CHASE_BRACKETS = ((0, 140), (140, 160), (160, 180), (180, 200), (200, 999))
+
+
+def _validate_conditions(conn, model: Model, trials: int, seed: int) -> None:
+    """[A267] Match conditions, REPORTED rather than asserted. Their size was measured from
+    the archive (`CONDITIONS_SD`, the two innings' shared run rate), not fitted to this
+    table -- but the table is what they exist to fix, so it stays in view. League-average
+    sides, both innings on one drawn condition, chasing with intent."""
+    from game.simulator import match_conditions
+
+    average = [Player(f"batter {i}", 0.0, 0.0) for i in range(11)]
+    rng = random.Random(seed)
+    firsts, sim = [], {b: [0, 0] for b in CHASE_BRACKETS}
+    for _ in range(trials):
+        c = match_conditions(rng)
+        a = play_innings(model, average, average[:BOWLERS_IN_TWELVE], rng, conditions=c)
+        b = play_innings(model, average, average[:BOWLERS_IN_TWELVE], rng, target=a.runs,
+                         conditions=c)
+        firsts.append(a.runs)
+        k = next(x for x in CHASE_BRACKETS if x[0] <= a.runs < x[1])
+        sim[k][0] += b.runs > a.runs
+        sim[k][1] += 1
+    real = {b: [0, 0] for b in CHASE_BRACKETS}
+    for runs, won in conn.execute(ARCHIVE_CHASE_SQL).fetchall():
+        k = next(x for x in CHASE_BRACKETS if x[0] <= runs < x[1])
+        real[k][0] += won
+        real[k][1] += 1
+    mean = sum(firsts) / len(firsts)
+    sd = (sum((x - mean) ** 2 for x in firsts) / len(firsts)) ** 0.5
+    print(f"\n=== match conditions, {trials} league-average matches, seed {seed} ===\n")
+    print(f"    {'':28}{'simulated':>12}{'archive':>12}")
+    print(f"    {'first-innings SD':28}{sd:12.1f}{'33.2*':>12}")
+    for k in CHASE_BRACKETS:
+        label = f"chase {k[0]}-{k[1] - 1}" if k[1] < 999 else f"chase {k[0]}+"
+        rs = real[k][0] / real[k][1] if real[k][1] else float("nan")
+        ss = sim[k][0] / sim[k][1] if sim[k][1] else float("nan")
+        print(f"    {label:28}{ss:11.0%} {rs:11.0%}")
+    print("\n    reported, not asserted -- CONDITIONS_SD was measured, not fitted to this table;"
+          "\n    * 30.6 within a season: the rest is era, which a drafted match mixes.")
 
 
 def _validate_super_over(conn, model: Model, trials: int, seed: int) -> None:

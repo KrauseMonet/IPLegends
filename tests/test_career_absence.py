@@ -251,9 +251,12 @@ def test_a_newcomer_is_left_out_only_straight_after_his_form_turns_poor(seasons)
         if not year.absent:
             assert year.absence_reason is None
             never += 1
-            # never out of form at any reading he played behind
+            # never out of form at any reading he played behind -- unless that reading
+            # dropped him at a make-or-break (A205), the same allowance as below: the block
+            # waits for his return and reads his form afresh then (A266 found the first
+            # season, Chennai 2018, where it no longer said poor on his return)
             for n in range(1, len(mine)):
-                assert not _poor(year, mine, n)
+                assert not _poor(year, mine, n) or (n + 1) in year.dropped
             continue
         s = year.absent[0]                        # league index the block starts at
         assert year.absent == list(range(s, min(s + len(block), len(mine))))

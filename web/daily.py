@@ -119,26 +119,45 @@ ENGINE_TWO_LEVEL_FROM = datetime.date(2026, 11, 7)
 ENGINE_A160_PIN = Path(__file__).resolve().parent.parent / "data" / "engine_a160.json.gz"
 
 
-@functools.lru_cache(maxsize=1)
-def engine_a160() -> dict:
-    """The frozen pre-A259 numbers. Missing or unreadable is an ERROR, not an empty pin: an
-    old day replayed on the new engine would quietly disagree with its stored score."""
-    with gzip.open(ENGINE_A160_PIN, "rt") as fh:
+def _read_pin(path: Path) -> dict:
+    """A frozen engine pin. Missing or unreadable is an ERROR, not an empty pin: an old day
+    replayed on the new engine would quietly disagree with its stored score."""
+    with gzip.open(path, "rt") as fh:
         doc = json.load(fh)
     if doc.get("format") != 1:
-        raise RuntimeError(f"{ENGINE_A160_PIN.name}: unknown format")
+        raise RuntimeError(f"{path.name}: unknown format")
     return doc
 
 
-_A160_DECKS: dict[int, Deck] = {}
+@functools.lru_cache(maxsize=1)
+def engine_a160() -> dict:
+    """The frozen pre-A259 numbers."""
+    return _read_pin(ENGINE_A160_PIN)
 
 
-def a160_deck(full: Deck) -> Deck:
-    """`full` with every card's four engine numbers as they were before A259. Cached per
-    deck object, as `ipl_keeper_deck` is."""
-    deck = _A160_DECKS.get(id(full))
+# [A267] The engine replays each season again (A160's rule), so a day played on A259's
+# two-level numbers -- from ENGINE_TWO_LEVEL_FROM until A267 ships -- keeps them, from the
+# pin `tools.pin_engine_a259` wrote before the change. Set to the day after A267 ships;
+# move it if it ships later.
+REPLAY_ENGINE_FROM = datetime.date(2026, 11, 8)
+ENGINE_A259_PIN = Path(__file__).resolve().parent.parent / "data" / "engine_a259.json.gz"
+
+
+@functools.lru_cache(maxsize=1)
+def engine_a259() -> dict:
+    """The frozen A259 numbers."""
+    return _read_pin(ENGINE_A259_PIN)
+
+
+_PINNED_DECKS: dict[tuple, Deck] = {}
+
+
+def _pinned_deck(full: Deck, pin: dict, tag: str) -> Deck:
+    """`full` with every card's four engine numbers read from `pin`. Cached per deck object
+    and pin, as `ipl_keeper_deck` is."""
+    key = (tag, id(full))
+    deck = _PINNED_DECKS.get(key)
     if deck is None or deck.fs_ids != full.fs_ids:
-        pin = engine_a160()
         names = pin["fields"]
 
         def old(c):
@@ -148,15 +167,34 @@ def a160_deck(full: Deck) -> Deck:
         deck = Deck(cards_by_fs={fs: [old(c) for c in cards]
                                  for fs, cards in full.cards_by_fs.items()},
                     fs_ids=list(full.fs_ids))
-        _A160_DECKS.clear()
-        _A160_DECKS[id(full)] = deck
+        for k in [k for k in _PINNED_DECKS if k[0] == tag]:
+            del _PINNED_DECKS[k]
+        _PINNED_DECKS[key] = deck
     return deck
+
+
+def _pinned_model(model: Model, pin: dict) -> Model:
+    old = {(d, int(y)): float(m) for d, y, m in pin["season_mean_scoring"]}
+    return replace(model, season_mean_scoring=old)
+
+
+def a160_deck(full: Deck) -> Deck:
+    """`full` with every card's four engine numbers as they were before A259."""
+    return _pinned_deck(full, engine_a160(), "a160")
 
 
 def a160_model(model: Model) -> Model:
     """`model` with the pre-A259 season average an unrated batter is centred on."""
-    old = {(d, int(y)): float(m) for d, y, m in engine_a160()["season_mean_scoring"]}
-    return replace(model, season_mean_scoring=old)
+    return _pinned_model(model, engine_a160())
+
+
+def a259_deck(full: Deck) -> Deck:
+    """`full` with every card's four engine numbers as A259 had them (A267)."""
+    return _pinned_deck(full, engine_a259(), "a259")
+
+
+def a259_model(model: Model) -> Model:
+    return _pinned_model(model, engine_a259())
 
 
 # [A260, A261] The first day played with situations: the settling-in curve, every card's
@@ -445,6 +483,10 @@ BOWLING_ORDER_FROM = datetime.date(2026, 10, 22)
 BATTING_ORDER_FROM = datetime.date(2026, 10, 23)
 # [A239] Likewise for the sixth bowler. Set to the day after the change ships.
 SIXTH_BOWLER_FROM = datetime.date(2026, 10, 30)
+# [A267] The first day played with match conditions shared by both innings. A day before it
+# draws none -- the draw would shift every random number after it -- so it replays exactly.
+# Set to the day after A267 ships; move it if it ships later.
+CONDITIONS_FROM = datetime.date(2026, 11, 8)
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
@@ -457,6 +499,7 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
+    from game.simulator import no_conditions
 
     # [A262] Before `side_for_fs` reads it: an opposition eleven obeys the overseas cap too.
     full = nationality_deck(full, day.challenge_date)
@@ -464,9 +507,12 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
         full, model = plain_deck(full), plain_model(model)
     if day.challenge_date < ENGINE_TWO_LEVEL_FROM:
         full, model = a160_deck(full), a160_model(model)
+    elif day.challenge_date < REPLAY_ENGINE_FROM:
+        full, model = a259_deck(full), a259_model(model)
     with (old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM),
           old_batting_order(day.challenge_date < BATTING_ORDER_FROM),
-          five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM)):
+          five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM),
+          no_conditions(day.challenge_date < CONDITIONS_FROM)):
         return _play_and_score(full, model, day, player, state)
 
 

@@ -53,7 +53,8 @@ def test_career_standing_opens_a_tier_the_season_card_alone_does_not(cards):
 
 def test_most_cards_show_nothing(cards):
     shown = sum(bool(W._card(c).skills) for c in cards)
-    assert 500 < shown < len(cards) / 3
+    # [A267] tiers at 80 / 87 / 94 and more skills: most cards still show none
+    assert 500 < shown < len(cards) / 2
 
 
 def test_the_journey_card_carries_them_too(cards):

@@ -29,9 +29,10 @@ from etl.skills import SKILL_BY_KEY, Skill
 
 SNAPSHOT = Path(__file__).resolve().parent.parent / "data" / "player_skills.json.gz"
 FORMAT = 2
-# The rating blocks are MEASURED, not chosen (A258): see `measure_blocks`. These are only
-# what a card falls back to if the snapshot carries none.
-FALLBACK_BLOCKS = {1: 80, 2: 90, 3: 96}
+# [A267] The rating at which each tier opens is DECLARED by the user: 80 / 87 / 94 on the
+# 72-99 scale. Until A267 they were measured (`measure_blocks`, A258) -- 84 / 88 / 96 the
+# last time; the snapshot still records the measured values beside it, for the record.
+TIER_BLOCKS = {1: 80, 2: 87, 3: 94}
 BLOCK_WIDTH = 4                         # levels pooled per band, to steady thin bands
 BLOCK_MIN_CARDS = 30                    # a band thinner than this is noise, not evidence
 BLOCK_SHARE = 0.5                       # of the top band's earning rate
@@ -70,8 +71,7 @@ def standing(cards) -> dict[str, int]:
 
 
 def blocks() -> dict[int, int]:
-    b = document().get("blocks")
-    return {int(k): v for k, v in b.items()} if b else dict(FALLBACK_BLOCKS)
+    return dict(TIER_BLOCKS)
 
 
 def slots(display: int | None, career: int, at: dict[int, int] | None = None) -> int:

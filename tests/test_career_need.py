@@ -19,8 +19,8 @@ def deck():
     return deck_from(DOC)
 
 
-def _you(deck, fs, role):
-    start, ceiling = C.spin(deck, 3, role)
+def _you(deck, fs, role, seed=3):
+    start, ceiling = C.spin(deck, seed, role)
     year = deck.cards_by_fs[fs][0].season_year
     return C.ability(start, ceiling, 0.5, setup=C.Setup("N", role, 2008), fs_id=fs, year=year,
                      franchise=deck.cards_by_fs[fs][0].franchise)
@@ -136,13 +136,14 @@ def test_a_refusal_reaches_the_clubs_standing(deck, monkeypatch):
 
 
 IMPACT_FS = 168      # the one real squad whose need changes when its Impact Player is counted
+IMPACT_SPIN = 0      # [A267] (3 until A267) the spin seed of the player who joins it: both re-found together
 
 
 def test_the_impact_player_counts_toward_the_attack(deck):
     """A twelve's Impact Player bowls where its eleven falls short (A78), so he counts. Only
     one real squad of 166 turns on it, found by search; the fixture checks it still does."""
     from game.__main__ import ATTACK_MIN_BALLS
-    you = _you(deck, IMPACT_FS, "opener")
+    you = _you(deck, IMPACT_FS, "opener", IMPACT_SPIN)
     xi, impact = C.xi_with(you, list(deck.cards_by_fs[IMPACT_FS]))
     xi_only = sum((c.bowl_balls or 0) >= ATTACK_MIN_BALLS for c in xi if c.person_id != C.YOU_ID)
     assert impact is not None and xi_only < C.NEED_BOWLERS <= _regular_bowlers(deck, you, IMPACT_FS), \

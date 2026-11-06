@@ -519,7 +519,7 @@ class CardOut(BaseModel):
                     "`role` is 'keeper' this season, OR he kept in some OTHER season "
                     "of his own career. Independent of `kind`/`role`, which always "
                     "reflect THIS season alone.")
-    rating: int | None = Field(description="A58/A60's integer 70-99 card rating")
+    rating: int | None = Field(description="A58/A60/A267's integer 72-99 card rating")
     has_bowl: bool = Field(default=False, description="counts as one of a twelve's five "
                            "bowling options -- the predicate order_errors itself uses")
     overseas: bool | None = Field(description="null means unknown, never domestic (A23)")

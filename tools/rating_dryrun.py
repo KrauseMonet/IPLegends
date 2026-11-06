@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 MAX_RIPPLE = 1          # the most a card the change was NOT about may move
 EPS = 1e-9
 ANCHOR_LO, ANCHOR_HI = 0.02, 0.992   # the view's own anchors (A118); checked, not trusted
+SCALE_LO = 72.0      # [A267] the scale is 72-99 (70-99 until migration 054)
 
 # A scorecard contradiction: one season clearly beat another in the same year, yet has
 # the lower card. The definitions are the sweep's (2026-11-05), named so they cannot drift.
@@ -176,7 +177,7 @@ def scale_of(cards: dict) -> tuple[float, float] | None:
 
 def to_display(x: float, lo: float, hi: float) -> int:
     t = max(0.0, min(1.0, (x - lo) / (hi - lo)))
-    return int(70.0 + 29.0 * t + 0.5)          # Postgres rounds half away from zero
+    return int(SCALE_LO + (99.0 - SCALE_LO) * t + 0.5)   # Postgres rounds half away from zero
 
 
 def _differs(a, b) -> bool:

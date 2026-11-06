@@ -138,7 +138,7 @@ class SeasonOut(BaseModel):
     contract_year: int            # 1-3 on a three-year deal, 0 on a one-year
     event: str
     choice: str
-    card: int                     # the Season grade, after the reputation floor
+    card: int                     # the Season grade, after the career's pull (A267)
     form: int                     # the season's own grade
     rating: int | None = None     # your Rating that season (A214); None on an older token
     potential: int = 0            # your potential that season, as it stood going in (A224)

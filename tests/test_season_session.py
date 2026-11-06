@@ -334,15 +334,18 @@ def test_form_is_oldest_first_and_never_confuses_two_equal_looking_sides():
     assert _side_form(six, a) == ["L", "W", "L", "W", "L"]    # the LAST five of seven
 
 
+IMPACT_SEED = 1    # (11 until A267) a season whose first break substitutes; re-find after an engine change
+
+
 def test_the_suggested_impact_slot_is_exactly_what_declining_does():
     """The break screen names the player declining would bring off. Declining is
     `ImpactPick(None)`, answered by `decide_impact` -- so choosing the named slot by hand
     must play the very same match, and the suggestion must not be a guess beside it."""
-    played = walk(11)
+    played = walk(IMPACT_SEED)
     model = _model_with_fixed_state()
     paused = ss.replay_season(DECK, model, played.state, ss.recorded_moves(()))
     slot = ss.suggested_impact_slot(paused)
-    assert slot is not None, "seed 11's first break substitutes; pick another seed if not"
+    assert slot is not None, "IMPACT_SEED's first break substitutes; pick another seed if not"
     assert 1 <= slot <= 11
 
     def first_result(move):

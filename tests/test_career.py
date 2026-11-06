@@ -478,16 +478,17 @@ def test_the_missed_block_comes_from_the_real_shares():
     assert sum(C.AVAILABILITY_SHARES) / len(C.AVAILABILITY_SHARES) == pytest.approx(0.86, abs=0.01)
 
 
-@pytest.mark.parametrize("previous, form, want", [
-    ([], 72, 72),               # a first season stands as it is
-    ([90, 90], 70, 80),         # halfway back toward the career
-    ([90, 90], 95, 95),         # a good season is never pulled down
-    ([80], 60, 70),
-    ([80, 70], 60, 68),         # the career is the mean of every season so far
-    ([72, 74], 85, 85),
+@pytest.mark.parametrize("previous, form, matches, want", [
+    ([], 72, 14, 72),               # a first season stands as it is
+    ([90, 90], 75, 14, 78),         # 3 / 17 of the way toward the career
+    ([90, 90], 95, 14, 94),         # [A267] a hot season is held back a little too
+    ([80], 74, 3, 77),              # a short season leans further: halfway at 3 matches
+    ([80, 70], 74, 14, 74),         # the career is the mean of every season so far
+    ([72, 74], 85, 0, 73),          # no matches of his own: the career alone
 ])
-def test_the_reputation_floor_lifts_a_season_halfway_toward_the_career(previous, form, want):
-    assert C.reputation_floor(previous, form) == want
+def test_the_career_pulls_a_season_toward_itself_by_three_matches(previous, form, matches, want):
+    """[A267] The real cards' rule (migration 054): a symmetric pull of 3 pseudo-matches."""
+    assert C.reputation_floor(previous, form, matches) == want
 
 
 def test_an_all_rounder_is_ranked_against_everybody_who_did_both():
@@ -795,13 +796,16 @@ def test_each_offer_says_where_you_would_play_in_that_eleven(deck, model):
             assert o.attack_rank == (ids.index(C.YOU_ID) + 1 if C.YOU_ID in ids else None)
 
 
+CHANGE_SEED = 14   # 10 -> 2 after A266, 2 -> 14 after A267; re-find after an engine or rating change
+
+
 def test_a_batter_is_told_when_he_would_be_the_change_bowler(deck, model):
     """[A239] An offer names a batter's place in the attack only as its change bowler, and
-    that is where the side's attack really puts him. Opener seed 10 (2012), found by search,
-    has such an offer."""
+    that is where the side's attack really puts him. An opener from 2012 (CHANGE_SEED, found
+    by search) has such an offer."""
     from game.__main__ import attack
     setup = C.Setup("T", "opener", 2012)
-    c = C.play_career(deck, model, 10, setup, moves=[])
+    c = C.play_career(deck, model, CHANGE_SEED, setup, moves=[])
     sixth = [o for o in c.pending.offers if o.attack_rank == 6]
     assert sixth, "the fixture must hold an offer as the change bowler"
     for o in c.pending.offers:
@@ -1061,9 +1065,9 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
 # pinned to the engine, so an engine change can move them (A208 moved every one of them,
 # Kings XI 2019 before this); re-find them by search rather than loosening a guard.
 MOMENT_FS = 26
-MOMENT_SEED = 2   # re-found after A239 moved seed 1 (to 2), after A259 (2 -> 10), after
+MOMENT_SEED = 16  # 2 -> 1 after A266, 1 -> 16 after A267 (each time the seed that passes every test AND fails with the cap raised); re-found after A239 moved seed 1 (to 2), after A259 (2 -> 10), after
                   # A261 (10 -> 3), and re-found after A265 (3 -> 2)
-EDGE = (101, 0)   # Mumbai 2019 (Chennai 2019 until A265): see test_every_league_stop_and_only_those_is_a_close_race
+EDGE = (26, 0)    # (101, 0) until A266, Chennai 2019 until A265: see test_every_league_stop_and_only_those_is_a_close_race
 
 
 def _moment_year(deck, model, role="opener", seed=None, fs_only=None):
@@ -1335,12 +1339,12 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 77, "kept": 161}    # both re-found after A251's home number (101, 123),
+MOB_FS = {"dropped": 26, "kept": 77}   # A267: dropped 140 -> 26, kept 140 -> 77; A266: dropped 77 -> 140, kept 161 -> 140; both re-found after A251's home number (101, 123),
                                           # after A259 (77, 50), after A261 (77, 140), and after A265 (77, 161)
-MOB_SEED = {"dropped": 0, "kept": 1}     # re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
+MOB_SEED = {"dropped": 0, "kept": 0}   # A267: kept 1 -> 0; A266: kept 1 -> 1 (squad moved); re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
                                           # squad season reaches poor form AND whose regular
                                           # season holds a block beside the drop are rare
-SIXTH = (161, 1)   # re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
+SIXTH = (26, 1)    # (50, 2) until A267, (161, 1) until A266; re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
                    # ((50, 2) -> (140, 5)): see
                    # test_a_make_or_break_is_failed_only_in_the_worst_sixth
 
@@ -1511,7 +1515,7 @@ def test_a_batter_bowls_in_the_five_only_when_his_side_lacks_five_real_bowlers(d
     from game.__main__ import BOWLERS_IN_TWELVE, bowling_order
 
     acted = 0
-    for seed in range(1, 40):
+    for seed in range(1, 80):   # 1..39 until A266, which left one season where the rule acts
         start, ceiling = C.spin(deck, seed, "middle")
         if start.bowl is None:
             continue

@@ -19,7 +19,7 @@ from game import press as P
 from web import career_routes as R
 
 DOC = read_document()
-MARK_SEED = 2   # 1 -> 2 after A265; see test_your_player_and_only_him_is_marked_in_every_scorecard
+MARK_SEED = 1   # 1 -> 2 after A265, 2 -> 1 after A266; see test_your_player_and_only_him_is_marked_in_every_scorecard
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
 

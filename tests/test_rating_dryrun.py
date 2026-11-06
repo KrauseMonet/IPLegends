@@ -28,9 +28,10 @@ def test_percentile_matches_postgres_percentile_cont():
 
 
 def test_display_rounds_half_up_like_postgres():
-    # 70 + 29 * 0.5 = 84.5, which Postgres's round() takes to 85 and Python's to 84
-    assert to_display(0.5, 0.0, 1.0) == 85
-    assert to_display(-9, 0.0, 1.0) == 70 and to_display(9, 0.0, 1.0) == 99
+    # [A267] 72 + 27 * (12.5 / 27) = 84.5, which Postgres's round() takes to 85 and
+    # Python's to 84
+    assert to_display(12.5, 0.0, 27.0) == 85
+    assert to_display(-9, 0.0, 1.0) == 72 and to_display(9, 0.0, 1.0) == 99
 
 
 def test_a_league_shift_alone_is_collateral_not_career():

@@ -121,6 +121,9 @@ def test_an_old_checkpoint_without_milestones_still_reads():
 DOC = read_document()
 
 
+HAT_SEED = 2   # (4 until A267) a pace career that takes a hat-trick; re-find after an engine or rating change
+
+
 @pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 def test_a_real_career_records_its_landmarks_against_its_own_feed():
     """Played through: every season's landmarks agree with its figures, the hat-tricks and
@@ -128,7 +131,7 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
     rule gives for the career before it."""
     deck, model = deck_from(DOC), model_from(DOC)
     setup = C.Setup("X", "pace", 2010, False)
-    SEED = 4
+    SEED = HAT_SEED
     # seed 1, found by search (again after A230 made nearly every card ask, and after A239's
     # sixth bowler): a hat-trick, so the count has something to agree with
     # [A259] seed 4, re-found after A259 re-estimated every card's engine numbers: two

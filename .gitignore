@@ -26,3 +26,5 @@ __pycache__/
 !/data/player_skills.json.gz
 # [A259] The engine numbers before A259, frozen once, for past daily challenges.
 !/data/engine_a160.json.gz
+# [A267] A259's engine numbers, which the daily replays days from 2026-11-07 on
+!/data/engine_a259.json.gz

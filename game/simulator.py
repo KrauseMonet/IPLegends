@@ -62,6 +62,8 @@ Known simplifications, all of them visible in the scoreboard rather than hidden:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import math
 import random
 from dataclasses import dataclass, field
@@ -75,6 +77,39 @@ from etl.skills import SETTLED
 from etl.state_model import FITTING_SET, bucket_of
 
 STYLE_INDEX = {"spin": 0, "pace": 1}       # [A260] `Player.style_bat`'s order
+
+# [A267] MATCH CONDITIONS: the pitch, the ground and the day, shared by both innings of one
+# match. Without them every match is played on identical conditions, so simulated totals
+# were too bunched (SD 26.8 against the archive's within-season 30.6) and 200+ chases
+# succeeded 8% of the time against a real 24%. The size is MEASURED, not fitted: in 1,193
+# real full-length matches the two innings' run rates over their first ten overs share a
+# covariance of 0.730 within a season (correlation 0.29), a shared SD of 0.854 runs an over,
+# 0.142 a ball. Drawn once a match from its own random stream, from seven equally likely
+# levels of a unit-variance normal (so the engine's per-ball cache, A181, still repeats),
+# and added to every ball's scoring aim in both innings and any super over.
+CONDITIONS_SD = 0.142
+_Z7 = (-1.4652, -0.7916, -0.3661, 0.0, 0.3661, 0.7916, 1.4652)
+_Z7_SD = math.sqrt(sum(z * z for z in _Z7) / len(_Z7))
+CONDITIONS_LEVELS = tuple(round(CONDITIONS_SD * z / _Z7_SD, 6) for z in _Z7)
+_NO_CONDITIONS = contextvars.ContextVar("no_conditions", default=False)
+
+
+@contextlib.contextmanager
+def no_conditions(on: bool = True):
+    """Play without match conditions, drawing nothing: the daily's days before A267 (A203)."""
+    token = _NO_CONDITIONS.set(on)
+    try:
+        yield
+    finally:
+        _NO_CONDITIONS.reset(token)
+
+
+def match_conditions(rng: random.Random) -> float:
+    """This match's conditions, runs a ball added to every ball's aim (A267). One draw."""
+    if _NO_CONDITIONS.get():
+        return 0.0
+    return CONDITIONS_LEVELS[min(int(rng.random() * len(CONDITIONS_LEVELS)),
+                                 len(CONDITIONS_LEVELS) - 1)]
 # [A261] the intent table is keyed by `etl.skills.phase_of`'s short names
 INTENT_PHASE = {"powerplay": "pp", "middle": "mid", "death": "death"}
 
@@ -804,7 +839,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                  overs: int = OVERS, max_wickets: int = WICKETS,
                  state_over: int | None = None,
                  plan: dict[str, str] | None = None,
-                 breakdown: "Breakdown | None" = None) -> Innings:
+                 breakdown: "Breakdown | None" = None,
+                 conditions: float = 0.0) -> Innings:
     """One innings. The three keyword-only parameters exist for the super over and
     nothing else; every one of them defaults to an ordinary twenty-over innings, so a
     caller that does not name them gets exactly the behaviour this function has always
@@ -891,7 +927,7 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
 
             probs, values = model.state(
                 over if state_over is None else state_over, innings.wickets)
-            aim = striker.player.bat_scoring - bowler.player.bowl_scoring
+            aim = striker.player.bat_scoring - bowler.player.bowl_scoring + conditions
             odds = striker.player.bat_dismissal * bowler.player.bowl_dismissal
             if (striker.player.phase_bat or bowler.player.phase_bowl
                     or bowler.player.phase_wkt):

@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 
 from etl.feasibility import BOWLERS_IN_TWELVE, Card, Deck
 from game.analysis import batting_rank, bowling_rank
-from game.simulator import BALLS_PER_OVER, Innings, OVERS, Model, play_innings
+from game.simulator import (BALLS_PER_OVER, Innings, OVERS, Model, match_conditions,
+                            play_innings)
 
 TEAMS = 10                 # you and nine historical sides
 MATCHES_EACH = 14          # the IPL's own league length
@@ -357,6 +358,9 @@ class Result:
     # `_play_human_match` ever populates them.
     toss_won_by_you: bool | None = None
     toss_elected: str | None = None
+    # [A267] the match's conditions (runs a ball both innings were played with): 0 for a
+    # match with none, and for every `Result` built by hand
+    conditions: float = 0.0
     # Empty for every match that was not tied. When it is not, the LAST entry is the
     # decisive one and `winner`/`margin` above already reflect it -- a consumer that
     # only wants to know who won never has to look in here at all.
@@ -682,7 +686,8 @@ def super_over_bowler(side: Side, number: int = 1) -> Card:
 
 
 def play_one_super_over(model: Model, first_side: Side, second_side: Side,
-                         rng: random.Random, number: int = 1) -> SuperOver:
+                         rng: random.Random, number: int = 1,
+                         conditions: float = 0.0) -> SuperOver:
     """One super over: `first_side` bats, `second_side` replies chasing.
 
     Reuses `play_innings` rather than hand-rolling six balls -- wides, extras, the tilt
@@ -699,7 +704,7 @@ def play_one_super_over(model: Model, first_side: Side, second_side: Side,
             [to_player(super_over_bowler(bowling, number), model)],
             rng, target=target,
             overs=SUPER_OVER_OVERS, max_wickets=SUPER_OVER_WICKETS,
-            state_over=SUPER_OVER_STATE_OVER,
+            state_over=SUPER_OVER_STATE_OVER, conditions=conditions,
         )
 
     first = _innings(first_side, second_side, None)
@@ -712,7 +717,7 @@ def play_one_super_over(model: Model, first_side: Side, second_side: Side,
 
 
 def play_super_overs(model: Model, home: Side, away: Side,
-                      rng: random.Random) -> list[SuperOver]:
+                      rng: random.Random, conditions: float = 0.0) -> list[SuperOver]:
     """Every super over a tied match needs, in order, the decisive one last.
 
     `away` bats first: it batted second in the match, and the side that chased opens the
@@ -721,7 +726,7 @@ def play_super_overs(model: Model, home: Side, away: Side,
     """
     played: list[SuperOver] = []
     for number in range(1, MAX_SUPER_OVERS + 1):
-        so = play_one_super_over(model, away, home, rng, number)
+        so = play_one_super_over(model, away, home, rng, number, conditions)
         played.append(so)
         if so.winner is not None:
             break
@@ -742,7 +747,7 @@ def _super_over_margin(played: list[SuperOver]) -> str:
 def _finish_result(model: Model, rng: random.Random,
                     home: Side, away: Side, stage: str, first: Innings, second: Innings,
                     toss_won_by_you: bool | None = None,
-                    toss_elected: str | None = None) -> Result:
+                    toss_elected: str | None = None, conditions: float = 0.0) -> Result:
     """The winner/margin arithmetic every match needs, factored out once rather than
     duplicated between `play()` and `_play_human_match` -- the only difference between
     an ordinary match and one the human's own side played in is whether a toss actually
@@ -759,13 +764,14 @@ def _finish_result(model: Model, rng: random.Random,
                home_runs=first.runs, home_wickets=first.wickets, home_balls=first.balls,
                away_runs=second.runs, away_wickets=second.wickets, away_balls=second.balls,
                home_innings=first, away_innings=second,
-               toss_won_by_you=toss_won_by_you, toss_elected=toss_elected)
+               toss_won_by_you=toss_won_by_you, toss_elected=toss_elected,
+               conditions=conditions)
     if second.runs > first.runs:
         r.winner, r.margin = away, f"{away.short} by {10 - second.wickets} wickets"
     elif first.runs > second.runs:
         r.winner, r.margin = home, f"{home.short} by {first.runs - second.runs} runs"
     else:
-        r.super_overs = play_super_overs(model, home, away, rng)
+        r.super_overs = play_super_overs(model, home, away, rng, conditions)
         r.winner = r.super_overs[-1].winner
         r.margin = _super_over_margin(r.super_overs)
     return r
@@ -818,9 +824,11 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     away_bowling_1 = (_apply_bowling_impact(away.xi, away_forced_target, away.impact)
                        if away_forced else away.xi)
     away_bowl_impact_1 = away.impact if away_forced else None
+    cond = match_conditions(rng)                  # [A267] one draw, both innings
     first = play_innings(model, lineup(home.xi, model, None),
                           attack(away_bowling_1, model, away_bowl_impact_1), rng,
-                          plan=away.bowling_plan, breakdown=_breakdown(away, model))
+                          plan=away.bowling_plan, breakdown=_breakdown(away, model),
+                          conditions=cond)
 
     home_target = None if home.impact is None else decide_impact(home, away, "bowl", first)
     away_target = (None if away.impact is None or away_forced
@@ -833,7 +841,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
                           rng, target=first.runs, plan=home.bowling_plan,
-                          breakdown=_breakdown(home, model))
+                          breakdown=_breakdown(home, model), conditions=cond)
 
     if stats is not None and track is not None:
         if track is home:
@@ -843,7 +851,7 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    return _finish_result(model, rng, home, away, stage, first, second)
+    return _finish_result(model, rng, home, away, stage, first, second, conditions=cond)
 
 
 # --- the toss, and a human match that pauses for it -------------------------------------
@@ -986,8 +994,10 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
     away_bowling_1 = (_apply_bowling_impact(away.xi, away_forced_target, away.impact)
                        if away_forced else away.xi)
     away_bowl_impact_1 = away.impact if away_forced else None
+    cond = match_conditions(rng)                  # [A267] one draw, both innings
     first = play_innings(model, lineup(home.xi, model, None),
-                          attack(away_bowling_1, model, away_bowl_impact_1), rng)
+                          attack(away_bowling_1, model, away_bowl_impact_1), rng,
+                          conditions=cond)
 
     # At the break: the discipline the human is asked about is always their SECOND
     # innings -- "bowl" if they batted first, "bat" if they bowled first. The opponent's
@@ -1025,7 +1035,7 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
     home_bowl_impact = home.impact if home_target is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
-                          rng, target=first.runs)
+                          rng, target=first.runs, conditions=cond)
 
     if stats is not None:
         if human is home:
@@ -1036,7 +1046,7 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
             stats.add_bowling(first)
 
     return _finish_result(model, rng, home, away, stage, first, second,
-                           toss_won_by_you=won_toss, toss_elected=elects)
+                           toss_won_by_you=won_toss, toss_elected=elects, conditions=cond)
 
 
 class _OpenMatchNeedsToss(Exception):
@@ -1105,8 +1115,10 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
     away_bowling_1 = (_apply_bowling_impact(away.xi, away_forced_target, away.impact)
                        if away_forced else away.xi)
     away_bowl_impact_1 = away.impact if away_forced else None
+    cond = match_conditions(rng)                  # [A267] one draw, both innings
     first = play_innings(model, lineup(home.xi, model, None),
-                          attack(away_bowling_1, model, away_bowl_impact_1), rng)
+                          attack(away_bowling_1, model, away_bowl_impact_1), rng,
+                          conditions=cond)
 
     def _decide(side: Side, opponent: Side, discipline: str, forced: bool) -> Card | None:
         if side.impact is None or forced:
@@ -1122,7 +1134,7 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
     home_bowl_impact = home.impact if home_target is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
-                          rng, target=first.runs)
+                          rng, target=first.runs, conditions=cond)
 
     if stats is not None and track is not None:
         if track is home:
@@ -1132,7 +1144,7 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
             stats.add_batting(second)
             stats.add_bowling(first)
 
-    return _finish_result(model, rng, home, away, stage, first, second)
+    return _finish_result(model, rng, home, away, stage, first, second, conditions=cond)
 
 
 def _credit(standing: Standing, runs: int, balls: int, wickets: int,

@@ -18,7 +18,8 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 
 COACH_TESTS = True          # conftest's `coach_off` leaves the coach on for this module
 DOC = read_document()
-TRIAL_SEED = 3   # 1 -> 3 after A265; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
+ROLE_SEED = 225  # (4 until A267; the only one of 0-400 that still changes role) a spinner who becomes an all-rounder; re-find after an engine or rating change
+TRIAL_SEED = 0   # 1 -> 3 after A265, 3 -> 0 after A266; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
 
@@ -481,14 +482,14 @@ def test_a_batter_who_takes_the_trial_bowls_and_one_who_passes_is_offered_the_ro
 
 def test_resuming_after_a_role_change_is_the_same_as_replaying(deck, model):
     setup = C.Setup("Test", "spin", 2010, False)
-    career, moves = _drive(deck, model, 4, setup, lambda c: 0)
+    career, moves = _drive(deck, model, ROLE_SEED, setup, lambda c: 0)
     changed = [i for i, r in enumerate(career.seasons) if r.role and not r.role["trial"]]
-    assert changed, "seed 4's spinner becomes an all-rounder"
+    assert changed, "ROLE_SEED's spinner becomes an all-rounder"
     # replay to just after the change, then resume from a JSON round trip of the checkpoint
     k = changed[0] + 1
     used, partial = [], None
     for n in range(len(moves) + 1):
-        c = C.play_career(deck, model, 4, setup, moves[:n])
+        c = C.play_career(deck, model, ROLE_SEED, setup, moves[:n])
         if len(c.seasons) == k and c.pending is not None:
             used = moves[:n]
             partial = c
@@ -581,12 +582,12 @@ def test_the_coach_offer_and_the_role_path_reach_the_page(deck, model):
     from web.app import app
 
     setup = C.Setup("Test", "spin", 2010, False)
-    career, moves = _drive(deck, model, 4, setup, lambda c: 0)
+    career, moves = _drive(deck, model, ROLE_SEED, setup, lambda c: 0)
     path = R.role_path(career)
     assert path[0] == "Spinner" and any(p.startswith("All-rounder from ") for p in path)
     # the first coach offer, as the page receives it
     for n in range(len(moves)):
-        c = C.play_career(deck, model, 4, setup, moves[:n])
+        c = C.play_career(deck, model, ROLE_SEED, setup, moves[:n])
         if c.pending is not None and c.pending.kind == "coach":
             out = R._pending(c.pending)
             assert out.kind == "coach" and out.coach.title and len(out.coach.options) >= 2

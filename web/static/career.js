@@ -1056,7 +1056,7 @@ function crSeason(d, r){
           ${crBadge(r.squad, 'dim', 'Squad player')}
           ${crBadge(r.missed - (r.dropped || 0) > 0, 'dim', `Missed ${r.missed - (r.dropped || 0)} match${r.missed - (r.dropped || 0) === 1 ? '' : 'es'}`)}
           ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
-          ${crBadge(r.card > r.form, 'dim', `Played to ${r.form}, reputation held the grade at ${r.card}`)}
+          ${crBadge(r.card !== r.form, 'dim', `Played to ${r.form}; your career moved the grade to ${r.card}`)}
           ${crBadge(!!r.mega, 'gold', esc(r.mega || ''))}
         </div>
         <div class="cr-lines">

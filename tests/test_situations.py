@@ -261,3 +261,88 @@ def test_the_committed_model_carries_the_curve_and_intent(model):
     behind = I.at(model.intent["mid"], 45.0)
     ahead = I.at(model.intent["mid"], -30.0)
     assert behind[0] > 0 > ahead[0] and behind[1] > 1 > ahead[1]
+
+
+# --------------------------------------------------------------------------- [A268] centring
+def _ball(over, pos, faced, style="pace"):
+    return Ball("m", 2016, 1, over, 0, "a", "b", "x", style, 1, False, False, faced, 0, pos,
+                0, 1, None)
+
+
+def _mix():
+    """Place 1 faces the new ball and mostly pace; place 9 only the death and mostly spin."""
+    balls = ([_ball(2, 1, i, "pace") for i in range(60)] + [_ball(10, 1, 20, "spin")] * 20
+             + [_ball(18, 9, 0, "spin")] * 9 + [_ball(18, 9, 3, "pace")])
+    return X.position_mix(balls)
+
+
+def test_position_mix_counts_each_places_balls():
+    mix = _mix()
+    assert mix[1]["pp"] == 60 and mix[1]["mid"] == 20 and mix[1]["death"] == 0
+    assert mix[1]["spin"] == 20 and mix[1]["pace"] == 60
+    assert mix[9]["death"] == 10 and mix[9]["spin"] == 9 and mix[9]["new"] == 10
+    # SETTLED is the boundary: faced 0..SETTLED-1 is new
+    from etl.skills import SETTLED
+    assert mix[1]["new"] == SETTLED and mix[1]["set"] == 80 - SETTLED
+
+
+def test_a_lean_nets_to_zero_where_the_card_bats_and_keeps_its_shape():
+    """Narine 2012's shape: a career powerplay and middle-overs lean, centred over 7 balls at
+    the death, so it adds runs on nearly every ball once his card opens. Re-centred on place
+    1, it adds none there, and the gap between the phases is untouched."""
+    mix = _mix()
+    fields = {"phase_bat": [0.22, 0.25, 0.0], "style_bat": [0.17, 0.0], "burn": [0.0, 0.05],
+              "settle_offset": [-0.07, -0.26], "phase_bowl": [0.1, -0.1, 0.0],
+              "phase_wkt": [-0.02, -0.02, 0.05]}
+    got = X.recentre(fields, {1}, mix)
+    m = mix[1]
+    assert sum(v * m[k] for v, k in zip(got["phase_bat"], X.PHASES)) == pytest.approx(0, abs=1e-5)
+    assert sum(v * m[k] for v, k in zip(got["style_bat"], X.STYLES)) == pytest.approx(0, abs=1e-5)
+    assert got["burn"][0] * m["new"] + got["burn"][1] * m["set"] == pytest.approx(0, abs=1e-5)
+    for f in ("phase_bat", "style_bat", "burn"):
+        old, new = fields[f], got[f]
+        assert [a - b for a, b in zip(old, old[1:])] == pytest.approx(
+            [a - b for a, b in zip(new, new[1:])], abs=1e-5)
+    # settle_offset is not a lean, and the bowling leans are A265's business
+    for f in ("settle_offset", "phase_bowl", "phase_wkt"):
+        assert got[f] == fields[f]
+    # and where he really batted (place 9, the death) a lean centred there would barely move
+    at9 = X.recentre({"phase_bat": [0.22, 0.25, 0.0]}, {9}, mix)["phase_bat"]
+    assert at9 == pytest.approx([0.22, 0.25, 0.0], abs=1e-6)
+
+
+def test_places_are_pooled_by_balls_faced_not_averaged():
+    """Places 1 and 9 together: place 1's 80 balls outweigh place 9's 10."""
+    mix = _mix()
+    got = X.recentre({"phase_bat": [0.3, 0.0, 0.0]}, {1, 9}, mix)["phase_bat"]
+    assert got[0] == pytest.approx(0.3 - 0.3 * 60 / 90, abs=1e-6)
+
+
+def test_a_place_with_no_balls_or_a_missing_lean_is_left_alone():
+    mix = _mix()
+    lean = {"phase_bat": [0.3, 0.0, 0.0], "style_bat": None}
+    got = X.recentre(lean, {5}, mix)                 # nobody batted at 5 in this archive
+    assert got["phase_bat"] == [0.3, 0.0, 0.0] and got["style_bat"] is None
+    assert X.recentre(lean, None, mix)["phase_bat"] == [0.3, 0.0, 0.0]
+
+
+def test_attach_situations_centres_on_the_cards_own_positions(monkeypatch):
+    from etl import feasibility as F
+    card = next(c for cs in read_document()["deck"]["cards_by_fs"].values() for c in cs
+                if c["bat_scoring"] is not None and c["bowl_scoring"] is not None)
+    from tools.snapshot_deck import _card_from
+    c = dataclasses.replace(_card_from(card), positions=frozenset({1}))
+    lean = {"phase_bat": [0.22, 0.25, 0.0], "style_bat": [0.17, 0.0], "burn": [0.0, 0.05],
+            "settle_offset": [-0.07, -0.26], "phase_bowl": [0.1, -0.1, 0.0],
+            "phase_wkt": [-0.02, -0.02, 0.05]}
+    mix = _mix()
+    monkeypatch.setattr(X, "build", lambda conn: {
+        "players": {(c.person_id, c.season_year): lean}, "pos_mix": mix})
+    cards = {1: [c]}
+    F.attach_situations(None, cards)
+    got = cards[1][0]
+    want = X.recentre(lean, {1}, mix)
+    assert list(got.phase_bat) == want["phase_bat"] and list(got.burn) == want["burn"]
+    assert list(got.style_bat) == want["style_bat"]
+    assert list(got.settle_offset) == lean["settle_offset"]
+    assert list(got.phase_bowl) == lean["phase_bowl"] and list(got.phase_wkt) == lean["phase_wkt"]

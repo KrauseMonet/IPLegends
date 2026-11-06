@@ -12,7 +12,7 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 
 DOC = read_document()
 # Seeded seasons, found by search; an engine change can move them (re-find, never loosen)
-KEY_SEED = 97      # 2 -> 26 after A259, 26 -> 20 after A265, 20 -> 97 after A267
+KEY_SEED = 13      # 2 -> 26 after A259, 26 -> 20 after A265, 20 -> 97 after A267, 97 -> 13 after A268
 NERVE_SEED = 9      # 3 -> 9 after A265: two playoff calls and one league moment
 pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 

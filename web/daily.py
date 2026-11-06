@@ -162,7 +162,11 @@ def _pinned_deck(full: Deck, pin: dict, tag: str) -> Deck:
 
         def old(c):
             vals = pin["cards"].get(str(c.fs_id), {}).get(c.person_id)
-            return c if vals is None else replace(c, **dict(zip(names, vals)))
+            if vals is None:
+                return c
+            # a lean is a list in JSON and a tuple on the card, which is frozen and hashed
+            return replace(c, **{n: tuple(v) if isinstance(v, list) else v
+                                 for n, v in zip(names, vals)})
 
         deck = Deck(cards_by_fs={fs: [old(c) for c in cards]
                                  for fs, cards in full.cards_by_fs.items()},
@@ -217,6 +221,25 @@ def plain_deck(full: Deck) -> Deck:
         _PLAIN_DECKS.clear()
         _PLAIN_DECKS[id(full)] = deck
     return deck
+
+
+# [A268] Batting leans re-centred on the balls faced at the card's own positions. A day played
+# on A260's centring (from SITUATIONS_FROM until A268 ships) keeps it, from the pin
+# `tools.pin_leans_a260` wrote before the change. Set to the day after A268 ships; move it
+# if it ships later. Equal to SITUATIONS_FROM, so no day was played on A260's centring.
+LEANS_CENTRED_FROM = datetime.date(2026, 11, 7)
+LEANS_A260_PIN = Path(__file__).resolve().parent.parent / "data" / "leans_a260.json.gz"
+
+
+@functools.lru_cache(maxsize=1)
+def leans_a260() -> dict:
+    """The frozen A260 batting leans."""
+    return _read_pin(LEANS_A260_PIN)
+
+
+def a260_leans_deck(full: Deck) -> Deck:
+    """`full` with every card's batting leans as A260 centred them (A268)."""
+    return _pinned_deck(full, leans_a260(), "leans_a260")
 
 
 def plain_model(model: Model) -> Model:
@@ -505,6 +528,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     full = nationality_deck(full, day.challenge_date)
     if day.challenge_date < SITUATIONS_FROM:
         full, model = plain_deck(full), plain_model(model)
+    elif day.challenge_date < LEANS_CENTRED_FROM:
+        full = a260_leans_deck(full)
     if day.challenge_date < ENGINE_TWO_LEVEL_FROM:
         full, model = a160_deck(full), a160_model(model)
     elif day.challenge_date < REPLAY_ENGINE_FROM:

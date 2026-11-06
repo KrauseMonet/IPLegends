@@ -108,6 +108,54 @@ def leans(balls: list[skills.Ball], measured: dict) -> dict[tuple[str, int], dic
     return dict(out)
 
 
+def position_mix(balls: list[skills.Ball]) -> dict[int, Counter]:
+    """[A268] The balls faced at each place in the order: by phase, against each style, and
+    new or set -- the mix a card's batting leans are centred on, since the engine plays a
+    card at its positions, not at the balls its player really faced."""
+    mix: dict[int, Counter] = defaultdict(Counter)
+    for b in balls:
+        m = mix[b.pos]
+        m[skills.phase_of(b.over)] += 1
+        if b.style in STYLES:
+            m[b.style] += 1
+        m["set" if b.faced >= skills.SETTLED else "new"] += 1
+    return {p: Counter(m) for p, m in mix.items()}
+
+
+BAT_LEANS = ("phase_bat", "style_bat", "burn")
+
+
+def recentre(fields: dict, positions, mix: dict[int, Counter]) -> dict:
+    """[A268] `fields` with its batting leans re-centred on the balls faced at `positions`.
+
+    A260 centred each lean over the balls the player really faced that season, so it adds
+    nothing over HIS season. The engine plays the card at its positions, though, and where
+    those differ -- a season too thin to place him, so his career's place is used (A76); a
+    finisher carded in the middle order -- the lean stops netting to zero there: Sunil
+    Narine faced 7 balls in 2012, all at the death, yet his card opens, and his
+    powerplay lean was played on nearly every ball, +4.7 runs a match nobody scored. Each
+    lean keeps its SHAPE (where he scores more or less) and loses only its mean over the
+    mix where he is played. The mix is the positions' balls pooled, so a place that faces
+    more balls weighs more. `settle_offset` is not a lean and is untouched; nor are the
+    bowling leans, whose gap is the engine's phase-blind rotation (A265), not centring."""
+    pooled = Counter()
+    for p in positions or ():
+        pooled.update(mix.get(p, Counter()))
+    out = dict(fields)
+
+    def centre(vals, keys):
+        n = sum(pooled[k] for k in keys)
+        if vals is None or not n:
+            return vals
+        mean = sum(v * pooled[k] for v, k in zip(vals, keys)) / n
+        return [round(v - mean, 6) for v in vals]
+
+    out["phase_bat"] = centre(fields.get("phase_bat"), PHASES)
+    out["style_bat"] = centre(fields.get("style_bat"), STYLES)
+    out["burn"] = centre(fields.get("burn"), ("new", "set"))
+    return out
+
+
 def build(conn) -> dict:
     """{"table": settling table, "players": {(person, season): fields}, "balls": adjusted
     balls, "measured": metrics}. Memoised per connection: a snapshot build asks twice (the
@@ -123,7 +171,8 @@ def build(conn) -> dict:
     players = leans(balls, measured)
     for (p, season), (r, logm) in offsets.items():
         players.setdefault((p, season), {})["settle_offset"] = [round(r, 6), round(logm, 6)]
-    doc = {"table": table, "players": players, "balls": balls, "measured": measured}
+    doc = {"table": table, "players": players, "balls": balls, "measured": measured,
+           "pos_mix": position_mix(balls)}
     _MEMO.clear()
     _MEMO[key] = doc
     return doc

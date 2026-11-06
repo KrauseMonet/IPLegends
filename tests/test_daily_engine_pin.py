@@ -5,6 +5,7 @@ switch on use the deck as it stands."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 from types import SimpleNamespace
 
@@ -87,7 +88,10 @@ def test_play_and_score_switches_engine_on_the_day(deck_model, monkeypatch, day_
         assert seen["model"].settle == {} and seen["model"].intent == {}
     elif pinned == "a259":
         # [A267] situations on (they shipped with A259's numbers), A259's numbers pinned
-        assert seen["deck"] is D.a259_deck(D.nationality_deck(deck, day.challenge_date))
+        base = D.nationality_deck(deck, day.challenge_date)
+        if day.challenge_date < D.LEANS_CENTRED_FROM:     # [A268] and A260's batting leans
+            base = D.a260_leans_deck(base)
+        assert seen["deck"] is D.a259_deck(base)
         assert seen["model"].intent == model.intent
     else:
         assert seen["deck"] is deck and seen["model"] is model
@@ -157,3 +161,63 @@ def test_the_situations_switch_on_their_own_day(deck_model, monkeypatch, offset,
     D.play_and_score(deck, model, day, 1, "state")
     assert (seen["deck"] is D.plain_deck(D.nationality_deck(deck, day.challenge_date))) == plain
     assert (seen["model"].intent == {}) == plain
+
+
+# --------------------------------------------------------------------------- [A268]
+LEANS = ("phase_bat", "style_bat", "burn")
+
+
+def test_the_a260_lean_pin_covers_every_lean_and_differs_from_today(deck_model):
+    deck, _ = deck_model
+    pin = D.leans_a260()["cards"]
+    cards = [(fs, c) for fs, cs in deck.cards_by_fs.items() for c in cs
+             if any(getattr(c, f) is not None for f in LEANS)]
+    assert all(c.person_id in pin.get(str(fs), {}) for fs, c in cards)
+    now = lambda c: [list(getattr(c, f)) if getattr(c, f) is not None else None for f in LEANS]
+    differ = sum(pin[str(fs)][c.person_id] != now(c) for fs, c in cards)
+    assert differ > len(cards) / 2
+
+
+def test_an_a260_days_deck_carries_the_old_leans_and_nothing_else(deck_model):
+    deck, _ = deck_model
+    old = D.a260_leans_deck(deck)
+    pin = D.leans_a260()["cards"]
+    for fs, cards in deck.cards_by_fs.items():
+        for now, then in zip(cards, old.cards_by_fs[fs]):
+            vals = pin.get(str(fs), {}).get(now.person_id)
+            if vals is None:
+                assert then is now
+                continue
+            assert [list(getattr(then, f)) if getattr(then, f) is not None else None
+                    for f in LEANS] == vals
+            assert all(isinstance(getattr(then, f), (tuple, type(None))) for f in LEANS)
+            assert dataclasses.replace(then, **{f: getattr(now, f) for f in LEANS}) == now
+
+
+def test_a_missing_a260_lean_pin_is_an_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(D, "LEANS_A260_PIN", tmp_path / "absent.json.gz")
+    D.leans_a260.cache_clear()
+    try:
+        with pytest.raises(OSError):
+            D.leans_a260()
+    finally:
+        D.leans_a260.cache_clear()
+
+
+@pytest.mark.parametrize("offset, a260", [(0, True), (2, True), (3, False)])
+def test_the_lean_centring_switches_on_its_own_day(deck_model, monkeypatch, offset, a260):
+    """Days from SITUATIONS_FROM until LEANS_CENTRED_FROM keep A260's leans. The real dates
+    leave that window empty (A268 shipped before SITUATIONS_FROM); widened here to test it."""
+    deck, model = deck_model
+    seen = {}
+    monkeypatch.setattr(D, "_play_and_score",
+                        lambda full, mdl, day, player, state: seen.update(deck=full, model=mdl))
+    monkeypatch.setattr(D, "ENGINE_TWO_LEVEL_FROM", datetime.date(2000, 1, 1))
+    monkeypatch.setattr(D, "REPLAY_ENGINE_FROM", datetime.date(2000, 1, 1))
+    monkeypatch.setattr(D, "LEANS_CENTRED_FROM", D.SITUATIONS_FROM + datetime.timedelta(days=3))
+    day = SimpleNamespace(challenge_date=D.SITUATIONS_FROM + datetime.timedelta(days=offset))
+    D.play_and_score(deck, model, day, 1, "state")
+    base = D.nationality_deck(deck, day.challenge_date)
+    assert (seen["deck"] is D.a260_leans_deck(base)) == a260
+    assert (seen["deck"] is base) == (not a260)
+    assert seen["model"] is model

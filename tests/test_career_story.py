@@ -21,14 +21,14 @@ DOC = read_document()
 needs_deck = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 CSK_2019 = 26
 K = 4
-SLUMP = (113, 25)  # (squad, seed): see test_you_are_not_left_out_in_the_match...; 22 -> 52, 52 -> 29 after A266, 29 -> (113, 25) after A267 -- each time the one candidate (of 5, then 9) that fails with the rule removed
+SLUMP = (45, 29)   # (squad, seed): see test_you_are_not_left_out_in_the_match...; 22 -> 52, 52 -> 29 after A266, 29 -> (113, 25) after A267, -> (45, 29) after A268 -- each time a candidate (of 5, 9, then 13) that fails with the rule removed
                    # after A265, chosen because it FAILS with the rule removed (the first
                    # four seasons found passed with or without it)
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
 # hamstring 9 -> 14 re-found after A259: the season must stop at the hamstring before any key
 # moment, since test_an_incident_a_career_has_used_up_does_not_come_again plays it with no answers
-OPENER = {"press": 2, "slump": 3, "row": 7, "hamstring": 9, "wedding": 12, "collapse": 20}   # hamstring 14 -> 34 after A265, 34 -> 9 after A267
-PACE = {"press": 40, "side_strain": 3, "hamstring": 1, "back": 68, "death": 35, "wedding": 25}   # A239, A251; press re-found after A259; press 73 -> 21, back 9 -> 68 after A265; press 21 -> 40, back 68 -> 9, death 19 -> 18 after A266; back 9 -> 68, death 18 -> 35 after A267
+OPENER = {"press": 2, "slump": 3, "row": 0, "hamstring": 14, "wedding": 12, "collapse": 20}   # hamstring 14 -> 34 after A265, 34 -> 9 after A267; row 7 -> 0, hamstring 9 -> 14 after A268
+PACE = {"press": 42, "side_strain": 3, "hamstring": 1, "back": 51, "death": 35, "wedding": 25}   # A239, A251; press re-found after A259; press 73 -> 21, back 9 -> 68 after A265; press 21 -> 40, back 68 -> 9, death 19 -> 18 after A266; back 9 -> 68, death 18 -> 35 after A267; press 40 -> 42, back 68 -> 51 after A268
 
 
 @pytest.fixture(scope="module")

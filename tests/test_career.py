@@ -1065,9 +1065,9 @@ def test_an_approach_moves_both_numbers_at_the_measured_rate():
 # pinned to the engine, so an engine change can move them (A208 moved every one of them,
 # Kings XI 2019 before this); re-find them by search rather than loosening a guard.
 MOMENT_FS = 26
-MOMENT_SEED = 16  # 2 -> 1 after A266, 1 -> 16 after A267 (each time the seed that passes every test AND fails with the cap raised); re-found after A239 moved seed 1 (to 2), after A259 (2 -> 10), after
+MOMENT_SEED = 95  # 2 -> 1 after A266, 1 -> 16 after A267, 16 -> 95 after A268 (0, 3 and 8 passed every test but also passed with the cap raised) (each time the seed that passes every test AND fails with the cap raised); re-found after A239 moved seed 1 (to 2), after A259 (2 -> 10), after
                   # A261 (10 -> 3), and re-found after A265 (3 -> 2)
-EDGE = (26, 0)    # (101, 0) until A266, Chennai 2019 until A265: see test_every_league_stop_and_only_those_is_a_close_race
+EDGE = (101, 0)   # (26, 0) until A268, (101, 0) until A266, Chennai 2019 until A265: see test_every_league_stop_and_only_those_is_a_close_race
 
 
 def _moment_year(deck, model, role="opener", seed=None, fs_only=None):
@@ -1339,12 +1339,12 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 26, "kept": 77}   # A267: dropped 140 -> 26, kept 140 -> 77; A266: dropped 77 -> 140, kept 161 -> 140; both re-found after A251's home number (101, 123),
+MOB_FS = {"dropped": 123, "kept": 26}   # A268: dropped 26 -> 123, kept 77 -> 26; A267: dropped 140 -> 26, kept 140 -> 77; A266: dropped 77 -> 140, kept 161 -> 140; both re-found after A251's home number (101, 123),
                                           # after A259 (77, 50), after A261 (77, 140), and after A265 (77, 161)
-MOB_SEED = {"dropped": 0, "kept": 0}   # A267: kept 1 -> 0; A266: kept 1 -> 1 (squad moved); re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
+MOB_SEED = {"dropped": 31, "kept": 0}   # A268: dropped 0 -> 31; A267: kept 1 -> 0; A266: kept 1 -> 1 (squad moved); re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
                                           # squad season reaches poor form AND whose regular
                                           # season holds a block beside the drop are rare
-SIXTH = (26, 1)    # (50, 2) until A267, (161, 1) until A266; re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
+SIXTH = (50, 0)    # (26, 1) until A268, (50, 2) until A267, (161, 1) until A266; re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
                    # ((50, 2) -> (140, 5)): see
                    # test_a_make_or_break_is_failed_only_in_the_worst_sixth
 

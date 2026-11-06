@@ -433,14 +433,18 @@ def load_deck(conn) -> Deck:
 
 def attach_situations(conn, cards_by_fs) -> None:
     """[A260] Each card's measured leans and settled share (etl.situations), only for the
-    disciplines it has. A card with no ball in a discipline gets no lean in it."""
+    disciplines it has. A card with no ball in a discipline gets no lean in it. [A268] Its
+    batting leans are re-centred on the balls faced at the card's own positions."""
     from etl import situations
-    players = situations.build(conn)["players"]
+    built = situations.build(conn)
+    players, mix = built["players"], built["pos_mix"]
     for fs, cards in cards_by_fs.items():
         for i, c in enumerate(cards):
             got = players.get((c.person_id, c.season_year))
             if not got:
                 continue
+            if c.positions:     # [A268] centred where the card bats, not where he did
+                got = situations.recentre(got, c.positions, mix)
             bat = c.bat_scoring is not None
             fields = {"phase_bat": got.get("phase_bat") if bat else None,
                       "style_bat": got.get("style_bat") if bat else None,

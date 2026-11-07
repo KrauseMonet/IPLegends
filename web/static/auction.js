@@ -1070,7 +1070,7 @@ function renderRetain(){
     return `<div class="auc-retain-row${kept ? ' kept' : ''}">
       ${ICON[c.kind] || ''}${keeperBadge(c)}
       <span class="auc-retain-name" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
-        ${c.overseas ? '<em class="auc-tag os">Overseas</em>' : ''}${skillChips(c, true)}</span>
+        ${bandTag(c)}${c.overseas ? '<em class="auc-tag os">Overseas</em>' : ''}${skillChips(c, true)}</span>
       ${choose}${ratingBadge(c, true)}
       <button class="act minor" onclick="toggleRetain(${cur.index})">${kept ? 'Release' : 'Keep'}</button>
     </div>`;
@@ -1082,7 +1082,7 @@ function renderRetain(){
   $('#aucRetainSpend').textContent = spend ? cr(spend) : '';
   $('#aucRetainSum').innerHTML = `
     ${RETAIN.map((i, n) => `<div class="auc-kept-row"><span>${n + 1}.</span>
-        <b>${byIndex.get(i).name}</b><em>${byIndex.get(i).season_year}</em><i>${cr(slabs[n])}</i></div>`).join('')
+        <b>${byIndex.get(i).name} ${bandTag(byIndex.get(i))}</b><em>${byIndex.get(i).season_year}</em><i>${cr(slabs[n])}</i></div>`).join('')
       || '<div class="note">Nobody kept yet. You can start with a full purse and six Right to Match cards.</div>'}
     <div class="auc-retain-totals">
       <div><b>${cr(A.purse_total - spend)}</b><span>purse for the auction</span></div>

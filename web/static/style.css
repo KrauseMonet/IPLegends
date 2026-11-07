@@ -2096,6 +2096,8 @@ body{
 .auc-retain-row.kept{background:rgba(245,184,61,.1);box-shadow:inset 3px 0 0 var(--gold)}
 .auc-retain-name{flex:1;font-weight:700;cursor:pointer;font-size:14px}
 .auc-retain-name .auc-tag{margin-left:6px;font-style:normal}
+/* [A271] the batting band beside a retention candidate, as on the squad panel (A158) */
+.auc-retain-name .auc-band,.auc-kept-row b .auc-band{margin-left:6px;vertical-align:2px;font-weight:400}
 .auc-season{font-family:var(--mono);font-size:12px;background:var(--panel-3);color:var(--ink);
   border:1px solid var(--line-strong);border-radius:6px;padding:5px 6px}
 .auc-season-one{font-family:var(--mono);font-size:12px;color:var(--ink-3);padding:0 6px}

@@ -71,6 +71,12 @@ def read_token(token: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]:
         raise HTTPException(400, "That career could not be read.") from None
     if not hmac.compare_digest(_sign(payload), sig):
         raise HTTPException(400, "That career could not be read.")
+    return decode_payload(payload)
+
+
+def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]:
+    """The career in a token's payload, with no signature check: for `read_token`, and for
+    a tool that has already matched the payload to a saved career by its hash (A272)."""
     try:
         d = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if d.get("v") != TOKEN_VERSION:
@@ -1064,6 +1070,20 @@ class HallOut(BaseModel):
     legend_group_order: int | None = None
     honours: list[str] = []       # which induction honours it holds (A225)
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
+    extras: list["ExtraLegendOut"] = []   # [A272] more seasons kept as legends, by request
+
+
+class ExtraLegendOut(BaseModel):
+    """[A272] One extra legend season of a saved career, shaped like a Hall of Fame entry's
+    legend half so the lobby picker lists it the same way. `key` is what to bring it by."""
+    key: str
+    name: str
+    card: dict                    # {"legend": ...}, as a hall entry's card holds it
+    legend_value: float | None = None
+    legend_bat: float | None = None
+    legend_bowl: float | None = None
+    legend_group: str | None = None
+    legend_group_order: int | None = None
 
 
 def _legend_fields(card: dict) -> dict:
@@ -1112,5 +1132,9 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             legend=bool(r["card"].get("legend")), **_legend_fields(r["card"]),
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
-            completed_at=r["completed_at"].isoformat()))
+            completed_at=r["completed_at"].isoformat(),
+            extras=[ExtraLegendOut(key=career_results.extra_key(r["key"], x["year"]),
+                                   name=r["name"], card={"legend": x},
+                                   **_legend_fields({"legend": x}))
+                    for x in r["card"].get("extra_legends") or []]))
     return out

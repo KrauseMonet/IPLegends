@@ -794,6 +794,12 @@ function legendsByValue(hall){
   return hall.filter(c => c.legend)
     .sort((a, b) => (b.legend_value ?? -Infinity) - (a.legend_value ?? -Infinity));
 }
+// [A272] Extra legend seasons a career carries by request, one entry each. They are listed
+// after the cut, always: they were asked for by name, so a limit must never hide them.
+function legendExtras(hall){
+  return hall.flatMap(c => (c.extras || []).map(x => ({...x, legend: true, extra: true})))
+    .sort((a, b) => (b.legend_value ?? -Infinity) - (a.legend_value ?? -Infinity));
+}
 // [A254, A269] Grouped by the role the legend's season was played in (A238), each group most
 // valuable first. The groups are the server's (`legend_group`: batters, wicketkeeper-batters,
 // all-rounders -- full-time bowlers among them --, spinners, fast bowlers) in its order
@@ -816,14 +822,16 @@ function legendIsMine(c, mine){
 function legendChoices(hall, mine, limit){
   const same = c => legendIsMine(c, mine);
   const groups = [];
-  for (const c of legendsByValue(hall)){
+  const group = c => {
     let g = groups.find(g => g.role === legendRole(c));
-    if (!g) groups.push(g = {role: legendRole(c), order: c.legend_group_order ?? 99, all: []});
-    g.all.push(c);
-  }
+    if (!g) groups.push(g = {role: legendRole(c), order: c.legend_group_order ?? 99, all: [], extra: []});
+    return g;
+  };
+  for (const c of legendsByValue(hall)) group(c).all.push(c);
+  for (const c of legendExtras(hall)) group(c).extra.push(c);
   groups.sort((a, b) => a.order - b.order);    // stable: without an order, best group first
-  return groups.map(g => ({role: g.role, total: g.all.length, items: limit == null ? g.all
-    : g.all.slice(0, limit).concat(g.all.slice(limit).filter(same).slice(0, 1))}));
+  return groups.map(g => ({role: g.role, total: g.all.length, items: (limit == null ? g.all
+    : g.all.slice(0, limit).concat(g.all.slice(limit).filter(same).slice(0, 1))).concat(g.extra)}));
 }
 // [A269] What a legend adds, in runs a match. An all-rounder's batting and bowling are shown
 // apart, since a twelve may need one more than the other.
@@ -863,7 +871,7 @@ function renderLobbyLegends(r){
          ${legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit).map(g => `<optgroup label="${esc(g.role)}">${g.items.map(c => { const l = c.card.legend || {};
            // [A225] a legend is a season, so the season is what is named
            return `<option value="${c.key}"${legendIsMine(c, r.legends[MY_PID]) ? ' selected' : ''}>
-           ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}</option>`; }).join('')}</optgroup>`).join('')}
+           ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}${c.extra ? ' · extra' : ''}</option>`; }).join('')}</optgroup>`).join('')}
        </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>
        ${ME.legend_limit != null && legendChoices(ROOM_HALL, null, null).some(g => g.total > ME.legend_limit) ? `<div class="note" style="margin-top:4px">Your best ${ME.legend_limit === 1 ? 'legend' : ME.legend_limit} in each role, by runs a match, of ${legendsByValue(ROOM_HALL).length} legends.</div>` : ''}`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one

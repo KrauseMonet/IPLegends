@@ -29,14 +29,14 @@ def legacy(runs: int, wickets: int) -> int:
     return runs + 20 * wickets
 
 
-def legend(career: C.Career) -> dict | None:
+def legend(career: C.Career, year: int | None = None) -> dict | None:
     """[A215] The best version of the player, kept so a friends' auction room can bring him
     in: since A225 his best season, carded like a real one (`C.legend_card`). Stored, not
     re-derived, because a later change to the career engine must not change a legend already
     saved. `rating` is the number on his card; `basis` says which rule made it."""
     from tools.snapshot_deck import _card_doc
 
-    best = C.legend_card(career)
+    best = C.legend_card(career, year)
     if best is None:
         return None
     r, c = best
@@ -85,6 +85,11 @@ def card(career: C.Career) -> dict:
     s = career.summary
     return {
         "legend": legend(career),
+        # [A273] every measured season, carded as a legend, so any of them can be added to
+        # the picker later (`add_extra_legend`) without the career's token. ~0.8 kB a season;
+        # the Hall of Fame route leaves it out of what it reads (`hall`).
+        "season_legends": [x for x in (legend(career, r.year) for r in career.seasons
+                                       if r.measured) if x is not None],
         "balls": s.balls, "outs": s.outs, "highest": s.highest, "fifties": s.fifties,
         "hundreds": s.hundreds, "bowl_balls": s.bowl_balls, "bowl_runs": s.bowl_runs,
         "five_fors": s.five_fors, "hat_tricks": s.hat_tricks, "finals": s.finals,
@@ -130,7 +135,7 @@ def hall(conn, account_id: int) -> list[dict]:
     rows = conn.execute(
         """
         select natural_key, player_name, role, debut, overseas, seasons, matches, runs,
-               wickets, titles, peak_card, peak_year, ending, card, completed_at
+               wickets, titles, peak_card, peak_year, ending, card - 'season_legends', completed_at
           from career_results
          where account_id = %s
          order by completed_at desc
@@ -146,12 +151,64 @@ def hall(conn, account_id: int) -> list[dict]:
     return out[:HALL_LIMIT]
 
 
+# [A272] A career brings its best-graded season (A225), and may carry EXTRA legend seasons a
+# player asked for by name, stored beside it in `card.extra_legends` (same shape as `legend`).
+# The picker names one as "<career key>@<year>", so it is still read from this account's own
+# saved careers and nobody brings a season they did not play.
+EXTRA_SEP = "@"
+
+
+def extra_key(key: str, year: int) -> str:
+    return f"{key}{EXTRA_SEP}{year}"
+
+
 def legend_of(conn, account_id: int, key: str) -> dict | None:
-    """[A215] The legend of one of this account's own saved careers, or None."""
+    """[A215] The legend of one of this account's own saved careers, or None. [A272] A key
+    naming a season (`extra_key`) reads that career's extra legend for the year."""
+    base, sep, year = key.partition(EXTRA_SEP)
     row = conn.execute(
-        "select card -> 'legend' from career_results where account_id = %s and natural_key = %s",
+        "select card -> 'legend', card -> 'extra_legends' from career_results"
+        " where account_id = %s and natural_key = %s",
+        (account_id, base)).fetchone()
+    if not row:
+        return None
+    if not sep:
+        return row[0] or None
+    if not year.isdigit():
+        return None
+    return next((x for x in row[1] or [] if x.get("year") == int(year)), None)
+
+
+def add_extra_legend(conn, account_id: int, key: str, year: int,
+                     career: C.Career | None = None) -> dict:
+    """[A272] Keep one more season of a saved career as a legend; its key must be a career
+    this account has saved. [A273] The season comes from the saved card's `season_legends`;
+    a career saved before every season was kept needs its token's `career` instead.
+    Re-adding a year replaces it. Raises ValueError when there is nothing to add."""
+    row = conn.execute(
+        "select card -> 'extra_legends', card -> 'legend' ->> 'year', card -> 'season_legends'"
+        " from career_results where account_id = %s and natural_key = %s for update",
         (account_id, key)).fetchone()
-    return row[0] if row and row[0] else None
+    if row is None:
+        raise ValueError("this account has not saved that career")
+    if career is not None:
+        leg = legend(career, year)
+    else:
+        leg = next((x for x in row[2] or [] if x.get("year") == year), None)
+        if leg is None and not row[2]:
+            raise ValueError("that career was saved before every season was kept; "
+                             "its token is needed")
+    if leg is None or leg["year"] != year:
+        raise ValueError(f"{year} has no measured season in that career")
+    if row[1] is not None and int(row[1]) == year:
+        raise ValueError(f"{year} is already this career's legend")
+    extras = [x for x in (row[0] or []) if x.get("year") != year] + [leg]
+    extras.sort(key=lambda x: x["year"])
+    conn.execute(
+        "update career_results set card = jsonb_set(card, '{extra_legends}', %s)"
+        " where account_id = %s and natural_key = %s",
+        (Jsonb(extras), account_id, key))
+    return leg
 
 
 def count(conn, account_id: int) -> int:

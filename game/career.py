@@ -4198,7 +4198,7 @@ def summarise(career: Career, real_runs: list[int] | None = None,
     return total
 
 
-def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
+def legend_card(career: Career, year: int | None = None) -> tuple[SeasonRecord, Card] | None:
     """The best version of you: what a friends' auction room brings in when its career-legends
     setting is on (A215).
 
@@ -4207,8 +4207,16 @@ def legend_card(career: Career) -> tuple[SeasonRecord, Card] | None:
     numbers its own figures measure (`measured_halves`). Seasons played before A225 carry no
     measurement; a career with none falls back to A215's rule, the season of your highest
     Rating, played and rated at that Rating. None for a career whose seasons carry no Rating
-    (a token from before A214)."""
+    (a token from before A214).
+
+    [A272] With `year`, that season instead of the best one, carded the same way: an extra
+    legend a player asked for by name. It must have been measured -- a season with no
+    measurement has no numbers of its own to play -- so otherwise None."""
     measured = [r for r in career.seasons if r.measured]
+    if year is not None:
+        measured = [r for r in measured if r.year == year]
+        if not measured:
+            return None
     if measured:
         best = max(measured, key=lambda r: (r.display, r.rating, -r.year))
         card = ability(career.start, top_card(career.ceiling, career.legend, best.potential),

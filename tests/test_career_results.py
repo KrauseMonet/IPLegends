@@ -124,7 +124,9 @@ def test_a_legend_is_read_only_from_its_own_accounts_careers(pg, finished):
     CR.save(pg, me, CR.natural_key(token), finished["opener"][2])
     legend = CR.legend_of(pg, me, CR.natural_key(token))
     assert legend == CR.legend(finished["opener"][2])
-    assert legend["rating"] == finished["opener"][2].summary.peak_rating
+    # [A225] the legend is the best-GRADED season, rated at its grade (this line asserted
+    # A215's peak Rating until A272 found it failing; the suite runs it only with a scratch db)
+    assert legend["rating"] == max(r.display for r in finished["opener"][2].seasons if r.measured)
     assert CR.legend_of(pg, other, CR.natural_key(token)) is None
     assert CR.legend_of(pg, me, "0" * 64) is None
 

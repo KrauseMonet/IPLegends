@@ -169,7 +169,9 @@ def test_a_lean_comes_from_the_two_real_players_behind_the_spins(deck):
     want = tuple(round((x + y) / 2, 6) for x, y in zip(a, b))
     assert card.phase_bowl == (want if any(want) else None)
     worked = C.with_phase(_card(), start, top, 0.5, {"bowl": [0.0, 0.0, 0.03]})
-    assert worked.phase_bowl[2] == pytest.approx(want[2] + 0.03, abs=1e-6)
+    # `with_phase` rounds after adding the worked step, `want` before it, so the two may
+    # differ by one unit in the sixth place (A270's spins: 0.022843 against 0.022844)
+    assert worked.phase_bowl[2] == pytest.approx(want[2] + 0.03, abs=1.5e-6)
 
 
 def test_off_or_empty_means_no_lean_at_all(deck, monkeypatch):

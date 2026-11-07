@@ -24,12 +24,12 @@ def client(monkeypatch):
 
 
 def test_a_signed_out_player_cannot_choose_a_seed(client):
-    assert client.post("/api/career/start", json={**BODY, "seed": 87809}).status_code == 403
+    assert client.post("/api/career/start", json={**BODY, "seed": 138911}).status_code == 403
 
 
 def test_a_player_who_is_not_an_admin_cannot_choose_a_seed(client):
     client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(8))
-    assert client.post("/api/career/start", json={**BODY, "seed": 87809}).status_code == 403
+    assert client.post("/api/career/start", json={**BODY, "seed": 138911}).status_code == 403
 
 
 def test_without_a_seed_anybody_still_starts_a_career(client):
@@ -38,7 +38,7 @@ def test_without_a_seed_anybody_still_starts_a_career(client):
 
 def test_an_admin_chooses_the_seed_and_gets_its_spins(client):
     client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(7))
-    a = client.post("/api/career/start", json={**BODY, "seed": 87809}).json()
-    b = client.post("/api/career/start", json={**BODY, "seed": 87809}).json()
+    a = client.post("/api/career/start", json={**BODY, "seed": 138911}).json()
+    b = client.post("/api/career/start", json={**BODY, "seed": 138911}).json()
     assert a["ceiling"] == b["ceiling"] and a["start"] == b["start"]
     assert a["ceiling"]["name"] == "Vaibhav Sooryavanshi" and a["ceiling"]["year"] == 2026

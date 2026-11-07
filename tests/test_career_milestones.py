@@ -121,7 +121,7 @@ def test_an_old_checkpoint_without_milestones_still_reads():
 DOC = read_document()
 
 
-HAT_SEED = 2   # (4 until A267) a pace career that takes a hat-trick; re-find after an engine or rating change
+HAT_SEED = 0   # (4 until A267, 2 until A270) a pace career that takes a hat-trick; re-find after an engine or rating change
 
 
 @pytest.mark.skipif(DOC is None, reason="no deck snapshot")

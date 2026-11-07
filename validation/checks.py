@@ -1261,11 +1261,14 @@ def check_09_no_rating_leaks_across_seasons(conn) -> Result:
     """)
     for name, year, matches, merit, career, blended in not_evidence:
         m, c = float(merit), float(career)
-        evidence = (matches / (matches + 3)) * m + (3 / (matches + 3)) * c   # [A267] 6 until then
+        # [A270] Pseudo-matches toward the career, graded by matches played: 6 up to six
+        # matches, 5 at seven, 4 at eight, 3 from nine (A267 used 3 for all; A266 6).
+        k = {7: 5, 8: 4}.get(matches, 6 if matches <= 6 else 3)
+        evidence = (matches / (matches + k)) * m + (k / (matches + k)) * c
         if abs(float(blended) - evidence) > 1e-9:
             offenders.append(
                 f"{name} {year}: blended {float(blended):.3f} but a season must read its "
-                f"own match-shrunk evidence {evidence:.3f} - a career floor is back")
+                f"own match-shrunk evidence {evidence:.3f} - a career floor is back, or the pull moved")
 
     # [A71] The reputation-only branch, checked on its own terms instead of by omission.
     reputation_rows = _rows(conn, """

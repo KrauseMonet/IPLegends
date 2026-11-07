@@ -29,7 +29,9 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # moved every seeded season): best market ceiling ₹1.23 cr, one key moment in 2010
 # [A267] seed 8, re-found after A267 (ratings on the 72-99 scale, the engine replaying each
 # season, match conditions): one key moment in 2010
-UNSOLD = (8, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1"])
+# [A270] seed 16, re-found after A270 (the card's pull graded by matches moved the spins):
+# two key moments in 2010
+UNSOLD = (16, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
 
 
 @pytest.fixture(scope="module")

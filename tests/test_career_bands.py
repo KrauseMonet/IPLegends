@@ -183,6 +183,7 @@ def test_the_lacking_band_is_judged_on_batting(deck):
 
 
 MIDDLE_SEED = 8             # (0 until A267, 2 until A268) a spinner whose first trial is at a squad short in the middle
+GLOVES_SEED = 0             # (2 until A270) a middle-order career the coach asks to keep wicket; re-find after a rating change
                             # (8 until re-found after A261: its 2011 trial squad now lacks the finisher band)
 
 
@@ -315,7 +316,7 @@ def test_taking_the_gloves_is_for_good(deck, model, monkeypatch):
     monkeypatch.setattr(C, "KEEPER_ASK_CHANCE", 1.0)
     monkeypatch.setattr(C, "WEAK_KEEPER", 0)
     monkeypatch.setattr(C, "COACH_TRIAL_CHANCE", 1.0)
-    career, _ = _drive(deck, model, 2, _setup("middle"),
+    career, _ = _drive(deck, model, GLOVES_SEED, _setup("middle"),
                        lambda c: 0 if c["key"] == "keeper" else len(c["options"]) - 1)
     took = next(i for i, r in enumerate(career.seasons) if r.coach and r.coach["key"] == "keeper")
     after = career.seasons[took:]
@@ -331,9 +332,9 @@ def test_taking_the_gloves_is_for_good(deck, model, monkeypatch):
 def test_the_coach_asks_at_most_the_cap(deck, model, monkeypatch):
     monkeypatch.setattr(C, "KEEPER_ASK_CHANCE", 1.0)
     monkeypatch.setattr(C, "WEAK_KEEPER", 0)
-    career, _ = _drive(deck, model, 2, _setup("middle"), lambda c: len(c["options"]) - 1)
+    career, _ = _drive(deck, model, GLOVES_SEED, _setup("middle"), lambda c: len(c["options"]) - 1)
     asked = [r for r in career.seasons if r.coach and r.coach["key"] == "keeper"]
-    assert len(asked) == C.KEEPER_OFFERS_MAX
+    assert len(asked) == 1        # A255's cap, stated: reading C.KEEPER_OFFERS_MAX could never fail (A207)
     assert all(r.role is None for r in career.seasons)        # declined, never a keeper
 
 

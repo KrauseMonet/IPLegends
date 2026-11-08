@@ -540,7 +540,7 @@ function setLotRow(x){
                : `Base ${cr(x.base)}`;
   return `<tr class="auc-sets-${x.status}">
     <td class="auc-sets-rt">${x.rating != null ? `<span class="rating-badge${ratingTier(x.rating)}">${x.rating}</span>` : ''}</td>
-    <td><div class="auc-sets-name">${ICON[x.kind] || ''}${esc(x.name)}${x.overseas === true ? ' <span class="auc-tag os">OS</span>' : ''}</div>
+    <td><div class="auc-sets-name">${ICON[x.kind] || ''}${esc(x.name)}${bandTag(x)}${x.overseas === true ? ' <span class="auc-tag os">OS</span>' : ''}</div>
       <div class="auc-sets-where">${esc(where)}</div></td>
     <td class="auc-sets-st">${status}</td></tr>`;
 }

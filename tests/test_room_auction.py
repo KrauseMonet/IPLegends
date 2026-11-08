@@ -856,6 +856,11 @@ def test_the_sets_list_every_lot_in_calling_order_with_how_each_went(deck, clock
     for s in out.sets:
         assert all(by_index[x.lot].set_code == s.code for x in s.lots)
     assert len({s.code for s in out.sets}) == len(out.sets), "a set appears twice"
+    # [A275] each row carries the season's batting numbers, read off the lot's own card
+    for s in out.sets:
+        for x in s.lots:
+            assert x.positions == sorted(by_index[x.lot].card.positions)
+    assert any(x.positions for s in out.sets for x in s.lots)
 
     sales = {x.lot.index: x for x in r.auction.sales}
     rows = {x.lot: x for s in out.sets for x in s.lots}
@@ -1312,3 +1317,14 @@ def test_a_reroll_that_can_only_draw_the_same_assignment_still_keeps_it(deck):
     rooms.randomise_franchises(conn, code, host, rng=Fixed(*[["KKR", "MI", "CSK"]] * 20))
     held = [load(conn, code).players[p].franchise for p in (host, ben, cat)]
     assert held == ["KKR", "MI", "CSK"]
+
+
+def test_the_sets_panel_shows_each_players_batting_band():
+    """[A275] A set row draws the same band tag as the squad panel, from the row's own
+    `positions`, so a drafter can plan who bats where before the lot comes up."""
+    import re
+    from pathlib import Path
+    js = (Path(__file__).parent.parent / "web/static/auction.js").read_text()
+    row = re.search(r"function setLotRow\(x\)\{.*?\n\}", js, re.S)
+    assert row, "setLotRow not found"
+    assert "bandTag(x)" in row.group(0)

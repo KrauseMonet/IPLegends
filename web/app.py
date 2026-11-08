@@ -2635,6 +2635,8 @@ class AuctionCatalogueLotOut(BaseModel):
     overseas: bool | None
     franchise: str | None
     season_year: int | None
+    positions: list[int] = Field(default_factory=list,
+                                 description="[A275] batting numbers this season (A76)")
     base: int = Field(description="lakh")
     status: str = Field(description="sold | unsold | current | upcoming")
     team: str | None = Field(default=None, description="buyer's short code, when sold")
@@ -2678,7 +2680,8 @@ def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
         sold = status == "sold"
         sets[-1].lots.append(AuctionCatalogueLotOut(
             lot=x.index, name=c.name, rating=c.display, kind=_kind(c), overseas=c.overseas,
-            franchise=c.franchise, season_year=c.season_year, base=x.base, status=status,
+            franchise=c.franchise, season_year=c.season_year,
+            positions=sorted(c.positions), base=x.base, status=status,
             team=a.teams[sale.winner].short if sold else None,
             price=sale.price if sold else None))
     current = lot.set_code if live is not None else None

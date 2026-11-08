@@ -225,3 +225,29 @@ def test_the_hall_route_sends_each_extra_with_its_own_key_and_value(finished, mo
     bat, bowl = C.legend_values(C.legend_card(career, y)[1])
     assert x["legend_value"] == round(bat + (bowl or 0.0), 2)
     assert h["legend_value"] != x["legend_value"]                # its own value, not the career's
+
+
+def test_a_room_accepts_an_extra_season_s_key_and_refuses_anything_else():
+    """[A272] The lobby brings an extra season by '<key>@<year>'; the request's own pattern
+    refused it, so bringing 2014 failed before the server ever looked the season up."""
+    from pydantic import ValidationError
+    from web.app import RoomLegendIn
+    key = "a" * 64
+    for ok in (key, CR.extra_key(key, 2014), None):
+        assert RoomLegendIn(player_id="p", career=ok).career == ok
+    for bad in (key + "@14", key + "@2014x", "a" * 63, key + "@"):
+        with pytest.raises(ValidationError):
+            RoomLegendIn(player_id="p", career=bad)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_a_list_shaped_refusal_is_worded_not_printed_as_an_object():
+    src = (Path(__file__).resolve().parents[1] / "web" / "static" / "common.js").read_text()
+    body = re.search(r"function detailText[\s\S]*?\n}\n", src).group(0)
+    call = ("[detailText([{msg: 'String should match pattern'}], 'x'), "
+            "detailText('Sign in first', 'x'), detailText(undefined, 'Bad')]")
+    out = subprocess.run(["node", "-e", f"{body}; console.log(JSON.stringify({call}))"],
+                         capture_output=True, text=True, check=True).stdout
+    listed, plain, missing = json.loads(out)
+    assert "object" not in listed.lower() and "String should match pattern" in listed
+    assert plain == "Sign in first" and missing == "Bad"

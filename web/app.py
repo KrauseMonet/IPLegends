@@ -4301,8 +4301,9 @@ def room_legends(code: str, body: RoomTradesIn) -> RoomStateOut:
 
 class RoomLegendIn(BaseModel):
     player_id: str
-    career: str | None = Field(default=None, pattern="^[0-9a-f]{64}$",
-                               description="a saved career's key (GET /api/career/hall), or "
+    career: str | None = Field(default=None, pattern="^[0-9a-f]{64}(@[0-9]{4})?$",
+                               description="a saved career's key (GET /api/career/hall), with "
+                                           "'@<year>' for one of its extra seasons [A272], or "
                                            "null to bring no legend")
 
 

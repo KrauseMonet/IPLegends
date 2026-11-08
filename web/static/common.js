@@ -130,8 +130,16 @@ function networkError(){
 // (room-session resume, elsewhere) tell "this is genuinely gone" (404) apart from "the
 // server is busy" or a transient network blip, without parsing prose. The whole body
 // too: a room's 409 carries the room as it now is [A146].
+// A refusal's `detail` is usually a sentence, but a request the server could not read at all
+// (FastAPI's 422) carries a LIST of objects, which as a message printed "[object Object]".
+function detailText(detail, fallback){
+  if (typeof detail === 'string' && detail) return detail;
+  if (Array.isArray(detail) && detail.length)
+    return 'The server could not read that request (' + detail.map(d => (d && d.msg) || '').filter(Boolean).join('; ') + ').';
+  return fallback;
+}
 function statusError(r, body){
-  const err = new Error(body.detail || r.statusText);
+  const err = new Error(detailText(body.detail, r.statusText || 'Request failed'));
   err.status = r.status;
   err.body = body;
   return err;

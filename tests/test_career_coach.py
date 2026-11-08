@@ -18,7 +18,7 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 
 COACH_TESTS = True          # conftest's `coach_off` leaves the coach on for this module
 DOC = read_document()
-ROLE_SEED = 498  # (4 until A267, 225 until A268, 4 until A270; after A270 the only one of 0-600 that changes role) a spinner who becomes an all-rounder; re-find after an engine or rating change
+ROLE_SEED = 0  # (4 until A267, 225 until A268, 4 until A270, 498 until A274) a spinner who becomes an all-rounder; re-find after an engine or rating change
 TRIAL_SEED = 0   # 1 -> 3 after A265, 3 -> 0 after A266, 0 -> 1 after A268, 1 -> 0 after A270; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
@@ -497,7 +497,7 @@ def test_resuming_after_a_role_change_is_the_same_as_replaying(deck, model):
     assert partial is not None and partial.checkpoint.roles == ["allrounder"]
     assert partial.checkpoint.role_since == changed[0]          # its grace season
     cp = C.Checkpoint.from_dict(json.loads(json.dumps(partial.checkpoint.to_dict())))
-    resumed = C.play_career(deck, model, 4, setup, moves[len(used):], resume=cp)
+    resumed = C.play_career(deck, model, ROLE_SEED, setup, moves[len(used):], resume=cp)
     assert [_stats(r) for r in resumed.seasons] == [_stats(r) for r in career.seasons]
     assert [r.role for r in resumed.seasons] == [r.role for r in career.seasons]
 

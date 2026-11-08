@@ -22,9 +22,10 @@ numbers (`ability`), scoring halves linearly and dismissal multipliers geometric
 
 **Your season card rates what you actually did.** Your season is scored against the other
 regulars in the SAME simulated season with the card's own statistics weights (A163), and
-the percentile is read off the real cards of that year and role (`season_display`). So a
-91 means "as good, relative to that year, as the real 91s of that year", and a dip after a
-91 is form, which you can see, rather than a hidden decline.
+your margin over them is laid on the real cards of your kind (`season_display`, A274): the
+average real card plus your margin in standard deviations. So a season far ahead of its
+field reads far above the average card, and a dip after a 91 is form, which you can see,
+rather than a hidden decline.
 
 Pure: a function of the deck, the model, a seed, the setup and the moves -- no database.
 Each season draws from its own random stream (`{seed}:season:{k}`), so a season's result
@@ -158,7 +159,7 @@ ABILITY_CAP = 1.0                    # nothing lifts you above your ceiling
 # [A214] Your RATING: the ability the engine plays, on the card scale, and nothing else. It
 # runs from the start's card (`t = 0`) to the ceiling's (`t = 1`) and on down past the start
 # as a career declines, so it moves only with age, events and development -- never with a
-# season's luck, which is the Season grade's job (the 70-99 card `season_display` gives).
+# season's luck, which is the Season grade's job (the 72-99 card `season_display` gives).
 # Measured before it existed: the season card follows ability at a correlation of 0.39 over
 # 402 simulated seasons, with luck (SD 6.6) larger than the whole rise from start to peak.
 RATING_FLOOR = 60
@@ -2263,7 +2264,6 @@ SHRINK_BALLS = 100
 SHRINK_OUTS = 5
 PEER_MIN_INNINGS = 5
 PEER_MIN_BOWL_BALLS = 60
-MIN_REAL_CARDS = 8           # fewer real regulars of a role in a year: use every year
 BAND_GROUP = {"opener": "top", "top_order": "top", "middle": "middle",
               "finisher": "finisher", "tail": "finisher"}
 MIN_BAND_PEERS = 6           # fewer batters of your band in a season: rank among all batters
@@ -2302,9 +2302,10 @@ def _bowl_scores(lines: list[Line]) -> list[float]:
     return [0.45 * a + 0.15 * b + 0.40 * c for a, b, c in zip(per_match, total, econ)]
 
 
-def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) -> float:
-    """Your place among the season's regulars of your kind, 0 (worst) to 1 (best), by the
-    card's statistics score. You are always in the pool, whatever your volume.
+def _peer_scores(lines: dict[tuple[str, int], Line],
+                 you: tuple[str, int]) -> tuple[float, list[float]]:
+    """Your season's statistics score and the scores of the regulars of your kind you are
+    judged against (A163's weights). You are always scored, whatever your volume.
 
     A batter is ranked among batters and keepers of his band, a bowler among bowlers, scored
     against everybody who batted (or bowled) enough. An all-rounder scores both halves and
@@ -2347,41 +2348,48 @@ def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) 
         b2 = {id(l): s for l, s in zip(bowl_any, _bowl_scores(bowl_any))}
         score = {id(l): b1[id(l)] + b2[id(l)] for l in both}
         peers = both
-    others = [score[id(l)] for l in peers if l is not me]
+    return score[id(me)], [score[id(l)] for l in peers if l is not me]
+
+
+def season_percentile(lines: dict[tuple[str, int], Line], you: tuple[str, int]) -> float:
+    """Your place among the season's regulars of your kind, 0 (worst) to 1 (best). This, not
+    the grade, decides a poor season, development and the coach's trials."""
+    mine, others = _peer_scores(lines, you)
     if not others:
         return 0.5
-    mine = score[id(me)]
     below = sum(s < mine for s in others) + 0.5 * sum(s == mine for s in others)
     return below / len(others)
 
 
-def real_displays(deck: Deck, year: int, kind: str) -> list[int]:
-    """The real regulars' card ratings of `year` for your kind, sorted; every year's if the
-    year has too few to read a distribution from. Read for the whole kind, not per batting
-    band (A198, measured): only 22 real cards in nineteen years are batters in the finisher
-    band, best 85, which is too few to be a scale -- reading finishers off it capped every
-    finisher's career at 85."""
-    def ok(c: Card) -> bool:
-        return c.display is not None and _kind(c) == kind and _regular(c)
-
-    cards = [c.display for fs in year_fs_ids(deck, year) for c in deck.cards_by_fs[fs] if ok(c)]
-    if len(cards) < MIN_REAL_CARDS:
-        cards = [c.display for cs in deck.cards_by_fs.values() for c in cs if ok(c)]
-    return sorted(cards)
+def season_margin(lines: dict[tuple[str, int], Line], you: tuple[str, int]) -> float:
+    """[A274] How far ahead of (or behind) the season's regulars of your kind you finished,
+    in their standard deviations. 0 with nobody to compare against."""
+    mine, others = _peer_scores(lines, you)
+    if not others:
+        return 0.0
+    return (mine - statistics.fmean(others)) / (statistics.pstdev(others) or 1.0)
 
 
-def quantile(sorted_values: list[int], p: float) -> int:
-    """Linear interpolation, so p = 0 is the lowest real card and p = 1 the highest."""
-    if len(sorted_values) == 1:
-        return sorted_values[0]
-    x = p * (len(sorted_values) - 1)
-    lo = math.floor(x)
-    hi = min(lo + 1, len(sorted_values) - 1)
-    return round(sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (x - lo))
+def real_scale(deck: Deck, kind: str) -> tuple[float, float]:
+    """[A274] The mean and standard deviation of the real regulars' cards of your kind, over
+    all nineteen years. Read for the whole kind, not per batting band (A198, measured): only
+    22 real cards in nineteen years are batters in the finisher band, too few to be a scale."""
+    cards = [c.display for cs in deck.cards_by_fs.values() for c in cs
+             if c.display is not None and _kind(c) == kind and _regular(c)]
+    return statistics.fmean(cards), statistics.pstdev(cards)
 
 
-def season_display(deck: Deck, year: int, card: Card, percentile: float) -> int:
-    return max(72, min(99, quantile(real_displays(deck, year, _kind(card)), percentile)))   # A267: 72-99
+def season_display(deck: Deck, card: Card, margin: float) -> int:
+    """[A274] The season grade: the average real card of your kind plus your margin over
+    your peers, on the real cards' own spread, 72-99 (A267).
+
+    It used to be your RANK read off that year's real cards, which capped the grade at the
+    best real card of the year -- an all-rounder in 2014 could never pass Raina's 90, however
+    far ahead he finished, while 2015 (seven real cards, so every year's) reached 99. Linear
+    on the margin, as real cards are linear on merit (A44): a narrow win and a runaway are
+    different seasons and read differently."""
+    mean, sd = real_scale(deck, _kind(card))
+    return max(72, min(99, round(mean + sd * margin)))
 
 
 # [A225] A season measured like a real card. A real card's two engine numbers per discipline
@@ -3957,7 +3965,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.percentile = season_percentile(lines, key)
     record.bat_rank = discipline_rank(lines, key, "bat")
     record.bowl_rank = discipline_rank(lines, key, "bowl")
-    record.display = season_display(deck, you.season_year, you, record.percentile)
+    record.display = season_display(deck, you, season_margin(lines, key))
     record.measured = measured_halves(lines, key)
     record.position = next(i for i, s in enumerate(season.table, 1) if s.side is yours)
     record.playoffs = record.position <= 4

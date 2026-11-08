@@ -3155,3 +3155,28 @@ or dismissals carries over not at all (r about 0). The true spread of a real lea
 Every other player, in every mode and in your own career's other sides, plays exactly as
 before (verified by fingerprinting historical leagues on the old and new engine). A saved
 legend brings no lean into a friends' auction room.
+
+## 26. The season grade in Build a Career [A274]
+
+A career season's grade (the second number on the season card) is **the average real card of
+your kind plus your margin over this season's peers, on the real cards' own spread**, kept to
+72-99:
+
+- **Your margin** is your season's statistics score (A163's weights) against the regulars of
+  your kind in the same simulated season, in their standard deviations: you against the
+  others, never a pool that includes you. A batter is compared within his band, a bowler with
+  bowlers, an all-rounder with everybody who did enough of both (A198).
+- **The scale** is the mean and standard deviation of the real regulars' cards of your kind
+  over all nineteen years: batters and keepers on 100+ balls faced, bowlers on 150+ bowled,
+  all-rounders on either. One scale for every year.
+- **Linear, not a percentile**, as real cards are linear on merit (A44): finishing first by a
+  whisker and finishing first by a mile read differently.
+
+**Your rank among the same peers is unchanged and still decides a poor season, development
+and the coach's trials.** Only the number on the card is read from the margin. The grade then
+takes the 3-match pull toward your career so far (A267), as before.
+
+Replaced, and why: the grade was your rank read off that year's real cards. That capped it at
+the best real card of the year (an all-rounder in 2014 could never pass Raina's 90, however far
+ahead he finished), made a year with eight real cards read differently from one with seven
+(which fell back to every year's), and could not tell a narrow win from a runaway.

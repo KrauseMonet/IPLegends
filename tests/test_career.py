@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import random
+import statistics
 from collections import Counter
 
 import pytest
@@ -268,22 +269,95 @@ def test_a_batter_is_not_ranked_against_bowlers_runs():
     assert C.season_percentile({**peers, **tail, **me}, ("me", 0)) == 0.0
 
 
-def test_a_percentile_reads_the_real_cards_from_lowest_to_highest():
-    real = [70, 74, 75, 81, 99]
-    assert C.quantile(real, 0.0) == 70 and C.quantile(real, 1.0) == 99
-    assert C.quantile(real, 0.5) == 75
-    assert [C.quantile(real, p / 20) for p in range(21)] == sorted(
-        C.quantile(real, p / 20) for p in range(21))
+def _hand_scale(deck, kind):
+    """The real regulars of a kind over every year, recounted here rather than through
+    `real_scale`: batters and keepers on 100+ balls faced, bowlers on 150+ bowled, all-rounders
+    on either."""
+    def regular(c):
+        bat, bowl = (c.bat_balls or 0) >= 100, (c.bowl_balls or 0) >= 150
+        return {"batter": bat, "keeper": bat, "bowler": bowl, "allrounder": bat or bowl}[c.role]
+    want = {"batter": ("batter", "keeper"), "bowler": ("bowler",), "allrounder": ("allrounder",)}
+    cards = [c.display for cs in deck.cards_by_fs.values() for c in cs
+             if c.display is not None and c.role in want[kind] and regular(c)]
+    return statistics.fmean(cards), statistics.pstdev(cards)
 
 
-def test_a_years_card_scale_is_that_years_real_regulars(deck):
-    """p = 1 is the best real regular of the year in that kind, p = 0 the worst."""
-    for year in (2008, 2016, 2025):
-        cards = [c for fs in C.year_fs_ids(deck, year) for c in deck.cards_by_fs[fs]
-                 if c.role in ("batter", "keeper") and (c.bat_balls or 0) >= 100]
-        you = Card(fs_id=1, person_id="y", name="y", role="batter")
-        assert C.season_display(deck, year, you, 1.0) == max(c.display for c in cards)
-        assert C.season_display(deck, year, you, 0.0) == max(70, min(c.display for c in cards))
+def _grade(deck, kind, margin):
+    mean, sd = _hand_scale(deck, kind)
+    return max(72, min(99, round(mean + sd * margin)))
+
+
+def test_the_grade_scale_is_every_years_real_regulars_of_the_kind(deck):
+    """[A274] One scale per kind over all nineteen years, never one year's handful."""
+    for kind in ("batter", "bowler", "allrounder"):
+        assert C.real_scale(deck, kind) == pytest.approx(_hand_scale(deck, kind))
+
+
+def test_the_grade_is_the_average_card_plus_the_margin_on_the_real_spread(deck):
+    """[A274] Linear on the margin, kept to 72-99."""
+    for role, kind in (("batter", "batter"), ("bowler", "bowler"), ("allrounder", "allrounder")):
+        you = Card(fs_id=1, person_id="y", name="y", role=role)
+        for margin in (-6.0, -1.3, 0.0, 0.4, 1.7, 2.6, 8.0):
+            assert C.season_display(deck, you, margin) == _grade(deck, kind, margin)
+    you = Card(fs_id=1, person_id="y", name="y", role="batter")
+    assert C.season_display(deck, you, -6.0) == 72 and C.season_display(deck, you, 8.0) == 99
+
+
+def test_the_margin_is_your_score_against_your_peers_in_their_sds():
+    """[A274] Recomputed from A163's own scores: you against the others, never against a pool
+    that includes you."""
+    peers = _peers(lambda i: _line("batter", runs=300 + 15 * i, balls=250 + 3 * i, outs=10 - i % 3))
+    me = _line("batter", runs=520, balls=330, outs=7)
+    lines = {**peers, ("me", 0): me}
+    pool = list(lines.values())
+    scores = dict(zip(map(id, pool), C._bat_scores(pool)))
+    others = [scores[id(l)] for l in pool if l is not me]
+    z = (scores[id(me)] - statistics.fmean(others)) / statistics.pstdev(others)
+    assert C.season_margin(lines, ("me", 0)) == pytest.approx(z)
+
+
+def test_a_runaway_season_reads_99_and_a_narrow_win_reads_less(deck):
+    """[A274] Both top their kind -- the same rank -- and are graded on how far ahead they
+    were. The reported case: an all-rounder's 1,082 runs and 35 wickets, which the old
+    year-of-cards scale held to Raina's 90 in 2014."""
+    def field(i):           # two tiers, so the top of the field is not far above its mean
+        strong = i % 2
+        return _line("allrounder", runs=(390 if strong else 240) + i, balls=260, outs=10,
+                     wickets=12 if strong else 7, bowl_balls=240,
+                     bowl_runs=(345 if strong else 400) + i)
+    peers = _peers(field)
+    runaway = {**peers, ("me", 0): _line("allrounder", runs=1082, balls=530, outs=14,
+                                         wickets=35, bowl_balls=330, bowl_runs=600, matches=17)}
+    narrow = {**peers, ("me", 0): _line("allrounder", runs=410, balls=260, outs=10,
+                                        wickets=12, bowl_balls=240, bowl_runs=340)}
+    you = Card(fs_id=1, person_id="y", name="y", role="allrounder", season_year=2014)
+    for lines in (runaway, narrow):
+        assert C.season_percentile(lines, ("me", 0)) == 1.0
+    hi = C.season_display(deck, you, C.season_margin(runaway, ("me", 0)))
+    lo = C.season_display(deck, you, C.season_margin(narrow, ("me", 0)))
+    assert hi == 99 and lo <= 92
+    later = dataclasses.replace(you, season_year=2015)
+    assert C.season_display(deck, later, C.season_margin(runaway, ("me", 0))) == hi
+
+
+def test_a_season_is_graded_on_its_margin(deck, model, monkeypatch):
+    """[A274] The wiring: the season's grade is read from the margin, not the rank."""
+    start, ceiling = C.spin(deck, 3, "opener")
+    fs = C.year_fs_ids(deck, 2013)[0]
+    you = C.ability(start, ceiling, 0.4, setup=_setup(), fs_id=fs, year=2013,
+                    franchise=deck.cards_by_fs[fs][0].franchise)
+    seen = []
+
+    def margin(lines, key):
+        seen.append(key)
+        return margin.value
+    monkeypatch.setattr(C, "season_margin", margin)
+    for value in (-2.5, 2.5):
+        margin.value = value
+        r = C.play_season(deck, model, 3, 1, you, C.SeasonRecord(1, 2013, "X", "X", 0, False,
+                                                                  "quiet", "", False, 0.4, 0))
+        assert r.display == _grade(deck, "batter", value)
+    assert seen and all(k[0] == C.YOU_ID for k in seen)
 
 
 # --- offers and events ----------------------------------------------------------------------

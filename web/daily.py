@@ -513,7 +513,7 @@ CONDITIONS_FROM = datetime.date(2026, 11, 8)
 # [A276] The first day whose bowlers are rotated by phase and style (spin through the
 # middle, pace at either end). A day before it rotates by workload alone, drawing nothing,
 # so it replays exactly. Set to the day after A276 ships; move it if it ships later.
-ROTATION_FROM = datetime.date(2026, 11, 11)
+ROTATION_FROM = datetime.date(2026, 11, 12)
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,

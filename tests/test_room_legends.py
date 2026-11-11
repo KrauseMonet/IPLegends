@@ -51,7 +51,8 @@ def career(deck, model):
 
 @pytest.fixture(scope="module")
 def legend(career):
-    return career_results.legend(career)
+    # [A284] a legend reaches a room only through the route, which stamps it skilled
+    return {**career_results.legend(career), "skilled": True}
 
 
 def test_the_legend_is_the_season_of_your_best_grade(career, legend):

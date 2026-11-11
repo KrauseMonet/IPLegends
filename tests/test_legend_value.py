@@ -99,7 +99,8 @@ def test_the_hall_route_carries_each_legends_value(monkeypatch):
     row = {"key": "k", "name": "T", "role": "opener", "debut": 2016, "overseas": False,
            "seasons": 1, "matches": 14, "runs": 500, "wickets": 0, "titles": 0,
            "peak_card": 90, "peak_year": 2016, "ending": "archive",
-           "card": {"legend": {"rating": 90, "year": 2016, "role": "opener",
+           "card": {"skills": [["anchor", 1, 1]],      # [A284] built with skills
+                    "legend": {"rating": 90, "year": 2016, "role": "opener",
                                "card": _card_doc(good)}},
            "completed_at": datetime.datetime(2026, 10, 27)}
     plain = {**row, "key": "j", "card": {}}

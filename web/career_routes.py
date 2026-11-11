@@ -1176,6 +1176,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
     real_wkts = [p.wickets for p in facts] if facts is not None else None
     out = []
     for r in rows:
+        bring = career_results.has_skills(r["card"])     # [A284] only a career with skills
         clubs = []
         for t in r["card"].get("timeline", []):
             if all(canonical(t["franchise"]) != canonical(c[0]) for c in clubs):
@@ -1193,7 +1194,8 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             runs=r["runs"], wickets=r["wickets"], titles=r["titles"],
             peak_card=r["peak_card"], peak_year=r["peak_year"], ending=r["ending"],
             peak_rating=r["card"].get("peak_rating"), peak_rating_year=r["card"].get("peak_rating_year"),
-            legend=bool(r["card"].get("legend")), **_legend_fields(r["card"]),
+            legend=bring and bool(r["card"].get("legend")),
+            **(_legend_fields(r["card"]) if bring else {}),
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
             skills=_skills_out(r["card"].get("skills")),
@@ -1201,5 +1203,5 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             extras=[ExtraLegendOut(key=career_results.extra_key(r["key"], x["year"]),
                                    name=r["name"], card={"legend": x},
                                    **_legend_fields({"legend": x}))
-                    for x in r["card"].get("extra_legends") or []]))
+                    for x in (r["card"].get("extra_legends") or []) if bring]))
     return out

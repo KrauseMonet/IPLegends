@@ -873,6 +873,7 @@ function renderLobbyLegends(r){
            return `<option value="${c.key}"${legendIsMine(c, r.legends[MY_PID]) ? ' selected' : ''}>
            ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}${c.extra ? ' · extra' : ''}</option>`; }).join('')}</optgroup>`).join('')}
        </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>
+       ${ROOM_HALL.some(c => !c.legend && c.card && c.card.legend) ? `<div class="note" style="margin-top:4px">Careers built before skills can't be brought into a room; they stay in your Hall of Fame.</div>` : ''}
        ${ME.legend_limit != null && legendChoices(ROOM_HALL, null, null).some(g => g.total > ME.legend_limit) ? `<div class="note" style="margin-top:4px">Your best ${ME.legend_limit === 1 ? 'legend' : ME.legend_limit} in each role, by runs a match, of ${legendsByValue(ROOM_HALL).length} legends.</div>` : ''}`;
   $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
     saved career's best season, carded like a real one. He joins your squad free, takes one of the eighteen places and counts toward

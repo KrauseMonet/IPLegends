@@ -29,6 +29,14 @@ def legacy(runs: int, wickets: int) -> int:
     return runs + 20 * wickets
 
 
+def has_skills(card: dict | None) -> bool:
+    """[A284] A saved career is built WITH skills when its card lists at least one. A career
+    saved before A278 carries none (its seasons were never judged for any), and so does one
+    whose player never earned any; both stay in the Hall of Fame but cannot bring a legend
+    into a room. Read off the stored card when asked, never stored apart from it (A19)."""
+    return bool((card or {}).get("skills"))
+
+
 def legend(career: C.Career, year: int | None = None) -> dict | None:
     """[A215] The best version of the player, kept so a friends' auction room can bring him
     in: since A225 his best season, carded like a real one (`C.legend_card`). Stored, not
@@ -165,13 +173,14 @@ def extra_key(key: str, year: int) -> str:
 
 def legend_of(conn, account_id: int, key: str) -> dict | None:
     """[A215] The legend of one of this account's own saved careers, or None. [A272] A key
-    naming a season (`extra_key`) reads that career's extra legend for the year."""
+    naming a season (`extra_key`) reads that career's extra legend for the year. [A284] None
+    for a career with no skills: its data is kept, but it cannot be brought into a room."""
     base, sep, year = key.partition(EXTRA_SEP)
     row = conn.execute(
-        "select card -> 'legend', card -> 'extra_legends' from career_results"
+        "select card -> 'legend', card -> 'extra_legends', card -> 'skills' from career_results"
         " where account_id = %s and natural_key = %s",
         (account_id, base)).fetchone()
-    if not row:
+    if not row or not has_skills({"skills": row[2]}):      # [A284] only a career with skills
         return None
     if not sep:
         return row[0] or None

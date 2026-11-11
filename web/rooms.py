@@ -631,6 +631,8 @@ def set_legend(conn, code: str, player_id: str, legend: dict | None) -> Room:
         raise RoomError("you are not in this room")
     if room.status != "lobby":
         raise RoomError("legends are chosen before the auction starts")
+    if legend is not None and not legend.get("skilled"):       # [A284]
+        raise RoomError("only a legend built with skills can be brought into a room")
     legends = dict(room.legends)
     if legend is None:
         legends.pop(player_id, None)
@@ -760,6 +762,10 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
         raise RoomError("this room has already started")
 
     if room.game != "draft":
+        # [A284] a legend chosen before the skills rule (it carries no `skilled` mark) is not
+        # played; the seat simply starts without one
+        if room.legends:
+            room.legends = {p: v for p, v in room.legends.items() if v.get("skilled")}
         _start_auction(room, deck)
         _save_room(conn, room)
         return room

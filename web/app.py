@@ -3396,7 +3396,8 @@ def _room_legends_out(room, caller_id: str | None) -> dict[str, RoomLegendOut]:
     return {pid: RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"],
                                year=v["year"], role_label=v["role_label"],
                                career=v.get("career") if pid == caller_id else None)
-            for pid, v in (room.legends or {}).items() if pid in room.players}
+            for pid, v in (room.legends or {}).items()
+            if pid in room.players and (v.get("skilled") or room.status != "lobby")}
 
 
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
@@ -4324,9 +4325,10 @@ def room_legend(code: str, body: RoomLegendIn, request: Request) -> RoomStateOut
                 raise HTTPException(status_code=401, detail="Sign in to bring a career legend.")
             legend = career_results.legend_of(conn, account_id, body.career)
             if legend is None:
-                raise HTTPException(status_code=400, detail="That career has no legend to bring "
-                                    "(it was saved before legends existed).")
-            legend = {**legend, "career": body.career}     # [A269] which one, for the picker
+                raise HTTPException(status_code=400, detail="That career cannot bring a legend: "
+                                    "only careers built with skills can be used in rooms.")
+            # [A269] which one, for the picker; [A284] skilled: it passed the skills check
+            legend = {**legend, "career": body.career, "skilled": True}
         try:
             room = rooms.set_legend(conn, code, body.player_id, legend)
         except rooms.RoomError as exc:

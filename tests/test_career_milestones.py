@@ -121,7 +121,7 @@ def test_an_old_checkpoint_without_milestones_still_reads():
 DOC = read_document()
 
 
-HAT_SEED = 0   # (4 until A267, 2 until A270) a pace career that takes a hat-trick; re-find after an engine or rating change
+HAT_SEED = 1   # (4 until A267, 2 until A270, 0 until A276) a pace career that takes a hat-trick; re-find after an engine or rating change
 
 
 @pytest.mark.skipif(DOC is None, reason="no deck snapshot")
@@ -149,8 +149,9 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
         assert rec.five_fors == sum(l.wickets >= 5 for l in feed)
         assert rec.hat_tricks == sum("hattrick" in l.landmarks for l in feed)
         # The selectors' milestones (A229) and an ambition's (A228) come from outside the
-        # feed and are checked by their own tests.
-        own = [m for m in rec.milestones if m.key not in ("international", "caps", "ambition")]
+        # feed and are checked by their own tests, as is a new skill's (A278).
+        own = [m for m in rec.milestones
+               if m.key not in ("international", "caps", "ambition", "skill")]
         assert own == C.career_milestones(seasons[:k], feed, rec)
         checked += 1
     assert checked == len(seasons) >= 3

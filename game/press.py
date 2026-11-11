@@ -535,6 +535,19 @@ def _ambition(f: dict, v: Voice) -> Clipping:
     return Clipping("ambition", f["y"], "SPORT", head, f["label"], "", body, "", 40, None, f.get("club"))
 
 
+def _skill(f: dict, v: Voice) -> Clipping:
+    """[A278] A skill on the card for the first time: what the season's numbers showed."""
+    sur, names = v.sur, f["skills"]
+    said = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    head = _pick(v, f, [f"{sur} earns a reputation: {said}", f"{sur}'s game has a name now",
+                        f"Analysts mark out {sur}"])
+    body = [f"The season's numbers put a name to what {_who(v, f)} does: {said}.",
+            _pick(v, f, ["Opposition analysts will have noticed too.",
+                         "It is the sort of thing that gets a player talked about in auction rooms.",
+                         "Every side in the league will be planning for it next season."], "colour")]
+    return Clipping("skill", f["y"], "SPORT", head, said, "", body, "", 38, None, f.get("club"))
+
+
 def _nt_debut(f: dict, v: Voice) -> Clipping:
     sur, country = v.sur, f["country"]
     noun = ROLE_NOUN.get(v.role, "player")
@@ -616,7 +629,7 @@ RENDER = {"hundred": _hundred, "blitz": _blitz, "five_for": _five_for, "hattrick
           "final_star": _final_star, "playoff_hero": _playoff_hero, "debut": _debut,
           "move": _move, "mega": _mega, "title": _title, "final_lost": _final_lost, "cap": _cap,
           "captain": _captain, "injury": _injury, "mate_last": _mate_last, "elite": _elite,
-          "ambition": _ambition, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
+          "ambition": _ambition, "skill": _skill, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
           "nt_dropped": _nt_dropped, "nt_caps": _nt_caps,
           "trade": _trade, "endorse": _endorse, "hit_back": _hit_back}
 
@@ -714,6 +727,7 @@ class SeasonFacts:
     caps_marks: list[int] = field(default_factory=list)   # every 50 internationals crossed
     traded: bool = False               # [A230] the move was a trade
     stories: list[str] = field(default_factory=list)      # [A230] "endorse", "hit_back"
+    new_skills: list[str] = field(default_factory=list)   # [A278] skills shown for the first time
 
 
 def season_facts(s: SeasonFacts, feed) -> list[dict]:
@@ -761,6 +775,8 @@ def season_facts(s: SeasonFacts, feed) -> list[dict]:
         out.append({"k": "elite", "y": y, "club": club, "grade": s.first_elite})
     for label in s.ambitions:
         out.append({"k": "ambition", "y": y, "club": club, "label": label})
+    if s.new_skills:
+        out.append({"k": "skill", "y": y, "club": club, "skills": list(s.new_skills)})
     nt = s.national
     if nt and nt.get("event") in ("debut", "recalled", "dropped"):
         out.append({"k": f"nt_{nt['event']}", "y": y, "country": nt["country"], "caps": nt["caps"],

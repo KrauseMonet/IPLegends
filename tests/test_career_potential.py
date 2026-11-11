@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import re
 from collections import Counter
@@ -319,3 +320,59 @@ def test_an_answer_that_moves_the_clock_says_so():
     assert fitness.options[0].age < 0 and "younger" in fitness.options[0].story
     managed = next(o for o in I.INCIDENTS["back"].options if o.age)
     assert managed.age > 0 and "for good" in managed.story
+
+
+# --- [A279] where the potential heads -------------------------------------------------------
+
+def _gap(c, ceiling):
+    """The shape gap by hand: each engine number in its measured spread across real regulars."""
+    sd = {"bat": (0.123, 0.241), "bowl": (0.104, 0.228)}
+    g = 0.0
+    for disc, (s1, s2) in sd.items():
+        a, b = getattr(c, f"{disc}_scoring"), getattr(ceiling, f"{disc}_scoring")
+        if a is None or b is None:
+            continue
+        g += ((a - b) / s1) ** 2 + ((math.log(getattr(c, f"{disc}_dismissal"))
+                                     - math.log(getattr(ceiling, f"{disc}_dismissal"))) / s2) ** 2
+    return g
+
+
+def test_the_legend_is_as_good_as_the_potential_reaches_and_plays_like_the_ceiling(deck):
+    checked = 0
+    for role in C.ROLES:
+        _, ceilings = C.template_pools(deck, role)
+        for ceiling in ceilings[:40]:
+            legend = C.potential_legend(deck, role, ceiling)
+            better = [c for c in ceilings if c.display > ceiling.display
+                      and C.main_rating(c, role) >= C.main_rating(ceiling, role)]
+            if not better:
+                assert legend is None
+                continue
+            target = min(99, ceiling.display + 8)        # POTENTIAL_MAX, stated
+            reach = [c for c in better if c.display >= target]
+            if reach:
+                low = min(c.display for c in reach)
+                near = [c for c in reach if c.display <= low + 1]
+            else:
+                top = max(c.display for c in better)
+                near = [c for c in better if c.display >= top]
+            assert legend in near, (role, ceiling.name, ceiling.season_year)
+            assert _gap(legend, ceiling) == pytest.approx(min(_gap(c, ceiling) for c in near))
+            checked += 1
+    assert checked > 100
+
+
+def test_a_ceiling_with_room_heads_somewhere_it_can_reach(deck):
+    """Room to grow is the full POTENTIAL_MAX whenever a better season sits that far up, and
+    the legend is then no further than a point beyond it -- never the role's 99 monster."""
+    for role in ("opener", "middle", "pace"):
+        _, ceilings = C.template_pools(deck, role)
+        for ceiling in ceilings[:60]:
+            legend = C.potential_legend(deck, role, ceiling)
+            if legend is None or ceiling.display + 8 > 98:
+                continue
+            reach = [c.display for c in ceilings if c.display >= ceiling.display + 8
+                     and C.main_rating(c, role) >= C.main_rating(ceiling, role)]
+            if reach:
+                assert min(reach) <= legend.display <= min(reach) + 1
+                assert C.potential_room(ceiling, legend) == 8

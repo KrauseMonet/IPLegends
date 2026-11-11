@@ -189,18 +189,14 @@ class StyleSplit:
 
     Per-phase economy and wickets for each style. The ECONOMIES are the real output here.
 
-    **The over SHARES are not a cricket finding and must not be presented as one, which was
-    measured rather than assumed.** Real T20 puts pace on the new ball and at the death and
-    spin through the middle; this engine cannot reproduce that, because `choose_bowler`
-    hands the next over to whoever has bowled least and knows nothing about phase or style
-    -- a deliberate omission its own docstring already records ("a real captain saves their
-    best for the death; this one does not"). Measured on a real 74-fixture season: pace took
-    51.0% of powerplay overs, 58.5% of middle and 53.5% of death, every phase within four
-    points of its 55.1% overall share, and individual bowlers turned up evenly in both the
-    powerplay and the death (Maharoof 14 overs in each). So a phase share here measures the
-    STYLE MIX OF THE FIVE-MAN ATTACK, not a captain's policy. Recorded here because the
-    obvious reading of this table is the wrong one, and the first draft of the UI copy for
-    it asserted exactly the pattern the engine does not produce.
+    [A276] The over SHARES now mean something. Until A276 `choose_bowler` handed the next
+    over to whoever had bowled least, blind to phase and style, and a real season read pace
+    at 51.0% of powerplay overs, 58.5% of middle and 53.5% of death -- the five-man
+    attack's style mix, not a captain's policy, which is what this docstring used to warn.
+    The rotation now spreads each side's spin over the twenty in the archive's per-over
+    shape (pace up front and at the death, spin through the middle), so a phase share reads
+    as real T20 does. Its level is still the attack's own: a side whose five hold three
+    spinners bowls more spin everywhere than one with one.
 
     `unknown` is its own bucket and is NEVER folded into either style (A23). It is NOT
     empty: 97 people bowled in the archive but never reached SPEC 6.3's 30-legal-ball

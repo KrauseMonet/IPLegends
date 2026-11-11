@@ -268,10 +268,32 @@ function crHead(d, hold){
         ${tot}
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
         ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+        ${crSlots(d)}
         ${crNationalChip(d)}
         ${crAmbitionChips(d)}
       </div>
     </div>`;
+}
+
+// [A282] The three skill slots: each tier, locked until the Rating opens it, and the skill
+// your last season showed in it. A slot that is open but empty says so: skills are earned
+// season by season, so an open slot is one to fill next season.
+function crSlots(d){
+  const slots = d.skill_slots || [];
+  if (!slots.length || !d.seasons.length) return '';
+  return `<div class="cr-slots">${slots.map(x => {
+    if (!x.open) return `<span class="cr-slot locked" title="${esc(x.name)} skills open at Rating ${x.opens_at}"><em>${esc(x.name)}</em>🔒 ${x.opens_at}</span>`;
+    if (!x.skill) return `<span class="cr-slot empty" title="Open: earn a ${esc(x.name.toLowerCase())} skill next season"><em>${esc(x.name)}</em>open</span>`;
+    return `<span class="cr-slot t${x.tier}" title="${esc(x.skill.blurb)}"><em>${esc(x.name)}</em>${esc(x.skill.label)}</span>`;
+  }).join('')}${(d.combos_now || []).map(c => `<span class="cr-combo">★ ${esc(c)}</span>`).join('')}</div>${d.combo_hint ? `<div class="cr-combo-hint">${esc(d.combo_hint)}</div>` : ''}`;
+}
+
+// [A282] A season's skills, the first-ever ones marked new, and the combinations they make.
+function crSeasonSkills(r){
+  const chips = (r.skills || []).map(k =>
+    `<span class="sk t${k.tier}" title="${esc(SKILL_TIER[k.tier] + ' skill: ' + k.blurb)}">${esc(k.label)}${k.new ? ' <b class="sk-new">NEW</b>' : ''}</span>`).join('');
+  const combos = (r.combos || []).map(c => `<span class="cr-combo">★ ${esc(c)}</span>`).join('');
+  return `<span class="skills">${chips}</span>${combos}`;
 }
 
 // [A229] Your country and your international record so far.
@@ -1058,7 +1080,10 @@ function crSeason(d, r){
           ${crBadge(r.dropped > 0, 'dim', `Dropped for ${r.dropped} match${r.dropped === 1 ? '' : 'es'}`)}
           ${crBadge(r.card !== r.form, 'dim', `Played to ${r.form}; your career moved the grade to ${r.card}`)}
           ${crBadge(!!r.mega, 'gold', esc(r.mega || ''))}
+          ${(r.skills || []).filter(k => k.new).map(k => crBadge(true, 'gold', `New skill · ${esc(k.label)}`)).join('')}
+          ${(r.combos || []).map(c => crBadge(true, 'gold', `★ ${esc(c)}`)).join('')}
         </div>
+        ${r.skills && r.skills.length ? `<div class="cr-skills"><span class="cr-label">Skills this season</span>${crSeasonSkills(r)}</div>` : ''}
         <div class="cr-lines">
           <div><b>${r.matches}</b> matches<span>${esc(r.price)}${r.stayed ? ' · stayed' : ''}</span></div>
           ${lines}
@@ -1135,6 +1160,7 @@ function crEnd(d){
           <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
           ${s.poms ? `<div><b>${s.poms}</b> Player of the Match<span>award${s.poms === 1 ? '' : 's'}</span></div>` : ''}
         </div>
+        ${s.skills && s.skills.length ? `<div class="cr-skills"><span class="cr-label">Career skills</span>${crSkillList(s.skills)}</div>` : ''}
         ${crAmbitionList(d)}
         ${crStory(d)}
       </div>
@@ -1272,6 +1298,11 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') crReelClose();
   else if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); crReelNext(); }
 });
+
+// [A278] The career's skills, each with the seasons it was shown.
+function crSkillList(list){
+  return `<span class="skills">${list.map(k => `<span class="sk t${k.tier}" title="${esc(SKILL_TIER[k.tier] + ' skill: ' + k.blurb)}">${esc(k.label)}${k.seasons > 1 ? ` <i>×${k.seasons}</i>` : ''}</span>`).join('')}</span>`;
+}
 
 // The career's milestones and injuries as one timeline, a row per year with that season's
 // club [A219]. Coloured by the milestone's own kind, which the server sends (`key`), so a
@@ -1424,6 +1455,12 @@ async function crDrawCard(d){
   if (ranks.length){
     ctx.fillStyle = gold2; ctx.font = `400 34px ${CARD_DISPLAY}`;
     ctx.fillText(fitText(ctx, ranks.join(' · '), tw, 400, 34, CARD_DISPLAY, 20), tx, 312);
+  }
+  // [A278] the career's signature skills, highest tier first
+  const skills = (s.skills || []).slice(0, 3).map(k => k.label.toUpperCase());
+  if (skills.length){
+    ctx.fillStyle = mint; ctx.font = `700 22px ${CARD_FIGS}`;
+    ctx.fillText(fitText(ctx, skills.join(' · '), tw, 700, 22, CARD_FIGS, 14), tx, ranks.length ? 352 : 312);
   }
 
   // --- four tiles, your own discipline first, each with its rates under it [A220] ----------

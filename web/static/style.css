@@ -4511,3 +4511,21 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
   .hx-table td,.hx-table th{padding:7px 9px}
   .hx .report h1.call{font-size:19px}
 }
+
+/* [A278] skills a career season earned, and the career's own list */
+.cr-skills{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 2px}
+.cr-skills .skills{margin-left:0}
+.cr-skills .sk i{font-style:normal;opacity:.7;font-size:.9em}
+/* [A282] skill slots on the player card, combinations, new skills */
+.cr-slots{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cr-slot{display:inline-flex;align-items:baseline;gap:6px;font-family:var(--mono);font-size:11px;font-weight:700;
+  padding:3px 8px;border-radius:6px;border:1px solid var(--line);color:var(--ink)}
+.cr-slot em{font-style:normal;font-weight:600;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.cr-slot.locked{opacity:.55;border-style:dashed}
+.cr-slot.empty{color:var(--ink-3);border-style:dashed}
+.cr-slot.t2{color:var(--mint);border-color:rgba(61,220,151,.5)}
+.cr-slot.t3{color:var(--gold);border-color:var(--gold);background:rgba(245,184,61,.10)}
+.cr-combo-hint{margin-top:6px;font-size:12px;color:var(--ink-3)}
+.cr-combo{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--gold)}
+.sk-new{font-size:8px;letter-spacing:.06em;padding:0 3px;border-radius:3px;background:var(--gold);color:#111;margin-left:3px}
+.hof summary .skills{margin-left:0}

@@ -39,3 +39,5 @@ assets/
 !data/engine_a259.json.gz
 # [A268] A260's batting leans, for a daily day before LEANS_CENTRED_FROM
 !data/leans_a260.json.gz
+# [A278] the career skill cut-offs: without it a career season earns no skill, silently
+!data/career_skill_cuts.json.gz

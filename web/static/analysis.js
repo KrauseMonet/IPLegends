@@ -496,8 +496,9 @@ function styleTable(rows, unknownOvers){
       <thead><tr><th></th>${head}</tr></thead>
       <tbody>${body}</tbody>
     </table></div>
-    <p class="an-sty-foot">Economy is runs per over. Share is of that phase's overs; the
-      bowling order is set by workload, not by phase.${unknownOvers > 0
+    <p class="an-sty-foot">Economy is runs per over. Share is of that phase's overs; sides
+      bowl pace up front and at the death and spin through the middle, as real captains do,
+      in proportion to the spin each attack holds.${unknownOvers > 0
       ? ` <b>${unknownOvers} over${unknownOvers === 1 ? '' : 's'}</b> were bowled by someone
          whose style is unrecorded, counted in their own row.`
       : ''}</p>`;

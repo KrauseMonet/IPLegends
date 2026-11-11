@@ -52,8 +52,8 @@ from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
-from game import phase_skill as phase_data
-from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model
+from game import career_skills, phase_skill as phase_data
+from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model, ball_log
 
 # --- who you can be ------------------------------------------------------------------
 
@@ -1005,8 +1005,9 @@ def ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
     if ROLES[setup.role].get("batting_only"):
         start = dataclasses.replace(start, role="batter", bowl=None, bowl_scoring=None,
                                     bowl_dismissal=None)
-    return apply_role(_ability(start, ceiling, t, setup=setup, fs_id=fs_id, year=year,
+    card = apply_role(_ability(start, ceiling, t, setup=setup, fs_id=fs_id, year=year,
                                franchise=franchise), role, t)
+    return with_leans(card, start, ceiling, t, role["add"] if role else None)
 
 
 def _ability(start: Card, ceiling: Card, t: float, *, setup: Setup, fs_id: int,
@@ -1458,9 +1459,205 @@ def phase_lean(start: Card, top: Card, t: float, built: dict, disc: str) -> tupl
     return tuple(round(_lin(x, y, max(0.0, min(1.0, t))) + e, 6) for x, y, e in zip(a, b, extra))
 
 
+# --- the templates' own leans [A277] ----------------------------------------------------------
+# Every real card carries what the archive measured about HOW the player did his job (A260,
+# A265): his edge against spin or pace, how slowly he settles, his own settled share (which
+# takes the league's settling curve back out of his level), and where his wickets come. Your
+# player's engine numbers are the two spins mixed by `t`; his leans are mixed the same way, so
+# the player who began as one real season and grows toward another plays both of their ways
+# of batting and bowling, not the league's. A lean is a centred deviation, so a template
+# with none counts as zero. Only disciplines your card has carry one: a discipline you took up
+# (A238) or gave up (the gloves, A255) has no template to read. Declared game design.
+LEANS_ON = True
+# [A278] Skills each season earns (`game.career_skills`); off, a season earns none and nothing
+# else changes -- recording the balls draws nothing, so no season plays differently either way.
+CAREER_SKILLS_ON = True
+LEAN_FIELDS_BAT = ("style_bat", "burn", "settle_offset")
+LEAN_FIELDS_BOWL = ("phase_wkt",)
+
+
+def _mix_lean(a, b, t: float):
+    """Two leans `t` of the way from `a` to `b`; a missing one is zeros. None when both are."""
+    if a is None and b is None:
+        return None
+    n = len(a if a is not None else b)
+    a = a or (0.0,) * n
+    b = b or (0.0,) * n
+    out = tuple(round(_lin(x, y, t), 6) for x, y in zip(a, b))
+    return out if any(out) else None
+
+
+def with_leans(card: Card, start: Card, top: Card, t: float, added: str | None = None) -> Card:
+    """Your card with the templates' leans, in the disciplines it has, except `added` -- one
+    you took up in a changed role, which plays a pooled level and not the template's (A238).
+    Nothing at all when leans are off."""
+    if not LEANS_ON:
+        return card
+    t = max(0.0, min(1.0, t))
+    fields = {}
+    bat = card.bat_scoring is not None and start.bat_scoring is not None and added != "bat"
+    bowl = (card.bowl_scoring is not None and start.bowl_scoring is not None
+            and added != "bowl")
+    for name in LEAN_FIELDS_BAT:
+        fields[name] = _mix_lean(getattr(start, name), getattr(top, name), t) if bat else None
+    for name in LEAN_FIELDS_BOWL:
+        fields[name] = _mix_lean(getattr(start, name), getattr(top, name), t) if bowl else None
+    return dataclasses.replace(card, **fields)
+
+
+# --- skill drills [A281] ----------------------------------------------------------------------
+# The coach can work on HOW you play, as well as where (A248): against spin, against pace, how
+# you settle in, and the yorker at the death. Each drill moves one of the leans the engine plays
+# (A260, A265), CENTRED on the balls (or, at the death, the wickets) where it lands, so it moves
+# where runs and wickets come and never how many: a better player against spin is a slightly
+# worse one against pace. A step is half the real spread of that lean across regular seasons
+# (spin minus pace 0.120 runs a ball, set minus new 0.072, death against other overs 0.098 in
+# log wickets), and two steps is about the top tenth of real players -- a skill's own bar.
+# The shares that centre them were measured in the engine replaying every real season.
+DRILLS_ON = True
+DRILL_STEP = {"spin": 0.06, "pace": 0.06, "burn": 0.036, "death_wkts": 0.05}
+DRILL_MAX = 2.0                      # steps of any one drill
+DRILL_OFFER_CHANCE = 0.3             # an eligible pre-season's chance, when the coach has nothing else
+DRILL_OFFERS_MAX = 2
+DRILL_OFFER_FROM = 1                 # from the second season
+SPIN_FACED = {"top": 0.363, "middle": 0.454, "finisher": 0.443}   # balls faced against spin
+NEW_FACED = {"top": 0.410, "middle": 0.489, "finisher": 0.616}    # ...within the first ten
+DEATH_WICKETS = 0.433                # a pace bowler's expected wickets that fall at the death
+MENTOR_DRILL_SD = 1.0                # a mentor passes on a lean this many real spreads clear
+LEAN_SD = {"spin": 0.120, "pace": 0.120, "burn": 0.072, "death_wkts": 0.098}
+
+
+def _bat_band(card: Card) -> str:
+    low = min(card.positions or (9,))
+    return "top" if low <= 2 else "middle" if low <= 4 else "finisher"
+
+
+def drill_offsets(card: Card, drills: dict) -> dict:
+    """{lean field: offsets} the drills built add, centred where they land (see above)."""
+    out: dict = {}
+    if not drills:
+        return out
+    band = _bat_band(card)
+    if card.bat_scoring is not None:
+        spin = (drills.get("spin", 0.0) - drills.get("pace", 0.0)) * DRILL_STEP["spin"]
+        if spin:
+            p = SPIN_FACED[band]
+            out["style_bat"] = (spin * (1 - p), -spin * p)          # (against spin, against pace)
+        burn = drills.get("burn", 0.0) * DRILL_STEP["burn"]
+        if burn:
+            q = NEW_FACED[band]
+            out["burn"] = (-burn * (1 - q), burn * q)               # (new, set)
+    if card.bowl_scoring is not None:
+        w = drills.get("death_wkts", 0.0) * DRILL_STEP["death_wkts"]
+        if w:
+            out["phase_wkt"] = (-w * DEATH_WICKETS, -w * DEATH_WICKETS, w * (1 - DEATH_WICKETS))
+    return out
+
+
+def with_drills(card: Card, drills: dict) -> Card:
+    """Your card with the coach's drills on its leans. Nothing when drills are off."""
+    if not DRILLS_ON or not drills:
+        return card
+    fields = {}
+    for name, add in drill_offsets(card, drills).items():
+        base = getattr(card, name) or (0.0,) * len(add)
+        fields[name] = tuple(round(x + y, 6) for x, y in zip(base, add))
+    return dataclasses.replace(card, **fields) if fields else card
+
+
+DRILL_TEXT = {
+    "pace": ("The coach has a plan. \"You open. You see the new ball every match. Let us make "
+             "you murder pace bowling.\"", "Nets against the quicks",
+             "Better against pace, and a little less so against spin -- where an opener lives."),
+    "spin": ("The coach has a plan. \"The middle overs are when the spinners come on. I want "
+             "you to own them.\"", "Nets against the spinners",
+             "Better against spin, and a little less so against pace -- the middle overs are spin's."),
+    "burn": ("The coach has a plan. \"You value your wicket. Now make it pay: take your time, "
+             "then cash in once you are set.\"", "Learn to bat time",
+             "Slower to start, faster once set -- and you survive long enough to get there."),
+    "death_wkts": ("The coach has a plan. \"Yorkers. Hundreds of them. I want you taking wickets "
+                   "at the death.\"", "Yorkers at the death",
+                   "More wickets at the death, a few fewer with the new ball."),
+}
+
+
+def drill_for(you: Card, traits: dict, drills: dict) -> str | None:
+    """Which drill fits: a pace bowler's yorker; a batter's by where he bats and how he plays
+    -- an anchor learns to bat time, an opener to take on pace, anyone lower to take on spin.
+    The next one along when that is built as far as it goes. A spinner has the new ball (A248)."""
+    order: list[str] = []
+    if you.bowl_scoring is not None and you.bowling_style == "pace" and _kind(you) != "batter":
+        order.append("death_wkts")
+    if you.bat_scoring is not None and _kind(you) != "bowler":
+        basher = "pace" if _bat_band(you) == "top" else "spin"
+        if traits.get("temper", 0.0) < 0:
+            order += ["burn", basher]
+        else:
+            order += [basher, "burn"]
+    for key in order:
+        if drills.get(key, 0.0) < DRILL_MAX:
+            return key
+    return None
+
+
+def drill_card(seed: int, k: int, cp: "Checkpoint", you: Card, squad: bool) -> dict | None:
+    """The coach's offer to drill a skill, if he asks this pre-season: its own stream, from
+    the second season, twice a career at most, and only for a drill that fits you."""
+    if (not (COACH_ON and DRILLS_ON) or squad or k < DRILL_OFFER_FROM
+            or cp.drill_offers >= DRILL_OFFERS_MAX
+            or random.Random(f"{seed}:drill:{k}").random() >= DRILL_OFFER_CHANCE):
+        return None
+    key = drill_for(you, cp.traits, cp.drills)
+    if key is None:
+        return None
+    text, take, hint = DRILL_TEXT[key]
+    return {"key": "drill", "title": "The coach has a plan", "target": "", "text": text,
+            "drill": key,
+            "options": [
+                _opt(take, hint, f"You put in the hours: {take.lower()}.", True),
+                dict(_opt("Keep your game as it is", "Change nothing, risk nothing.",
+                          "You kept your game as it was.", False), neutral=True)]}
+
+
+def drill_words(drills: dict) -> list[str]:
+    """The player card's words for what the drills built: never numbers."""
+    words = {"spin": "Drilled against spin", "pace": "Drilled against pace",
+             "burn": "Learning to bat time", "death_wkts": "Bowls yorkers at the death"}
+    return [words[k] for k, v in sorted(drills.items()) if v > 0 and k in words]
+
+
+def mentor_drill(person: Card | None, you: Card) -> str | None:
+    """[A281] The skill a mentor passes on: his clearest real lean, if it is at least
+    MENTOR_DRILL_SD real spreads clear and in a discipline you have."""
+    if person is None:
+        return None
+    clear: list[tuple[float, str]] = []
+    if person.style_bat and you.bat_scoring is not None and _kind(you) != "bowler":
+        diff = person.style_bat[0] - person.style_bat[1]
+        clear.append((abs(diff) / LEAN_SD["spin"], "spin" if diff > 0 else "pace"))
+    if person.burn and you.bat_scoring is not None and _kind(you) != "bowler":
+        diff = person.burn[1] - person.burn[0]
+        if diff > 0:
+            clear.append((diff / LEAN_SD["burn"], "burn"))
+    if (person.phase_wkt and you.bowl_scoring is not None and you.bowling_style == "pace"
+            and _kind(you) != "batter"):
+        diff = person.phase_wkt[2] - (person.phase_wkt[0] + person.phase_wkt[1]) / 2
+        if diff > 0:
+            clear.append((diff / LEAN_SD["death_wkts"], "death_wkts"))
+    best = max(clear, default=None)
+    return best[1] if best and best[0] >= MENTOR_DRILL_SD else None
+
+
+MENTOR_DRILL_WORDS = {"spin": "{who} also showed you how to play the spinners.",
+                      "pace": "{who} also showed you how to take on pace.",
+                      "burn": "{who} also showed you how to bat time and cash in.",
+                      "death_wkts": "{who} also taught you the yorker."}
+
+
 def with_phase(card: Card, start: Card, top: Card, t: float, built: dict) -> Card:
     """Your card with its phase lean, in the disciplines it has. Nothing at all when phases
-    are off, or the lean is nothing: the card plays exactly as before."""
+    are off, or the lean is nothing: the card plays exactly as before. [A277] It carries the
+    templates' other leans too, from `ability` (`with_leans`), which have their own switch."""
     if not PHASE_ON:
         return card
     bat = phase_lean(start, top, t, built, "bat") if card.bat_scoring is not None else None
@@ -1900,16 +2097,51 @@ def arc_point(k: float, permanent: float, season: float, shape: Shape = STANDARD
     return max(ABILITY_FLOOR, min(ABILITY_CAP, shape.arc(k) + permanent + season))
 
 
+# [A279] How far each engine number can sit from your ceiling's and still be "like" it: the
+# spread of that number across real regular seasons (100+ balls faced, 150+ bowled), measured,
+# so a scoring gap and a dismissal gap count in the same currency.
+SHAPE_SD = {"bat_scoring": 0.123, "bat_dismissal": 0.241, "bowl_scoring": 0.104,
+            "bowl_dismissal": 0.228}
+
+
+def _shape_gap(c: Card, ceiling: Card) -> float:
+    """How unlike your ceiling a season plays: each engine number's gap in its own spreads
+    (dismissals on the log scale, as they mix), in the disciplines both have."""
+    gap = 0.0
+    for disc in ("bat", "bowl"):
+        a, b = getattr(c, f"{disc}_scoring"), getattr(ceiling, f"{disc}_scoring")
+        if a is None or b is None:
+            continue
+        gap += ((a - b) / SHAPE_SD[f"{disc}_scoring"]) ** 2
+        gap += ((math.log(getattr(c, f"{disc}_dismissal")) - math.log(getattr(ceiling, f"{disc}_dismissal")))
+                / SHAPE_SD[f"{disc}_dismissal"]) ** 2
+    return gap
+
+
 def potential_legend(deck: Deck, role: str, ceiling: Card) -> Card | None:
-    """Where a growing potential heads [A224]: the role's best real season that is better than
-    your ceiling both on the card and at the role's job. Raising the potential moves your top
-    card toward it, so every number you play with is still a mix of real players' (A197),
-    never an extrapolation past one. None when the ceiling is already the best there is."""
+    """Where a growing potential heads [A224, A279]: a real season better than your ceiling both
+    on the card and at the role's job, about as good as the potential can take you -- the
+    nearest card at or above ceiling + POTENTIAL_MAX, within a point -- and among those, the
+    one that plays most like your ceiling. Raising the potential moves your top card toward
+    it, so every number you play with is still a mix of real players' (A197), never an
+    extrapolation past one. None when the ceiling is already the best there is.
+
+    Until A279 it was the role's single highest card, and that was wrong in a way the skills
+    showed (A278): the highest cards sit at the scale's 99 with engine numbers far beyond a
+    normal 99 (Sooryavanshi 2026 scores +0.64 a ball, Maxwell 2014 +0.48), and the top card
+    moves in proportion to card points, so eight points of potential moved a ceiling of 85
+    more than half way to Maxwell. Careers then scored nearly twice as fast as real batters
+    of their Rating (+2.18 runs an over above par at 94+, real +1.10) and read as Aggressors."""
     _, ceilings = template_pools(deck, role)
     better = [c for c in ceilings if c.display > ceiling.display
               and main_rating(c, role) >= main_rating(ceiling, role)]
-    return max(better, key=lambda c: (c.display, main_rating(c, role), c.season_year, c.person_id),
-               default=None)
+    if not better:
+        return None
+    target = min(99, ceiling.display + POTENTIAL_MAX)
+    reach = [c for c in better if c.display >= target] or better
+    low = min(c.display for c in reach) if reach is not better else max(c.display for c in better)
+    near = [c for c in reach if low <= c.display <= low + 1]
+    return min(near, key=lambda c: (_shape_gap(c, ceiling), c.season_year, c.person_id))
 
 
 def potential_room(ceiling: Card, legend: Card | None) -> float:
@@ -3039,6 +3271,7 @@ class SeasonRecord:
     cover: dict | None = None
     # [A248] the phase work you chose, as the season was played with it (an input)
     phase_built: dict = field(default_factory=dict)
+    drills_built: dict = field(default_factory=dict)   # [A281] the drills, as the season was played
     bat_at: int | None = None              # [A251] the batting number this season was played at
     rival: list | None = None
     extra_earnings: int = 0
@@ -3053,6 +3286,12 @@ class SeasonRecord:
     # season's choices made to them, applied before the next. Empty on an older token.
     traits: dict = field(default_factory=dict)
     trait_moves: list = field(default_factory=list)
+    # [A278] The season's balls against par, kept so later seasons can judge him against his
+    # career so far; the skills it earned ([key, tier, strength], strongest first) and the ones
+    # his Rating opened to show. None/empty on a season played before A278.
+    skill_log: dict | None = None
+    skills_earned: list = field(default_factory=list)
+    skills: list = field(default_factory=list)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -3150,6 +3389,7 @@ class Year:
     incident: dict | None = None                     # the season's incident and your answer (A230)
     incident_out: dict = field(default_factory=dict) # league index -> why it kept you out (A230)
     cover: dict | None = None                        # a cover spell you bowled (A247)
+    skill_log: dict | None = None                    # your balls against par (A278)
 
 
 def availability_shares(tenure: int | None, overseas: bool) -> tuple[float, ...]:
@@ -3617,10 +3857,14 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
             seen += 1
             moment(a, b, season, stage, 0)
 
+    # [A278] every ball you face or bowl, against par, for the skills the season earns;
+    # recording draws nothing, so the season is the season played without it
+    collector = career_skills.Collector(YOU_ID)
     try:
-        season = run_league(model, sides, rng, double_at=double, before_match=league_hook,
-                            schedule=schedule)
-        season = run_playoffs(model, season, rng, before_match=playoff_hook)
+        with ball_log(collector):
+            season = run_league(model, sides, rng, double_at=double, before_match=league_hook,
+                                schedule=schedule)
+            season = run_playoffs(model, season, rng, before_match=playoff_hook)
     finally:
         yours.xi, yours.impact = with_you
         yours.breakdown = None
@@ -3631,7 +3875,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
                 absent=sorted(set(out) - set(incident_out)), absence_reason=absence_why,
                 incident=incident, incident_out=incident_out,
-                cover=cover_spell(season, yours))
+                cover=cover_spell(season, yours), skill_log=collector.summary(YOU_ID) or None)
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
     return year
@@ -3967,6 +4211,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.bowl_rank = discipline_rank(lines, key, "bowl")
     record.display = season_display(deck, you, season_margin(lines, key))
     record.measured = measured_halves(lines, key)
+    record.skill_log = year.skill_log
     record.position = next(i for i, s in enumerate(season.table, 1) if s.side is yours)
     record.playoffs = record.position <= 4
     final = season.playoffs[-1]
@@ -4232,7 +4477,7 @@ def legend_card(career: Career, year: int | None = None) -> tuple[SeasonRecord, 
                        role=best.role)
         fields = dict(zip(("bat_scoring", "bat_dismissal", "bowl_scoring", "bowl_dismissal"),
                           best.measured))
-        return best, dataclasses.replace(card, display=best.display,
+        return best, dataclasses.replace(_as_played(card, best), display=best.display,
                                          **{k: v for k, v in fields.items() if v is not None})
     rated = [r for r in career.seasons if r.rating]
     if not rated:
@@ -4241,7 +4486,17 @@ def legend_card(career: Career, year: int | None = None) -> tuple[SeasonRecord, 
     card = ability(career.start, top_card(career.ceiling, career.legend, best.potential),
                    best.ability, setup=career.setup, fs_id=0, year=best.year, franchise=None,
                    role=best.role)
-    return best, dataclasses.replace(card, display=best.rating)
+    return best, dataclasses.replace(_as_played(card, best), display=best.rating)
+
+
+def _as_played(card: Card, season: SeasonRecord) -> Card:
+    """[A283] A legend plays his leans the way his season did: the spins' own (A277, already on
+    the card from `ability`) and the drills he had built by then (A281). A277 stripped them
+    until the picker could value them; `legend_values` now does. The measured halves (A225)
+    are his card's numbers plus that season's luck, measured against the very distribution
+    those leans shaped, so adding the leans back reproduces the season rather than counting
+    anything twice."""
+    return with_drills(card, season.drills_built)
 
 
 # [A234] What a legend is worth to a twelve, in runs a match above an average player. The
@@ -4321,7 +4576,14 @@ def legend_values(c: Card) -> tuple[float, float | None]:
 
     bat = 0.0
     if c.bat_scoring is not None and c.positions:
-        bat = legend_bat_value(c.bat_scoring, c.bat_dismissal, c.positions)
+        scoring, dismissal = c.bat_scoring, c.bat_dismissal
+        if c.settle_offset:
+            # [A283] his settled share is a flat shift of his level, which the engine takes
+            # off every ball (A260), so it is valued as one. His other leans move WHERE his
+            # runs and wickets come, centred where he bats, and are worth about nothing.
+            scoring -= c.settle_offset[0]
+            dismissal *= math.exp(-c.settle_offset[1])
+        bat = legend_bat_value(scoring, dismissal, c.positions)
     thin = c.bowl_balls is not None and c.bowl_balls < ATTACK_MIN_BALLS
     bowl = None
     if c.bowl_scoring is not None and c.has_bowl and not thin:
@@ -4459,6 +4721,8 @@ class Checkpoint:
     coach_mentor: dict = field(default_factory=dict)
     phase: dict = field(default_factory=dict)          # [A248] the coach's work, by discipline
     phase_offers: int = 0
+    drills: dict = field(default_factory=dict)         # [A281] skill drills built, in steps
+    drill_offers: int = 0
     promotions: int | None = None       # [A251] places earned up the order; None before the rise
     # [A255] Whether the batting band comes from the ceiling spin (False on a checkpoint from
     # before, so a career in progress does not change band halfway), the band a bowler made
@@ -4497,6 +4761,8 @@ class Checkpoint:
                    coach_mentor=dict(d.get("coach_mentor") or {}),
                    phase={k: list(v) for k, v in (d.get("phase") or {}).items()},
                    phase_offers=d.get("phase_offers", 0), promotions=d.get("promotions"),
+                   drills={k: float(v) for k, v in (d.get("drills") or {}).items()},
+                   drill_offers=d.get("drill_offers", 0),
                    ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
                    keeper_offers=d.get("keeper_offers", 0))
 
@@ -4609,6 +4875,8 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
                      else None),
         ambitions=[m.text.removeprefix("Ambition achieved: ") for m in played.milestones
                    if m.key == "ambition"],
+        new_skills=[m.text.removeprefix("New skill: ") for m in played.milestones
+                    if m.key == "skill"],
         first_hundred=not any(r.hundreds for r in prev),
         first_five_for=not any(r.five_fors for r in prev),
         national=({"country": setup.nation, "event": played.national, "caps": played.caps,
@@ -4910,13 +5178,16 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         coach = coach_card(seed, setup, start, cp, k, squad_now, need, weak)
         # [A248] Your lean going into the season, as the player card says it and as the coach
         # reads it when he has no other offer to make.
-        leaning = with_phase(ability(start, top, career_t(cp, start, top, shape), setup=setup,
-                                     fs_id=offer.fs_id, year=year, franchise=offer.franchise,
-                                     role=rd), start, top, career_t(cp, start, top, shape),
-                             cp.phase)
-        career.phase_words = phase_words(leaning)
+        leaning = with_drills(with_phase(ability(start, top, career_t(cp, start, top, shape),
+                                                 setup=setup, fs_id=offer.fs_id, year=year,
+                                                 franchise=offer.franchise, role=rd),
+                                         start, top, career_t(cp, start, top, shape), cp.phase),
+                              cp.drills)
+        career.phase_words = phase_words(leaning) + (drill_words(cp.drills) if DRILLS_ON else [])
         if coach is None:
             coach = phase_card(seed, k, cp, leaning, squad_now)
+        if coach is None:
+            coach = drill_card(seed, k, cp, leaning, squad_now)   # [A281]
         if coach is not None:
             coach = with_coach_mentor(deck, coach, offer.fs_id, start, cp)
         coach_said, coach_rec = None, None
@@ -4931,6 +5202,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             coach_said = (pick["story"], "up" if pick["take"] else "")
             coach_rec = {"key": coach["key"], "choice": pick["label"], "take": pick["take"],
                          "need": bool(coach.get("need")), "cover": bool(coach.get("cover"))}
+            if coach.get("drill"):
+                coach_rec["drill"] = coach["drill"]          # [A281] which drill
             cp.standing += pick.get("standing", 0)
             trial = False
             if coach["key"] == "switch":
@@ -4947,6 +5220,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 cp.phase_offers += 1
                 if pick["take"]:
                     cp.phase = phase_after(cp.phase, *coach["phase"])
+            elif coach["key"] == "drill":                 # [A281]
+                cp.drill_offers += 1
+                if pick["take"]:
+                    d = coach["drill"]
+                    cp.drills[d] = min(DRILL_MAX, cp.drills.get(d, 0.0) + 1.0)
             elif coach["key"] == "specialise":
                 if pick["take"]:
                     cp.roles.append(coach["target"])
@@ -5032,6 +5310,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 mates.club = canonical(offer.franchise)
             cp.standing = 1                    # they asked for you
             already = False
+        mentor_taught = ""                             # [A281] a skill a mentor passed on
         outcome = draw_outcome(seed, k, option)
         now = outcome if outcome is not None and not outcome.next_season else None
         if outcome is not None and outcome.next_season:
@@ -5048,6 +5327,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     else ct.style_from(person.bat_scoring, person.bat_dismissal, False))
             if lean:
                 trait_moves.append(("temper", MENTOR_LEAN * lean))
+            # [A281] ...and his clearest real skill, if he has one you can use
+            taught = mentor_drill(person, probe) if DRILLS_ON else None
+            if taught and cp.drills.get(taught, 0.0) < DRILL_MAX:
+                cp.drills[taught] = min(DRILL_MAX, cp.drills.get(taught, 0.0) + 1.0)
+                mentor_taught = MENTOR_DRILL_WORDS[taught].format(who=person.name)
         extra = option.missed + landed_missed + (now.missed if now else 0)
         cp.standing += option.standing + (now.standing if now else 0)
         for line in (option.injury, now.injury if now else ""):
@@ -5064,6 +5348,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 "up" if now.season > 0 or now.permanent > 0 else "down")
         else:
             say(story, tone)
+        if mentor_taught:
+            say(mentor_taught, "up")
         if outcome is not None and outcome.next_season and any(o.permanent > 0 for o in option.outcomes):
             say("Whether it works, you will see next season.")
         money = endorsement_fee(rating_at(start, top, t)) if option.money else 0
@@ -5086,9 +5372,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         absence_label = (event.title.lower() if option.injury or (now and now.missed) or
                          event.key in ("workload", "home_league") and extra else
                          "an injury that came back" if landed_missed else "")
-        you = with_phase(ct.styled(ability(start, top, t, setup=setup, fs_id=offer.fs_id,
-                                           year=year, franchise=offer.franchise, role=rd),
-                                   traits), start, top, t, cp.phase)
+        you = with_drills(with_phase(ct.styled(ability(start, top, t, setup=setup,
+                                                       fs_id=offer.fs_id, year=year,
+                                                       franchise=offer.franchise, role=rd),
+                                               traits), start, top, t, cp.phase), cp.drills)
         career.phase_words = phase_words(you)
         captain_now = option.captain or (already and not squad_now)
         plan: tuple[tuple[str, str], ...] = ()
@@ -5115,7 +5402,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                               tenure=tenure_at(cp.seasons, offer.franchise),
                               role=rd, coach=coach_rec, traits=traits,
                               cover_ok=cover_eligible(setup, cp, k, squad_now),
-                              phase_built=dict(cp.phase),
+                              phase_built=dict(cp.phase), drills_built=dict(cp.drills),
                               bat_at=batting_number(you, earned(cp)))
         # Read the PLAYED record, never `record`: on a cache hit `record` is the blank one
         # this loop built, and the next season's offers would price you as a 70.
@@ -5133,6 +5420,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                                    (setup, start, top, offer, option, t,
                                                     squad_now, ct.key(traits), captain_now,
                                                     record.cover_ok, you.phase_bat, you.phase_bowl,
+                                                    you.style_bat, you.burn, you.settle_offset, you.phase_wkt,
                                                     tuple(sorted((d, tuple(v)) for d, v in cp.phase.items())),
                                                     record.bat_at, role_key(rd), record.tenure),
                                                    answers, plan,
@@ -5212,6 +5500,15 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if state == "done" and when == year:
                 played.milestones.append(CareerMilestone(
                     "ambition", f"Ambition achieved: {AMBITIONS[key][0]}"))
+        if CAREER_SKILLS_ON:
+            played.skills_earned = career_skills.judge(
+                [r.skill_log for r in cp.seasons] + [played.skill_log])
+            played.skills = career_skills.shown(played.skills_earned, played.rating, you.role)
+            held_before = {x[0] for r in cp.seasons for x in r.skills}
+            for key_, _tier, _st in played.skills:
+                if key_ not in held_before:
+                    played.milestones.append(CareerMilestone(
+                        "skill", f"New skill: {career_skills.label(key_)}"))
         career.live_milestones = played.milestones
         played.press = press.season_facts(_press_facts(deck, cp, played, offer, k, year,
                                                         career.auction, setup),

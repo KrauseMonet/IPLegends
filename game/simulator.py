@@ -94,6 +94,36 @@ CONDITIONS_LEVELS = tuple(round(CONDITIONS_SD * z / _Z7_SD, 6) for z in _Z7)
 _NO_CONDITIONS = contextvars.ContextVar("no_conditions", default=False)
 
 
+# [A278] A per-ball record of what happened and what an AVERAGE player would have expected
+# in that state, for judging a simulated season the way the archive judges a real one
+# (`game.career_skills`). Set only by Build a Career and the tool that measures its cut-offs;
+# it draws nothing, so a match played with it on is the match played without it.
+_BALL_LOG = contextvars.ContextVar("ball_log", default=None)
+
+
+@contextlib.contextmanager
+def ball_log(fn):
+    """Call `fn(over, wickets, striker, bowler, outcome, par)` for every ball faced in a
+    twenty-over innings (never a super over), `par` being (runs, out, dot, boundary, six) an
+    average batter facing an average bowler would expect: the state's own distribution
+    after the league's settling curve, as `etl.skills` prices a real ball."""
+    token = _BALL_LOG.set(fn)
+    try:
+        yield
+    finally:
+        _BALL_LOG.reset(token)
+
+
+def _par(model: "Model", probs, values, over: int, wickets: int, faced: int) -> tuple:
+    settle = getattr(model, "settle", None)
+    cell = settle.get((over, bucket_of(wickets), faced_bucket(faced))) if settle else None
+    d = split_ball(probs, values, cell[0], cell[1]) if cell else probs
+    runs = sum(q * v for q, v in zip(d[1:], values[1:]))
+    bound = sum(q for q, r in zip(d[1:], OFF_THE_BAT) if r >= 4)
+    # a dot as the archive counts one: nothing off the bat, a wicket ball included (etl.skills)
+    return (runs, d[0], d[0] + d[1 + OFF_THE_BAT.index(0)], bound, d[SIX])
+
+
 @contextlib.contextmanager
 def no_conditions(on: bool = True):
     """Play without match conditions, drawing nothing: the daily's days before A267 (A203)."""
@@ -136,6 +166,46 @@ FRONTLINE_BOWLERS = 5
 CHANGE_MAX_OVERS = 2
 CHANGE_MIN_OVERS = 1
 CHANGE_ECONOMY = 11.0
+
+# [A276] Who bowls WHEN. Until A276 the rotation handed out overs by workload alone, blind
+# to phase and style, so openers faced pace on 60% of powerplay balls against a real 82%,
+# and spin was bowled at the same rate in every phase. MEASURED over the archive's
+# full-length innings (47,034 overs, each credited to the bowler who bowled most of it):
+# the share of each over bowled by spin, 14% in the first, 60% through overs 7-10, 9% in
+# the last two. A side spreads its OWN spin overs (four a frontline spinner) over the
+# twenty in that proportion, and its pace overs in the other, and each over goes to the
+# style furthest behind its schedule -- so a side with one spinner or four keeps the shape
+# and still bowls its twenty, and nobody is left unable to finish (`_can_finish`). Within
+# a style, the usual order: fewest overs, then the better bowler. No random draw.
+# Two per-BOWLER schedules were tried first and both bunched the overs (no spin in overs
+# 1-2 and nearly all of over 5): the archive's 14% comes from some sides opening with spin,
+# not from every side bowling one spin over in the fifth.
+SPIN_SHARE_BY_OVER = (0.142, 0.114, 0.132, 0.183, 0.227, 0.263, 0.599, 0.597, 0.626, 0.598,
+                      0.572, 0.562, 0.503, 0.497, 0.433, 0.388, 0.263, 0.178, 0.093, 0.093)
+
+
+def _due(share: tuple[float, ...]) -> tuple[float, ...]:
+    """Cumulative share of a style's overs due by the end of each over."""
+    total, run, out = sum(share), 0.0, []
+    for x in share:
+        run += x
+        out.append(run / total)
+    return tuple(out)
+
+
+STYLE_DUE = {"spin": _due(SPIN_SHARE_BY_OVER),
+             "pace": _due(tuple(1 - x for x in SPIN_SHARE_BY_OVER))}
+_PHASE_BLIND = contextvars.ContextVar("phase_blind_rotation", default=False)
+
+
+@contextlib.contextmanager
+def phase_blind_rotation(on: bool = True):
+    """Rotate by workload alone, as before A276: the daily's days scored under it (A203)."""
+    token = _PHASE_BLIND.set(on)
+    try:
+        yield
+    finally:
+        _PHASE_BLIND.reset(token)
 
 
 @dataclass(frozen=True)
@@ -606,6 +676,9 @@ class BowlerCard:
     change: bool = False
     max_overs: int = MAX_OVERS_PER_BOWLER
     taken_off: int = 0
+    # [A276] a batter covering a broken-down bowler's overs (A247): the next over is his,
+    # whatever the style schedule says, as it always was when the rotation went by workload
+    covering: bool = False
 
     @property
     def overs(self) -> str:
@@ -738,15 +811,23 @@ class Breakdown:
 
 
 def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
-                  over: int | None = None, plan: dict[str, str] | None = None) -> BowlerCard:
+                  over: int | None = None, plan: dict[str, str] | None = None,
+                  rng: random.Random | None = None) -> BowlerCard:
     """Fewest overs bowled first, best bowler breaking the tie, never two overs running.
 
-    A real captain saves their best for the death; this one does not, unless a captain has
-    set a PLAN (A213: Build a Career's armband): a phase per bowler, "powerplay", "middle" or
-    "death". Then this over's phase goes to its planned bowlers first, the unplanned next,
-    and a bowler saved for a later phase last -- but never in a way that leaves the innings
-    unable to finish its twenty overs (`_can_finish`). With no plan, exactly as before: no
-    other mode changes.
+    [A276] In a full twenty each over first goes to the style it is drawn for
+    (`_style_for_over`): spin as often as the side has fallen behind the archive's per-over
+    share (`SPIN_SHARE_BY_OVER`), so pace bowls up front and at the death and spin through
+    the middle, as real captains bowl them. It still does not save its BEST for the death --
+    the draw is by style, not by quality. A batter covering a broken-down bowler (A247)
+    takes the next over whatever the draw says. A captain's PLAN (A213: Build a Career's
+    armband) -- a phase per bowler, "powerplay", "middle" or "death" -- comes before the
+    style: this over's phase goes to its planned bowlers first, the unplanned next, and a
+    bowler saved for a later phase last, never in a way that leaves the innings unable to
+    finish its twenty overs (`_can_finish`). Without a plan that check cannot act: 60,000
+    random style rotations with it removed, change bowlers included, never stranded one.
+    Under `phase_blind_rotation` (the daily's older days) and in a super over, workload
+    alone, exactly as before A276, and no draw.
 
     [A239] Only the frontline bowlers are chosen here; a change bowler comes on through
     `change_bowler`, never by rotation. A frontline bowler who has had an over taken off him
@@ -770,15 +851,60 @@ def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
             # Never past anyone's cap: a short attack still raises (A133's guard).
             rest = [b for b in bowlers if b.balls < b.max_overs * BALLS_PER_OVER]
         return min(rest, key=default)
-    if not plan or over is None:
+    blind = _PHASE_BLIND.get()
+    if over is None or (blind and not plan):
         return min(available, key=default)
     phase = phase_of_over(over)
-    order = sorted(available, key=lambda b: (_plan_rank(plan.get(b.player.person_id), phase),)
-                   + default(b))
+
+    lead = None if blind else _style_for_over(bowlers, available, over, rng)
+
+    def key(b):
+        planned = _plan_rank(plan.get(b.player.person_id), phase) if plan else 1
+        # [A276] the style this over is given to first
+        due = blind or not (b.covering and b.balls == 0)
+        return (planned, due, _style(b) != lead) + default(b)
+    order = sorted(available, key=key)
     for b in order:
         if _can_finish(frontline, b, OVERS - over - 1):
             return b
     return min(available, key=default)
+
+
+def _style(b: BowlerCard) -> str:
+    """Spin or pace for the rotation; a bowler with no recorded style bowls as pace."""
+    return "spin" if b.player.bowling_style == "spin" else "pace"
+
+
+def _styles_behind(bowlers: list[BowlerCard], over: int) -> dict[str, float]:
+    """[A276] For each style, overs it is behind its schedule after this over: the side's
+    capacity in that style (four overs a frontline bowler, his cap if shorter) times the
+    archive's share due by now, less the overs that style has bowled. A change bowler's
+    overs count toward his style; his cap does not (he is not part of the plan)."""
+    cap, done = {"spin": 0, "pace": 0}, {"spin": 0.0, "pace": 0.0}
+    for b in bowlers:
+        st = _style(b)
+        if not b.change:
+            cap[st] += b.max_overs
+        done[st] += b.balls / BALLS_PER_OVER
+    return {st: cap[st] * STYLE_DUE[st][over] - done[st] for st in cap}
+
+
+def _style_for_over(bowlers: list[BowlerCard], available: list[BowlerCard], over: int,
+                    rng: random.Random | None) -> str | None:
+    """[A276] Which style this over goes to. Spin with probability equal to the spin overs
+    the side is behind (clamped to 0-1), so on average a side bowls its spin to the archive's
+    shape and a side that has fallen behind catches up; one draw an over. Sides then differ
+    over by over as real captains do: a deterministic rule gave every side the same choice
+    at the same over and the per-over shares zig-zagged (50% spin in the third over and 1%
+    in the fourth, against the archive's 13% and 18%). With no `rng` (direct callers in
+    tests), the style furthest behind. Only a style somebody available can bowl."""
+    have = {_style(b) for b in available}
+    if len(have) < 2:
+        return next(iter(have), None)
+    behind = _styles_behind(bowlers, over)
+    if rng is None:
+        return max(behind, key=behind.get)
+    return "spin" if rng.random() < min(1.0, max(0.0, behind["spin"])) else "pace"
 
 
 def change_bowler(bowlers: list[BowlerCard], chosen: BowlerCard,
@@ -898,11 +1024,12 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
             cover.max_overs = cover.balls // BALLS_PER_OVER + injured.max_overs - breakdown.after
             injured.max_overs = breakdown.after
             innings.breakdown_at = over
+            cover.covering = True
         # A captain's phase plan (A213) is for a full twenty only; a super over has none.
         # A super over has one bowler and no change of bowling (A239).
         full = overs == OVERS
         bowler = choose_bowler(attack, previous, over if full else None,
-                               plan if full else None)
+                               plan if full else None, rng)
         if full:
             change = change_bowler(attack, bowler, previous)
             if change is not None:
@@ -974,6 +1101,10 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 aim += sp.style_bat[STYLE_INDEX[bowler.player.bowling_style]]
             dist = split_ball(probs, values, aim, odds)
             outcome = draw(dist, rng)
+            log = _BALL_LOG.get()
+            if log is not None and state_over is None and overs == OVERS:
+                log(over, innings.wickets, striker, bowler, outcome,
+                    _par(model, probs, values, over, innings.wickets, striker.balls))
             expected = sum(q * v for q, v in zip(dist[1:], values[1:]))
             striker.exp_runs += expected
             striker.exp_outs += dist[0]

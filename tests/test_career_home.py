@@ -150,12 +150,13 @@ RISEN_SEED = 0
 @pytest.fixture(scope="module")
 def risen(no_incidents, deck, model):
     """An opener's career that climbs to No. 1 and falls back, found by search. Built here
-    with the coach and phases off: a module fixture is set up before conftest's per-test
+    with the coach, phases and career leans off: a module fixture is set up before conftest's per-test
     switches, and the tests replay it with them off. Seed RISEN_SEED (re-found after A259,
     and again after A261)."""
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(C, "COACH_ON", False)
         mp.setattr(C, "PHASE_ON", False)
+        mp.setattr(C, "LEANS_ON", False)       # [A277] the career leans, likewise
         car, moves = C.auto_career(deck, model, RISEN_SEED, C.Setup("T", "opener", 2010, False),
                                    "strength")
     car.moves = moves

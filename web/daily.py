@@ -510,6 +510,10 @@ SIXTH_BOWLER_FROM = datetime.date(2026, 10, 30)
 # draws none -- the draw would shift every random number after it -- so it replays exactly.
 # Set to the day after A267 ships; move it if it ships later.
 CONDITIONS_FROM = datetime.date(2026, 11, 8)
+# [A276] The first day whose bowlers are rotated by phase and style (spin through the
+# middle, pace at either end). A day before it rotates by workload alone, drawing nothing,
+# so it replays exactly. Set to the day after A276 ships; move it if it ships later.
+ROTATION_FROM = datetime.date(2026, 11, 11)
 
 
 def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
@@ -522,7 +526,7 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
-    from game.simulator import no_conditions
+    from game.simulator import no_conditions, phase_blind_rotation
 
     # [A262] Before `side_for_fs` reads it: an opposition eleven obeys the overseas cap too.
     full = nationality_deck(full, day.challenge_date)
@@ -537,7 +541,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     with (old_bowling_order(day.challenge_date < BOWLING_ORDER_FROM),
           old_batting_order(day.challenge_date < BATTING_ORDER_FROM),
           five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM),
-          no_conditions(day.challenge_date < CONDITIONS_FROM)):
+          no_conditions(day.challenge_date < CONDITIONS_FROM),
+          phase_blind_rotation(day.challenge_date < ROTATION_FROM)):
         return _play_and_score(full, model, day, player, state)
 
 

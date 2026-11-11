@@ -13,6 +13,7 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 DOC = read_document()
 # Seeded seasons, found by search; an engine change can move them (re-find, never loosen)
 KEY_SEED = 20      # 2 -> 26 after A259, 26 -> 20 after A265, 20 -> 97 after A267, 97 -> 13 after A268, 13 -> 20 after A270
+ROW_SEED = 0       # 7 -> 8 after A259, 8 -> 0 after A276; re-find after an engine change
 NERVE_SEED = 9      # 3 -> 9 after A265: two playoff calls and one league moment
 pytestmark = pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 
@@ -351,10 +352,10 @@ def test_a_captain_meets_the_captains_row(deck, model, monkeypatch):
     start, ceiling = C.spin(deck, 3, "opener")
     you = C.ability(start, ceiling, 0.5, setup=C.Setup("R", "opener", 2019), fs_id=26,
                     year=2019, franchise=deck.cards_by_fs[26][0].franchise)
-    # seed 7 -> 8 re-found after A259: the row must come before any key moment, for both
+    # the row must come before any key moment, for both (ROW_SEED)
     for captain, want in ((True, "Call a team meeting"), (False, "Back the captain")):
         try:
-            C.simulate_year(deck, model, 8, 2, you, answers=(), captain=captain)
+            C.simulate_year(deck, model, ROW_SEED, 2, you, answers=(), captain=captain)
         except C._NeedMoment as need:
             assert need.prompt is not None
             assert need.prompt["options"][0].label == want

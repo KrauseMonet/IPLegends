@@ -31,7 +31,9 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # season, match conditions): one key moment in 2010
 # [A270] seed 16, re-found after A270 (the card's pull graded by matches moved the spins):
 # two key moments in 2010
-UNSOLD = (16, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
+# [A276] seed 33, re-found after A276 (bowlers rotated by phase and style): two key
+# moments in 2010
+UNSOLD = (33, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
 
 
 @pytest.fixture(scope="module")

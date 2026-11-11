@@ -182,7 +182,7 @@ def test_the_lacking_band_is_judged_on_batting(deck):
     assert C.lacking_band(_fake(squad), 1) == "finisher"
 
 
-MIDDLE_SEED = 8             # (0 until A267, 2 until A268) a spinner whose first trial is at a squad short in the middle
+MIDDLE_SEED = 0             # (0 until A267, 2 until A268, 8 until A276) a spinner whose first trial is at a squad short in the middle
 GLOVES_SEED = 0             # (2 until A270) a middle-order career the coach asks to keep wicket; re-find after a rating change
                             # (8 until re-found after A261: its 2011 trial squad now lacks the finisher band)
 

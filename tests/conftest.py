@@ -68,3 +68,27 @@ def keeper_off(request, monkeypatch):
     from game import career as C
 
     monkeypatch.setattr(C, "KEEPER_ASK_CHANCE", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def leans_off(request, monkeypatch):
+    """The templates' own leans on your career player (A277) move every seeded season the older
+    career tests pin. Off for every test except a module that sets `LEANS_TESTS = True`
+    (`test_career_leans.py`). The season cache needs no clearing: the leans are in its key."""
+    if getattr(request.module, "LEANS_TESTS", False):
+        return
+    from game import career as C
+
+    monkeypatch.setattr(C, "LEANS_ON", False)
+
+
+@pytest.fixture(autouse=True)
+def drills_off(request, monkeypatch):
+    """A mentor passing on his real skill (A281) is an event card's outcome, not the coach's,
+    so it would move the older seeded careers even with the coach off. Off for every test
+    except a module that sets `DRILL_TESTS = True` (`test_career_drills.py`)."""
+    if getattr(request.module, "DRILL_TESTS", False):
+        return
+    from game import career as C
+
+    monkeypatch.setattr(C, "DRILLS_ON", False)

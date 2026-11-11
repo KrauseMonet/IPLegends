@@ -340,8 +340,8 @@ def attack(xi: list[Card], model: Model, impact: Card | None = None) -> list[Pla
     decides, per match, whether he plays at all and in place of whom, before this is ever
     called -- so `xi` is always the eleven who are actually out there, impact-substituted
     or not, and this just picks the best five of them.] Capped at five deliberately:
-    `choose_bowler` hands the next over to whoever has bowled least, so a pool bigger than
-    five would spread overs thinner still (A50).
+    `choose_bowler` gives every one of them his overs (A276: by style and phase, then
+    workload), so a pool bigger than five would spread overs thinner still (A50).
 
     [A239] Plus a sixth, the next in the same order, as a change bowler: he bowls at most
     two overs and only when a frontline bowler is being hit (`simulator.change_bowler`), so
@@ -574,7 +574,9 @@ def _validate_sixth_bowler(conn, model: Model, seed: int, seasons: int = 16) -> 
     from game.simulator import CHANGE_ECONOMY
 
     deck = load_deck(conn)
+    style = {c.person_id: c.bowling_style for cs in deck.cards_by_fs.values() for c in cs}
     overs = change = five = innings = 0
+    phase_overs = [[0, 0] for _ in range(3)]          # [A276] [spin, all] by phase
     for s in range(seasons):
         rng = random.Random(seed * 1000 + s)
         for r in run_league(model, historical_sides(deck, rng, 10), rng).results:
@@ -583,7 +585,14 @@ def _validate_sixth_bowler(conn, model: Model, seed: int, seasons: int = 16) -> 
                 five += sum(1 for b in inn.bowling if b.balls) <= BOWLERS_IN_TWELVE
                 overs += inn.balls
                 change += sum(b.balls for b in inn.bowling if b.change)
+                for o in inn.over_log:
+                    st = style.get(o.bowler_id)
+                    if st in ("pace", "spin"):
+                        ph = 0 if o.over < 6 else 1 if o.over < 15 else 2
+                        phase_overs[ph][0] += st == "spin"
+                        phase_overs[ph][1] += 1
     real = archive_bowler_use(conn)
+    real_spin = archive_spin_by_phase(conn)
 
     print(f"\n=== the sixth bowler, {seasons} historical-side leagues, seed {seed} ===\n")
     print(f"    {'':28}{'simulated':>12}{'archive':>12}")
@@ -592,6 +601,35 @@ def _validate_sixth_bowler(conn, model: Model, seed: int, seasons: int = 16) -> 
     print(f"\n    reported, not asserted -- CHANGE_ECONOMY = {CHANGE_ECONOMY} was swept to fit "
           f"the first row\n    ({real['innings']:,} real innings); balls, not overs, on "
           "the simulated side.")
+    for ph, name in enumerate(("powerplay", "middle", "death")):
+        sim = phase_overs[ph][0] / phase_overs[ph][1] if phase_overs[ph][1] else 0.0
+        print(f"    {'spin overs, ' + name:28}{sim:11.1%}{real_spin[ph]:11.1%}")
+    print("\n    [A276] reported, not asserted -- the rotation spreads each side's spin to the"
+          "\n    archive's per-over shape (SPIN_SHARE_BY_OVER); the level is the attack's own.")
+
+
+def archive_spin_by_phase(conn) -> list[float]:
+    """[A276] The share of full-length innings' overs bowled by spin, by phase: each over
+    credited to the bowler who bowled most of its balls."""
+    rows = conn.execute(
+        """
+        with b as (
+          select d.match_id, d.innings_no, d.over_no, d.bowler_id, count(*) n
+            from deliveries d
+           where d.innings_no in (1, 2) and not d.is_super_over
+             and d.innings_scheduled_balls = 120
+           group by 1, 2, 3, 4),
+        o as (
+          select distinct on (match_id, innings_no, over_no) over_no, bowler_id
+            from b order by match_id, innings_no, over_no, n desc, bowler_id)
+        select case when o.over_no < 6 then 0 when o.over_no < 15 then 1 else 2 end ph,
+               count(*) filter (where p.bowling_style = 'spin')::float
+                 / count(*) filter (where p.bowling_style in ('pace', 'spin'))
+          from o join people p on p.person_id = o.bowler_id
+         group by 1 order by 1
+        """
+    ).fetchall()
+    return [r[1] for r in rows]
 
 
 # [A267] The archive's chase success by first-innings total, the same full-length matches

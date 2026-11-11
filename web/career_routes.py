@@ -132,6 +132,36 @@ def _clip(c: press.Clipping) -> ClippingOut:
                        tone=c.tone)
 
 
+class SkillOut(BaseModel):
+    """[A278] A skill a season earned, the way a real card shows one."""
+    key: str
+    label: str
+    tier: int                     # 1 style, 2 special, 3 elite
+    blurb: str
+    seasons: int = 1              # seasons it was shown, on a career's list
+    new: bool = False             # [A282] shown for the first time in this career
+
+
+class SlotOut(BaseModel):
+    """[A282] One of the player card's three skill slots."""
+    tier: int
+    name: str                     # Style / Special / Elite
+    opens_at: int                 # the Rating that opens it
+    open: bool
+    skill: SkillOut | None = None
+
+
+def _skills_out(rows) -> list[SkillOut]:
+    from etl.skills import SKILL_BY_KEY
+    out = []
+    for row in rows or []:
+        sk = SKILL_BY_KEY.get(row[0])
+        if sk is not None:
+            out.append(SkillOut(key=sk.key, label=sk.label, tier=sk.tier, blurb=C.career_skills.blurb(sk.key),
+                                seasons=row[2] if len(row) > 2 and isinstance(row[2], int) else 1))
+    return out
+
+
 class SeasonOut(BaseModel):
     year: int
     franchise: str
@@ -175,6 +205,8 @@ class SeasonOut(BaseModel):
     five_fors: int = 0
     hat_tricks: int = 0
     milestones: list[str] = []    # A209
+    skills: list[SkillOut] = []   # what the season card shows (A278)
+    combos: list[str] = []        # [A282] combinations those skills make
     mega: str = ""                # how a mega-auction year went (A212)
     plan: list[str] = []          # "Name: Death", the plan the season began with (A213)
     poms: int = 0                 # Player of the Match awards (A228)
@@ -329,6 +361,7 @@ class SummaryOut(BaseModel):
     five_fors: int = 0
     hat_tricks: int = 0
     milestones: list[MilestoneOut] = []       # A209, the career's in order
+    skills: list[SkillOut] = []               # A278, every skill a season showed
     poms: int = 0                             # A228
     farewell: ClippingOut | None = None       # the papers on the career's end (A228)
     epilogue: ClippingOut | None = None       # where the player went after the game (A228)
@@ -452,6 +485,9 @@ class CareerOut(BaseModel):
     in_side: bool = False
     standing: str = ""            # how your club sees you, in words; "" when neutral (A230)
     traits: list[str] = []        # who your player has become, in words, never numbers (A245)
+    skill_slots: list[SlotOut] = []   # [A282] the last season's skills, by tier
+    combo_hint: str = ""          # [A282] the nearest combination, one skill away
+    combos_now: list[str] = []    # [A282] combinations the last season's skills make
 
 
 def _template(c) -> TemplateOut:
@@ -482,6 +518,8 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
                     for h in r.highlights],
         five_fors=r.five_fors, hat_tricks=r.hat_tricks,
         milestones=[m.text for m in r.milestones], mega=r.mega,
+        skills=_skills_out([[k, t, 1] for k, t, _st in r.skills]),
+        combos=C.career_skills.combos(k for k, *_ in r.skills),
         plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan],
         role=r.role["role"] if r.role else "",
         role_label=C.role_label(r.role["role"]) if r.role else "",
@@ -651,7 +689,8 @@ def _summary(c: C.Career) -> SummaryOut:
         # From the seasons rather than `s.milestones`, which keeps (year, text) pairs for the
         # saved card; the same walk in the same order, with each milestone's kind kept.
         milestones=[MilestoneOut(year=r.year, text=m.text, key=m.key)
-                    for r in c.seasons for m in r.milestones])
+                    for r in c.seasons for m in r.milestones],
+        skills=_skills_out(C.career_skills.signature(c.seasons)))
 
 
 def _season_play(detail: C.SeasonDetail,
@@ -773,6 +812,30 @@ def _ambitions(career: C.Career) -> list[AmbitionOut]:
     return out
 
 
+def _skill_view(career) -> dict:
+    """[A282] The player card's slots and combination hint, from the last season played."""
+    CS = C.career_skills
+    last = career.seasons[-1] if career.seasons else None
+    shown = list(last.skills) if last else []
+    by_key = {s.key: s for s in _skills_out(shown)}
+    slots = [SlotOut(tier=x["tier"], name=x["name"], opens_at=x["opens_at"], open=x["open"],
+                     skill=by_key.get(x["key"])) for x in CS.slots(shown, _rating_now(career))]
+    role = career.role_now or career.setup.role
+    card_role = C.ROLES.get(role, {}).get("role", ("allrounder",))[0]   # a full-time bowler bowls
+    return {"skill_slots": slots, "combos_now": CS.combos(k for k, *_ in shown),
+            "combo_hint": CS.combo_hint([k for k, *_ in shown], card_role) if last else ""}
+
+
+def _mark_new(seasons: list[SeasonOut]) -> list[SeasonOut]:
+    """[A282] A skill is new the first season it is shown."""
+    seen: set[str] = set()
+    for s in seasons:
+        for k in s.skills:
+            k.new = k.key not in seen
+            seen.add(k.key)
+    return seasons
+
+
 def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
     st = career.setup
     v = voice(seed, st)
@@ -787,7 +850,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         role_now_label=C.role_label(career.role_now or st.role),
         season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
-        seasons=[_season(r, career.ceiling.display, v) for r in career.seasons],
+        seasons=_mark_new([_season(r, career.ceiling.display, v) for r in career.seasons]),
         pending=(_pending(career.pending, career.season_role or st.role).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
@@ -801,7 +864,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])],
         standing=(C.STANDING_WORDS.get(career.checkpoint.standing, "")
                   if career.checkpoint and not career.summary else ""),
-        traits=_trait_words(career))
+        traits=_trait_words(career), **_skill_view(career))
 
 
 def _trait_words(career: C.Career) -> list[str]:
@@ -1071,6 +1134,7 @@ class HallOut(BaseModel):
     honours: list[str] = []       # which induction honours it holds (A225)
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
     extras: list["ExtraLegendOut"] = []   # [A272] more seasons kept as legends, by request
+    skills: list[SkillOut] = []   # [A278] the career's skills; none on a career saved before
 
 
 class ExtraLegendOut(BaseModel):
@@ -1132,6 +1196,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             legend=bool(r["card"].get("legend")), **_legend_fields(r["card"]),
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
+            skills=_skills_out(r["card"].get("skills")),
             completed_at=r["completed_at"].isoformat(),
             extras=[ExtraLegendOut(key=career_results.extra_key(r["key"], x["year"]),
                                    name=r["name"], card={"legend": x},

@@ -18,8 +18,8 @@ from tools.snapshot_deck import deck_from, model_from, read_document
 
 COACH_TESTS = True          # conftest's `coach_off` leaves the coach on for this module
 DOC = read_document()
-ROLE_SEED = 0  # (4 until A267, 225 until A268, 4 until A270, 498 until A274) a spinner who becomes an all-rounder; re-find after an engine or rating change
-TRIAL_SEED = 0   # 1 -> 3 after A265, 3 -> 0 after A266, 0 -> 1 after A268, 1 -> 0 after A270; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
+ROLE_SEED = 9  # (4 until A267, 225 until A268, 4 until A270, 498 until A274, 0 until A279) a spinner who becomes an all-rounder; re-find after an engine or rating change
+TRIAL_SEED = 1   # 0 -> 1 after A276, 1 -> 3 after A265, 3 -> 0 after A266, 0 -> 1 after A268, 1 -> 0 after A270; see test_a_batter_who_takes_the_trial_bowls...; re-find after an engine change
 pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
               pytest.mark.usefixtures("no_incidents")]
 

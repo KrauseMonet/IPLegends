@@ -137,7 +137,8 @@ def recentre(fields: dict, positions, mix: dict[int, Counter]) -> dict:
     lean keeps its SHAPE (where he scores more or less) and loses only its mean over the
     mix where he is played. The mix is the positions' balls pooled, so a place that faces
     more balls weighs more. `settle_offset` is not a lean and is untouched; nor are the
-    bowling leans, whose gap is the engine's phase-blind rotation (A265), not centring."""
+    bowling leans, whose gap is the engine's rotation by style rather than by each bowler's own
+    phases (A265; A276 made it phase-aware by style), not centring."""
     pooled = Counter()
     for p in positions or ():
         pooled.update(mix.get(p, Counter()))

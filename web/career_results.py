@@ -97,6 +97,7 @@ def card(career: C.Career) -> dict:
         "captaincies": s.captaincies, "regular_seasons": s.regular_seasons,
         "earnings": crore(s.earnings), "franchises": s.franchises,
         "milestones": [[y, t] for y, t in s.milestones],
+        "skills": C.career_skills.signature(career.seasons),        # [A278]
         "peak_rating": s.peak_rating, "peak_rating_year": s.peak_rating_year,
         # [A228] Player of the Match awards, where the player went after the game, and the
         # ambitions set on the first day with how each went.

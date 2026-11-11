@@ -2,6 +2,7 @@
 numbers the engine plays (A160), and the lobby picker ordered by it."""
 
 import contextlib
+import dataclasses
 import datetime
 import json
 import pathlib
@@ -328,3 +329,32 @@ def test_one_of_several_alike_legends_is_marked_by_its_career_key():
     # a room from before the key still finds him by name, year and rating
     old = {"name": "K", "year": 2015, "rating": 99}
     assert _picker_js(f"{json.dumps(SAME)}.filter(c => legendIsMine(c, {json.dumps(old)})).length") == 4
+
+
+def test_his_settled_share_is_valued_as_the_shift_of_level_the_engine_plays():
+    """[A283] The engine takes his settled share off every ball (A260): aim minus its first
+    half, dismissal odds times exp(-second). The value reads the same shift."""
+    import math
+    plain = card(bat_scoring=0.10, bat_dismissal=0.9, positions=frozenset({3, 4}))
+    lean = dataclasses.replace(plain, settle_offset=(0.04, 0.08))
+    want = C.legend_bat_value(0.10 - 0.04, 0.9 * math.exp(-0.08), plain.positions)
+    assert C.legend_values(lean)[0] == pytest.approx(want)
+    assert C.legend_values(lean)[0] < C.legend_values(plain)[0]
+    # a lean that only moves WHERE runs come is worth nothing in the formula
+    moved = dataclasses.replace(plain, style_bat=(0.05, -0.04), burn=(-0.03, 0.02))
+    assert C.legend_values(moved)[0] == C.legend_values(plain)[0]
+
+
+def test_a_stored_legend_keeps_its_leans_through_the_room(monkeypatch):
+    """[A283] The room builds a legend from the saved card document; leans survive the trip
+    and come back as tuples (a frozen card must hash)."""
+    from tools.snapshot_deck import _card_doc
+    from web import room_auction as RA
+    c = dataclasses.replace(card(bat_scoring=0.1, bat_dismissal=0.9, positions=frozenset({2})),
+                            style_bat=(0.05, -0.04), settle_offset=(0.01, 0.02))
+
+    class P: is_cpu = False
+    class Room: players = {"p1": P()}; legends = {"p1": {"name": "N", "card": _card_doc(c)}}
+    got = RA.legend_cards(Room())["p1"]
+    assert got.style_bat == (0.05, -0.04) and got.settle_offset == (0.01, 0.02)
+    hash(got)

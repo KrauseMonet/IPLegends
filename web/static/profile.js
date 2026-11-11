@@ -146,6 +146,7 @@ function hofRow(c){
       <span class="hof-num"><b>${c.titles}</b> title${c.titles === 1 ? '' : 's'} · peak <b>${c.peak_card}</b></span>
       ${rank(c.runs_rank, 'runs')}${rank(c.wickets_rank, 'wickets')}
       ${c.inducted ? `<span class="hof-honours">${c.honours.map(h => `<i>${esc(h)}</i>`).join('')}</span>` : ''}
+      ${c.skills && c.skills.length ? skillChips({skills: c.skills.slice(0, 3)}, true) : ''}
     </summary>
     ${ms ? `<ol class="hof-ms">${ms}</ol>` : '<p class="pf-empty">No milestones in this one.</p>'}
   </details>`;

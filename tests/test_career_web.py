@@ -657,7 +657,7 @@ def test_a_reroll_is_the_same_player_on_a_new_seed(client, admins):
     assert r.status_code == 200
     n = r.json()
     old, new = _payload(d["token"]), _payload(n["token"])
-    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True, None, "", "", [], ""]
+    assert new["setup"] == old["setup"] == ["Rolly", "spin", 2012, True, None, "", "", [], "", "R", "R", ""]
     assert new["seed"] != old["seed"]
     # the spins are the new seed's, exactly as a fresh start on it would draw them
     fresh = client.post("/api/career/start", json={"name": "Rolly", "role": "spin", "debut": 2012,

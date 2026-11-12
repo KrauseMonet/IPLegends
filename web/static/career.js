@@ -48,16 +48,12 @@ function crFigs(d, runs, wkts){
 
 function crPick(group, btn){
   document.querySelectorAll(`#${group} .room-choice`).forEach(b => b.classList.toggle('sel', b === btn));
-  if (group === 'crRoles') crRoleNote();
+  if (group === 'crRoles') crTechnique();
   // [A229] an overseas player picks a country to play for
   if (group === 'crPassport') $('#crCountryWrap').classList.toggle('hide', btn.dataset.v !== '1');
+  crPreview();
 }
 
-// On a phone the role cards show only their names; the chosen role's line sits under them.
-function crRoleNote(){
-  const el = document.getElementById('crRoleNote'), sel = document.querySelector('#crRoles .room-choice.sel');
-  if (el && sel) el.textContent = sel.querySelector('.cr-role-blurb').textContent;
-}
 const crChosen = group => (document.querySelector(`#${group} .room-choice.sel`) || {}).dataset;
 
 // --- create --------------------------------------------------------------------------------
@@ -75,20 +71,37 @@ const CR_ROLE_ICON = {
   allrounder: CR_SVG('<g transform="translate(-2 2) scale(.8)">' + CR_BAT + '</g><circle cx="17.5" cy="7" r="4"/>'),
 };
 
+// [A287] Short tags for the role tiles: a game's labels, not rules. The server's own line
+// for each role (its `blurb`, whose claims are tested) is the tile's tooltip.
+const CR_ROLE_TAG = {opener: 'New ball, most balls', middle: 'Holds it together', finisher: 'Ends it',
+  keeper: 'Gloves and bat', pace: 'Hits the deck', spin: 'Turns it', allrounder: 'Does both'};
+// [A287] Cosmetic only: how your player looks at the crease. Pace or spin is the role's.
+const CR_TYPES = {
+  pace: [{v: 'fast', label: 'Fast', tag: '145+'}, {v: 'fastmedium', label: 'Fast-medium', tag: 'Hits the seam'},
+         {v: 'medium', label: 'Medium', tag: 'Swing and cutters'}],
+  spin: [{v: 'finger', label: 'Finger spin', tag: ''}, {v: 'wrist', label: 'Wrist spin', tag: ''}],
+};
+// A spinner's type reads by arm: off-spin and leg-spin, left-arm orthodox and wrist-spin.
+const crSpinName = (arm, v) => arm === 'L' ? (v === 'wrist' ? 'Left-arm wrist-spin' : 'Left-arm orthodox')
+                                           : (v === 'wrist' ? 'Leg-spin' : 'Off-spin');
+// A country tints the shirt on the preview card: decoration only.
+const CR_KIT = {India: '#1f5bd8', Australia: '#e8b800', England: '#203a8f', 'South Africa': '#0f7a45',
+  'New Zealand': '#22252b', 'West Indies': '#7d1733', 'Sri Lanka': '#1d3c94', Afghanistan: '#1366c2',
+  Bangladesh: '#0b6a3c'};
+const CR_FLAG = {India: 'IND', Australia: 'AUS', England: 'ENG', 'South Africa': 'SA', 'New Zealand': 'NZ',
+  'West Indies': 'WI', 'Sri Lanka': 'SL', Afghanistan: 'AFG', Bangladesh: 'BAN'};
+
 function crShowCreate(){
   CR.data = null;
   $('#career').classList.remove('started');
   $('#crMain').classList.add('hide');
   $('#crCreate').classList.remove('hide');
   const o = CR.options;
-  // A card per role [A219]: an icon, the name and one line on what the job is, the line
-  // the server's own role table carries so it cannot promise a rule the game lacks.
   $('#crRoles').innerHTML = o.roles.map((r, i) =>
-    `<button class="room-choice cr-role${i ? '' : ' sel'}" data-v="${r.key}" onclick="crPick('crRoles', this)">
-      <span class="cr-role-icon">${CR_ROLE_ICON[r.key] || ''}</span>
-      <b>${esc(r.label)}</b><span class="cr-role-blurb">${esc(r.blurb || '')}</span></button>`).join('')
-    + '<p class="cr-role-note" id="crRoleNote"></p>';
-  crRoleNote();
+    `<button class="room-choice cb-role${i ? '' : ' sel'}" data-v="${r.key}" title="${esc(r.blurb || '')}"
+       onclick="crPick('crRoles', this)">
+      <span class="cb-role-icon">${CR_ROLE_ICON[r.key] || ''}</span>
+      <b>${esc(r.label)}</b><span class="cb-role-tag">${esc(CR_ROLE_TAG[r.key] || '')}</span></button>`).join('');
   const years = [];
   for (let y = o.first_debut; y <= o.last_debut; y++) years.push(y);
   $('#crDebut').innerHTML = years.map(y =>
@@ -100,7 +113,62 @@ function crShowCreate(){
     `<button class="room-choice${i ? '' : ' sel'}" data-v="${esc(n)}" onclick="crPick('crCountry', this)">${esc(n)}</button>`).join('');
   $('#crAmb').innerHTML = (o.ambitions || []).map(a =>
     `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
+  crTechnique();
   Promise.resolve(CR.me).then(crSeedRow, crSeedRow);
+}
+
+// The bowling half of Technique follows the role: a pace or spin role picks its kind, an
+// all-rounder only his arm (his pace or spin comes with his first spin), a batter nothing.
+function crTechnique(){
+  const role = (crChosen('crRoles') || {}).v, kinds = CR_TYPES[role];
+  const bowls = ['pace', 'spin', 'allrounder'].includes(role);
+  $('#crArmRow').classList.toggle('hide', !bowls);
+  const prev = (crChosen('crType') || {}).v;
+  $('#crType').innerHTML = kinds ? kinds.map((k, i) =>
+    `<button class="room-choice cb-type${(prev ? prev === k.v : !i) ? ' sel' : ''}" data-v="${k.v}"
+      onclick="crPick('crType', this)"><b data-type="${k.v}">${esc(k.label)}</b>${k.tag ? `<span>${esc(k.tag)}</span>` : ''}</button>`).join('')
+    : '';
+  if (kinds && !document.querySelector('#crType .room-choice.sel'))
+    document.querySelector('#crType .room-choice').classList.add('sel');
+  crPreview();
+}
+
+// The words the card shows for the chosen technique, as the server will (technique_words).
+function crTechWords(){
+  const role = (crChosen('crRoles') || {}).v, arm = (crChosen('crArm') || {}).v || 'R';
+  const type = (crChosen('crType') || {}).v, armWord = arm === 'L' ? 'Left-arm' : 'Right-arm';
+  const out = [((crChosen('crBat') || {}).v === 'L' ? 'Left' : 'Right') + '-handed bat'];
+  if (role === 'spin') out.push(crSpinName(arm, type));
+  else if (role === 'pace') out.push(`${armWord} ${{fast: 'fast', fastmedium: 'fast-medium', medium: 'medium'}[type] || 'seam'}`);
+  else if (role === 'allrounder') out.push(`${armWord} bowler`);
+  return out;
+}
+
+// The preview card, redrawn on every choice.
+function crPreview(){
+  if (!CR.options || !document.getElementById('cbCard')) return;
+  const name = $('#crName').value.trim(), num = $('#crNumber').value.trim();
+  const roleBtn = document.querySelector('#crRoles .room-choice.sel');
+  const overseas = (crChosen('crPassport') || {}).v === '1';
+  const nation = overseas ? ((crChosen('crCountry') || {}).v || '') : 'India';
+  const surname = name ? name.split(' ').slice(-1)[0] : 'YOUR NAME';
+  $('#cbShirtName').textContent = surname.toUpperCase().slice(0, 14);
+  $('#cbShirtNum').textContent = num === '' ? '?' : String(Math.max(0, Math.min(99, Number(num) || 0)));
+  $('#cbName').textContent = name || 'Your name';
+  $('#cbName').classList.toggle('empty', !name);
+  $('#cbRole').textContent = roleBtn ? roleBtn.querySelector('b').textContent : '';
+  $('#cbFlag').textContent = CR_FLAG[nation] || 'OVS';
+  const kit = CR_KIT[nation] || '#4b5b7c';
+  $('#cbCard').style.setProperty('--kit', kit);
+  // white lettering on a dark shirt, dark on a light one (Australia's gold)
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(kit.slice(i, i + 2), 16));
+  $('#cbCard').style.setProperty('--kit-ink', 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#13213f' : '#fff');
+  $('#cbTags').innerHTML = crTechWords().map(t => `<span>${esc(t)}</span>`).join('');
+  const home = $('#crHome').value.trim(), debut = (crChosen('crDebut') || {}).v;
+  $('#cbMeta').textContent = [debut ? `Debut ${debut}` : '', home].filter(Boolean).join(' · ');
+  // a spinner's type tiles say what the arm makes them
+  document.querySelectorAll('#crType b[data-type="finger"], #crType b[data-type="wrist"]').forEach(b =>
+    b.textContent = crSpinName((crChosen('crArm') || {}).v || 'R', b.dataset.type));
 }
 
 // [A235] The seed box is an admin's alone (the server refuses anybody else's seed), and it
@@ -122,6 +190,7 @@ function crAmbition(btn){
     return;
   }
   btn.classList.toggle('sel');
+  $('#crAmbCount').textContent = `${document.querySelectorAll('#crAmb .room-choice.sel').length}/${CR.options.ambitions_max || 3}`;
 }
 
 async function crStart(btn){
@@ -139,6 +208,8 @@ async function crStart(btn){
       celebration: (crChosen('crCel') || {}).v || '',
       ambitions: [...document.querySelectorAll('#crAmb .room-choice.sel')].map(b => b.dataset.v),
       country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : '',
+      bat_hand: (crChosen('crBat') || {}).v || 'R', bowl_arm: (crChosen('crArm') || {}).v || 'R',
+      bowl_type: (crChosen('crType') || {}).v || '',
       ...(seed ? {seed: Number(seed)} : {})});
     CR.seen = 0;
     crShow(d, 'spin');
@@ -260,6 +331,7 @@ function crHead(d, hold){
       <div class="cr-pc-who">
         <b>${esc(d.name)}</b>${d.nickname ? `<em class="cr-nick">“${esc(d.nickname)}”</em>` : ''}
         <span>${d.number != null ? `No. ${d.number} · ` : ''}${esc(d.role_now_label || d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''}${d.home ? ` · ${esc(d.home)}` : ''} · debut ${d.debut}</span>
+        ${(d.technique || []).length ? `<span class="cr-tech">${d.technique.map(esc).join(' · ')}</span>` : ''}
       </div>
       <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
       <div class="cr-pc-foot">
@@ -419,11 +491,7 @@ function crSpin(d){
       ${crTemplateCard('You start like', d.start, 'start', 'your Rating at 19')}
       ${crTemplateCard('Your ceiling', d.ceiling, 'ceiling', 'your potential')}
     </div>
-    <p class="room-note">Your Rating climbs from the first toward the second, then falls away
-      with age. When you peak and how fast you fade are for you to find out. The second is not
-      a limit: a season graded well above it raises your potential while you are still growing,
-      and good form in your thirties slows the decline. Coaches, mentors and injuries move your
-      Rating; each season's grade is how the matches actually went.</p>
+    <p class="room-note cr-spin-note">You rise from the first toward the second. How far past it, and for how long, is up to you.</p>
     <div class="foot-actions cr-held" id="crSpinGo" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>
       ${typeof ME !== 'undefined' && ME && ME.is_admin

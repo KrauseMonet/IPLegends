@@ -4586,3 +4586,135 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .hof-finish.finish-silver{border-color:#c4ccd6;color:#dde3ea}
 .hof-finish.finish-gold{border-color:#d4a73a;color:#f0d690}
 .hof-finish.finish-platinum{border-color:#bfe6ff;color:#d8f1ff}
+
+/* ---------------------------------------------------------------------------------------
+   [A287] Build a Career's create screen: a player builder. A live card on the left (the
+   player as chosen so far, his shirt tinted by country), numbered steps on the right, and
+   one big button. Few words: the guide does the explaining.
+--------------------------------------------------------------------------------------- */
+.cr-pc-who > .cr-tech{display:block;margin-top:3px;color:var(--gold-2)}
+.cb{display:grid;grid-template-columns:290px minmax(0,1fr);gap:28px;align-items:start;margin-top:10px}
+.cb-side{position:sticky;top:calc(var(--nav-h,64px) + 14px);display:flex;flex-direction:column;gap:12px}
+.cb-card{--kit:#1f5bd8;position:relative;overflow:hidden;border-radius:18px;padding:16px 16px 18px;
+  border:1px solid rgba(245,184,61,.45);
+  background:radial-gradient(120% 70% at 50% 0%,color-mix(in srgb,var(--kit) 55%,transparent),transparent 70%),
+    linear-gradient(160deg,#16294d,#0a1530 70%);
+  box-shadow:0 18px 40px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.12)}
+.cb-card::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.07) 45%,transparent 55%);
+  background-size:250% 100%;animation:cb-shine 5s ease-in-out infinite}
+@keyframes cb-shine{0%,60%{background-position:120% 0}100%{background-position:-60% 0}}
+@media (prefers-reduced-motion:reduce){.cb-card::after{animation:none}}
+.cb-card-top{display:flex;justify-content:space-between;align-items:flex-start}
+.cb-ovr{display:flex;flex-direction:column;align-items:center;line-height:1}
+.cb-ovr b{font-family:var(--display);font-size:44px;color:var(--gold-2);text-shadow:0 0 18px rgba(245,184,61,.4)}
+.cb-ovr span{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+.cb-flag{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.12em;padding:4px 9px;
+  border-radius:6px;background:rgba(0,0,0,.35);border:1px solid var(--line-strong)}
+.cb-shirt{display:block;width:78%;margin:-6px auto 4px;filter:drop-shadow(0 10px 18px rgba(0,0,0,.45))}
+.cb-shirt-body{fill:var(--kit);stroke:rgba(255,255,255,.25);stroke-width:2;transition:fill .3s}
+.cb-shirt-trim{fill:none;stroke:var(--gold);stroke-width:5}
+.cb-shirt-name{font-family:var(--display);font-size:17px;letter-spacing:.06em;fill:var(--kit-ink,#fff)}
+.cb-shirt-num{font-family:var(--display);font-size:64px;fill:var(--kit-ink,#fff);stroke:rgba(0,0,0,.25);stroke-width:1.5}
+.cb-card-name{font-family:var(--display);font-size:26px;line-height:1.05;text-align:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cb-card-name.empty{color:var(--ink-3)}
+.cb-card-role{text-align:center;font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--gold);margin-top:3px}
+.cb-card-tags{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;margin-top:10px}
+.cb-card-tags span{font-size:12px;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.08);
+  border:1px solid var(--line)}
+.cb-card-meta{text-align:center;font-size:12.5px;color:var(--ink-3);margin-top:8px;min-height:1em}
+.cb-go{appearance:none;border:0;cursor:pointer;border-radius:14px;padding:16px 18px;
+  font-family:var(--display);font-size:22px;letter-spacing:.04em;text-transform:uppercase;color:#1a1204;
+  background:linear-gradient(180deg,var(--gold-2),var(--gold));
+  box-shadow:0 6px 0 #a8731a,0 14px 26px rgba(245,184,61,.25);transition:transform .08s,box-shadow .08s}
+.cb-go:hover{filter:brightness(1.06)}
+.cb-go:active{transform:translateY(4px);box-shadow:0 2px 0 #a8731a,0 8px 16px rgba(245,184,61,.2)}
+.cb-go:disabled{opacity:.6;cursor:wait}
+.cb-dice{display:inline-block;margin-right:6px;transition:transform .4s}
+.cb-go:hover .cb-dice{transform:rotate(200deg)}
+.cb-guide{text-align:center;font-size:13px;color:var(--ink-3)}
+.cb-guide:hover{color:var(--gold-2)}
+
+.cb-steps{display:flex;flex-direction:column;gap:14px;min-width:0}
+.cb-step{border:1px solid var(--line);border-radius:16px;padding:14px 16px 16px;
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01))}
+.cb-step h3{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-family:var(--display);
+  font-size:20px;font-weight:400;letter-spacing:.03em;text-transform:uppercase}
+.cb-step h3 i{font-style:normal;font-family:var(--mono);font-size:12px;color:#1a1204;background:var(--gold);
+  border-radius:6px;padding:2px 6px;letter-spacing:.05em}
+.cb-pair{display:grid;grid-template-columns:minmax(0,1fr) 84px;gap:10px}
+.cb-name-in{font-size:18px;font-weight:700}
+.cb-num-in{text-align:center;font-family:var(--display);font-size:20px}
+.cb-sub{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 8px}
+.cb-sub span{color:var(--gold);margin-left:4px}
+
+.cb-roles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.cb-role.room-choice{margin:0;display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+  padding:12px;text-align:left;text-transform:none;letter-spacing:0;position:relative;
+  transition:transform .12s,border-color .12s,background .12s}
+.cb-role.room-choice:hover{transform:translateY(-2px)}
+.cb-role-icon{width:30px;height:30px;color:var(--ink-3);margin-bottom:2px}
+.cb-role-icon svg{width:100%;height:100%}
+.cb-role b{font-family:var(--sans);font-size:14.5px;color:var(--ink)}
+.cb-role-tag{font-family:var(--sans);font-size:12px;color:var(--ink-3)}
+.cb-role.sel{border-color:var(--gold);background:linear-gradient(180deg,rgba(245,184,61,.16),rgba(245,184,61,.04));
+  box-shadow:0 0 0 1px var(--gold) inset,0 8px 20px rgba(245,184,61,.12)}
+.cb-role.sel .cb-role-icon{color:var(--gold)}
+@media (min-width:761px){.cb-roles{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cb-role:last-child:nth-child(3n+1){grid-column:1/-1;flex-direction:row;align-items:center;gap:12px}
+  .cb-role:last-child:nth-child(3n+1) .cb-role-icon{margin:0}}
+@media (max-width:760px){.cb-role:last-child:nth-child(2n+1){grid-column:1/-1}}
+.cb-role.sel::after{content:"✓";position:absolute;top:8px;right:10px;font-weight:700;color:var(--gold)}
+
+.cb-tech{display:flex;flex-direction:column;gap:10px}
+.cb-tech-row{display:grid;grid-template-columns:60px minmax(0,1fr);align-items:center;gap:10px}
+.cb-k{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.cb-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;border:1px solid var(--line-strong);
+  border-radius:12px;padding:3px;background:rgba(0,0,0,.2)}
+.cb-seg .room-choice{margin:0;border:0;border-radius:9px;background:transparent;padding:9px 8px;
+  text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:14px;font-weight:600}
+.cb-seg .room-choice.sel{background:var(--gold);color:#1a1204}
+.cb-seg-wide{margin-bottom:10px}
+.cb-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.cb-types:empty{display:none}
+.cb-type.room-choice{margin:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;
+  text-transform:none;letter-spacing:0;text-align:left}
+.cb-type b{font-family:var(--sans);font-size:14px;color:var(--ink)}
+.cb-type span{font-size:12px;color:var(--ink-3)}
+.cb-type.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+
+.cb-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cb-chips .room-choice{margin:0;flex:0 0 auto;font-size:13px;padding:7px 12px;border-radius:999px;
+  text-transform:none;letter-spacing:0;font-family:var(--sans)}
+.cb-chips .room-choice.sel{background:var(--gold);color:#1a1204;border-color:var(--gold)}
+.cb-ambs .room-choice.sel::before{content:"★ "}
+.cb .cr-country{margin:0 0 10px}
+.cb-home{margin-top:2px}
+.cb-years{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.cb-years .room-choice{margin:0;padding:8px 4px;text-align:center;font-family:var(--display);font-size:16px;letter-spacing:.02em}
+.cb-years .room-choice.sel{background:var(--gold);color:#1a1204;border-color:var(--gold)}
+
+@media (max-width:760px){
+  .cb{grid-template-columns:1fr;gap:16px}
+  .cb-side{position:static}
+  .cb-card{display:grid;grid-template-columns:96px minmax(0,1fr);grid-template-rows:auto auto auto auto;
+    column-gap:12px;padding:12px 14px;align-items:center}
+  .cb-card-top{grid-column:1;grid-row:1 / span 4;flex-direction:column;align-items:center;gap:6px}
+  .cb-shirt{display:none}
+  .cb-ovr b{font-size:36px}
+  .cb-card-name,.cb-card-role,.cb-card-meta,.cb-card-tags{grid-column:2;text-align:left}
+  .cb-card-name{font-size:22px}
+  .cb-card-tags{justify-content:flex-start;margin-top:6px}
+  .cb-card-meta{margin-top:4px}
+  .cb-go{position:fixed;left:16px;right:16px;bottom:14px;z-index:40;font-size:20px;padding:14px}
+  .cb-guide{order:-1;text-align:right}
+  .cb-steps{padding-bottom:84px}
+  .cb-roles{grid-template-columns:1fr 1fr}
+  .cb-role.room-choice{padding:10px}
+  .cb-tech-row{grid-template-columns:52px minmax(0,1fr)}
+}
+
+.cr-spin-note{text-align:center;font-size:14px}
+@media (max-width:760px){.cb-role-icon{width:24px;height:24px}}

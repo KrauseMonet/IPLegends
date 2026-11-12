@@ -23,7 +23,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=57d699806e">
+<link rel="stylesheet" href="/static/style.css?v=d77cef321a">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -59,60 +59,98 @@
       <div class="call">Build a Career</div>
     </div>
 
-    <!-- create -->
-    <div id="crCreate" class="cr-panel hide">
-      <p class="qz-lede">One player, real IPL seasons. Two spins decide how good you start and how
-        good you can become; after that it is your choices and your form. Play badly two
-        seasons running and nobody signs you.</p>
-      <label class="cr-label" for="crName">Your name</label>
-      <input id="crName" class="room-input" maxlength="30" autocomplete="off" placeholder="Name on the back of the shirt">
-      <div class="cr-label">Your role</div>
-      <div class="room-choices cr-roles" id="crRoles"></div>
-      <div class="cr-row">
-        <div>
-          <div class="cr-label">Debut season</div>
-          <div class="room-choices cr-years" id="crDebut"></div>
+    <!-- create [A287]: a player builder, not a form. The card on the left is the player as
+         chosen so far, drawn live; the guide (/guides/career) does the explaining. -->
+    <div id="crCreate" class="cb hide">
+      <aside class="cb-side">
+        <div class="cb-card" id="cbCard">
+          <div class="cb-card-top">
+            <div class="cb-ovr"><b>??</b><span>Rating</span></div>
+            <div class="cb-flag" id="cbFlag">IND</div>
+          </div>
+          <svg class="cb-shirt" viewBox="0 0 200 190" aria-hidden="true">
+            <path class="cb-shirt-body" d="M62 8 L38 18 L4 52 L28 80 L46 66 L46 182 L154 182 L154 66 L172 80 L196 52 L162 18 L138 8 Q100 30 62 8 Z"/>
+            <path class="cb-shirt-trim" d="M62 8 Q100 30 138 8"/>
+            <text class="cb-shirt-name" id="cbShirtName" x="100" y="70" text-anchor="middle">YOUR NAME</text>
+            <text class="cb-shirt-num" id="cbShirtNum" x="100" y="150" text-anchor="middle">18</text>
+          </svg>
+          <div class="cb-card-name" id="cbName">Your name</div>
+          <div class="cb-card-role" id="cbRole"></div>
+          <div class="cb-card-tags" id="cbTags"></div>
+          <div class="cb-card-meta" id="cbMeta"></div>
         </div>
-        <div>
-          <div class="cr-label">Passport</div>
-          <div class="room-choices" id="crPassport">
+        <button class="cb-go" id="crGo" onclick="crStart(this)">
+          <span class="cb-dice" aria-hidden="true">⚄</span> Spin your talent</button>
+        <a class="cb-guide" href="/guides/career">How a career works →</a>
+      </aside>
+
+      <div class="cb-steps">
+        <section class="cb-step">
+          <h3><i>01</i> Who are you</h3>
+          <div class="cb-pair">
+            <input id="crName" class="room-input cb-name-in" maxlength="30" autocomplete="off"
+              placeholder="Player name" oninput="crPreview()" aria-label="Player name">
+            <input id="crNumber" class="room-input cb-num-in" type="number" min="0" max="99"
+              inputmode="numeric" placeholder="No." oninput="crPreview()" aria-label="Shirt number">
+          </div>
+        </section>
+
+        <section class="cb-step">
+          <h3><i>02</i> Pick your role</h3>
+          <div class="cb-roles" id="crRoles"></div>
+        </section>
+
+        <section class="cb-step">
+          <h3><i>03</i> Technique</h3>
+          <div class="cb-tech">
+            <div class="cb-tech-row">
+              <span class="cb-k">Bats</span>
+              <div class="cb-seg" id="crBat">
+                <button class="room-choice sel" data-v="R" onclick="crPick('crBat', this)">Right-handed</button>
+                <button class="room-choice" data-v="L" onclick="crPick('crBat', this)">Left-handed</button>
+              </div>
+            </div>
+            <div class="cb-tech-row" id="crArmRow">
+              <span class="cb-k">Bowls</span>
+              <div class="cb-seg" id="crArm">
+                <button class="room-choice sel" data-v="R" onclick="crPick('crArm', this)">Right arm</button>
+                <button class="room-choice" data-v="L" onclick="crPick('crArm', this)">Left arm</button>
+              </div>
+            </div>
+            <div class="cb-types" id="crType"></div>
+          </div>
+        </section>
+
+        <section class="cb-step">
+          <h3><i>04</i> Where you're from</h3>
+          <div class="cb-seg cb-seg-wide" id="crPassport">
             <button class="room-choice sel" data-v="0" onclick="crPick('crPassport', this)">Indian</button>
             <button class="room-choice" data-v="1" onclick="crPick('crPassport', this)">Overseas</button>
           </div>
           <!-- [A229] who an overseas player plays for -->
           <div class="cr-country hide" id="crCountryWrap">
-            <div class="cr-label">Country</div>
-            <div class="room-choices cr-countries" id="crCountry"></div>
+            <div class="cb-chips cr-countries" id="crCountry"></div>
           </div>
-        </div>
-      </div>
-      <!-- [A228] who you are, for the papers: none of it touches a match -->
-      <details class="cr-you">
-        <summary>Make it yours <span>shirt number, home town, celebration, ambitions · optional</span></summary>
-        <div class="cr-row">
-          <div>
-            <label class="cr-label" for="crNumber">Shirt number</label>
-            <input id="crNumber" class="room-input" type="number" min="0" max="99" inputmode="numeric" placeholder="0 to 99">
-          </div>
-          <div>
-            <label class="cr-label" for="crHome">Home town</label>
-            <input id="crHome" class="room-input" maxlength="24" autocomplete="off" placeholder="Where you grew up">
-          </div>
-        </div>
-        <div class="cr-label">Celebration</div>
-        <div class="room-choices cr-cels" id="crCel"></div>
-        <div class="cr-label">Ambitions <span class="cr-label-note">up to three; the career card keeps score</span></div>
-        <div class="room-choices cr-ambs-pick" id="crAmb"></div>
-      </details>
-      <!-- [A235] admins only: a chosen seed fixes the two spins and the career's shape -->
-      <div class="cr-row hide" id="crSeedRow">
-        <div>
-          <label class="cr-label" for="crSeed">Seed <span class="cr-label-note">admin only; blank for a random career</span></label>
-          <input id="crSeed" class="room-input" type="number" min="1" max="2147483648" inputmode="numeric" placeholder="Random">
-        </div>
-      </div>
-      <div class="foot-actions" style="justify-content:flex-start;padding-left:0">
-        <button class="act lead" id="crGo" onclick="crStart(this)">Spin your talent</button>
+          <input id="crHome" class="room-input cb-home" maxlength="24" autocomplete="off"
+            placeholder="Home town (optional)" oninput="crPreview()" aria-label="Home town">
+          <div class="cb-sub">Debut season</div>
+          <div class="cb-years" id="crDebut"></div>
+        </section>
+
+        <section class="cb-step">
+          <h3><i>05</i> Flair</h3>
+          <div class="cb-sub">Celebration</div>
+          <div class="cb-chips" id="crCel"></div>
+          <div class="cb-sub">Ambitions <span id="crAmbCount">0/3</span></div>
+          <div class="cb-chips cb-ambs" id="crAmb"></div>
+        </section>
+
+        <!-- [A235] admins only: a chosen seed fixes the two spins and the career's shape -->
+        <section class="cb-step hide" id="crSeedRow">
+          <h3><i>⚙</i> Seed <span class="cr-label-note">admin only</span></h3>
+          <input id="crSeed" class="room-input" type="number" min="1" max="2147483648"
+            inputmode="numeric" placeholder="Random">
+        </section>
       </div>
     </div>
 
@@ -266,6 +304,6 @@
 <script src="/static/reveal.js?v=57bf5361db"></script>
 <script src="/static/analysis.js?v=8700575431"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
-<script src="/static/career.js?v=55d586989a"></script>
+<script src="/static/career.js?v=93dfeb399d"></script>
 </body>
 </html>

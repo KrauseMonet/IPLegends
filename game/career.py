@@ -805,6 +805,33 @@ def endorsement_fee(rating: int) -> int:
 
 HOME_MAX = 24
 AMBITIONS_MAX = 3
+
+# [A287] How your player looks at the crease, chosen at creation: COSMETIC ONLY. Nothing in
+# the engine reads any of it -- whether you bowl pace or spin is your role's, or for an
+# all-rounder your start spin's -- so a left-hander bats exactly as a right-hander would.
+HANDS = ("R", "L")
+BOWL_TYPES = {"pace": ("fast", "fastmedium", "medium"), "spin": ("finger", "wrist")}
+BOWL_TYPE_WORDS = {"fast": "fast", "fastmedium": "fast-medium", "medium": "medium"}
+
+
+def technique_words(setup: "Setup", style: str | None) -> list[str]:
+    """[A287] "Left-handed bat", "Leg-spin", "Right-arm fast-medium": the player card's own description.
+    `style` is the engine's pace or spin, the only part that is not cosmetic, so a chosen
+    type never names a style the engine does not play; None when he does not bowl."""
+    words = ["Left-handed bat" if setup.bat_hand == "L" else "Right-handed bat"]
+    arm = "Left-arm" if setup.bowl_arm == "L" else "Right-arm"
+    if style == "spin":
+        wrist = setup.bowl_type == "wrist"
+        if not setup.bowl_type:          # an all-rounder chose only his arm
+            words.append(f"{arm} spin")
+        elif setup.bowl_arm == "L":
+            words.append("Left-arm wrist-spin" if wrist else "Left-arm orthodox")
+        else:
+            words.append("Leg-spin" if wrist else "Off-spin")
+    elif style == "pace":
+        kind = BOWL_TYPE_WORDS.get(setup.bowl_type)
+        words.append(f"{arm} {kind}" if kind else f"{arm} seam")
+    return words
 # [A228] What a career can set out to do, each checked against the season records alone.
 # key -> (label, check over the seasons so far). A target reached is a milestone and a
 # clipping in the season it falls; `one_club` can also be broken, by a move.
@@ -864,6 +891,11 @@ class Setup:
     # [A229] The country an overseas career plays for, "" for none. An Indian career plays
     # for India and leaves this empty.
     country: str = ""
+    # [A287] cosmetic only (see HANDS): batting hand, bowling arm, and for a pace or spin
+    # role the kind of bowler -- "fast"/"fastmedium"/"medium" or "finger"/"wrist".
+    bat_hand: str = "R"
+    bowl_arm: str = "R"
+    bowl_type: str = ""
 
     @property
     def nation(self) -> str:
@@ -896,6 +928,11 @@ class Setup:
             raise CareerError(f"an overseas player picks a country from {', '.join(national.OVERSEAS_NATIONS)}")
         if "international" in self.ambitions and not self.nation:
             raise CareerError("pick a country to aim to play for it")
+        if self.bat_hand not in HANDS or self.bowl_arm not in HANDS:
+            raise CareerError("a hand is R or L")
+        style = ROLES[self.role].get("style")
+        if self.bowl_type and self.bowl_type not in BOWL_TYPES.get(style, ()):
+            raise CareerError(f"no such bowling type {self.bowl_type!r} for this role")
 
 
 def _regular(c: Card) -> bool:

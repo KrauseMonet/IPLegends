@@ -56,7 +56,8 @@ def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) 
     body = json.dumps({"v": TOKEN_VERSION, "seed": seed,
                        "setup": [setup.name, setup.role, setup.debut, setup.overseas,
                                  setup.number, setup.home, setup.celebration,
-                                 list(setup.ambitions), setup.country],
+                                 list(setup.ambitions), setup.country,
+                                 setup.bat_hand, setup.bowl_arm, setup.bowl_type],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -81,13 +82,17 @@ def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]
         d = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         if d.get("v") != TOKEN_VERSION:
             raise ValueError("old token")
-        # Four fields before A228 (no identity, no ambitions), eight before A229 (no country).
+        # Four fields before A228 (no identity, no ambitions), eight before A229 (no country),
+        # nine before A287 (no batting hand, bowling arm or bowling type).
         name, role, debut, overseas, *rest = d["setup"]
-        number, home, celebration, ambitions, country = (rest + [None, "", "", [], ""][len(rest):])[:5]
+        defaults = [None, "", "", [], "", "R", "R", ""]
+        number, home, celebration, ambitions, country, bat_hand, bowl_arm, bowl_type = (
+            rest + defaults[len(rest):])[:8]
         return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
                                          None if number is None else int(number), str(home or ""),
                                          str(celebration or ""), tuple(str(a) for a in ambitions or ()),
-                                         str(country or "")),
+                                         str(country or ""), str(bat_hand or "R"),
+                                         str(bowl_arm or "R"), str(bowl_type or "")),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -583,6 +588,7 @@ class CareerOut(BaseModel):
     focus_now: str = ""           # [A285] what you are working on, in words
     master_seasons: int = 4       # [A285] seasons a skill must be shown in to be mastered
     nickname: str | None = None   # [A286] what the papers call you, once they do
+    technique: list[str] = []     # [A287] "Left-handed bat", "Leg-spin": cosmetic only
 
 
 def _template(c) -> TemplateOut:
@@ -979,12 +985,23 @@ def _mark_new(seasons: list[SeasonOut]) -> list[SeasonOut]:
     return seasons
 
 
+def _bowls_as(career: C.Career) -> str | None:
+    """[A287] The engine's pace or spin for your player, or None while he does not bowl: a
+    batting role until the coach gives him the ball (A238), the gloves for good (A255)."""
+    role = (career.role_now or career.setup.role) if career.checkpoint else career.setup.role
+    if role in ("opener", "middle", "finisher", "keeper"):
+        return None
+    if C.ROLES.get(career.setup.role, {}).get("style"):
+        return C.ROLES[career.setup.role]["style"]
+    return (career.checkpoint.style if career.checkpoint else None) or career.start.bowling_style
+
+
 def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
     st = career.setup
     v = voice(seed, st)
     return CareerOut(
         number=st.number, home=st.home, celebration=st.celebration, ambitions=_ambitions(career),
-        country=st.nation,
+        country=st.nation, technique=C.technique_words(st, _bowls_as(career)),
         caps=int((career.checkpoint.national if career.checkpoint else {}).get("caps", 0)),
         in_side=bool((career.checkpoint.national if career.checkpoint else {}).get("in_side")),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
@@ -1091,6 +1108,9 @@ class StartIn(BaseModel):
     celebration: str = ""
     ambitions: list[str] = Field(default=[], max_length=C.AMBITIONS_MAX)
     country: str = ""                                          # A229, overseas only
+    bat_hand: str = "R"                                        # A287, cosmetic only
+    bowl_arm: str = "R"
+    bowl_type: str = ""
 
 
 def seed_allowed(request: Request) -> bool:
@@ -1110,7 +1130,8 @@ def career_start(body: StartIn, request: Request) -> CareerOut:
     if any(ch in home for ch in "<>") or any(ord(ch) < 32 for ch in home):
         raise HTTPException(400, "Choose a plain home town.")
     setup = C.Setup(name, body.role, body.debut, body.overseas, body.number, home,
-                    body.celebration, tuple(body.ambitions), body.country)
+                    body.celebration, tuple(body.ambitions), body.country,
+                    body.bat_hand, body.bowl_arm, body.bowl_type)
     try:
         setup.check()
     except C.CareerError as e:
@@ -1150,7 +1171,9 @@ def career_reroll(body: RerollIn, request: Request, response: Response) -> Caree
     return career_start(StartIn(name=setup.name, role=setup.role, debut=setup.debut,
                                 overseas=setup.overseas, seed=new, number=setup.number,
                                 home=setup.home, celebration=setup.celebration,
-                                ambitions=list(setup.ambitions), country=setup.country), request)
+                                ambitions=list(setup.ambitions), country=setup.country,
+                                bat_hand=setup.bat_hand, bowl_arm=setup.bowl_arm,
+                                bowl_type=setup.bowl_type), request)
 
 
 class MoveIn(BaseModel):

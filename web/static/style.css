@@ -4529,3 +4529,32 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-combo{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--gold)}
 .sk-new{font-size:8px;letter-spacing:.06em;padding:0 3px;border-radius:3px;background:var(--gold);color:#111;margin-left:3px}
 .hof summary .skills{margin-left:0}
+
+/* [A285] A focus for the season: what you work on and the coach's challenge for it. */
+.cr-sub{color:var(--muted);max-width:640px;margin:4px 0 16px;line-height:1.45}
+.cr-focus-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.cr-focus{position:relative;display:flex;flex-direction:column;gap:6px;text-align:left;cursor:pointer;
+  padding:14px 14px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  color:var(--ink);font:inherit;min-width:0}
+.cr-focus:hover{border-color:var(--gold)}
+.cr-focus.current{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.cr-focus.none{background:transparent;border-style:dashed}
+.cr-focus b{font-size:15px}
+.cr-focus span{color:var(--muted);font-size:13px;line-height:1.4}
+.cr-focus .cr-focus-chal{color:var(--ink)}
+.cr-focus .sk{margin-left:2px}
+.cr-focus .gauge{margin:4px 0 0;height:4px}
+.cr-focus-tag{position:absolute;top:10px;right:10px;font-style:normal;font-family:var(--mono);
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+.cr-focus-result{display:flex;flex-direction:column;gap:3px;margin:10px 0;padding:10px 12px;
+  border:1px solid var(--line);border-left:3px solid var(--muted);border-radius:8px}
+.cr-focus-result.done{border-left-color:var(--gold)}
+.cr-focus-result span{color:var(--muted);font-size:13px}
+.cr-focus-dots{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.cr-focus-dots i{width:9px;height:9px;border-radius:50%;background:var(--panel-3)}
+.cr-focus-dots i.hit{background:var(--gold)}
+.cr-chal{font-style:normal;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;
+  color:var(--gold);border:1px solid var(--gold);border-radius:4px;padding:0 4px}
+.cr-mastered{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.sk.mastered{box-shadow:0 0 0 1px var(--gold) inset;font-weight:600}
+.cr-focus-now{font-size:12px;color:var(--muted)}

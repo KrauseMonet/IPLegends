@@ -213,6 +213,7 @@ function crShow(d, moment){
   if (d.pending.kind === 'mega') return crMega(d);
   if (d.pending.kind === 'plan') return crPlan(d);
   if (d.pending.kind === 'coach') return crCoach(d);
+  if (d.pending.kind === 'focus') return crFocus(d);
   return d.pending.kind === 'offer' ? crOffers(d) : crEvent(d);
 }
 
@@ -269,10 +270,18 @@ function crHead(d, hold){
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
         ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
         ${crSlots(d)}
+        ${crMastered(d.mastered, d.focus_now)}
         ${crNationalChip(d)}
         ${crAmbitionChips(d)}
       </div>
     </div>`;
+}
+
+// [A285] Skills mastered for good, and what you are working on now.
+function crMastered(list, focus){
+  const m = (list || []).map(k => `<span class="sk mastered t${k.tier}" title="Mastered${k.year ? ' in ' + k.year : ''}: shown in enough seasons to be part of the career for good">✦ ${esc(k.label)}</span>`).join('');
+  const f = focus ? `<span class="cr-focus-now">Working on: ${esc(focus)}</span>` : '';
+  return m || f ? `<div class="cr-mastered">${m}${f}</div>` : '';
 }
 
 // [A282] The three skill slots: each tier, locked until the Rating opens it, and the skill
@@ -286,6 +295,20 @@ function crSlots(d){
     if (!x.skill) return `<span class="cr-slot empty" title="Open: earn a ${esc(x.name.toLowerCase())} skill next season"><em>${esc(x.name)}</em>open</span>`;
     return `<span class="cr-slot t${x.tier}" title="${esc(x.skill.blurb)}"><em>${esc(x.name)}</em>${esc(x.skill.label)}</span>`;
   }).join('')}${(d.combos_now || []).map(c => `<span class="cr-combo">★ ${esc(c)}</span>`).join('')}</div>${d.combo_hint ? `<div class="cr-combo-hint">${esc(d.combo_hint)}</div>` : ''}`;
+}
+
+// [A285] How the season's focus went: the challenge, the matches that met it, and the skill
+// it works toward.
+function crFocusResult(r){
+  const f = r.focus;
+  if (!f) return '';
+  const dots = (f.hits || []).map(h => `<i class="${h ? 'hit' : ''}"></i>`).join('');
+  return `<div class="cr-focus-result ${f.done ? 'done' : ''}">
+      <span class="cr-label">Focus · ${esc(f.label)}</span>
+      <b>${f.done ? 'Challenge met' : 'Challenge missed'} · ${f.met} of ${f.target}</b>
+      <span>${esc(f.challenge)} · works toward ${esc(f.skill_label)}${f.switched ? ' · a new focus, bedding in' : ''}</span>
+      ${dots ? `<span class="cr-focus-dots" title="Your matches this season: lit where the challenge was met">${dots}</span>` : ''}
+    </div>`;
 }
 
 // [A282] A season's skills, the first-ever ones marked new, and the combinations they make.
@@ -693,6 +716,33 @@ function crCoach(d){
     </div>`;
 }
 
+// [A285] What to work on this season: each focus names the skill it works toward and the
+// coach's challenge for it. Meet the challenge and the season builds a full step of the work;
+// miss it and it builds half. The skill itself is still earned by a season that shows it.
+function crFocus(d){
+  const p = d.pending, o = p.offers[0];
+  const card = (f, i) => {
+    if (!f.key) return `<button class="cr-focus none" onclick="crMove('f${i}')">
+        <b>${esc(f.label)}</b><span>${esc(f.blurb)}</span></button>`;
+    const pct = Math.round(100 * Math.min(1, f.built));
+    return `<button class="cr-focus${f.current ? ' current' : ''}" onclick="crMove('f${i}')">
+        ${f.current ? '<em class="cr-focus-tag">Keep at it</em>' : ''}
+        <b>${esc(f.label)}</b>
+        <span class="cr-focus-skill">Works toward <span class="sk t${f.tier}">${esc(f.skill_label)}</span></span>
+        <span class="cr-focus-chal">Challenge: ${esc(f.challenge)}, in ${f.target} matches</span>
+        <span>${esc(f.blurb)}</span>
+        <span class="gauge" title="How far this work is built"><i style="width:${pct}%"></i></span>
+      </button>`;
+  };
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · ${esc(o.franchise).toUpperCase()} · PRE-SEASON</div>
+      <h2 class="cr-h">What will you work on this season?</h2>
+      <p class="cr-sub">Meet the coach's challenge and the work pays off in full next season; miss it and it still counts for half. A new focus takes a season to bed in. Show a skill in ${d.master_seasons || 4} seasons and it is mastered for good.</p>
+      <div class="cr-focus-grid">${p.focus.map(card).join('')}</div>
+    </div>`;
+}
+
 const CR_EVENT_ICON = {quiet: '☀', form: '🔥', niggle: '🩹', captain: '©', coach: '🎓', injury: '🩹',
   fracture: '🦴', mentor: '🤝', rivalry: '⚔', slump: '🌧', home_league: '✈', one_more: '⏳',
   endorsement: '📸', trade: '🔁', youngster: '🌱', workload: '🧭', fitness: '🏋',
@@ -748,7 +798,7 @@ function crFeedRow(l, n){
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
     <span class="cr-fr-res">${l.result}</span>
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
-    <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}${l.pom ? ' <em class="cr-pom" title="Player of the Match">PoM</em>' : ''}</span>
+    <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}${l.pom ? ' <em class="cr-pom" title="Player of the Match">PoM</em>' : ''}${l.challenge ? ' <em class="cr-chal" title="This match met your focus\'s challenge">✓ Challenge</em>' : ''}</span>
     <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
   </li>`;
 }
@@ -1084,6 +1134,7 @@ function crSeason(d, r){
           ${(r.combos || []).map(c => crBadge(true, 'gold', `★ ${esc(c)}`)).join('')}
         </div>
         ${r.skills && r.skills.length ? `<div class="cr-skills"><span class="cr-label">Skills this season</span>${crSeasonSkills(r)}</div>` : ''}
+        ${crFocusResult(r)}
         <div class="cr-lines">
           <div><b>${r.matches}</b> matches<span>${esc(r.price)}${r.stayed ? ' · stayed' : ''}</span></div>
           ${lines}
@@ -1160,6 +1211,7 @@ function crEnd(d){
           <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
           ${s.poms ? `<div><b>${s.poms}</b> Player of the Match<span>award${s.poms === 1 ? '' : 's'}</span></div>` : ''}
         </div>
+        ${s.mastered && s.mastered.length ? `<div class="cr-skills"><span class="cr-label">Mastered</span>${crMastered(s.mastered, '')}</div>` : ''}
         ${s.skills && s.skills.length ? `<div class="cr-skills"><span class="cr-label">Career skills</span>${crSkillList(s.skills)}</div>` : ''}
         ${crAmbitionList(d)}
         ${crStory(d)}

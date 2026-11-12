@@ -45,10 +45,16 @@ def _init(overrides: dict | None = None) -> None:
     doc = read_document()
     _STATE["deck"], _STATE["model"] = deck_from(doc), model_from(doc)
     _STATE["facts"] = players_from(read_facts())
+    import importlib
+
     for name, value in (overrides or {}).items():
-        if not hasattr(career, name):
-            raise SystemExit(f"game.career has no constant {name}")
-        setattr(career, name, value)
+        mod = career
+        if "." in name:                        # e.g. career_focus.FOCUS_ON=False (A285)
+            sub, name = name.rsplit(".", 1)
+            mod = importlib.import_module(f"game.{sub}")
+        if not hasattr(mod, name):
+            raise SystemExit(f"{mod.__name__} has no constant {name}")
+        setattr(mod, name, value)
 
 
 def _one(job: tuple[str, str, int]) -> dict:

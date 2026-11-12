@@ -3180,3 +3180,31 @@ Replaced, and why: the grade was your rank read off that year's real cards. That
 the best real card of the year (an all-rounder in 2014 could never pass Raina's 90, however far
 ahead he finished), made a year with eight real cards read differently from one with seven
 (which fell back to every year's), and could not tell a narrow win from a runaway.
+
+## 27. A focus each pre-season, and mastered skills [A285]
+
+**A focus.** Every pre-season you choose one thing to work on (`game/career_focus.py`), from
+a menu that fits your role: batters and all-rounders take on spin or pace, learn to bat time,
+value the wicket, play for the runs, and own the powerplay (top band) or finish innings
+(otherwise); bowlers take the new ball, and a seamer also bowls yorkers or owns the death; a
+pure bowler bowls for wickets or bowls dry. All-rounders have one temper, so theirs is a
+batting focus only. Each focus names the skill it works toward and builds a lever that
+already existed -- a drill (A281), phase work (A248) or temper (A245). The coach's random
+drill and phase offers are gone; his trials, role changes and the gloves stay.
+
+**The challenge.** Each focus has a per-match test counted from your own balls (`Counter`, a
+`ball_log` callback that draws nothing, so a season is the season played without it): runs
+off the spinners or quicks, balls faced, not out, strike rate, runs in the powerplay or at the
+death, wickets and runs in a phase or a spell. Runs are off the bat. A season meeting it in
+the target number of matches builds a full step of the lever for next season, a missed one
+half, and the first season on a new focus half again. Targets are measured
+(`tools.career_focus_targets`): the number of matches about half of regular seasons reach
+with the focus off. A focus never hands out a skill; the season still has to show it (A278).
+
+**Mastered.** A skill shown in `MASTER_SEASONS` = 4 seasons (3 when first built, raised the same day because mastery was common) is mastered: a milestone, a
+clipping, and a permanent mark on the player card, the career card and the Hall of Fame. It
+records the career's history, so it stays when the season-by-season badge goes. Saved
+careers from before carry their signature's season counts, so mastery is read from those
+(without the year).
+
+**Tuned foci.** Each focus carries `power` (steps a met season builds) and `reach` (how far its lever may go, as a multiple of the usual cap). Yorkers at the death and Take the new ball are power 2, reach 2; Bowl to take wickets is power 2; every other focus is 1 and 1. Measured in A285.

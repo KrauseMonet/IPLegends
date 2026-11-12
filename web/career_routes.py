@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from game import career as C
-from game import career_traits as ct, national, press
+from game import career_focus as CF, career_traits as ct, national, press
 from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
@@ -142,6 +142,20 @@ class SkillOut(BaseModel):
     new: bool = False             # [A282] shown for the first time in this career
 
 
+class MasteredOut(BaseModel):
+    """[A285] A skill the career has mastered: shown in MASTER_SEASONS seasons, kept for good."""
+    key: str
+    label: str
+    tier: int
+    year: int | None = None       # the season it was mastered (None on a saved card)
+
+
+def _mastered_out(rows) -> list[MasteredOut]:
+    from etl.skills import SKILL_BY_KEY
+    return [MasteredOut(key=k, label=SKILL_BY_KEY[k].label, tier=t, year=y)
+            for k, t, y in rows if k in SKILL_BY_KEY]
+
+
 class SlotOut(BaseModel):
     """[A282] One of the player card's three skill slots."""
     tier: int
@@ -218,6 +232,7 @@ class SeasonOut(BaseModel):
     role: str = ""                # the role this season was played in, when changed (A238)
     role_label: str = ""
     trial: bool = False           # a trial season the coach offered
+    focus: FocusResultOut | None = None   # [A285] the season's focus and its challenge
 
 
 class OfferOut(BaseModel):
@@ -303,6 +318,34 @@ class MomentOut(BaseModel):
     kind: str = "must_win"        # "must_win" | "playoff" | "make_or_break" (A205)
 
 
+class FocusOptionOut(BaseModel):
+    """[A285] A focus you can choose: the skill it works toward, the lever it builds and the
+    coach's challenge for the season. `key` "" is no focus."""
+    key: str
+    label: str
+    skill: str = ""
+    skill_label: str = ""
+    tier: int = 0
+    challenge: str = ""
+    target: int = 0
+    blurb: str = ""
+    built: float = 0.0            # how far the lever is built already, 0-1
+    current: bool = False         # the focus you worked on last season
+
+
+class FocusResultOut(BaseModel):
+    """[A285] How a season's focus went."""
+    key: str
+    label: str
+    skill_label: str
+    challenge: str
+    met: int
+    target: int
+    done: bool
+    switched: bool
+    hits: list[bool] = []         # per match of yours, in the feed's order
+
+
 class PendingOut(BaseModel):
     kind: str                     # "offer" | "event" | "moment"
     year: int
@@ -321,6 +364,7 @@ class PendingOut(BaseModel):
     incident: EventOut | None = None            # something happened mid-season: `i{n}` (A230)
     cold: bool = False                          # your club has not asked you to stay (A230)
     coach: EventOut | None = None               # the coach's offer: `t{i}` (A238)
+    focus: list[FocusOptionOut] | None = None   # what to work on this season: `f{i}` (A285)
 
 
 class MilestoneOut(BaseModel):
@@ -330,6 +374,7 @@ class MilestoneOut(BaseModel):
 
 
 class SummaryOut(BaseModel):
+    mastered: list[MasteredOut] = []   # [A285] skills the career has mastered
     seasons: int
     regular_seasons: int
     matches: int
@@ -408,6 +453,7 @@ class MatchLineOut(BaseModel):
     cover: str | None = None      # a teammate broke down and you bowled his overs (A247)
     milestones: list[str] = []    # career milestones reached in this match (A209)
     pom: bool = False             # Player of the Match (A228)
+    challenge: bool = False       # [A285] this match met your focus's challenge
 
 
 class TableRowOut(BaseModel):
@@ -488,6 +534,9 @@ class CareerOut(BaseModel):
     skill_slots: list[SlotOut] = []   # [A282] the last season's skills, by tier
     combo_hint: str = ""          # [A282] the nearest combination, one skill away
     combos_now: list[str] = []    # [A282] combinations the last season's skills make
+    mastered: list[MasteredOut] = []  # [A285] skills mastered so far
+    focus_now: str = ""           # [A285] what you are working on, in words
+    master_seasons: int = 4       # [A285] seasons a skill must be shown in to be mastered
 
 
 def _template(c) -> TemplateOut:
@@ -523,7 +572,44 @@ def _season(r: C.SeasonRecord, ceiling: int = 0, voice: press.Voice | None = Non
         plan=[f"{n}: {PHASE_WORDS[ph]}" for n, ph in r.plan],
         role=r.role["role"] if r.role else "",
         role_label=C.role_label(r.role["role"]) if r.role else "",
-        trial=bool(r.role and r.role["trial"]))
+        trial=bool(r.role and r.role["trial"]),
+        focus=_focus_result(r.focus))
+
+
+def _focus_hits(career: C.Career) -> list[bool] | None:
+    """[A285] The season just played's challenge, match by match -- only once the season is
+    complete, since a paused season's record does not exist yet."""
+    d = career.detail
+    if d is None or not d.complete or not career.seasons:
+        return None
+    f = career.seasons[-1].focus
+    return list(f["hits"]) if f else None
+
+
+def _focus_result(f: dict | None) -> FocusResultOut | None:
+    if not f:
+        return None
+    fo = CF.FOCUS_BY_KEY[f["focus"]]
+    return FocusResultOut(key=fo.key, label=fo.label, skill_label=C.career_skills.label(fo.skill),
+                          challenge=fo.challenge, met=f["met"], target=f["target"],
+                          done=f["done"], switched=f["switched"], hits=list(f.get("hits") or []))
+
+
+def _focus_options(p: C.Pending, cp) -> list[FocusOptionOut]:
+    out = []
+    for key in p.focus["options"]:
+        if not key:
+            out.append(FocusOptionOut(key="", label="No particular focus",
+                                      blurb="Play your game. Nothing is built this season."))
+            continue
+        fo = CF.FOCUS_BY_KEY[key]
+        sk = C.career_skills.S.SKILL_BY_KEY[fo.skill]
+        out.append(FocusOptionOut(
+            key=key, label=fo.label, skill=fo.skill, skill_label=sk.label, tier=sk.tier,
+            challenge=fo.challenge, target=fo.target, blurb=fo.blurb,
+            built=round(C.focus_built(key, cp), 3) if cp is not None else 0.0,
+            current=key == p.focus.get("current")))
+    return out
 
 
 def role_path(c: C.Career) -> list[str]:
@@ -577,7 +663,7 @@ def _moment(m: C.Moment, role: str) -> MomentOut:
                      kind=m.kind)
 
 
-def _pending(p: C.Pending, role: str = "") -> PendingOut:
+def _pending(p: C.Pending, role: str = "", cp=None) -> PendingOut:
     event = incident = None
     if p.kind == "event":
         event = EventOut(key=p.event.key, title=p.event.title, text=p.event_text or p.event.text,
@@ -607,6 +693,7 @@ def _pending(p: C.Pending, role: str = "") -> PendingOut:
         event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
         mega=mega, plan=plan, incident=incident, cold=p.cold, coach=coach,
+        focus=_focus_options(p, cp) if p.kind == "focus" and p.focus else None,
         epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [])
 
 
@@ -690,12 +777,14 @@ def _summary(c: C.Career) -> SummaryOut:
         # saved card; the same walk in the same order, with each milestone's kind kept.
         milestones=[MilestoneOut(year=r.year, text=m.text, key=m.key)
                     for r in c.seasons for m in r.milestones],
-        skills=_skills_out(C.career_skills.signature(c.seasons)))
+        skills=_skills_out(C.career_skills.signature(c.seasons)),
+        mastered=_mastered_out(C.career_skills.mastered(c.seasons)))
 
 
 def _season_play(detail: C.SeasonDetail,
                  milestones: list[C.CareerMilestone] = (),
-                 clips: list[press.Clipping] = ()) -> SeasonPlayOut:
+                 clips: list[press.Clipping] = (),
+                 hits: list[bool] | None = None) -> SeasonPlayOut:
     from web.app import _analysis_out, _result_out      # the solo season's own shapes
 
     yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
@@ -712,7 +801,7 @@ def _season_play(detail: C.SeasonDetail,
         approach=l.approach, stop=l.stop, verdict=l.verdict, dropped=l.dropped, form=l.form,
         form_word=l.form_word, milestones=[m.text for m in milestones if m.match == i], pom=l.pom,
         card=l.card, absence=l.absence, incident=l.incident,
-        cover=l.cover)
+        cover=l.cover, challenge=bool(hits and len(hits) == len(detail.feed) and hits[i]))
         for i, l in enumerate(detail.feed)]
     table = [TableRowOut(pos=i, short=t.short, name=t.name,
                          crest=crests.crest_url(t.franchise, t.year), played=t.played,
@@ -822,7 +911,12 @@ def _skill_view(career) -> dict:
                      skill=by_key.get(x["key"])) for x in CS.slots(shown, _rating_now(career))]
     role = career.role_now or career.setup.role
     card_role = C.ROLES.get(role, {}).get("role", ("allrounder",))[0]   # a full-time bowler bowls
-    return {"skill_slots": slots, "combos_now": CS.combos(k for k, *_ in shown),
+    cp = career.checkpoint
+    fk = cp.focus if cp is not None else ""
+    return {"mastered": _mastered_out(CS.mastered(career.seasons)),
+            "master_seasons": CS.MASTER_SEASONS,
+            "focus_now": CF.FOCUS_BY_KEY[fk].label if fk in CF.FOCUS_BY_KEY else "",
+            "skill_slots": slots, "combos_now": CS.combos(k for k, *_ in shown),
             "combo_hint": CS.combo_hint([k for k, *_ in shown], card_role) if last else ""}
 
 
@@ -851,11 +945,13 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
         seasons=_mark_new([_season(r, career.ceiling.display, v) for r in career.seasons]),
-        pending=(_pending(career.pending, career.season_role or st.role).model_copy(update={"club_gone": _club_gone(career)})
+        pending=(_pending(career.pending, career.season_role or st.role,
+                          career.checkpoint).model_copy(update={"club_gone": _club_gone(career)})
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
-        season_play=(_season_play(career.detail, career.live_milestones, _live_clips(seed, career))
+        season_play=(_season_play(career.detail, career.live_milestones, _live_clips(seed, career),
+                                  _focus_hits(career))
                      if career.detail else None),
         auction=_auction(career.auction, _auction_year(career)) if career.auction else None,
         rating=_rating_now(career), potential=round(career.top.display),
@@ -896,7 +992,8 @@ def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     (an offer awaiting its event, a season paused at a key moment), none once a season is
     played or the career is over."""
     return (moves if career.pending is not None
-            and career.pending.kind in ("event", "plan", "moment", "incident", "coach")
+            and career.pending.kind in ("event", "plan", "moment", "incident", "coach",
+                                        "focus")
             else [])
 
 
@@ -1134,6 +1231,7 @@ class HallOut(BaseModel):
     honours: list[str] = []       # which induction honours it holds (A225)
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
     extras: list["ExtraLegendOut"] = []   # [A272] more seasons kept as legends, by request
+    mastered: list[MasteredOut] = []   # [A285] from the card; read off its signature if older
     skills: list[SkillOut] = []   # [A278] the career's skills; none on a career saved before
 
 
@@ -1199,6 +1297,8 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             runs_rank=runs_rank, wickets_rank=wickets_rank,
             crests=[crests.crest_url(f, y) for f, y in clubs], card=r["card"],
             skills=_skills_out(r["card"].get("skills")),
+            mastered=_mastered_out(r["card"].get("mastered")
+                                   or C.career_skills.mastered_from_signature(r["card"].get("skills"))),
             completed_at=r["completed_at"].isoformat(),
             extras=[ExtraLegendOut(key=career_results.extra_key(r["key"], x["year"]),
                                    name=r["name"], card={"legend": x},

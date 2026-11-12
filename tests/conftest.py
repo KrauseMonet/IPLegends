@@ -92,3 +92,25 @@ def drills_off(request, monkeypatch):
     from game import career as C
 
     monkeypatch.setattr(C, "DRILLS_ON", False)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def focus_off_everywhere():
+    """[A285] The pre-season focus asks a question every season, which the older seeded
+    careers' move lists never answer. Off for the whole session, so a MODULE-scoped fixture
+    that builds a career sees it off too (A251's trap: those run before any per-test switch).
+    A module that tests it sets `FOCUS_TESTS = True` and turns it on itself, module-wide."""
+    from game import career_focus
+
+    was = career_focus.FOCUS_ON
+    career_focus.FOCUS_ON = False
+    yield
+    career_focus.FOCUS_ON = was
+
+
+@pytest.fixture(autouse=True)
+def focus_off(request, monkeypatch):
+    """...and per test, so a test that turned it on cannot leak it to the next."""
+    from game import career_focus
+
+    monkeypatch.setattr(career_focus, "FOCUS_ON", bool(getattr(request.module, "FOCUS_TESTS", False)))

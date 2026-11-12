@@ -267,6 +267,32 @@ def signature(seasons) -> list[list]:
     return sorted(held.values(), key=lambda x: (-x[1], -x[2], x[0]))
 
 
+# --- [A285] mastered: a skill shown often enough becomes part of the career for good --------
+
+MASTER_SEASONS = 4            # seasons a skill must be shown in to be mastered (declared)
+
+
+def mastered(seasons) -> list[list]:
+    """The skills the career has MASTERED, [key, tier, year mastered], in the order they were
+    mastered. A statement about the career's history -- the seasons a skill was shown in --
+    never about the next season, so it stays honest when the season-by-season badge goes:
+    the badge says how you play now, mastery says what you were."""
+    count: dict[str, int] = {}
+    out = []
+    for r in seasons:
+        for key, tier, _st in getattr(r, "skills", None) or []:
+            count[key] = count.get(key, 0) + 1
+            if count[key] == MASTER_SEASONS:
+                out.append([key, tier, getattr(r, "year", None)])
+    return out
+
+
+def mastered_from_signature(sig) -> list[list]:
+    """Mastery as a saved card's signature ([key, tier, seasons held]) can show it: the year
+    is not kept there, so it reads None."""
+    return [[k, t, None] for k, t, n in sig or [] if n >= MASTER_SEASONS]
+
+
 # --- [A282] how the skills are shown: slots and combinations --------------------------------
 
 TIER_NAMES = {1: "Style", 2: "Special", 3: "Elite"}

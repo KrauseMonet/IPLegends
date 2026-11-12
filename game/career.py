@@ -52,7 +52,7 @@ from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
-from game import career_skills, phase_skill as phase_data
+from game import career_focus, career_skills, phase_skill as phase_data
 from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model, ball_log
 
 # --- who you can be ------------------------------------------------------------------
@@ -1439,11 +1439,14 @@ PHASE_TAKE = {("bowl", 2): "Own the death overs", ("bowl", 0): "Take the new bal
               ("bat", 0): "Attack the powerplay", ("bat", 2): "Become the finisher"}
 
 
-def phase_after(built: dict, disc: str, idx: int) -> dict:
+def phase_after(built: dict, disc: str, idx: int, steps: float = 1.0,
+                cap: float | None = None) -> dict:
     """The coach's work on one phase, added to what is built: +PHASE_STEP there, -PHASE_COST
-    in each other phase, never past PHASE_MAX in the phase worked on."""
+    in each other phase, never past PHASE_MAX in the phase worked on. `steps` scales it: a
+    focus whose challenge was missed builds half a step, and a focus may carry a higher `cap`
+    (A285)."""
     cur = list(built.get(disc, (0.0, 0.0, 0.0)))
-    gain = min(PHASE_STEP, max(0.0, PHASE_MAX - cur[idx]))
+    gain = min(PHASE_STEP * steps, max(0.0, (PHASE_MAX if cap is None else cap) - cur[idx]))
     if not gain:
         return dict(built)
     cost = PHASE_COST * gain / PHASE_STEP
@@ -1617,6 +1620,47 @@ def drill_card(seed: int, k: int, cp: "Checkpoint", you: Card, squad: bool) -> d
                 _opt(take, hint, f"You put in the hours: {take.lower()}.", True),
                 dict(_opt("Keep your game as it is", "Change nothing, risk nothing.",
                           "You kept your game as it was.", False), neutral=True)]}
+
+
+def focus_menu(card: Card, cp: "Checkpoint") -> list[str]:
+    """[A285] The foci you can choose this pre-season: those that fit how you play, less any
+    built as far as it goes, the one you worked on last first, and "" (no focus) last."""
+    keys = career_focus.available(_kind(card), _bat_band(card),
+                                  card.bowl_scoring is not None, card.bowling_style)
+    keys = [x for x in keys if not career_focus.built_out(
+        x, cp.drills, cp.phase, cp.traits, DRILL_MAX, PHASE_MAX, ct.TRAIT_MAX)]
+    if not keys:
+        return []
+    if cp.focus in keys:
+        keys.remove(cp.focus)
+        keys.insert(0, cp.focus)
+    return keys + [""]
+
+
+def focus_built(key: str, cp: "Checkpoint") -> float:
+    """[A285] How far a focus's lever is built, 0-1: the menu's progress bar."""
+    fo = career_focus.FOCUS_BY_KEY[key]
+    lever = fo.lever
+    if lever[0] == "drill":
+        return cp.drills.get(lever[1], 0.0) / (DRILL_MAX * fo.reach)
+    if lever[0] == "phase":
+        return max(0.0, (cp.phase.get(lever[1]) or (0.0, 0.0, 0.0))[lever[2]]) / (PHASE_MAX * fo.reach)
+    return max(0.0, lever[1] * cp.traits.get("temper", 0.0)) / ct.TRAIT_MAX
+
+
+def focus_words(res) -> str:
+    """[A285] The season card's sentence for how the focus's challenge went: never numbers
+    beyond the matches counted."""
+    f = career_focus.FOCUS_BY_KEY[res.focus]
+    got = f"{res.met} of {res.target}"
+    if res.done:
+        text = f"Challenge met ({got}: {f.challenge}). The work on “{f.label}” paid off."
+    else:
+        text = (f"Challenge missed ({got}: {f.challenge}). The work on “{f.label}” "
+                f"still counts for something.")
+    if res.switched:
+        text += " A new focus takes time to bed in."
+    return text
 
 
 def drill_words(drills: dict) -> list[str]:
@@ -3292,6 +3336,11 @@ class SeasonRecord:
     skill_log: dict | None = None
     skills_earned: list = field(default_factory=list)
     skills: list = field(default_factory=list)
+    # [A285] Your figures match by match (in the season as played; cleared before the record
+    # is kept, since the token would grow by every match), and the focus you worked on and
+    # how its challenge went: {key, met, target, done, built, switched, hits}. None: no focus.
+    focus_log: list = field(default_factory=list)
+    focus: dict | None = None
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -3390,6 +3439,7 @@ class Year:
     incident_out: dict = field(default_factory=dict) # league index -> why it kept you out (A230)
     cover: dict | None = None                        # a cover spell you bowled (A247)
     skill_log: dict | None = None                    # your balls against par (A278)
+    focus_log: list = field(default_factory=list)    # your figures, match by match (A285)
 
 
 def availability_shares(tenure: int | None, overseas: bool) -> tuple[float, ...]:
@@ -3788,6 +3838,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     def league_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal played, seen, breaks, pending_break, waiting
         if yours is a or yours is b:
+            counter.next_match()                    # [A285] your figures, match by match
             # Form is read as it stood straight after your own last match -- the moment the
             # feed shows it -- never shifted by other sides' matches played since.
             mine = [i for i, r in enumerate(season.results) if yours in (r.home, r.away)]
@@ -3852,6 +3903,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     def playoff_hook(a: Side, b: Side, season, stage: str) -> None:
         nonlocal seen
         if yours is a or yours is b:
+            counter.next_match()                    # [A285]
             yours.breakdown = None
             yours.xi, yours.impact = without if squad or season_over[0] else lineup(10 ** 6)
             seen += 1
@@ -3860,8 +3912,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     # [A278] every ball you face or bowl, against par, for the skills the season earns;
     # recording draws nothing, so the season is the season played without it
     collector = career_skills.Collector(YOU_ID)
+    counter = career_focus.Counter(YOU_ID)          # [A285] the focus's challenge, per match
     try:
-        with ball_log(collector):
+        with ball_log(career_focus.chain(collector, counter)):
             season = run_league(model, sides, rng, double_at=double, before_match=league_hook,
                                 schedule=schedule)
             season = run_playoffs(model, season, rng, before_match=playoff_hook)
@@ -3875,7 +3928,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     year = Year(season, yours, season.results + season.playoffs, roster, len(out | dropped),
                 absent=sorted(set(out) - set(incident_out)), absence_reason=absence_why,
                 incident=incident, incident_out=incident_out,
-                cover=cover_spell(season, yours), skill_log=collector.summary(YOU_ID) or None)
+                cover=cover_spell(season, yours), skill_log=collector.summary(YOU_ID) or None,
+                focus_log=counter.matches)
     year.approaches = approaches
     year.dropped, year.verdicts = dropped_seen, verdicts
     return year
@@ -4212,6 +4266,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     record.display = season_display(deck, you, season_margin(lines, key))
     record.measured = measured_halves(lines, key)
     record.skill_log = year.skill_log
+    record.focus_log = year.focus_log
     record.position = next(i for i, s in enumerate(season.table, 1) if s.side is yours)
     record.playoffs = record.position <= 4
     final = season.playoffs[-1]
@@ -4338,6 +4393,7 @@ class Pending:
     event_fill: tuple = ("", "", "captain")   # the name, club and whom you answer to (A245)
     cold: bool = False                 # your club has not offered to keep you (A230)
     coach: dict | None = None          # the coach's offer, answered `t{i}` (A238)
+    focus: dict | None = None          # your focus for the season, answered `f{i}` (A285)
 
 
 @dataclass
@@ -4730,6 +4786,7 @@ class Checkpoint:
     ceiling_band: bool = True
     bat_band: str = ""
     keeper_offers: int = 0
+    focus: str = ""                       # [A285] the focus you worked on last ("" none yet)
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -4764,7 +4821,7 @@ class Checkpoint:
                    drills={k: float(v) for k, v in (d.get("drills") or {}).items()},
                    drill_offers=d.get("drill_offers", 0),
                    ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
-                   keeper_offers=d.get("keeper_offers", 0))
+                   keeper_offers=d.get("keeper_offers", 0), focus=d.get("focus", ""))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -4877,6 +4934,8 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
                    if m.key == "ambition"],
         new_skills=[m.text.removeprefix("New skill: ") for m in played.milestones
                     if m.key == "skill"],
+        mastered=[m.text.removeprefix("Mastered: ") for m in played.milestones
+                  if m.key == "mastered"],
         first_hundred=not any(r.hundreds for r in prev),
         first_five_for=not any(r.five_fors for r in prev),
         national=({"country": setup.nation, "event": played.national, "caps": played.caps,
@@ -5184,9 +5243,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                          start, top, career_t(cp, start, top, shape), cp.phase),
                               cp.drills)
         career.phase_words = phase_words(leaning) + (drill_words(cp.drills) if DRILLS_ON else [])
-        if coach is None:
+        if coach is None and not career_focus.FOCUS_ON:   # [A285] your focus replaces these
             coach = phase_card(seed, k, cp, leaning, squad_now)
-        if coach is None:
+        if coach is None and not career_focus.FOCUS_ON:
             coach = drill_card(seed, k, cp, leaning, squad_now)   # [A281]
         if coach is not None:
             coach = with_coach_mentor(deck, coach, offer.fs_id, start, cp)
@@ -5249,6 +5308,21 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                             bat_band=cp.bat_band)
             career.role_now = cp.roles[-1] if cp.roles else setup.role
             career.season_role = rd["role"] if rd else setup.role
+        # [A285] What you work on this season, and the coach's challenge that goes with it.
+        focus_key, focus_switched = "", False
+        if career_focus.FOCUS_ON and k >= career_focus.FIRST_SEASON:
+            now_card = ability(start, top, career_t(cp, start, top, shape), setup=setup,
+                               fs_id=offer.fs_id, year=year, franchise=offer.franchise, role=rd)
+            menu = focus_menu(now_card, cp)
+            if menu:
+                move = nxt()
+                if move is None:
+                    career.pending = Pending("focus", year, k, offers=[offer], squad=squad_now,
+                                             focus={"options": menu, "current": cp.focus})
+                    return career
+                focus_key = menu[_index(move, "f", len(menu))]
+                focus_switched = bool(cp.focus) and bool(focus_key) and focus_key != cp.focus
+                cp.focus = focus_key
         probe = ability(start, top, 0.0, setup=setup, fs_id=offer.fs_id, year=year,
                         franchise=offer.franchise, role=rd)
         # [A245] Whether a card makes sense for you now: a mentor needs someone in the squad
@@ -5509,6 +5583,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 if key_ not in held_before:
                     played.milestones.append(CareerMilestone(
                         "skill", f"New skill: {career_skills.label(key_)}"))
+            # [A285] a skill shown for the MASTER_SEASONS-th time is mastered, for good
+            shown_before = [r for r in cp.seasons]
+            for key_, _tier, _year in career_skills.mastered(shown_before + [played]):
+                if _year == played.year and key_ not in {
+                        m[0] for m in career_skills.mastered(shown_before)}:
+                    played.milestones.append(CareerMilestone(
+                        "mastered", f"Mastered: {career_skills.label(key_)}"))
         career.live_milestones = played.milestones
         played.press = press.season_facts(_press_facts(deck, cp, played, offer, k, year,
                                                         career.auction, setup),
@@ -5540,6 +5621,24 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             # by character, keeps his place through one poor season. Not the armband.
             cp.squad, led_through = False, True
             say("A poor season, but the dressing room wants you in it. You keep your place.", "up")
+        # [A285] How the focus's challenge went, and what the work built for next season.
+        if focus_key:
+            res = career_focus.judge(focus_key, played.focus_log, focus_switched)
+            played.focus = dataclasses.asdict(res)
+            built = res.built
+            fo = career_focus.FOCUS_BY_KEY[focus_key]
+            lever = fo.lever
+            if lever[0] == "drill":
+                cp.drills[lever[1]] = min(DRILL_MAX * fo.reach,
+                                          cp.drills.get(lever[1], 0.0) + built)
+            elif lever[0] == "phase":
+                cp.phase = phase_after(cp.phase, lever[1], lever[2], built,
+                                       cap=PHASE_MAX * fo.reach)
+            else:
+                trait_moves.append(("temper", lever[1] * built))
+            say(focus_words(res), "up" if res.done else "")
+        if not career_focus.KEEP_LOG:
+            played.focus_log = []                 # the token keeps the verdict, not the matches
         # [A245] What the season's choices made of you, from next season on.
         before_traits = cp.traits
         cp.traits = ct.nudge(traits, trait_moves if TRAITS_ON else ())
@@ -5626,7 +5725,8 @@ def _index(move: str, kind: str, n: int) -> int:
     if not isinstance(move, str) or not move.startswith(kind) or not move[1:].isdigit():
         what = {"o": "an offer", "c": "an offer", "e": "an event answer", "m": "a key-moment call",
                 "i": "an answer to what happened", "t": "an answer to the coach",
-                "b": "a base price", "w": "a where-are-they-now"}.get(kind, "a")
+                "b": "a base price", "w": "a where-are-they-now",
+                "f": "a focus"}.get(kind, "a")
         raise CareerError(f"expected {what} move, got {move!r}")
     i = int(move[1:])
     if not 0 <= i < n:
@@ -5660,6 +5760,9 @@ def policy_move(career: Career, policy: str, rng: random.Random) -> str:
             return f"t{0 if sign > 0 else len(p.coach['options']) - 1}"
         if p.kind == "offer":
             return "o0"
+    if p.kind == "focus":                      # A285: careless at random, the rest keep at it
+        n = len(p.focus["options"])
+        return f"f{rng.randrange(n) if policy == 'random' else 0}"
     if p.kind == "epilogue":                   # A228
         return f"w{rng.randrange(len(press.EPILOGUES)) if policy == 'random' else 0}"
     if p.kind == "coach":                      # A238: careless at random, the rest say yes

@@ -4558,3 +4558,31 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-mastered{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
 .sk.mastered{box-shadow:0 0 0 1px var(--gold) inset;font-weight:600}
 .cr-focus-now{font-size:12px;color:var(--muted)}
+
+/* [A286] Honours on the career card: the nickname, titles, best match, lineage, rivalries,
+   and a finish set by everything won. */
+.cr-nick{display:block;font-style:normal;font-size:.9em;color:var(--gold,#d4a73a);margin:2px 0}
+.cr-honours{margin:18px auto 6px;max-width:620px;text-align:left;padding:14px 16px;border-radius:12px;
+  border:1px solid var(--line,#ffffff22);background:var(--panel,#ffffff08)}
+.cr-honours.finish-bronze{border-color:#b0763f;box-shadow:inset 0 0 0 1px #b0763f55}
+.cr-honours.finish-silver{border-color:#c4ccd6;box-shadow:inset 0 0 0 1px #c4ccd655}
+.cr-honours.finish-gold{border-color:#d4a73a;box-shadow:inset 0 0 0 1px #d4a73a66,0 0 18px #d4a73a33}
+.cr-honours.finish-platinum{border-color:#bfe6ff;box-shadow:inset 0 0 0 1px #bfe6ff66,0 0 22px #8fd3ff44;
+  background:linear-gradient(135deg,#ffffff10,#8fd3ff14 40%,#ffffff08)}
+.cr-hon-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.cr-finish{font-size:.78em;text-transform:uppercase;letter-spacing:.08em;opacity:.8}
+.cr-hon-nick{font-family:var(--display,inherit);font-size:1.5em;margin:2px 0 10px}
+.cr-hon-nick span{display:block;font-family:var(--sans,system-ui,sans-serif);font-weight:400;letter-spacing:0;font-size:.5em;opacity:.7;margin-top:2px}
+.cr-titles{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.cr-title{font-size:.82em;padding:3px 9px;border-radius:999px;border:1px solid #d4a73a88;color:#f0d690}
+.cr-title.captain{border-color:#8fb7ff88;color:#c4d8ff}
+.cr-hon-row{font-size:.9em;margin:6px 0;line-height:1.4}
+.cr-hon-row .cr-label{display:inline-block;min-width:88px;margin-right:6px}
+.cr-hon-row ul{margin:4px 0 0;padding-left:18px}
+@media (max-width:560px){.cr-hon-row .cr-label{display:block;min-width:0}}
+.hof-nick{display:block;font-style:normal;font-size:.85em;color:#f0d690}
+.hof-finish{font-size:.72em;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:999px;border:1px solid #ffffff44}
+.hof-finish.finish-bronze{border-color:#b0763f;color:#e3b07c}
+.hof-finish.finish-silver{border-color:#c4ccd6;color:#dde3ea}
+.hof-finish.finish-gold{border-color:#d4a73a;color:#f0d690}
+.hof-finish.finish-platinum{border-color:#bfe6ff;color:#d8f1ff}

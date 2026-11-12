@@ -3208,3 +3208,8 @@ careers from before carry their signature's season counts, so mastery is read fr
 (without the year).
 
 **Tuned foci.** Each focus carries `power` (steps a met season builds) and `reach` (how far its lever may go, as a multiple of the usual cap). Yorkers at the death and Take the new ball are power 2, reach 2; Bowl to take wickets is power 2; every other focus is 1 and 1. Measured in A285.
+
+## 28. Honours [A286]
+
+Honours describe what a career did and never how it plays: feat titles (Big-match player, Finals specialist, Scourge of a club, Chase master), captaincy titles (Title-winning captain, Dynasty builder, Leader of men, a club's captain, Born winner, Captain's knock), a nickname the papers coin once and keep, the real players who taught you, the career's best match, its record against each rival the papers built up, and a card finish (Standard, Bronze, Silver, Gold, Platinum) from what it won. All are derived from the season records when read; each season keeps a small `feats` record off its match feed for the ones the feed alone supports. None reaches the engine, a rating or a legend's value. A card, coach offer or incident drawn again in the same career names the year it was last asked and what was chosen.
+

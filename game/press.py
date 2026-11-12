@@ -535,8 +535,23 @@ def _ambition(f: dict, v: Voice) -> Clipping:
     return Clipping("ambition", f["y"], "SPORT", head, f["label"], "", body, "", 40, None, f.get("club"))
 
 
+def _nickname(f: dict, v: Voice) -> Clipping:
+    """[A286] The papers coin a nickname, and it sticks. In single quotes: double quotes in a
+    clipping are kept for the player's own words (A228)."""
+    sur, nick = v.sur, f["nick"]
+    head = _pick(v, f, [f"Meet ‘{nick}’: the name that has stuck to {sur}",
+                        f"They are calling {sur} ‘{nick}’ now",
+                        f"‘{nick}’: how the league has come to know {sur}"])
+    body = [f"Commentators started it, the stands took it up, and by the end of the season "
+            f"nobody called {_who(v, f)} anything else: ‘{nick}’.",
+            _pick(v, f, ["Nicknames in this league are earned, not given.",
+                         "Shirts with it printed on the back sold out by the playoffs.",
+                         "Teammates insist they thought of it first."], "colour")]
+    return Clipping("nickname", f["y"], "SPORT", head, nick, "", body, "", 38, None, f.get("club"))
+
+
 def _mastered(f: dict, v: Voice) -> Clipping:
-    """[A285] A skill shown for a third season: part of the player for good."""
+    """[A285] A skill shown for a fourth season: part of the player for good."""
     sur, names = v.sur, f["skills"]
     said = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
     head = _pick(v, f, [f"{sur} has made it a trademark: {said}",
@@ -644,7 +659,7 @@ RENDER = {"hundred": _hundred, "blitz": _blitz, "five_for": _five_for, "hattrick
           "final_star": _final_star, "playoff_hero": _playoff_hero, "debut": _debut,
           "move": _move, "mega": _mega, "title": _title, "final_lost": _final_lost, "cap": _cap,
           "captain": _captain, "injury": _injury, "mate_last": _mate_last, "elite": _elite,
-          "ambition": _ambition, "skill": _skill, "mastered": _mastered, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
+          "ambition": _ambition, "skill": _skill, "mastered": _mastered, "nickname": _nickname, "nt_debut": _nt_debut, "nt_recalled": _nt_recalled,
           "nt_dropped": _nt_dropped, "nt_caps": _nt_caps,
           "trade": _trade, "endorse": _endorse, "hit_back": _hit_back}
 
@@ -744,6 +759,7 @@ class SeasonFacts:
     stories: list[str] = field(default_factory=list)      # [A230] "endorse", "hit_back"
     new_skills: list[str] = field(default_factory=list)   # [A278] skills shown for the first time
     mastered: list[str] = field(default_factory=list)     # [A285] skills mastered this season
+    nickname: str = ""                                    # [A286] coined this season
 
 
 def season_facts(s: SeasonFacts, feed) -> list[dict]:
@@ -795,6 +811,8 @@ def season_facts(s: SeasonFacts, feed) -> list[dict]:
         out.append({"k": "skill", "y": y, "club": club, "skills": list(s.new_skills)})
     if s.mastered:
         out.append({"k": "mastered", "y": y, "club": club, "skills": list(s.mastered)})
+    if s.nickname:
+        out.append({"k": "nickname", "y": y, "club": club, "nick": s.nickname})
     nt = s.national
     if nt and nt.get("event") in ("debut", "recalled", "dropped"):
         out.append({"k": f"nt_{nt['event']}", "y": y, "country": nt["country"], "caps": nt["caps"],

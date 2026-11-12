@@ -150,9 +150,10 @@ def test_a_real_career_records_its_landmarks_against_its_own_feed():
         assert rec.hat_tricks == sum("hattrick" in l.landmarks for l in feed)
         # The selectors' milestones (A229) and an ambition's (A228) come from outside the
         # feed and are checked by their own tests, as are a new skill's (A278) and a mastered
-        # one's (A285, tests/test_career_focus.py).
+        # one's (A285, tests/test_career_focus.py), and the nickname (A286).
         own = [m for m in rec.milestones
-               if m.key not in ("international", "caps", "ambition", "skill", "mastered")]
+               if m.key not in ("international", "caps", "ambition", "skill", "mastered",
+                                 "nickname")]
         assert own == C.career_milestones(seasons[:k], feed, rec)
         checked += 1
     assert checked == len(seasons) >= 3

@@ -258,7 +258,7 @@ function crHead(d, hold){
     <div class="cr-pc">
       <div class="cr-pc-rating ${crTier(d.rating)}"><b>${d.rating}</b><span>Rating</span></div>
       <div class="cr-pc-who">
-        <b>${esc(d.name)}</b>
+        <b>${esc(d.name)}</b>${d.nickname ? `<em class="cr-nick">“${esc(d.nickname)}”</em>` : ''}
         <span>${d.number != null ? `No. ${d.number} · ` : ''}${esc(d.role_now_label || d.role_label)} · age ${d.age}${d.overseas ? ' · overseas' : ''}${d.home ? ` · ${esc(d.home)}` : ''} · debut ${d.debut}</span>
       </div>
       <div class="cr-pc-club">${crestImg(crest, 'cr-pc-crest')}<span>${esc(clubName)}</span></div>
@@ -275,6 +275,26 @@ function crHead(d, hold){
         ${crAmbitionChips(d)}
       </div>
     </div>`;
+}
+
+// [A286] Honours: what the career did, never how it plays. The nickname, feat and captaincy
+// titles, the best match, who taught you, the rivalries the papers built up, and the finish.
+function crHonours(h){
+  if (!h) return '';
+  const titles = (h.titles || []).map(t => `<span class="cr-title ${t.kind}" title="${esc(t.text)}">${t.kind === 'captain' ? '(c)' : '★'} ${esc(t.label)}</span>`).join('');
+  const rivals = (h.rivalries || []).slice().sort((a, b) => b.matches - a.matches).slice(0, 3)
+    .map(r => `<li>v ${esc(r.name)} (${esc(r.club)}): won ${r.won} of ${r.matches}${r.runs ? ` · ${r.runs} run${r.runs === 1 ? '' : 's'}` : ''}${r.wickets ? ` · ${r.wickets} wkt${r.wickets === 1 ? '' : 's'}` : ''}</li>`).join('');
+  const rows = [
+    titles ? `<div class="cr-titles">${titles}</div>` : '',
+    h.signature ? `<div class="cr-hon-row"><span class="cr-label">Best match</span>${esc(h.signature)}</div>` : '',
+    (h.lineage || []).length ? `<div class="cr-hon-row"><span class="cr-label">Taught by</span>${h.lineage.map(esc).join(', ')}</div>` : '',
+    rivals ? `<div class="cr-hon-row"><span class="cr-label">Rivalries</span><ul>${rivals}</ul></div>` : '',
+  ].join('');
+  if (!rows && !h.nickname) return '';
+  return `<div class="cr-honours finish-${(h.finish || 'Standard').toLowerCase()}">
+      <div class="cr-hon-head"><span class="cr-label">Honours</span><span class="cr-finish">${esc(h.finish || 'Standard')} finish</span></div>
+      ${h.nickname ? `<div class="cr-hon-nick">“${esc(h.nickname)}”${h.nickname_year ? `<span>the papers' name for you since ${h.nickname_year}</span>` : ''}</div>` : ''}
+      ${rows}</div>`;
 }
 
 // [A285] Skills mastered for good, and what you are working on now.
@@ -1211,6 +1231,7 @@ function crEnd(d){
           <div><b>${esc(s.earnings)}</b> earned<span>${s.franchises.length} franchise${s.franchises.length === 1 ? '' : 's'}</span></div>
           ${s.poms ? `<div><b>${s.poms}</b> Player of the Match<span>award${s.poms === 1 ? '' : 's'}</span></div>` : ''}
         </div>
+        ${crHonours(s.honours)}
         ${s.mastered && s.mastered.length ? `<div class="cr-skills"><span class="cr-label">Mastered</span>${crMastered(s.mastered, '')}</div>` : ''}
         ${s.skills && s.skills.length ? `<div class="cr-skills"><span class="cr-label">Career skills</span>${crSkillList(s.skills)}</div>` : ''}
         ${crAmbitionList(d)}
@@ -1497,7 +1518,13 @@ async function crDrawCard(d){
   ctx.textAlign = 'left';
   ctx.fillStyle = col.ink; ctx.font = `700 22px ${CARD_FIGS}`;
   const path = (d.role_path && d.role_path.length ? d.role_path : [d.role_label]).map(x => x.split(' from ')[0]);
-  ctx.fillText(fitText(ctx, `BUILD A CAREER · ${path.join(' → ').toUpperCase()}`, tw, 700, 22, CARD_FIGS, 14), tx, 122);
+  const hon = s.honours || {};                 // [A286] the papers' name, above it all
+  if (hon.nickname){
+    ctx.fillStyle = gold2; ctx.font = `italic 400 30px ${CARD_DISPLAY}`;
+    ctx.fillText(fitText(ctx, `“${hon.nickname}”`, tw, 400, 30, CARD_DISPLAY, 18), tx, 92);
+    ctx.fillStyle = col.ink; ctx.font = `700 22px ${CARD_FIGS}`;
+  }
+  ctx.fillText(fitText(ctx, `BUILD A CAREER · ${path.join(' → ').toUpperCase()}`, tw, 700, 22, CARD_FIGS, 14), tx, 128);
   ctx.fillStyle = ink;
   ctx.fillText(fitText(ctx, d.name.toUpperCase(), tw, 400, 88, CARD_DISPLAY, 40), tx, 214);
   ctx.fillStyle = ink2; ctx.font = `600 24px ${CARD_FIGS}`;
@@ -1615,6 +1642,16 @@ async function crDrawCard(d){
   ctx.textAlign = 'left';
   ctx.strokeStyle = col.team; ctx.lineWidth = 6; ctx.strokeRect(3, 3, W - 6, H - 6);
 
+  // [A286] the card's finish, set by everything the career won: a frame round the whole card
+  const FRAME = {bronze: '#b0763f', silver: '#c4ccd6', gold: '#d4a73a', platinum: '#bfe6ff'};
+  const fin = (hon.finish || 'Standard').toLowerCase();
+  if (FRAME[fin]){
+    ctx.save(); ctx.lineWidth = 14; ctx.strokeStyle = FRAME[fin];
+    ctx.strokeRect(7, 7, W - 14, H - 14);
+    ctx.fillStyle = FRAME[fin]; ctx.font = `700 18px ${CARD_FIGS}`; ctx.textAlign = 'right';
+    ctx.fillText(`${fin.toUpperCase()} FINISH`, W - M, 40);
+    ctx.restore();
+  }
   $('#crCardDownload').href = canvas.toDataURL('image/png');
 }
 

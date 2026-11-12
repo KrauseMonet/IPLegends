@@ -52,7 +52,7 @@ from game.season import (
     DOUBLE_AT, Result, Side, _abbrev, balanced_order, fixtures, run_league, run_playoffs,
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
-from game import career_focus, career_skills, phase_skill as phase_data
+from game import career_focus, career_honours, career_skills, phase_skill as phase_data
 from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model, ball_log
 
 # --- who you can be ------------------------------------------------------------------
@@ -3224,6 +3224,66 @@ def fill(text: str, name: str = "", club: str = "", boss: str = "captain") -> st
             .replace("{boss}", boss))
 
 
+# [A286] A card drawn again in the same career remembers the last time: the year and what you
+# said. Words only -- which card is drawn is unchanged, so no seeded career moves.
+EVENT_AGAIN = {
+    "form": "It is not the first time: in {year} you chose “{choice}”.",
+    "endorsement": "The brand from {year} is back. Last time you chose “{choice}”.",
+    "workload": "The board asks again, as it did in {year}, when you chose “{choice}”.",
+    "fitness": "The programme is a new one; in {year} you chose “{choice}”.",
+    "coach": "Another coach, another rebuild. In {year} you chose “{choice}”.",
+    "mentor": "Not the first offer of help: in {year} you chose “{choice}”.",
+    "rivalry": "Your duel of {year} is not forgotten either.",
+    "captain": "They asked once before, in {year}, and you chose “{choice}”.",
+    "lead": "The dressing room asked once before, in {year}.",
+    "one_more": "You asked yourself the same in {year}, and chose “{choice}”.",
+    "home_league": "The league back home called in {year} too, and you chose “{choice}”.",
+    "youngster": "Not your first pupil: in {year} you chose “{choice}”.",
+    "trade": "A trade was agreed once before, in {year}, and you chose “{choice}”.",
+}
+EVENT_AGAIN_ANY = "Last time, in {year}, you chose “{choice}”."
+
+
+def again_words(key: str, seasons) -> str:
+    """The line a card carries when it was drawn before in this career, or ""."""
+    prev = next((r for r in reversed(seasons or []) if r.event == key), None)
+    if prev is None or key == "quiet":
+        return ""
+    return EVENT_AGAIN.get(key, EVENT_AGAIN_ANY).format(year=prev.year, choice=prev.choice)
+
+
+INCIDENT_AGAIN = {
+    "slump": "You have been here before: in {year} you chose “{choice}”.",
+    "press": "Not the first time the papers have turned: in {year} you chose “{choice}”.",
+    "row": "The dressing room has been here before, in {year}, when you chose “{choice}”.",
+}
+INCIDENT_AGAIN_ANY = "It has happened before: in {year} you chose “{choice}”."
+
+
+def incident_again(prompt: dict | None, seasons) -> dict | None:
+    """[A286] A mid-season incident that happened before in this career says so."""
+    if not prompt:
+        return prompt
+    prev = next((r for r in reversed(seasons or [])
+                 if r.incident and r.incident.get("key") == prompt.get("key")), None)
+    if prev is None:
+        return prompt
+    line = INCIDENT_AGAIN.get(prompt["key"], INCIDENT_AGAIN_ANY).format(
+        year=prev.year, choice=prev.incident.get("choice", ""))
+    return dict(prompt, text=f"{prompt['text']} {line}", again=prev.year)
+
+
+def coach_again(coach: dict, seasons) -> dict:
+    """[A286] A coach's offer made again remembers the last one: when, and what you said."""
+    prev = next((r for r in reversed(seasons or [])
+                 if r.coach and r.coach.get("key") == coach.get("key")), None)
+    if prev is None:
+        return coach
+    said = "agreed" if prev.coach.get("take") else "said no"
+    return dict(coach, again=prev.year,
+                text=f"{coach['text']} The coach asked before, in {prev.year}, and you {said}.")
+
+
 # --- a season, and a career -------------------------------------------------------------
 
 
@@ -3341,6 +3401,11 @@ class SeasonRecord:
     # how its challenge went: {key, met, target, done, built, switched, hits}. None: no focus.
     focus_log: list = field(default_factory=list)
     focus: dict | None = None
+    # [A286] What the honours need from the season, off its feed (`career_honours.
+    # season_feats`), and the real players who taught you this season. None/empty on an
+    # older token, whose honours are what its other fields support.
+    feats: dict | None = None
+    mentors: list = field(default_factory=list)
 
 
 def _best_bat(inn, but: str = YOU_ID):
@@ -4279,6 +4344,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
     detail = season_detail(year)
     record.hat_tricks = sum("hattrick" in l.landmarks for l in detail.feed)
     record.poms = sum(l.pom for l in detail.feed)
+    record.feats = career_honours.season_feats(detail.feed, record.rival, record.captain)
     detail.analysis = season_analysis(results, track=yours)
     detail.results = results
     return record, detail
@@ -4472,6 +4538,13 @@ class Career:
     @property
     def complete(self) -> bool:
         return self.pending is None
+
+
+def honours_of(career: Career) -> career_honours.Honours:
+    """[A286] The career's honours, worked out from its seasons now."""
+    style = (career.checkpoint.style if career.checkpoint else None) or career.start.bowling_style
+    return career_honours.honours(career.seasons, career.setup.role, style, career.setup.name,
+                                  len(career_skills.mastered(career.seasons)))
 
 
 def summarise(career: Career, real_runs: list[int] | None = None,
@@ -4936,6 +5009,8 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
                     if m.key == "skill"],
         mastered=[m.text.removeprefix("Mastered: ") for m in played.milestones
                   if m.key == "mastered"],
+        nickname=next((m.text.split("“", 1)[1].rstrip("”") for m in played.milestones
+                       if m.key == "nickname"), ""),
         first_hundred=not any(r.hundreds for r in prev),
         first_five_for=not any(r.five_fors for r in prev),
         national=({"country": setup.nation, "event": played.national, "caps": played.caps,
@@ -5249,8 +5324,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             coach = drill_card(seed, k, cp, leaning, squad_now)   # [A281]
         if coach is not None:
             coach = with_coach_mentor(deck, coach, offer.fs_id, start, cp)
+            coach = coach_again(coach, cp.seasons)
         coach_said, coach_rec = None, None
         trait_moves: list = []                 # [A245] what this season's choices make of you
+        trial_mentor = ""                      # [A286] the trial's mentor, for the lineage
         if coach is not None:
             move = nxt()
             if move is None:
@@ -5297,6 +5374,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     cp.style = pick["style"] or cp.style
                     if pick.get("mentor"):
                         cp.coach_mentor = dict(pick["mentor"])
+                        trial_mentor = pick["mentor"].get("name", "")   # [A286] lineage
                     if pick.get("band"):           # [A255] the band the squad needed
                         cp.bat_band = pick["band"]
                         if cp.promotions is None:  # ...and the foot of it, to rise from
@@ -5346,7 +5424,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if move is None:
                 career.pending = Pending("event", year, k, offers=[offer], event=event,
                                          squad=squad_now,
-                                         event_text=fill(event.text, name, club_name, boss),
+                                         event_text=" ".join(x for x in (
+                                             fill(event.text, name, club_name, boss),
+                                             again_words(event.key, cp.seasons)) if x),
                                          event_fill=(name, club_name, boss))
                 return career
             option = event.options[_index(move, "e", len(event.options))]
@@ -5385,6 +5465,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             cp.standing = 1                    # they asked for you
             already = False
         mentor_taught = ""                             # [A281] a skill a mentor passed on
+        season_mentors: list[str] = []                 # [A286] who taught you this season
         outcome = draw_outcome(seed, k, option)
         now = outcome if outcome is not None and not outcome.next_season else None
         if outcome is not None and outcome.next_season:
@@ -5430,6 +5511,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         if option.thread == "mentor" and person is not None:
             cp.threads.append({"k": "mentor", "id": person.person_id, "name": person.name,
                                "year": year})
+            season_mentors.append(person.name)
         if option.thread == "pupil" and person is not None:
             cp.threads.append({"k": "pupil", "id": person.person_id, "name": person.name,
                                "year": year})
@@ -5511,7 +5593,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             career.live_milestones = career_milestones(cp.seasons, career.detail.feed)
             career.pending = Pending("incident" if need.prompt else "moment", year, k,
                                      squad=squad_now, offers=[offer], moment=need.moment,
-                                     incident=need.prompt,
+                                     incident=incident_again(need.prompt, cp.seasons),
                                      plan_bowlers=bowlers, plan=current)
             return career
         played.form = played.display
@@ -5590,6 +5672,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                         m[0] for m in career_skills.mastered(shown_before)}:
                     played.milestones.append(CareerMilestone(
                         "mastered", f"Mastered: {career_skills.label(key_)}"))
+        # [A286] the season the papers coin your nickname (once, and it sticks)
+        nick = career_honours.nickname(cp.seasons + [played], setup.role,
+                                       cp.style or start.bowling_style, setup.name)
+        if nick and nick[1] == played.year:
+            played.milestones.append(CareerMilestone("nickname", f"The papers call you “{nick[0]}”"))
         career.live_milestones = played.milestones
         played.press = press.season_facts(_press_facts(deck, cp, played, offer, k, year,
                                                         career.auction, setup),
@@ -5621,6 +5708,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             # by character, keeps his place through one poor season. Not the armband.
             cp.squad, led_through = False, True
             say("A poor season, but the dressing room wants you in it. You keep your place.", "up")
+        played.mentors = season_mentors + ([trial_mentor] if trial_mentor else [])   # [A286]
         # [A285] How the focus's challenge went, and what the work built for next season.
         if focus_key:
             res = career_focus.judge(focus_key, played.focus_log, focus_switched)

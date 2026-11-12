@@ -156,6 +156,50 @@ def _mastered_out(rows) -> list[MasteredOut]:
             for k, t, y in rows if k in SKILL_BY_KEY]
 
 
+class TitleOut(BaseModel):
+    """[A286] A feat title: what the career did, never how it plays."""
+    key: str
+    label: str
+    text: str
+    kind: str = "feat"            # feat | captain
+
+
+class RivalOut(BaseModel):
+    name: str
+    club: str
+    seasons: int
+    matches: int
+    won: int
+    runs: int
+    wickets: int
+
+
+class HonoursOut(BaseModel):
+    """[A286] The career's honours, from its seasons (or a saved card's copy)."""
+    nickname: str | None = None
+    nickname_year: int | None = None
+    titles: list[TitleOut] = []
+    lineage: list[str] = []
+    signature: str | None = None  # the career's best match, in words
+    rivalries: list[RivalOut] = []
+    finish: str = "Standard"      # the card's finish: Standard / Bronze / Silver / Gold / Platinum
+
+
+def honours_out(h) -> HonoursOut:
+    """From `career_honours.Honours`, or from a saved card's dict copy of it."""
+    if h is None:
+        return HonoursOut()
+    if isinstance(h, dict):
+        return HonoursOut(**h)
+    return HonoursOut(nickname=h.nickname, nickname_year=h.nickname_year,
+                      titles=[TitleOut(key=t.key, label=t.label, text=t.text, kind=t.kind)
+                              for t in h.titles],
+                      lineage=h.lineage, signature=h.signature_words,
+                      rivalries=[RivalOut(**{k: r[k] for k in RivalOut.model_fields})
+                                 for r in h.rivalries],
+                      finish=h.finish)
+
+
 class SlotOut(BaseModel):
     """[A282] One of the player card's three skill slots."""
     tier: int
@@ -375,6 +419,7 @@ class MilestoneOut(BaseModel):
 
 class SummaryOut(BaseModel):
     mastered: list[MasteredOut] = []   # [A285] skills the career has mastered
+    honours: HonoursOut = HonoursOut()  # [A286]
     seasons: int
     regular_seasons: int
     matches: int
@@ -537,6 +582,7 @@ class CareerOut(BaseModel):
     mastered: list[MasteredOut] = []  # [A285] skills mastered so far
     focus_now: str = ""           # [A285] what you are working on, in words
     master_seasons: int = 4       # [A285] seasons a skill must be shown in to be mastered
+    nickname: str | None = None   # [A286] what the papers call you, once they do
 
 
 def _template(c) -> TemplateOut:
@@ -778,7 +824,8 @@ def _summary(c: C.Career) -> SummaryOut:
         milestones=[MilestoneOut(year=r.year, text=m.text, key=m.key)
                     for r in c.seasons for m in r.milestones],
         skills=_skills_out(C.career_skills.signature(c.seasons)),
-        mastered=_mastered_out(C.career_skills.mastered(c.seasons)))
+        mastered=_mastered_out(C.career_skills.mastered(c.seasons)),
+        honours=honours_out(C.honours_of(c)))
 
 
 def _season_play(detail: C.SeasonDetail,
@@ -913,7 +960,9 @@ def _skill_view(career) -> dict:
     card_role = C.ROLES.get(role, {}).get("role", ("allrounder",))[0]   # a full-time bowler bowls
     cp = career.checkpoint
     fk = cp.focus if cp is not None else ""
+    h = C.honours_of(career)
     return {"mastered": _mastered_out(CS.mastered(career.seasons)),
+            "nickname": h.nickname,       # [A286] once the papers have coined one
             "master_seasons": CS.MASTER_SEASONS,
             "focus_now": CF.FOCUS_BY_KEY[fk].label if fk in CF.FOCUS_BY_KEY else "",
             "skill_slots": slots, "combos_now": CS.combos(k for k, *_ in shown),
@@ -1232,6 +1281,7 @@ class HallOut(BaseModel):
     inducted: bool = False        # in the Hall of Fame proper; the rest fold away (A225)
     extras: list["ExtraLegendOut"] = []   # [A272] more seasons kept as legends, by request
     mastered: list[MasteredOut] = []   # [A285] from the card; read off its signature if older
+    career_honours: HonoursOut = HonoursOut()   # [A286] from the card; none on an older card
     skills: list[SkillOut] = []   # [A278] the career's skills; none on a career saved before
 
 
@@ -1299,6 +1349,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
             skills=_skills_out(r["card"].get("skills")),
             mastered=_mastered_out(r["card"].get("mastered")
                                    or C.career_skills.mastered_from_signature(r["card"].get("skills"))),
+            career_honours=honours_out(r["card"].get("career_honours")),
             completed_at=r["completed_at"].isoformat(),
             extras=[ExtraLegendOut(key=career_results.extra_key(r["key"], x["year"]),
                                    name=r["name"], card={"legend": x},

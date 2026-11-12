@@ -88,6 +88,13 @@ def inducted(held: list[str]) -> bool:
     return len(held) >= INDUCTION_NEEDS
 
 
+def _honours(career: C.Career) -> dict:
+    """[A286] The honours as a saved card keeps them: the API's own shape, so the Hall of
+    Fame reads them back with no second copy of the rules."""
+    from web.career_routes import honours_out
+    return honours_out(C.honours_of(career)).model_dump()
+
+
 def card(career: C.Career) -> dict:
     """The career card beyond the ranked columns, as the page draws it."""
     s = career.summary
@@ -107,6 +114,7 @@ def card(career: C.Career) -> dict:
         "milestones": [[y, t] for y, t in s.milestones],
         "skills": C.career_skills.signature(career.seasons),        # [A278]
         "mastered": C.career_skills.mastered(career.seasons),       # [A285]
+        "career_honours": _honours(career),                         # [A286]
         "peak_rating": s.peak_rating, "peak_rating_year": s.peak_rating_year,
         # [A228] Player of the Match awards, where the player went after the game, and the
         # ambitions set on the first day with how each went.

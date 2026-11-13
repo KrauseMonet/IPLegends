@@ -114,3 +114,24 @@ def focus_off(request, monkeypatch):
     from game import career_focus
 
     monkeypatch.setattr(career_focus, "FOCUS_ON", bool(getattr(request.module, "FOCUS_TESTS", False)))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cycle_off_everywhere():
+    """[A288] The contract cycle replaces the yearly offers ("o0") that every older seeded
+    career's move list starts with. Off for the whole session (A251's module-fixture trap);
+    a module that tests it sets `CYCLE_TESTS = True` and turns it on itself."""
+    from game import career
+
+    was = career.CYCLE_ON
+    career.CYCLE_ON = False
+    yield
+    career.CYCLE_ON = was
+
+
+@pytest.fixture(autouse=True)
+def cycle_off(request, monkeypatch):
+    """...and per test, so a test that turned it on cannot leak it to the next."""
+    from game import career
+
+    monkeypatch.setattr(career, "CYCLE_ON", bool(getattr(request.module, "CYCLE_TESTS", False)))

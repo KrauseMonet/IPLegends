@@ -413,6 +413,7 @@ def _move(f: dict, v: Voice) -> Clipping:
 
 def _mega(f: dict, v: Voice) -> Clipping:
     club, sur = _club(f["club"]), v.sur
+    what = "mini auction" if f.get("stage") == "mini" else "mega auction"     # A288
     if f.get("retained"):
         head = _pick(v, f, [f"{club} keep {sur}", f"{sur} retained at {_crore(f['price'])}"])
         body = [f"{club} have retained {_who(v, f)} ahead of the mega auction, at {_crore(f['price'])} a season.",
@@ -423,7 +424,7 @@ def _mega(f: dict, v: Voice) -> Clipping:
         head = f"No bids for {sur} at the auction"
         body = [f"{_who(v, f)} went unsold at a base price of {_crore(f['base'])}.",
                 f"{club} picked up the {ROLE_NOUN.get(v.role, 'player')} late, at the base price."]
-        return Clipping("mega", f["y"], "AUCTION", head, "A quiet day at the mega auction", "",
+        return Clipping("mega", f["y"], "AUCTION", head, f"A quiet day at the {what}", "",
                         body, "", 45, None, f["club"], "red")
     rivals = f.get("rivals") or []
     big = f["price"] >= 1000
@@ -432,10 +433,10 @@ def _mega(f: dict, v: Voice) -> Clipping:
                         f"{_crore(f['price'])}! {sur} goes to {club}"] if big else
                  [f"{sur} to {club} for {_crore(f['price'])}", f"{club} pick up {sur}"])
     fought = (f" after a fight with {' and '.join(rivals[:2])}" if rivals else "")
-    body = [f"{club} bought {_who(v, f)} for {_crore(f['price'])} at the mega auction{fought}.",
+    body = [f"{club} bought {_who(v, f)} for {_crore(f['price'])} at the {what}{fought}.",
             f"The paddles went up {_plural(f.get('bids', 0), 'time')} from a base price of {_crore(f['base'])}."
             if f.get("bids") else ""]
-    return Clipping("mega", f["y"], "AUCTION", head, "The mega auction", "", [b for b in body if b],
+    return Clipping("mega", f["y"], "AUCTION", head, f"The {what}", "", [b for b in body if b],
                     "", 75 if big else 60, None, f["club"], "gold" if big else "")
 
 

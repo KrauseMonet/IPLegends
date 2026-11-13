@@ -296,6 +296,8 @@ class OfferOut(BaseModel):
     position: int | None          # where you would bat in that eleven
     attack_rank: int | None       # where you would come in its attack, if you bowl
     strength_words: str = ""      # the squad in words (A230): the page shows no number
+    contract_years: int = 3       # the deal `contract_year` counts in (A288)
+    need: str = ""                # a trial club short in your band (A288)
 
 
 class MegaOut(BaseModel):
@@ -305,6 +307,22 @@ class MegaOut(BaseModel):
     bases: list[str]              # the base prices, in crore/lakh words
     suggested: int                # index: the auction's own base for your card
     retain_card: int = C.RETAIN_CARD   # the card a club wants before it retains you
+    kind: str = "mega"            # "mega", or "mini" after a release or a club folding (A288)
+    why: str = ""                 # a mini auction's cause: "released" | "folded"
+
+
+class WindowEventOut(BaseModel):
+    kind: str                     # "higher" | "captain" | "bowl" | "shopped"
+    text: str
+    offer: OfferOut               # the club, and where you would play for it
+
+
+class WindowOut(BaseModel):
+    """The trade window (A289): what is on the table, and every club you could ask to join.
+    Answered `x0` to stay, `x{i}` to take event i-1, or `a{i}` to ask for club i."""
+    events: list[WindowEventOut]
+    clubs: list[OfferOut]
+    captain: bool = False         # you hold your club's armband: it will not let you go
 
 
 class AuctionBidOut(BaseModel):
@@ -325,6 +343,8 @@ class AuctionOut(BaseModel):
     price: str
     bids: list[AuctionBidOut]
     price_lakh: int = 0           # A218, as `lakh` above
+    kind: str = "mega"            # "mega" | "mini" | "debut" (A288)
+    ended: bool = False           # released and unsold: the career is over (A288)
 
 
 class PlanBowlerOut(BaseModel):
@@ -414,6 +434,7 @@ class PendingOut(BaseModel):
     cold: bool = False                          # your club has not asked you to stay (A230)
     coach: EventOut | None = None               # the coach's offer: `t{i}` (A238)
     focus: list[FocusOptionOut] | None = None   # what to work on this season: `f{i}` (A285)
+    window: WindowOut | None = None             # the trade window: `x{i}` or `a{i}` (A289)
 
 
 class MilestoneOut(BaseModel):
@@ -738,7 +759,8 @@ def _pending(p: C.Pending, role: str = "", cp=None) -> PendingOut:
     mega = None
     if p.kind == "mega" and p.mega is not None:
         mega = MegaOut(retain=_offer(p.mega.retain, p.year) if p.mega.retain else None,
-                       bases=[crore(b) for b in p.mega.bases], suggested=p.mega.suggested)
+                       bases=[crore(b) for b in p.mega.bases], suggested=p.mega.suggested,
+                       kind=p.mega.kind, why=p.mega.why)
     return PendingOut(
         kind=p.kind, year=p.year, season_no=p.k + 1, squad=p.squad,
         offers=[_offer(o, p.year) for o in p.offers],
@@ -746,7 +768,13 @@ def _pending(p: C.Pending, role: str = "", cp=None) -> PendingOut:
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
         mega=mega, plan=plan, incident=incident, cold=p.cold, coach=coach,
         focus=_focus_options(p, cp) if p.kind == "focus" and p.focus else None,
-        epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [])
+        epilogue=list(press.EPILOGUES.values()) if p.kind == "epilogue" else [],
+        window=(WindowOut(events=[WindowEventOut(kind=e["kind"], text=e["text"],
+                                                 offer=_offer(e["offer"], p.year))
+                                  for e in p.window["events"]],
+                          clubs=[_offer(o, p.year) for o in p.window["clubs"]],
+                          captain=p.window["captain"])
+                if p.kind == "window" and p.window else None))
 
 
 def _offer(o: C.Offer, year: int) -> OfferOut:
@@ -756,14 +784,15 @@ def _offer(o: C.Offer, year: int) -> OfferOut:
                             else None),
                     contract_year=o.contract_year, strength=o.strength, stay=o.stay,
                     position=o.position, attack_rank=o.attack_rank,
-                    strength_words=strength_words(o.strength))
+                    strength_words=strength_words(o.strength),
+                    contract_years=o.contract_years, need=o.need)
 
 
 def _auction(a: C.MegaResult, year: int) -> AuctionOut:
     return AuctionOut(retained=a.retained, sold=a.sold, base=crore(a.base) if a.base else "",
                       franchise=a.franchise, short=a.short,
-                      crest=crests.crest_url(a.franchise, year), price=crore(a.price),
-                      price_lakh=a.price,
+                      crest=crests.crest_url(a.franchise, year) if a.franchise else None,
+                      price=crore(a.price), price_lakh=a.price, kind=a.kind, ended=a.fs_id < 0,
                       bids=[AuctionBidOut(short=sh, crest=crests.crest_url(f, year), price=crore(pr),
                                           lakh=pr)
                             for f, sh, pr in a.bids])
@@ -1056,11 +1085,8 @@ def _auction_year(career: C.Career) -> int:
 def _moves_since_checkpoint(career: C.Career, moves: list[str]) -> list[str]:
     """The moves to keep beside the checkpoint: those that answered the season now pending
     (an offer awaiting its event, a season paused at a key moment), none once a season is
-    played or the career is over."""
-    return (moves if career.pending is not None
-            and career.pending.kind in ("event", "plan", "moment", "incident", "coach",
-                                        "focus")
-            else [])
+    played or the career is over. The engine says how many came before its checkpoint (A288)."""
+    return moves[career.ck_at:] if career.pending is not None else []
 
 
 # --- routes -----------------------------------------------------------------------------------

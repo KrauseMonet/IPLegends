@@ -3213,3 +3213,60 @@ careers from before carry their signature's season counts, so mastery is read fr
 
 Honours describe what a career did and never how it plays: feat titles (Big-match player, Finals specialist, Scourge of a club, Chase master), captaincy titles (Title-winning captain, Dynasty builder, Leader of men, a club's captain, Born winner, Captain's knock), a nickname the papers coin once and keep, the real players who taught you, the career's best match, its record against each rival the papers built up, and a card finish (Standard, Bronze, Silver, Gold, Platinum) from what it won. All are derived from the season records when read; each season keeps a small `feats` record off its match feed for the ones the feed alone supports. None reaches the engine, a rating or a legend's value. A card, coach offer or incident drawn again in the same career names the year it was last asked and what was chosen.
 
+
+## 29. The contract cycle [A288]
+
+A career no longer fields three offers every winter; staying is the norm, as it is in the IPL
+(measured: a regular with 7+ matches changes club in 11.7% of ordinary seasons and 53% of the
+seasons into a mega auction).
+
+**Debut.** Four of that year's clubs invite you to a trial (`TRIAL_INVITES`), and you attend
+two (`v{i}{j}`). How each trial goes is drawn from the seed (impressed 35%, steady 45%,
+struggled 20%), never from which two you chose. Then the uncapped auction at a ₹20L base: a
+club that saw you bids on your value times `DEBUT_VALUE` (0.5) and that impression (1.35 /
+1.0 / 0.6); a club short in your band (`NEED_SHORT`) bids `TRIAL_NEED` (1.25) more; a club
+that did not see you bids only `SCOUTED` (15%) of the time, at `SCOUT_VIEW` (0.6). Nobody
+meeting the base: one of your trial clubs signs you late, as a squad player.
+
+**A club is short in your band** at or below this many regulars (A33's volume floors), measured
+over the 166 real squads: top order 4 (31% of squads), middle order 5 (29%), finishers 2 (19%),
+pace bowlers 2 (22%), spinners 1 (43%).
+
+**The deal** runs to the next mega auction (`cycle_contract`): a 2012 debut is two years, a
+2015 one three. In between your club keeps you at the price you signed for, and the season asks
+nothing at its start. Mega years are A212's, and their deal runs to the next mega year too.
+
+**Release.** Two poor seasons, or a club that has lost patience with you (standing at
+`STANDING_COLD` or below), and the club releases you; a contract no longer protects you, a star
+(Rating 85+) still is never released. A release sends you to the next auction: in an ordinary
+year the mini auction, where you set a base and every club but the one that let you go bids on
+A212's ceilings; unsold there, the career is over. A released player at a mega auction gets no
+retention offer and no loyalty premium. A club with no team that year (Deccan after 2012, the
+2016-17 suspensions) also sends you to the mini auction, where unsold means a late signing.
+
+## 30. The trade window [A289]
+
+Every ordinary pre-season of a deal (from the second season; never a debut, a mega year or a
+mini auction) opens a trade window, answered `x0` to stay, `x{i}` to take what is on the
+table, or `a{i}` to ask for a move to club i.
+
+**What can be on the table** is drawn from the seed alone (two independent draws, so one
+never moves the other):
+- an APPROACH (`APPROACH_CHANCE` 10%) from a club that needs you: to bat a band higher (a
+  finisher into the middle order, a middle-order batter to the top three, from a club short in
+  that band), to bowl full time (a batter who bowls, from a club short of his kind of bowler;
+  he becomes an all-rounder there, with A238's grace and way back), or to captain it (a player
+  rated `STAR_RATING`+ from his fifth season). Weighted 1.0 / 0.4 / 0.6.
+- your own club SHOPPING you (`SHOP_CHANCE` 8%), once it has gone cold on you (standing 0 or
+  below, not a star, not its captain), to a club short where you play if there is one.
+  Turning it down costs a point of standing. This replaces A230's trade card under the cycle.
+
+**A request** is refused if your club trusts you (standing `STANDING_BACKED`+) or you hold its
+armband, unwanted if the other club is not short where you play and you are not a star
+(`WANTED_RATING` = 85), and otherwise agreed. Asking costs a point of standing either way.
+
+A traded player keeps his fee and his contract. A club that came for you starts you at a
+standing of 1; one you asked to join, at 0. A move up the order is kept on the checkpoint
+(`up_band`) and your card bats in that band from then on, with the promotions it had earned.
+The chances are declared and small, because moves are rare in the archive and role-changing
+ones rarer (A288).

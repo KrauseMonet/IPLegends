@@ -236,7 +236,7 @@ async function crMove(move){
   if (CR.busy) return;
   CR.busy = true;
   const before = CR.data.seasons.length;
-  const mega = move === 'k' || move[0] === 'b';
+  const mega = move === 'k' || move[0] === 'b' || move[0] === 'v';
   if (move[0] === 'w') crLoading('The papers go to print…', 'Your career, as the papers tell it.');
   else if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
@@ -282,6 +282,8 @@ function crShow(d, moment){
   if (!d.pending) return crEnd(d);
   if (d.pending.kind === 'epilogue') return crEpilogue(d);
   if (d.pending.kind === 'mega') return crMega(d);
+  if (d.pending.kind === 'trials') return crTrials(d);
+  if (d.pending.kind === 'window') return crWindow(d);
   if (d.pending.kind === 'plan') return crPlan(d);
   if (d.pending.kind === 'coach') return crCoach(d);
   if (d.pending.kind === 'focus') return crFocus(d);
@@ -552,7 +554,7 @@ function crOffers(d){
       <i><b style="width:${Math.max(6, Math.min(100, Math.round(100 * (o.strength - 76) / 8)))}%"></b></i><em>${esc(o.strength_words)}</em></div>`;
   const deal = (o, i) => o.contract_year
     ? `<div class="cr-deal"><button class="act lead" onclick="crMove('o${i}')">Play on</button>
-         <span>Year ${o.contract_year} of 3 · ${esc(o.price)}</span></div>`
+         <span>Year ${o.contract_year} of ${o.contract_years} · ${esc(o.price)}</span></div>`
     : `<div class="cr-deal">
          <button class="act lead" onclick="crMove('o${i}')">1 year · ${esc(o.price)}</button>
          ${o.price3 ? `<button class="act" onclick="crMove('c${i}')">3 years · ${esc(o.price3)}/yr</button>` : ''}
@@ -584,6 +586,93 @@ function crOffers(d){
     </div>`;
 }
 
+// --- trials and the debut auction [A288] ----------------------------------------------------
+// Four clubs invite you to a trial; you go to two. How each goes is decided by the seed, and
+// the clubs that saw you bid hardest at the uncapped auction that follows.
+
+function crTrials(d){
+  const p = d.pending;
+  CR.trials = [];
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · TRIALS</div>
+      <h2 class="cr-h">Four clubs want a look at you</h2>
+      <p class="room-note cr-mega-note">Pick two trials. The clubs that see you bid hardest at the
+        auction, and a club short in your role wants you most.</p>
+      <div class="cr-offers cr-trials">${p.offers.map((o, i) => `
+        <button class="cr-offer ${crestClass(o.crest)}" id="crTrial${i}" onclick="crPickTrial(${i})" aria-pressed="false">
+          ${o.need ? `<span class="cr-tag">${esc(o.need)}</span>` : ''}
+          ${crestImg(o.crest, 'cr-offer-crest')}
+          <b>${esc(o.franchise)}</b>
+          <span class="cr-place">${esc(crPlace(o))}</span>
+          <span class="cr-place">${esc(o.strength_words || '')}</span>
+        </button>`).join('')}</div>
+      <div class="foot-actions" style="justify-content:center">
+        <button class="act lead" id="crTrialGo" disabled onclick="crMove('v' + CR.trials.slice().sort().join(''))">Go to the trials</button></div>
+    </div>`;
+}
+
+function crPickTrial(i){
+  const at = CR.trials.indexOf(i);
+  if (at >= 0) CR.trials.splice(at, 1);
+  else { CR.trials.push(i); if (CR.trials.length > 2) CR.trials.shift(); }
+  document.querySelectorAll('.cr-trials .cr-offer').forEach((el, j) => {
+    const on = CR.trials.includes(j);
+    el.classList.toggle('picked', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  $('#crTrialGo').disabled = CR.trials.length !== 2;
+}
+
+// --- the trade window [A289] -----------------------------------------------------------------
+// Between the seasons of a deal: what another club, or your own, has put on the table, and
+// a move you can ask for yourself.
+
+const CR_WINDOW_TAG = {higher: 'Bat higher', captain: 'Captaincy', bowl: 'Bowl full time', shopped: 'Your club wants to trade you'};
+
+function crWindow(d){
+  const p = d.pending, w = p.window, here = p.offers[0];
+  CR.ask = null;
+  const card = (o, tag, body, button) => `
+    <div class="cr-offer ${crestClass(o.crest)}">
+      ${tag ? `<span class="cr-tag">${esc(tag)}</span>` : ''}
+      ${crestImg(o.crest, 'cr-offer-crest')}
+      <b>${esc(o.franchise)}</b>
+      <span class="cr-place">${esc(crPlace(o))}</span>
+      ${body ? `<p class="room-note">${esc(body)}</p>` : ''}
+      <div class="cr-deal">${button}</div>
+    </div>`;
+  const stay = card(here, 'Your club', `Year ${here.contract_year} of ${here.contract_years} · ${here.price}`,
+    `<button class="act lead" onclick="crMove('x0')">Stay</button>`);
+  const events = w.events.map((e, i) => card(e.offer, CR_WINDOW_TAG[e.kind], e.text,
+    `<button class="act" onclick="crMove('x${i + 1}')">Go to ${esc(e.offer.short)}</button>`)).join('');
+  $('#crStage').innerHTML = `
+    <div class="cr-step">
+      <div class="over-line">${p.year} · TRADE WINDOW · SEASON ${p.season_no}</div>
+      <h2 class="cr-h">${w.events.length ? 'Something is on the table' : 'The trade window is open'}</h2>
+      ${w.events.length ? '' : `<p class="room-note cr-mega-note">Nobody has come for you. Stay put, or ask for a move yourself.</p>`}
+      <div class="cr-offers">${stay}${events}</div>
+      <details class="cr-ask">
+        <summary>Ask for a trade</summary>
+        <p class="room-note">Your fee and contract go with you. ${w.captain
+          ? 'You hold the armband here: your club will not let you go.'
+          : 'A club that trusts you will refuse, and the other club only says yes if it is short where you play, or you are a star. Asking costs you goodwill at your club either way.'}</p>
+        <div class="cr-ask-clubs">${w.clubs.map((o, i) => `
+          <button class="cr-ask-club ${crestClass(o.crest)}" onclick="crPickAsk(${i}, this)">
+            ${crestImg(o.crest, 'cr-ask-crest')}<b>${esc(o.short)}</b>
+            <span>${esc(o.need || o.strength_words || '')}</span></button>`).join('')}</div>
+        <div class="foot-actions" style="justify-content:center">
+          <button class="act" id="crAskGo" disabled onclick="crMove('a' + CR.ask)">Ask for the move</button></div>
+      </details>
+    </div>`;
+}
+
+function crPickAsk(i, btn){
+  CR.ask = i;
+  document.querySelectorAll('.cr-ask-club').forEach(b => b.classList.toggle('picked', b === btn));
+  $('#crAskGo').disabled = false;
+}
+
 // --- a mega-auction year [A212] --------------------------------------------------------------
 // Every contract ends. Your club may come to you with a retention offer at one of the real
 // slabs; take it, or go into the auction at a base price you choose.
@@ -602,12 +691,17 @@ function crMega(d){
     </div>` : '';
   const noRetain = m.retain ? '' : `<p class="room-note cr-mega-note">${esc(last.franchise)} have not asked to retain you.
       Retention is offered from a season card of ${m.retain_card}.</p>`;
+  const mini = m.kind === 'mini';
+  const why = !mini ? '' : m.why === 'released'
+    ? `<p class="cr-warn">${esc(last.franchise)} have released you. Set a base price: if nobody meets it, your IPL career is over.</p>`
+    : `<p class="room-note cr-mega-note">${esc(last.franchise)} have no team in ${p.year}. You go into the mini auction.</p>`;
   $('#crStage').innerHTML = `
     <div class="cr-step">
-      <div class="over-line">${p.year} · MEGA AUCTION · SEASON ${p.season_no}</div>
-      <h2 class="cr-h">Every contract ends this year</h2>
-      ${p.squad ? `<p class="cr-warn">Last season was poor: whoever buys you, you start as a squad player.</p>` : ''}
-      ${noRetain}
+      <div class="over-line">${p.year} · ${mini ? 'MINI' : 'MEGA'} AUCTION · SEASON ${p.season_no}</div>
+      <h2 class="cr-h">${mini ? 'Back in the auction' : 'Every contract ends this year'}</h2>
+      ${why}
+      ${p.squad && !mini ? `<p class="cr-warn">Last season was poor: whoever buys you, you start as a squad player.</p>` : ''}
+      ${mini ? '' : noRetain}
       <div class="cr-offers cr-mega${m.retain ? '' : ' solo'}">
         ${retain}
         <div class="cr-offer cr-auction">
@@ -618,7 +712,7 @@ function crMega(d){
             onclick="crPickBase(${i}, this)">${esc(b)}${i === m.suggested ? '<i>usual</i>' : ''}</button>`).join('')}</div>
           <div class="cr-deal"><button class="act${m.retain ? '' : ' lead'}" onclick="crMove('b' + CR.base)">Enter the auction</button></div>
           <p class="room-note">Every club bids what it thinks you are worth. Set your base too high
-            and nobody may meet it: then a club signs you late, at your base, as a squad player.</p>
+            and nobody may meet it${mini && m.why === 'released' ? '.' : ': then a club signs you late, at your base, as a squad player.'}</p>
         </div>
       </div>
       ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
@@ -697,7 +791,8 @@ function crAuctionPlay(a, done){
     retint(crestClass(a.crest));
     $('#crAucStamp').innerHTML = a.sold ? `SOLD · ${esc(a.short)}` : 'UNSOLD';
     $('#crAucLead').innerHTML = `${crestImg(a.crest, 'cr-auc-crest')}<b class="cr-auc-price">${esc(a.price)}</b>
-      <span>${a.sold ? esc(a.franchise) : `Nobody met your base. ${esc(a.franchise)} sign you late, as a squad player.`}</span>`;
+      <span>${a.sold ? esc(a.franchise) : a.ended ? 'Nobody bid. Your IPL career is over.'
+        : `Nobody met your base. ${esc(a.franchise)} sign you late, as a squad player.`}</span>`;
     $('#crAucAfter').innerHTML = finish;
     $('#crAucGo').onclick = done;
     if (a.sold){

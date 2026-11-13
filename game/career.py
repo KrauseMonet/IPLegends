@@ -2779,6 +2779,8 @@ class Offer:
     contract_year: int = 0      # 2 or 3: the season of a three-year deal already signed
     position: int | None = None  # where you would bat in that eleven (A200)
     attack_rank: int | None = None  # where you would come in its attack, if you bowl
+    contract_years: int = CONTRACT_YEARS   # the length of the deal `contract_year` counts in (A288)
+    need: str = ""              # a trial club short in your band, in words (A288)
 
 
 def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
@@ -2853,6 +2855,8 @@ class MegaOffer:
     retain: Offer | None                 # your club's retention offer, None when it makes none
     bases: tuple[int, ...]
     suggested: int                       # index into `bases`: the auction's own base for your card
+    kind: str = "mega"                   # "mega", or "mini" after a release (A288)
+    why: str = ""                        # a mini auction: "released" | "folded"
 
 
 @dataclass
@@ -2865,6 +2869,7 @@ class MegaResult:
     short: str
     price: int
     bids: list[tuple[str, str, int]] = field(default_factory=list)   # (franchise, short, price)
+    kind: str = "mega"                   # "mega" | "mini" | "debut" (A288)
 
 
 def retention_slab(last_display: int | None, *, capped: bool) -> int | None:
@@ -2946,7 +2951,295 @@ def mega_text(res: MegaResult) -> str:
         return f"Retained by {res.franchise} at {crore(res.price)}"
     if not res.sold:
         return f"Unsold at {crore(res.base)}; signed late by {res.franchise}"
-    return f"Mega auction: sold to {res.franchise} for {crore(res.price)} (base {crore(res.base)})"
+    what = {"mega": "Mega auction", "mini": "Mini auction", "debut": "Auction"}[res.kind]
+    return f"{what}: sold to {res.franchise} for {crore(res.price)} (base {crore(res.base)})"
+
+
+# --- the trade window [A289] ---------------------------------------------------------------
+# Ratified with the contract cycle: between the seasons of a deal, a trade window. Every
+# ordinary pre-season (not a debut, a mega year or a mini auction) it opens with up to two
+# things already on the table, drawn from the seed and never from your choices:
+#   * an APPROACH from another club that needs you -- to bat higher (a finisher into the middle
+#     order, a middle-order batter to the top: a club short in that band), to bowl full time (a
+#     batter who bowls, for a club short of his kind of bowler), or to captain it (a player
+#     rated STAR_RATING+ from his fifth season);
+#   * your own club SHOPPING you to a club that wants you (it has gone cold on you).
+# And you may ask for a trade to a club of your choosing. Your club refuses if it trusts you
+# or you hold its armband; the other club takes you only if it is short where you play or you
+# are a star. Asking costs you standing at your club whether or not it comes off.
+# Measured, a move is rare and a role-changing one rarer (moved and promoted 2+ places 9.8%
+# against 8.0% for those who stayed; a batter turned bowler 0.8% on a move against 2.0% at
+# home), so the chances below are declared and small. A traded player keeps his fee and his
+# contract, as in the IPL.
+WINDOW_FROM = 1                          # from the second season
+APPROACH_CHANCE = 0.10
+SHOP_CHANCE = 0.08
+APPROACH_WEIGHTS = {"higher": 1.0, "captain": 0.6, "bowl": 0.4}
+CAPTAIN_FROM = 4                         # seasons played before a club offers its armband
+WANTED_RATING = STAR_RATING              # a club takes a player this good whatever it needs
+UP_BAND = {"finisher": "middle", "middle": "top"}
+REQUEST_STANDING = -1                    # what asking costs you at your club
+
+
+@dataclass(frozen=True)
+class Approach:
+    kind: str                            # "higher" | "captain" | "bowl" | "shopped"
+    fs_id: int
+    band: str = ""                       # "higher": the band they want you in
+    style: str = ""                      # "bowl": seam or spin
+
+
+def your_band(card: Card) -> str | None:
+    return next((b for b, s in BAND_SLOTS.items() if frozenset(card.positions or ()) == s), None)
+
+
+def with_band(card: Card, band: str) -> Card:
+    """The card batting in `band` (A289's move up the order); "" leaves it as it is."""
+    if not band:
+        return card
+    return dataclasses.replace(card, positions=BAND_SLOTS[band])
+
+
+def window_events(deck: Deck, seed: int, k: int, year: int, you: Card, current: str,
+                  setup: Setup, cp: "Checkpoint", rating: int) -> list[Approach]:
+    """What is on the table when the window opens: an approach, your club shopping you, both
+    or neither. Both draws are always made, so one never moves the other."""
+    rng = random.Random(f"{seed}:window:{k}")
+    approach_roll, shop_roll = rng.random(), rng.random()
+    others = sorted(fs for fs in year_fs_ids(deck, year)
+                    if canonical(deck.cards_by_fs[fs][0].franchise) != current)
+    out: list[Approach] = []
+    if approach_roll < APPROACH_CHANCE and others:
+        options: dict[str, list[Approach]] = {}
+        band = your_band(you)
+        if _kind(you) == "batter" and band in UP_BAND:
+            up = UP_BAND[band]
+            higher = with_band(you, up)
+            options["higher"] = [Approach("higher", fs, band=up) for fs in others
+                                 if band_need(deck, higher, fs) == up]
+        style = you.bowling_style
+        if (_kind(you) == "batter" and not cp.roles and style in ("pace", "spin")
+                and you.bowl_scoring is not None and not ROLES[setup.role].get("batting_only")):
+            as_ar = dataclasses.replace(you, role="allrounder")
+            options["bowl"] = [Approach("bowl", fs, style=style) for fs in others
+                               if band_need(deck, as_ar, fs) == style]
+        if rating >= STAR_RATING and k >= CAPTAIN_FROM and cp.captain != current:
+            options["captain"] = [Approach("captain", fs) for fs in others]
+        kinds = sorted(kd for kd, v in options.items() if v)
+        if kinds:
+            kind = rng.choices(kinds, weights=[APPROACH_WEIGHTS[kd] for kd in kinds])[0]
+            out.append(rng.choice(options[kind]))
+    if (shop_roll < SHOP_CHANCE and others and k >= 2 and cp.standing <= 0
+            and rating < STAR_RATING and cp.captain != current):
+        keen = [fs for fs in others if band_need(deck, you, fs)] or others
+        out.append(Approach("shopped", rng.choice(keen)))
+    return out
+
+
+def request_answer(deck: Deck, you: Card, fs_id: int, cp: "Checkpoint", rating: int,
+                   captain: bool) -> str:
+    """How a trade you asked for goes: "refused" (your club will not let you go), "unwanted"
+    (the other club is not short where you play and you are not a star) or "agreed"."""
+    if captain or cp.standing >= STANDING_BACKED:
+        return "refused"
+    if band_need(deck, you, fs_id) is None and rating < WANTED_RATING:
+        return "unwanted"
+    return "agreed"
+
+
+APPROACH_TEXT = {
+    "higher": "{club} are short of {who} and want you batting there for them.",
+    "captain": "{club} want a new leader, and they want it to be you. Their armband, if you come.",
+    "bowl": "{club} are short of {who}. They want you bowling your four overs, every match.",
+    "shopped": "Your club has agreed a trade with {club}. It only needs your yes.",
+}
+REQUEST_WORDS = {
+    "refused": "You asked to leave. {mine} would not hear of it.",
+    "unwanted": "You asked for a move to {club}. They were not interested.",
+    "agreed": "You asked for a move to {club}, and got it.",
+}
+
+
+def approach_text(a: Approach, deck: Deck) -> str:
+    club = deck.cards_by_fs[a.fs_id][0].franchise
+    who = BAND_NAMES.get(a.band or a.style, "")
+    return APPROACH_TEXT[a.kind].format(club=club, who=who)
+
+
+def _club_fs(deck: Deck, year: int, club: str | None) -> int | None:
+    """That club's franchise-season this year (`club` canonical), or None: it has no team."""
+    if club is None:
+        return None
+    return next((fs for fs in year_fs_ids(deck, year)
+                 if canonical(deck.cards_by_fs[fs][0].franchise) == club), None)
+
+
+# --- the contract cycle [A288] -------------------------------------------------------------
+# Ratified by the user: an IPL player does not field three offers every winter. A debutant is
+# invited to trials, attends two, and is bought at the uncapped auction; a contract then runs to
+# the next mega auction (the real cycle, so a 2012 debut is a two-year deal and a 2015 one a
+# three-year deal); in between the club keeps him. Measured first, regulars with 7+ matches:
+# 11.7% change club in an ordinary year against 53% into a mega auction, so staying is the norm.
+# A release -- two poor seasons, or a club that has lost patience with you -- sends you to a mini
+# auction at a base of your choosing, and going unsold there ends the career. A contract no
+# longer protects you from release (the user's choice); a club that folds sends you to the mini
+# auction too, and there an unsold player is signed late, since it was not his doing.
+# Off in the older seeded tests (conftest's `cycle_off`), whose move lists start "o0".
+CYCLE_ON = True
+TRIAL_INVITES = 4                        # clubs that invite a debutant to a trial
+TRIALS_ATTENDED = 2                      # ... of which he can attend
+DEBUT_VALUE = 0.5                        # an uncapped debutant against a capped player's value
+# How a trial went, its weight and what it does to that club's view of you (declared).
+TRIAL_IMPRESSIONS = (("impressed", 0.35, 1.35), ("steady", 0.45, 1.0), ("struggled", 0.20, 0.6))
+TRIAL_WORDS = {"impressed": "You impressed at {club}'s trial.",
+               "steady": "A steady trial at {club}.",
+               "struggled": "You struggled at {club}'s trial."}
+TRIAL_NEED = 1.25                        # a club short in your band wants you more
+SCOUTED = 0.15                           # a club that did not see you bids anyway, this often
+SCOUT_VIEW = 0.6                         # ... and knows you less well
+# A squad is short in a band at or below these many regulars (A33's volume floors), measured
+# over the 166 real squads: top order 31%, middle 29%, finisher 19%, pace 22%, spin 43%.
+NEED_SHORT = {"top": 4, "middle": 5, "finisher": 2, "pace": 2, "spin": 1}
+BAND_SLOTS = {"top": TOP_SLOTS, "middle": MIDDLE_SLOTS, "finisher": FINISHER_SLOTS}
+BAND_NAMES = {"top": "top-order batters", "middle": "middle-order batters",
+              "finisher": "finishers", "pace": "pace bowlers", "spin": "spinners"}
+
+
+def next_mega(year: int) -> int:
+    """The first mega-auction year after this one; past the last, the year after the game."""
+    return min((y for y in MEGA_YEARS if y > year), default=LAST_YEAR + 1)
+
+
+def cycle_contract(club: str, price: int, year: int) -> "Contract":
+    """A deal signed this year runs to the next mega auction."""
+    left = next_mega(year) - year
+    return Contract(club, price, left, left)
+
+
+def band_need(deck: Deck, you: Card, fs_id: int) -> str | None:
+    """The band of yours this squad is short in (`NEED_SHORT`), or None: the batting band your
+    card bats in, and for a bowler his style. An all-rounder can be wanted for either."""
+    cards = [c for c in deck.cards_by_fs.get(fs_id, []) if c.person_id != YOU_ID]
+    out = None
+    kind = _kind(you)
+    if kind in ("bowler", "allrounder") and you.bowling_style in ("pace", "spin"):
+        n = sum((c.bowl_balls or 0) >= BOWL_REGULAR_BALLS and c.bowling_style == you.bowling_style
+                for c in cards)
+        if n <= NEED_SHORT[you.bowling_style]:
+            out = you.bowling_style
+    if out is None and kind != "bowler":
+        band = next((b for b, s in BAND_SLOTS.items() if frozenset(you.positions or ()) == s), None)
+        if band is not None:
+            n = sum((c.bat_balls or 0) >= BAT_REGULAR_BALLS and c.role != "bowler"
+                    and bool(frozenset(c.positions or ()) & BAND_SLOTS[band]) for c in cards)
+            if n <= NEED_SHORT[band]:
+                out = band
+    return out
+
+
+def need_words(need: str | None) -> str:
+    return f"Short of {BAND_NAMES[need]}" if need else ""
+
+
+def trial_invites(deck: Deck, seed: int, year: int) -> list[int]:
+    """The clubs that invite a debutant to a trial: TRIAL_INVITES of that year's, from the seed."""
+    fss = year_fs_ids(deck, year)
+    return sorted(random.Random(f"{seed}:trials").sample(fss, min(TRIAL_INVITES, len(fss))))
+
+
+def trial_impression(seed: int, fs_id: int) -> tuple[str, float]:
+    """How a trial at this club went: drawn from the seed, never from your choices."""
+    r = random.Random(f"{seed}:trial:{fs_id}").random()
+    for key, weight, factor in TRIAL_IMPRESSIONS:
+        if r < weight:
+            return key, factor
+        r -= weight
+    return TRIAL_IMPRESSIONS[-1][0], TRIAL_IMPRESSIONS[-1][2]
+
+
+def parse_trials(move: str, n: int) -> tuple[int, ...]:
+    """`v{i}{j}`: the invitations you attend, TRIALS_ATTENDED distinct indices."""
+    if not (isinstance(move, str) and move.startswith("v") and move[1:].isdigit()):
+        raise CareerError(f"expected the trials you attend, got {move!r}")
+    picks = tuple(int(ch) for ch in move[1:])
+    if (len(picks) != min(TRIALS_ATTENDED, n) or len(set(picks)) != len(picks)
+            or any(not 0 <= i < n for i in picks)):
+        raise CareerError(f"choose {min(TRIALS_ATTENDED, n)} different trials")
+    return picks
+
+
+@dataclass
+class TrialReport:
+    fs_id: int
+    franchise: str
+    impression: str
+
+
+def debut_auction(deck: Deck, seed: int, year: int, value: float, attended: list[int],
+                  needs: dict[int, str | None]) -> tuple[MegaResult, list[TrialReport]]:
+    """The uncapped auction at a debut: clubs that saw you at a trial bid on what they saw, a
+    club short in your band a little more, and a club that did not see you only now and then.
+    Nobody meeting the base: a trial club signs you late at it, as a squad player."""
+    from game.auction import Lot, bid_log
+
+    fss = year_fs_ids(deck, year)
+    base = value * DEBUT_VALUE
+    reports, ceilings = [], {}
+    for i, fs in enumerate(fss):
+        rng = random.Random(f"{seed}:debut:{fs}")
+        view = base * math.exp(rng.gauss(0, MEGA_SPREAD))
+        if fs in attended:
+            how, factor = trial_impression(seed, fs)
+            reports.append(TrialReport(fs, deck.cards_by_fs[fs][0].franchise, how))
+            view *= factor
+        elif rng.random() < SCOUTED:
+            view *= SCOUT_VIEW
+        else:
+            continue
+        if needs.get(fs):
+            view *= TRIAL_NEED
+        ceilings[i] = min(PRICE_CAP, int(view))
+    lot = Lot(index=0, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="",
+              base=DEBUT_PRICE)
+    bids = bid_log(lot, ceilings, seed, 0)
+    if bids:
+        fs, price = fss[bids[-1].team], bids[-1].price
+    else:
+        fs, price = random.Random(f"{seed}:debut-late").choice(sorted(attended)), DEBUT_PRICE
+    c = deck.cards_by_fs[fs][0]
+    res = MegaResult(DEBUT_PRICE, bool(bids), False, fs, c.franchise, _abbrev(c.franchise, year),
+                     price, [(deck.cards_by_fs[fss[b.team]][0].franchise,
+                              _abbrev(deck.cards_by_fs[fss[b.team]][0].franchise, year), b.price)
+                             for b in bids], kind="debut")
+    return res, reports
+
+
+def mini_auction(deck: Deck, seed: int, k: int, year: int, released_by: str | None,
+                 last_display: int | None, base: int, *, capped: bool) -> MegaResult:
+    """The mini auction: every club that year but the one that let you go bids on the mega
+    value curve with its own view of you (A212's ceilings, no loyalty premium)."""
+    from game.auction import Lot, bid_log
+
+    fss = year_fs_ids(deck, year)
+    by_fs = mega_ceilings(deck, seed, k, year, None, last_display, capped=capped)
+    ceilings = {i: by_fs[fs] for i, fs in enumerate(fss)
+                if canonical(deck.cards_by_fs[fs][0].franchise) != released_by}
+    lot = Lot(index=k, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="", base=base)
+    bids = bid_log(lot, ceilings, seed, 0)
+    if bids:
+        fs, price = fss[bids[-1].team], bids[-1].price
+        c = deck.cards_by_fs[fs][0]
+        return MegaResult(base, True, False, fs, c.franchise, _abbrev(c.franchise, year), price,
+                          [(deck.cards_by_fs[fss[b.team]][0].franchise,
+                            _abbrev(deck.cards_by_fs[fss[b.team]][0].franchise, year), b.price)
+                           for b in bids], kind="mini")
+    if released_by:                              # released and unsold: the career is over
+        return MegaResult(base, False, False, -1, "", "", base, [], kind="mini")
+    others = [fs for fs in fss]                  # a club that folded: somebody signs you late
+    fs = random.Random(f"{seed}:mini-late:{k}").choice(others)
+    c = deck.cards_by_fs[fs][0]
+    return MegaResult(base, False, False, fs, c.franchise, _abbrev(c.franchise, year), base, [],
+                      kind="mini")
 
 
 # --- the captain's bowling plan [A213] --------------------------------------------------------
@@ -4497,6 +4790,7 @@ class Pending:
     cold: bool = False                 # your club has not offered to keep you (A230)
     coach: dict | None = None          # the coach's offer, answered `t{i}` (A238)
     focus: dict | None = None          # your focus for the season, answered `f{i}` (A285)
+    window: dict | None = None         # the trade window: `x{i}` (stay 0, or an approach) or `a{i}` (A289)
 
 
 @dataclass
@@ -4543,6 +4837,7 @@ class Career:
     ceiling: Card
     seasons: list[SeasonRecord] = field(default_factory=list)
     pending: Pending | None = None
+    ck_at: int = 0                     # moves before the checkpoint, of those replayed (A288)
     retired: bool = False
     released: bool = False             # two poor seasons running: nobody signed you
     summary: Summary | None = None
@@ -4825,6 +5120,7 @@ class Contract:
     club: str                             # canonical franchise
     price: int                            # lakh a year
     left: int                             # seasons of it still to play
+    years: int = CONTRACT_YEARS           # its length: three (A200), or to the next mega (A288)
 
 
 @dataclass
@@ -4897,6 +5193,11 @@ class Checkpoint:
     bat_band: str = ""
     keeper_offers: int = 0
     focus: str = ""                       # [A285] the focus you worked on last ("" none yet)
+    # [A288] The club that released you, while you wait for the next auction ("" when your
+    # club folded instead: no fault of yours). None: you are under contract.
+    released_by: str | None = None
+    # [A289] The band a club moved you up into ("" none): your card bats there from then on.
+    up_band: str = ""
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -4931,7 +5232,8 @@ class Checkpoint:
                    drills={k: float(v) for k, v in (d.get("drills") or {}).items()},
                    drill_offers=d.get("drill_offers", 0),
                    ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
-                   keeper_offers=d.get("keeper_offers", 0), focus=d.get("focus", ""))
+                   keeper_offers=d.get("keeper_offers", 0), focus=d.get("focus", ""),
+                   released_by=d.get("released_by"), up_band=d.get("up_band", ""))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -5019,13 +5321,14 @@ def _press_facts(deck: Deck, cp: "Checkpoint", played: SeasonRecord, offer: Offe
     prev = cp.seasons
     last = prev[-1] if prev else None
     mega = None
-    if auction is not None and year in MEGA_YEARS and k > 0:
+    if auction is not None and (year in MEGA_YEARS and k > 0 or auction.kind == "mini"):
         rivals = []
         for f, _short, _price in reversed(auction.bids):
             if canonical(f) != canonical(auction.franchise) and f not in rivals:
                 rivals.append(f)
         mega = {"retained": auction.retained, "sold": auction.sold, "price": auction.price,
-                "base": auction.base, "bids": len(auction.bids), "rivals": rivals[:2]}
+                "base": auction.base, "bids": len(auction.bids), "rivals": rivals[:2],
+                "stage": auction.kind}
     moved = (last.franchise if last is not None and mega is None
              and canonical(last.franchise) != canonical(offer.franchise) else None)
     return press.SeasonFacts(
@@ -5100,7 +5403,8 @@ def event_fits(event: Event, ctx: EventContext) -> bool:
         return False
     if event.key == "captain" and ctx.captain:
         return False
-    if event.key == "trade" and (not ctx.staying or ctx.mega):
+    if event.key == "trade" and (CYCLE_ON or not ctx.staying or ctx.mega):
+        # [A289] under the contract cycle, a club shopping you happens in the trade window
         return False
     if event.key == "workload" and not ctx.in_national_side:
         return False
@@ -5206,6 +5510,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
     if cp.ceiling_band:                    # [A255] a career from before keeps its start's band
         start = banded(start, ceiling, setup.role)
+    start0 = start                         # [A289] before any move up the order
     shape = draw_shape(seed) if cp.shaped else STANDARD
     legend = potential_legend(deck, setup.role, ceiling)
     career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
@@ -5215,6 +5520,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
 
     def nxt() -> str | None:
         return queue.pop(0) if queue else None
+
+    def ck() -> None:
+        """Where a resume would start from, and how many of `moves` came before it [A288]: a
+        season under contract asks nothing at its start, so the moves to keep beside the
+        checkpoint can no longer be told from the kind of question pending."""
+        career.checkpoint = copy.deepcopy(cp)
+        career.ck_at = len(moves) - len(queue)
 
     def take_answers(bowlers: list[Card]) -> tuple:
         """This season's answers at its key moments: the `m{i}` moves that follow its offer
@@ -5241,9 +5553,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     while cp.ended is None and cp.k < MAX_SEASONS and setup.debut + cp.k <= LAST_YEAR:
         k = cp.k
         clock = cp.clock
+        start = with_band(start0, cp.up_band)  # [A289] where a club moved you up to
         top = top_card(ceiling, legend, cp.potential)
         year = setup.debut + k
         squad_now, mega_note = cp.squad, ""
+        pre_notes: list[tuple[str, str]] = []  # [A288] the trials and the auction, in words
+        window_ok, wanted = False, False        # [A289] a trade window opens this pre-season
+        auction_before = career.auction         # [A288] the press reads only THIS season's
         traits = ct.nudge(cp.traits, ())       # [A245] who you are going into the season
         captained = cp.captain is not None and cp.captain == cp.current
         # [A238] the changed role you go into the season in, before the coach says anything
@@ -5252,13 +5568,89 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                         bat_band=cp.bat_band)
         career.role_now = career.season_role = cp.roles[-1] if cp.roles else setup.role
         market = market_for(start, ceiling, cp, shape, legend)
-        if year in MEGA_YEARS and k > 0:
+        if CYCLE_ON and k == 0:
+            # [A288] Trials, then the uncapped auction. The trial clubs, how each trial goes and
+            # every club's view of you come from the seed; which two trials you attend is yours.
+            invites = trial_invites(deck, seed, year)
+            here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
+                           fs_id=invites[0], year=year,
+                           franchise=deck.cards_by_fs[invites[0]][0].franchise, role=rd)
+
+            def at(fs: int) -> Card:
+                return dataclasses.replace(here, fs_id=fs,
+                                           franchise=deck.cards_by_fs[fs][0].franchise)
+            needs = {fs: band_need(deck, at(fs), fs) for fs in year_fs_ids(deck, year)}
+            ck()
+            move = nxt()
+            if move is None:
+                placed = []
+                for fs in invites:
+                    o = _club_offer(deck, fs, year, DEBUT_PRICE, False)
+                    pos, rank = where_you_play(deck, at(fs), fs, batting_number(here, earned(cp)))
+                    placed.append(dataclasses.replace(o, position=pos, attack_rank=rank,
+                                                      need=need_words(needs[fs])))
+                career.pending = Pending("trials", year, k, offers=placed, squad=cp.squad)
+                return career
+            attended = [invites[i] for i in parse_trials(move, len(invites))]
+            value = value_curve(rating_at(start, top, career_t(cp, start, top, shape)),
+                                mega=True) * UNCAPPED_VALUE
+            a, reports = debut_auction(deck, seed, year, value, attended, needs)
+            career.auction = a
+            for rep_ in reports:
+                pre_notes.append((TRIAL_WORDS[rep_.impression].format(club=rep_.franchise),
+                                  {"impressed": "up", "struggled": "down"}.get(rep_.impression, "")))
+            offer = _club_offer(deck, a.fs_id, year, a.price, False)
+            squad_now = squad_now or not a.sold
+            cp.contract = cycle_contract(canonical(a.franchise), a.price, year)
+            mega_note = mega_text(a)
+        elif CYCLE_ON and not (year in MEGA_YEARS and k > 0) and (
+                cp.released_by is not None or not _club_fs(deck, year, cp.current)):
+            # [A288] Released, or your club has no team this year: the mini auction.
+            why = "released" if cp.released_by else "folded"
+            capped = bool(cp.national.get("capped"))
+            base0 = mega_offer(deck, year, None, market, capped=capped)
+            mo = MegaOffer(None, base0.bases, base0.suggested, kind="mini", why=why)
+            ck()
+            move = nxt()
+            if move is None:
+                career.pending = Pending("mega", year, k, squad=cp.squad, mega=mo)
+                return career
+            if move == "r":
+                career.retired, cp.ended = True, "retired"
+                break
+            base = mo.bases[_index(move, "b", len(mo.bases))]
+            a = career.auction = mini_auction(deck, seed, k, year, cp.released_by, market, base,
+                                              capped=capped)
+            if a.fs_id < 0:                            # released, and nobody wanted you
+                career.released, cp.ended = True, "released"
+                break
+            offer = _club_offer(deck, a.fs_id, year, a.price, False)
+            # A club that bought you starts you afresh; a late signing is a squad player.
+            cp.squad = squad_now = not a.sold
+            cp.contract = cycle_contract(canonical(a.franchise), a.price, year)
+            cp.released_by = None
+            mega_note = mega_text(a)
+        elif CYCLE_ON and not (year in MEGA_YEARS and k > 0):
+            # [A288] Under contract: your club keeps you, at the price you signed for.
+            ck()
+            if cp.contract is None or cp.contract.club != cp.current:
+                last_price = cp.seasons[-1].price if cp.seasons else DEBUT_PRICE
+                cp.contract = cycle_contract(cp.current, last_price, year)
+            fs = _club_fs(deck, year, cp.current)
+            o = _club_offer(deck, fs, year, cp.contract.price, True)
+            offer = dataclasses.replace(
+                o, contract_year=cp.contract.years - cp.contract.left + 1,
+                contract_years=cp.contract.years)
+            window_ok = k >= WINDOW_FROM
+        elif year in MEGA_YEARS and k > 0:
             cp.contract = None                 # a mega auction ends every deal (A212)
             capped = bool(cp.national.get("capped"))
+            # [A288] a club that released you does not retain you, nor bid with a loyal heart
+            club_now = None if (CYCLE_ON and cp.released_by is not None) else cp.current
             # [A245] a club's captain is a player it wants to keep
-            mo = mega_offer(deck, year, cp.current, market, capped=capped,
+            mo = mega_offer(deck, year, club_now, market, capped=capped,
                             trusted=cp.standing >= STANDING_BACKED or captained)
-            career.checkpoint = copy.deepcopy(cp)
+            ck()
             move = nxt()
             if move is None:
                 if mo.retain is not None:
@@ -5282,11 +5674,16 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                             offer.short, offer.price)
             else:
                 base = mo.bases[_index(move, "b", len(mo.bases))]
-                a = career.auction = mega_auction(deck, seed, k, year, cp.current,
+                a = career.auction = mega_auction(deck, seed, k, year, club_now,
                                                   market, base, capped=capped)
                 offer = _club_offer(deck, a.fs_id, year, a.price, canonical(a.franchise) == cp.current)
+                if CYCLE_ON and cp.released_by is not None and a.sold:
+                    cp.squad = squad_now = False         # [A288] a club that bought you starts you afresh
                 squad_now = squad_now or not a.sold          # a late signing is a squad player
             mega_note = mega_text(career.auction)
+            if CYCLE_ON:                                 # [A288] a deal to the next mega auction
+                cp.contract = cycle_contract(canonical(offer.franchise), offer.price, year)
+                cp.released_by = None
         else:
             offers = offers_for(deck, seed, k, year, cp.current, market, cp.contract,
                                 capped=bool(cp.national.get("capped")))
@@ -5303,7 +5700,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     o, price=min(PRICE_CAP, round(o.price * CAPTAIN_PREMIUM)),
                     price3=None if o.price3 is None else min(PRICE_CAP,
                                                              round(o.price3 * CAPTAIN_PREMIUM)))
-            career.checkpoint = copy.deepcopy(cp)
+            ck()
             move = nxt()
             if move is None:
                 here = ability(start, top, career_t(cp, start, top, shape), setup=setup,
@@ -5333,8 +5730,85 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 offer = offers[_index(move, "o", len(offers))]
                 if not offer.contract_year:
                     cp.contract = None
+        if window_ok:
+            # [A289] The trade window, before anything else this season.
+            t_now = career_t(cp, start, top, shape)
+            here = ability(start, top, t_now, setup=setup, fs_id=offer.fs_id, year=year,
+                           franchise=offer.franchise, role=rd)
+            rating_now = rating_at(start, top, t_now)
+            events = window_events(deck, seed, k, year, here, cp.current, setup, cp, rating_now)
+            others = sorted(fs for fs in year_fs_ids(deck, year)
+                            if canonical(deck.cards_by_fs[fs][0].franchise) != cp.current)
+            move = nxt()
+            if move is None:
+                def placed(fs: int, card: Card) -> Offer:
+                    o = _club_offer(deck, fs, year, cp.contract.price, False)
+                    at = dataclasses.replace(card, fs_id=fs, franchise=o.franchise)
+                    pos, rank = where_you_play(deck, at, fs, batting_number(at, earned(cp)))
+                    return dataclasses.replace(o, position=pos, attack_rank=rank,
+                                               need=need_words(band_need(deck, at, fs)))
+                shown = []
+                for a in events:
+                    card = with_band(here, a.band) if a.kind == "higher" else (
+                        dataclasses.replace(here, role="allrounder", bowl_balls=None)
+                        if a.kind == "bowl" else here)
+                    shown.append({"kind": a.kind, "text": approach_text(a, deck),
+                                  "offer": placed(a.fs_id, card)})
+                pos, rank = where_you_play(deck, here, offer.fs_id, batting_number(here, earned(cp)))
+                career.pending = Pending("window", year, k, squad=squad_now,
+                                         offers=[dataclasses.replace(offer, position=pos,
+                                                                     attack_rank=rank)],
+                                         window={"events": shown,
+                                                 "clubs": [placed(fs, here) for fs in others],
+                                                 "captain": captained})
+                return career
+            mine = offer.franchise
+            go: Approach | None = None
+            if move.startswith("a"):
+                fs = others[_index(move, "a", len(others))]
+                answer = request_answer(deck, here, fs, cp, rating_now, captained)
+                club = deck.cards_by_fs[fs][0].franchise
+                pre_notes.append((REQUEST_WORDS[answer].format(club=club, mine=mine),
+                                  "up" if answer == "agreed" else "down"))
+                cp.standing += REQUEST_STANDING
+                if answer == "agreed":
+                    go = Approach("request", fs)
+            else:
+                i = _index(move, "x", len(events) + 1)
+                if i:
+                    go = events[i - 1]
+                elif any(a.kind == "shopped" for a in events):
+                    cp.standing -= 1                    # they were ready to let you go
+                    pre_notes.append(("You turned the trade down. The club kept you, but it "
+                                      "had been ready to let you go.", "down"))
+            if go is not None:
+                new = _club_offer(deck, go.fs_id, year, cp.contract.price, False)
+                offer = dataclasses.replace(new, contract_year=offer.contract_year,
+                                            contract_years=offer.contract_years)
+                cp.contract.club = canonical(new.franchise)
+                wanted = go.kind != "request"
+                story = {"higher": f"You moved to {new.franchise} to bat higher up the order.",
+                         "captain": f"You moved to {new.franchise}, as their captain.",
+                         "bowl": f"You moved to {new.franchise} to bowl full time.",
+                         "shopped": f"You agreed to the trade, and started the season at {new.franchise}.",
+                         "request": ""}[go.kind]
+                if story:
+                    pre_notes.append((story, "up"))
+                if go.kind == "higher":
+                    cp.up_band = go.band
+                    start = with_band(start0, cp.up_band)
+                elif go.kind == "captain":
+                    cp.captain = canonical(new.franchise)
+                elif go.kind == "bowl":
+                    cp.roles.append("allrounder")
+                    cp.role_since = k
+                    cp.style = go.style
+                    rd = role_state(deck, model, seed, setup, start, "allrounder", cp.second,
+                                    cp.style, year, mentor=cp.coach_mentor, bat_band=cp.bat_band)
+                    career.role_now = career.season_role = "allrounder"
         if canonical(offer.franchise) != cp.current:
-            cp.standing = 0                    # a new club starts from nothing (A230)
+            cp.standing = 1 if wanted else 0   # a new club starts from nothing (A230)...
+                                               # ...unless it came for you (A289)
         # The armband stays once taken, until you change club or have a poor season (A213).
         already = cp.captain is not None and cp.captain == canonical(offer.franchise)
         # [A238] What the coach offers before the season: a trial, the full-time role a good
@@ -5485,6 +5959,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if text:
                 notes.append(text)
                 tones.append(tone)
+
+        for text_, tone_ in pre_notes:
+            say(text_, tone_)
 
         if coach_said:
             say(*coach_said)
@@ -5722,7 +6199,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             played.milestones.append(CareerMilestone("nickname", f"The papers call you “{nick[0]}”"))
         career.live_milestones = played.milestones
         played.press = press.season_facts(_press_facts(deck, cp, played, offer, k, year,
-                                                        career.auction, setup),
+                                                        career.auction if career.auction
+                                                        is not auction_before else None, setup),
                                           career.detail.feed if career.detail else None)
         cp.seasons.append(played)
         cp.current, cp.last_display = canonical(offer.franchise), played.display
@@ -5823,13 +6301,27 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         cp.captain = next_captain(captain_now, cp.squad or led_through, canonical(offer.franchise))
         if bowlers:
             cp.plan = current
-        if released and cp.contract is not None:
+        if released and cp.contract is not None and not CYCLE_ON:
             released = False                   # a contract year remains: you stay, benched
         if released and played.rating >= STAR_RATING:
             released = False                   # a star is never out of work (A214)
             played.notes.append("Two poor seasons, but at your level somebody always signs you.")
             played.tones.append("")
-        if released:
+        if CYCLE_ON and not released and cp.standing <= STANDING_COLD \
+                and played.rating < STAR_RATING:
+            released = True                    # [A288] the club has lost patience with you
+            played.notes.append(f"{offer.franchise} have lost patience with you. You are released.")
+            played.tones.append("down")
+        elif CYCLE_ON and released:
+            played.notes.append(f"Two poor seasons: {offer.franchise} release you. "
+                                "Your future is in the auction now.")
+            played.tones.append("down")
+        if released and CYCLE_ON:
+            # [A288] Not the end: the next auction decides whether anybody wants you.
+            cp.released_by = canonical(offer.franchise)
+            cp.contract = None
+            cp.captain = None
+        elif released:
             career.released, cp.ended = True, "released"
             break
     # [A228] Where did the player go after the game? Asked once, when the career ends; a
@@ -5838,13 +6330,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         move = nxt()
         if move is None:
             last = max(cp.k - 1, 0)
-            career.checkpoint = copy.deepcopy(cp)
+            ck()
             career.pending = Pending("epilogue", setup.debut + last, last)
             return career
         cp.epilogue = list(press.EPILOGUES)[_index(move, "w", len(press.EPILOGUES))]
     if nxt() is not None:
         raise CareerError("moves left over after the career ended")
-    career.checkpoint = copy.deepcopy(cp)
+    ck()
     career.pending = None
     real_runs = [p.runs for p in facts] if facts is not None else None
     real_wkts = [p.wickets for p in facts] if facts is not None else None
@@ -5857,7 +6349,8 @@ def _index(move: str, kind: str, n: int) -> int:
         what = {"o": "an offer", "c": "an offer", "e": "an event answer", "m": "a key-moment call",
                 "i": "an answer to what happened", "t": "an answer to the coach",
                 "b": "a base price", "w": "a where-are-they-now",
-                "f": "a focus"}.get(kind, "a")
+                "f": "a focus", "v": "a choice of trials", "x": "a trade-window answer",
+                "a": "a trade request"}.get(kind, "a")
         raise CareerError(f"expected {what} move, got {move!r}")
     i = int(move[1:])
     if not 0 <= i < n:
@@ -5900,6 +6393,30 @@ def policy_move(career: Career, policy: str, rng: random.Random) -> str:
         return f"t{rng.randrange(len(p.coach['options'])) if policy == 'random' else 0}"
     if p.kind == "plan":                       # A213: the automatic players set none
         return "p" + "0" * len(p.plan_bowlers)
+    if p.kind == "window":                     # A289
+        ev, clubs = p.window["events"], p.window["clubs"]
+        if policy == "random":
+            r = rng.random()
+            if r < 0.1 and clubs:
+                return f"a{rng.randrange(len(clubs))}"
+            return f"x{rng.randrange(len(ev) + 1)}"
+        if policy == "strength":
+            here = p.offers[0].strength or 0
+            best = max(range(len(ev)), key=lambda i: ev[i]["offer"].strength or 0, default=None)
+            if best is not None and (ev[best]["offer"].strength or 0) > here:
+                return f"x{best + 1}"
+        return "x0"
+    if p.kind == "trials":                     # A288: careless at random, the rest by their lights
+        n = len(p.offers)
+        if policy == "random":
+            picks = rng.sample(range(n), min(TRIALS_ATTENDED, n))
+        elif policy == "money":
+            picks = sorted(range(n), key=lambda i: (not p.offers[i].need, i))[:TRIALS_ATTENDED]
+        elif policy == "strength":
+            picks = sorted(range(n), key=lambda i: (-(p.offers[i].strength or 0), i))[:TRIALS_ATTENDED]
+        else:
+            picks = list(range(min(TRIALS_ATTENDED, n)))
+        return "v" + "".join(str(i) for i in sorted(picks))
     if p.kind == "mega":                       # A212
         m = p.mega
         if policy == "random":

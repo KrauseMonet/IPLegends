@@ -406,3 +406,46 @@ def test_a_trial_names_its_mentor_and_passes_on_his_style(deck):
         assert o["traits"] == ([("temper", C.MENTOR_LEAN * m["lean"])] if m["lean"] else [])
     no = [o for o in card["options"] if not o["take"]]
     assert no and "mentor" not in no[0]
+
+
+def _youngster():
+    return next(e for e in C.EVENTS if e.key == "youngster")
+
+
+def test_a_youngster_needs_a_real_debutant_to_name(deck):
+    """Reported from a career screen: 'A senior player, in his first IPL season, asks if he
+    can shadow you' -- the card was drawn for Mumbai 2017, which had no first-season debutant,
+    so `fill` fell back to 'A senior player'. The card now gives way when nobody can be named."""
+    ok = C.EventContext(k=3)
+    assert C.event_fits(_youngster(), ok)
+    assert not C.event_fits(_youngster(), dataclasses.replace(ok, pupil_ok=False))
+
+
+def test_a_youngster_card_is_only_played_where_a_debutant_can_be_named(deck, model, monkeypatch):
+    """The wiring: whatever seasons a career plays, a drawn youngster card always names a real
+    first-season player (and the context's `pupil_ok` is what `event_person` says)."""
+    real = C.season_event
+    seen = []
+
+    def spy(cp, k, year, offer, squad, already, seed, setup, ctx=None):
+        event = real(cp, k, year, offer, squad, already, seed, setup, ctx)
+        seen.append((year, offer.fs_id, event.key, getattr(ctx, "pupil_ok", None)))
+        return event
+    monkeypatch.setattr(C, "season_event", spy)
+    rng = __import__("random").Random(3)
+    for seed in range(1, 7):
+        setup = C.Setup("Pupil", "middle", 2010)
+        moves: list[str] = []
+        for _ in range(60):
+            car = C.play_career(deck, model, seed, setup, moves)
+            if car.complete:
+                break
+            p = car.pending
+            moves.append("m2" if p.kind == "moment" else C.policy_move(car, "loyal", rng))
+    probe = next(c for cards in deck.cards_by_fs.values() for c in cards)
+    assert seen
+    for year, fs, key, pupil_ok in seen:
+        named = C.event_person(deck, _youngster(), fs, year, probe) is not None
+        assert pupil_ok in (None, named)
+        if key == "youngster":
+            assert named, (year, fs)

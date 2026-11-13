@@ -5090,6 +5090,7 @@ class EventContext:
     growing: bool = True
     rating: int | None = None
     mentor_ok: bool = True            # a teammate good enough to teach you is in the squad
+    pupil_ok: bool = True             # a first-season debutant is in the squad to shadow you
 
 
 def event_fits(event: Event, ctx: EventContext) -> bool:
@@ -5107,6 +5108,8 @@ def event_fits(event: Event, ctx: EventContext) -> bool:
             ctx.growing and ctx.k <= MENTOR_UNTIL and ctx.mentor_ok
             and (ctx.rating is None or ctx.rating < MENTOR_MAX_RATING)):
         return False
+    if event.key == "youngster" and not ctx.pupil_ok:
+        return False        # nobody in the squad to name: "A senior player, in his first season"
     if event.key == "coach" and (ctx.k >= VETERAN_FROM or (
             ctx.rating is not None and ctx.rating >= REBUILD_MAX_RATING)):
         return False
@@ -5444,9 +5447,12 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         # clearly better than you, and a player still young enough to be taught.
         rating_now = rating_at(start, top, career_t(cp, start, top, shape))
         teacher = event_person(deck, MENTOR_EVENT, offer.fs_id, year, probe)
+        pupil = event_person(deck, next(e for e in EVENTS if e.key == "youngster"),
+                             offer.fs_id, year, probe)
         ctx = EventContext(growing=shape.growing(clock), rating=rating_now,
                            mentor_ok=teacher is not None
-                           and (teacher.display or 0) >= rating_now + MENTOR_MARGIN)
+                           and (teacher.display or 0) >= rating_now + MENTOR_MARGIN,
+                           pupil_ok=pupil is not None)
         event = season_event(cp, k, year, offer, squad_now, already, seed, setup, ctx)
         person = event_person(deck, event, offer.fs_id, year, probe) if event.who else None
         target = (trade_target(deck, seed, k, year, canonical(offer.franchise))

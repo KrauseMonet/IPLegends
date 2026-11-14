@@ -203,8 +203,30 @@ def test_nobody_rebuilds_a_great_players_technique():
 
 def test_a_captain_is_not_offered_the_captaincy():
     cap = next(e for e in C.EVENTS if e.key == "captain")
-    assert C.event_fits(cap, C.EventContext())
-    assert not C.event_fits(cap, C.EventContext(captain=True))
+    ok = C.EventContext(k=4, rating=80)
+    assert C.event_fits(cap, ok)
+    assert not C.event_fits(cap, dataclasses.replace(ok, captain=True))
+    assert not C.event_fits(cap, dataclasses.replace(ok, squad=True))
+
+
+def test_nobody_is_offered_the_captaincy_early_or_weak():
+    """[A290] The armband on debut was reported as unrealistic. The numbers are stated, not
+    read from the code, so moving them fails here (A207's trap)."""
+    cap = next(e for e in C.EVENTS if e.key == "captain")
+    for k in range(4):
+        assert not C.event_fits(cap, C.EventContext(k=k, rating=95)), k
+    assert C.event_fits(cap, C.EventContext(k=4, rating=95))
+    assert not C.event_fits(cap, C.EventContext(k=6, rating=79))
+    assert C.event_fits(cap, C.EventContext(k=6, rating=80))
+
+
+@pytest.mark.parametrize("role,seed", [("opener", 3), ("pace", 8), ("allrounder", 1)])
+def test_no_career_is_handed_the_armband_in_its_first_four_seasons(deck, model, role, seed):
+    """The whole loop, the dressing room's card included: whatever is answered, nobody
+    captains before his fifth season."""
+    career, _ = C.auto_career(deck, model, seed, C.Setup("Early", role, 2010), "virtue")
+    for r in career.seasons[:4]:
+        assert not r.captain and r.event not in ("captain", "lead"), r
 
 
 @pytest.mark.parametrize("policy", ["virtue", "vice", "random"])
@@ -303,18 +325,23 @@ def test_traits_reach_the_season_and_its_cache_key(deck, model, monkeypatch):
         return real(deck_, model_, seed, k, you, record, key, *a, **kw)
     monkeypatch.setattr(C, "_cached_season", spy)
     setup = C.Setup("Key", "opener", 2012)
-    # seed 2 -> 26 re-found after A259: the hot season must still pause where the plain one
-    # did (the moves replayed are the plain career's), and season one must leave no trait
     seed = KEY_SEED
     _, moves = C.auto_career(deck, model, seed, setup, "loyal")
     cut = next(i for i in range(len(moves))
                if len(C.play_career(deck, model, seed, setup, moves[:i]).seasons) == 1)
     cp = C.play_career(deck, model, seed, setup, moves[:cut]).checkpoint
-    hot = dataclasses.replace(cp, traits={"temper": 3.0})
+    # [A290] both sides set their own temper, so the test no longer needs a seed whose first
+    # season moved none; and only the moves up to the next season's first play are replayed,
+    # since a different temper can pause that season at different key moments
+    plain = dataclasses.replace(cp, traits={**cp.traits, "temper": 0.0})
+    hot = dataclasses.replace(cp, traits={**cp.traits, "temper": 3.0})
     runs = []
-    for resume in (cp, hot):
+    for resume in (plain, hot):
         keys.clear(), cards.clear()
-        C.play_career(deck, model, seed, setup, moves[cut:], resume=resume)
+        for n in range(1, len(moves) - cut + 1):
+            C.play_career(deck, model, seed, setup, moves[cut:cut + n], resume=resume)
+            if keys:
+                break
         runs.append((keys[0], cards[0]))
     assert runs[0][0] != runs[1][0]
     assert runs[1][1].bat_scoring == pytest.approx(runs[0][1].bat_scoring + 3 * ct.TEMPER_STEP)
@@ -449,3 +476,17 @@ def test_a_youngster_card_is_only_played_where_a_debutant_can_be_named(deck, mod
         assert pupil_ok in (None, named)
         if key == "youngster":
             assert named, (year, fs)
+
+
+def test_the_dressing_room_does_not_ask_before_the_fifth_season(deck, model):
+    """[A290] The dressing room's card (A230) asked from the third season; standing at its
+    top is enough to ask, and still not before four seasons played (stated, not read)."""
+    import copy
+    setup = C.Setup("Lead", "opener", 2012)
+    car = C.play_career(deck, model, 3, setup, [])
+    offer = car.pending.offers[0]
+    cp = copy.deepcopy(car.checkpoint)
+    cp.standing, cp.threads = C.STANDING_MAX, []
+    for k in range(4):
+        assert C.season_event(cp, k, 2012 + k, offer, False, False, 3, setup).key != "lead", k
+    assert C.season_event(cp, 4, 2016, offer, False, False, 3, setup).key == "lead"

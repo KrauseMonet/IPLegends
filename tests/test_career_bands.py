@@ -117,6 +117,9 @@ def test_the_peak_needs_ninety(deck):
     assert C.next_promotions(3, 85, 95, True, True, C.marks_for(mid)) == 2
 
 
+# 2 -> 0 after A290: seed 2's career kept its place on a debut armband nobody is offered now
+PEAK_SEED = 0
+
 @pytest.mark.parametrize("role,peak", [("middle", 3), ("finisher", 5)])
 def test_a_career_reaches_the_peak_rung_and_bats_there(deck, model, monkeypatch, role, peak):
     """The wiring: with the marks low enough that any career clears them, the season after the
@@ -126,7 +129,7 @@ def test_a_career_reaches_the_peak_rung_and_bats_there(deck, model, monkeypatch,
     monkeypatch.setattr(C, "COACH_ON", False)
     C._SEASON_CACHE.clear()
     try:
-        career, _ = _drive(deck, model, 2, _setup(role), lambda c: 0)
+        career, _ = _drive(deck, model, PEAK_SEED, _setup(role), lambda c: 0)
     finally:
         C._SEASON_CACHE.clear()
     at = [r.bat_at for r in career.seasons if r.bat_at is not None]

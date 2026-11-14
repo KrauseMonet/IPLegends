@@ -764,7 +764,7 @@ def _pending(p: C.Pending, role: str = "", cp=None) -> PendingOut:
     return PendingOut(
         kind=p.kind, year=p.year, season_no=p.k + 1, squad=p.squad,
         offers=[_offer(o, p.year) for o in p.offers],
-        event=event, can_retire=p.kind in ("offer", "mega") and p.k > 0,
+        event=event, can_retire=p.kind in PRESEASON and p.k > 0,
         moment=_moment(p.moment, role) if p.kind == "moment" and p.moment else None,
         mega=mega, plan=plan, incident=incident, cold=p.cold, coach=coach,
         focus=_focus_options(p, cp) if p.kind == "focus" and p.focus else None,
@@ -1223,11 +1223,28 @@ def _stale(deck, model, seed, setup, checkpoint, partial) -> C.Career | None:
         return C.play_career(deck, model, seed, setup, [], _facts(), resume=checkpoint)
 
 
+# The questions asked before a season's first ball, from any of which a player may retire.
+PRESEASON = ("offer", "mega", "window", "focus", "coach", "event", "plan")
+
+
+def _retire_moves(deck, model, seed, setup, checkpoint, partial) -> list[str]:
+    """Retiring drops this pre-season's answers and goes back to its start, where the engine
+    takes `r` (an offer, a mega or mini auction, or a contract year that asks nothing first).
+    Refused once the season has begun: a key moment is no place to walk away."""
+    now = C.play_career(deck, model, seed, setup, partial, _facts(), resume=checkpoint)
+    if now.pending is None or now.pending.kind not in PRESEASON or now.pending.k == 0:
+        raise HTTPException(409, "you can only retire before a season starts")
+    return ["r"]
+
+
 @router.post("/api/career/move")
 def career_move(body: MoveIn) -> CareerOut:
     seed, setup, checkpoint, partial = read_token(body.token)
-    moves = partial + [body.move]
     deck, model = _state()
+    if body.move == "r":
+        moves = _retire_moves(deck, model, seed, setup, checkpoint, partial)
+    else:
+        moves = partial + [body.move]
     try:
         career = C.play_career(deck, model, seed, setup, moves, _facts(), resume=checkpoint)
     except C.CareerError as e:

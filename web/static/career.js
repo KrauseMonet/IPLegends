@@ -581,8 +581,7 @@ function crOffers(d){
       <p class="room-note">A three-year deal fixes your price for three seasons and keeps you
         safe from release, but you cannot move or earn a raise. Stronger squads win more
         titles, but you may play a smaller part in them.</p>
-      ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
-        <button class="act" onclick="crRetire()">Retire instead</button></div>` : ''}
+      ${crRetireButton(p)}
     </div>`;
 }
 
@@ -664,6 +663,7 @@ function crWindow(d){
         <div class="foot-actions" style="justify-content:center">
           <button class="act" id="crAskGo" disabled onclick="crMove('a' + CR.ask)">Ask for the move</button></div>
       </details>
+      ${crRetireButton(p)}
     </div>`;
 }
 
@@ -715,8 +715,7 @@ function crMega(d){
             and nobody may meet it${mini && m.why === 'released' ? '.' : ': then a club signs you late, at your base, as a squad player.'}</p>
         </div>
       </div>
-      ${p.can_retire ? `<div class="foot-actions" style="justify-content:center">
-        <button class="act" onclick="crRetire()">Retire instead</button></div>` : ''}
+      ${crRetireButton(p)}
     </div>`;
 }
 
@@ -857,7 +856,13 @@ function crPlan(d){
       <div class="cr-plan">${crPlanRows(p.plan)}</div>
       <div class="foot-actions" style="justify-content:center">
         <button class="act lead" onclick="crMove('p' + CR.plan.join(''))">Start the season</button></div>
+      ${crRetireButton(p)}
     </div>`;
+}
+
+function crRetireButton(p){
+  return p.can_retire ? `<div class="foot-actions" style="justify-content:center">
+        <button class="act" onclick="crRetire()">Retire instead</button></div>` : '';
 }
 
 function crRetire(){
@@ -878,6 +883,7 @@ function crEvent(d){
           `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('e${i}')">
             <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
       </div>
+      ${crRetireButton(p)}
     </div>`;
 }
 
@@ -896,6 +902,7 @@ function crCoach(d){
           `<button class="cr-opt${i ? '' : ' lead'}" onclick="crMove('t${i}')">
             <b>${esc(o.label)}</b><span>${esc(o.hint)}</span></button>`).join('')}</div>
       </div>
+      ${crRetireButton(p)}
     </div>`;
 }
 
@@ -923,6 +930,7 @@ function crFocus(d){
       <h2 class="cr-h">What will you work on this season?</h2>
       <p class="cr-sub">Meet the coach's challenge and the work pays off in full next season; miss it and it still counts for half. A new focus takes a season to bed in. Show a skill in ${d.master_seasons || 4} seasons and it is mastered for good.</p>
       <div class="cr-focus-grid">${p.focus.map(card).join('')}</div>
+      ${crRetireButton(p)}
     </div>`;
 }
 

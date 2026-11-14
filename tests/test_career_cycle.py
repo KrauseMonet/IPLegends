@@ -279,3 +279,66 @@ def test_the_api_starts_a_career_at_its_trials(deck, model):
         r = client.post("/api/career/move", json={"token": d["token"], "move": "v01"}).json()
         assert r["auction"]["kind"] == "debut"
         assert r["pending"]["kind"] != "trials"
+
+
+def _answer(p):
+    """A first answer to whatever is pending, for walking a career through the API."""
+    k = p["kind"]
+    if k == "trials":
+        return "v01"
+    if k == "mega":
+        return "b%d" % p["mega"]["suggested"]
+    if k == "plan":
+        return "p" + "0" * len(p["plan"])
+    return {"offer": "o0", "window": "x0", "focus": "f0", "coach": "t0", "event": "e0",
+            "moment": "m1", "incident": "i0", "epilogue": "w0"}[k]
+
+
+def test_a_contract_year_can_be_retired_from_after_a_preseason_answer(deck, model):
+    """[A288] A contract year asks no offer, so retire has to be offered on whichever pre-season
+    question shows first -- and still after one of them has been answered."""
+    from web.app import app
+    with TestClient(app) as client:
+        d = client.post("/api/career/start", json={"name": "X", "role": "opener",
+                                                    "debut": 2012, "seed": 3}).json()
+        found = False
+        for _ in range(400):
+            p = d["pending"]
+            assert p is not None, "career ended before a contract year was found"
+            if (p["kind"] in ("window", "focus", "coach", "event") and p["offers"]
+                    and p["offers"][0].get("contract_year")):     # a year that asked no offer
+                assert p["can_retire"]
+                found = True
+                break
+            d = client.post("/api/career/move", json={"token": d["token"],
+                                                      "move": _answer(p)}).json()
+        assert found
+        played = len(d["seasons"])
+        # answer this question, then retire from whatever pre-season question follows
+        d2 = client.post("/api/career/move", json={"token": d["token"], "move": _answer(p)}).json()
+        if d2["pending"]["kind"] in ("window", "focus", "coach", "event", "plan"):
+            d = d2
+        r = client.post("/api/career/move", json={"token": d["token"], "move": "r"}).json()
+        assert len(r["seasons"]) == played
+        assert r["pending"]["kind"] == "epilogue"          # asked where next, then the card
+        end = client.post("/api/career/move", json={"token": r["token"], "move": "w0"}).json()
+        assert end["summary"]["ending"] == "retired" and len(end["seasons"]) == played
+
+
+def test_retire_is_refused_once_a_season_has_begun(deck, model):
+    from web.app import app
+    with TestClient(app) as client:
+        d = client.post("/api/career/start", json={"name": "X", "role": "opener",
+                                                    "debut": 2012, "seed": 3}).json()
+        for _ in range(600):
+            p = d["pending"]
+            if p is None:
+                pytest.skip("no key moment in this career")
+            if p["kind"] in ("moment", "incident") and p["season_no"] > 1:   # past the debut,
+                # where the engine would refuse `r` on its own and hide a missing guard
+                assert not p["can_retire"]
+                r = client.post("/api/career/move", json={"token": d["token"], "move": "r"})
+                assert r.status_code == 409
+                return
+            d = client.post("/api/career/move", json={"token": d["token"],
+                                                      "move": _answer(p)}).json()

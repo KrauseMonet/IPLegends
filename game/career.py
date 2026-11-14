@@ -2976,6 +2976,7 @@ APPROACH_CHANCE = 0.10
 SHOP_CHANCE = 0.08
 APPROACH_WEIGHTS = {"higher": 1.0, "captain": 0.6, "bowl": 0.4}
 CAPTAIN_FROM = 4                         # seasons played before a club offers its armband
+CAPTAIN_RATING = 80                      # [A290] the Rating a club asks to lead its side
 WANTED_RATING = STAR_RATING              # a club takes a player this good whatever it needs
 UP_BAND = {"finisher": "middle", "middle": "top"}
 REQUEST_STANDING = -1                    # what asking costs you at your club
@@ -5401,7 +5402,10 @@ def event_fits(event: Event, ctx: EventContext) -> bool:
     can hold every card against it (A245)."""
     if ctx.squad and event.key in NOT_IN_A_SQUAD_SEASON:
         return False
-    if event.key == "captain" and ctx.captain:
+    if event.key == "captain" and (ctx.captain or ctx.k < CAPTAIN_FROM or (
+            ctx.rating is not None and ctx.rating < CAPTAIN_RATING)):
+        # [A290] nobody is handed an IPL armband on debut: the same seasons a rival club
+        # waits before offering its own (CAPTAIN_FROM), and a Rating that leads a side
         return False
     if event.key == "trade" and (CYCLE_ON or not ctx.staying or ctx.mega):
         # [A289] under the contract cycle, a club shopping you happens in the trade window
@@ -5429,7 +5433,8 @@ def season_event(cp: "Checkpoint", k: int, year: int, offer: Offer, squad: bool,
         return FOLLOW_UPS["press_feud"]
     club = canonical(offer.franchise)
     leader = ct.level(cp.traits.get("lead", 0.0)) >= LEAD_TRAIT
-    if ((cp.standing >= STANDING_LEAD or leader) and not squad and not already and k >= 2
+    if ((cp.standing >= STANDING_LEAD or leader) and not squad and not already
+            and k >= CAPTAIN_FROM
             and not any(t["k"] == "lead" and t.get("club") == club for t in cp.threads)):
         return FOLLOW_UPS["lead"]
     ctx = dataclasses.replace(
@@ -5633,6 +5638,12 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         elif CYCLE_ON and not (year in MEGA_YEARS and k > 0):
             # [A288] Under contract: your club keeps you, at the price you signed for.
             ck()
+            if queue and queue[0] == "r":
+                # Nothing is asked at the start of a contract year, so a retirement arrives
+                # here, ahead of whichever pre-season question was showing.
+                queue.pop(0)
+                career.retired, cp.ended = True, "retired"
+                break
             if cp.contract is None or cp.contract.club != cp.current:
                 last_price = cp.seasons[-1].price if cp.seasons else DEBUT_PRICE
                 cp.contract = cycle_contract(cp.current, last_price, year)

@@ -300,8 +300,90 @@ def test_the_purse_reserve_stops_a_reckless_human_from_stranding(deck):
 def test_the_catalogue_offers_each_person_once_and_respects_the_split(deck):
     lots = au.build_catalogue(deck, 1)
     assert len({lot.card.person_id for lot in lots}) == len(lots)
-    assert sum(lot.card.overseas is True for lot in lots) == au.OVERSEAS_LOTS
+    assert sum(lot.card.overseas is True for lot in lots) == au.OVERSEAS_LOTS == 68
+    assert len(lots) == 260
     assert lots[0].set_code == "M1"
+
+
+@needs_snapshot
+def test_the_catalogue_shares_each_passport_out_by_batting_band(deck):
+    """[A291] 192 domestic and 68 overseas lots, each shared over top / middle / finisher /
+    tail by BAND_SHARES -- stated here rather than read from the code (A207's trap) -- and
+    within a band the strongest draws are the ones listed."""
+    for seed in (1, 7, 30):
+        drawn = au.draw_seasons(deck, seed)
+        lots = au.build_catalogue(deck, seed)
+        listed = {lot.card.person_id for lot in lots}
+        for overseas, quota in ((False, [41, 31, 41, 79]), (True, [15, 11, 14, 28])):
+            mine = [c for c in drawn if (c.overseas is True) == overseas]
+            got = [c for c in mine if c.person_id in listed]
+            assert [sum(au.band(c) == b for c in got) for b in range(4)] == quota
+            for b in range(4):
+                inside = [c.display or 0 for c in got if au.band(c) == b]
+                outside = [c.display or 0 for c in mine
+                           if au.band(c) == b and c.person_id not in listed]
+                assert not outside or min(inside) >= max(outside), (seed, overseas, b)
+
+
+@needs_snapshot
+def test_a_band_that_runs_short_is_topped_up_from_the_strongest_rest(deck):
+    """[A291] A mega auction's retentions can thin a band below its quota. Every domestic
+    middle-order draw is then listed, and the places left over go to the strongest domestic
+    players not yet listed, so the domestic total still holds."""
+    drawn = au.draw_seasons(deck, 3)
+    middle = [c for c in drawn if c.overseas is not True and au.band(c) == 1]
+    keep = 10
+    gone = frozenset(c.person_id for c in middle[keep:])
+    lots = au.build_catalogue(deck, 3, gone)
+    cards = [lot.card for lot in lots]
+    domestic = [c for c in cards if c.overseas is not True]
+    assert len(domestic) == 192
+    assert sum(au.band(c) == 1 for c in domestic) == keep
+    # the top-up: the 21 extra places are the strongest unlisted domestic draws
+    ids = {c.person_id for c in domestic}
+    rest = [c for c in drawn if c.overseas is not True and c.person_id not in gone]
+    by_band = {b: [c for c in rest if au.band(c) == b] for b in range(4)}
+    quota = [41, 31, 41, 79]
+    base = {c.person_id for b in range(4) for c in by_band[b][:quota[b]]}
+    extra = [c for c in rest if c.person_id not in base][:192 - len(base)]
+    assert ids == base | {c.person_id for c in extra}
+
+
+@needs_snapshot
+def test_band_supply_counts_unbought_catalogue_players_by_band(deck):
+    """[A291] Recounted from the lots and the squads at every sale: a lot is available
+    until somebody owns him, whether or not his turn has come."""
+    checked = []
+
+    def on_sale(sale):
+        if len(checked) % 40 == 0:
+            owned = {c.person_id for t in a_box[0].teams for c in t.squad}
+            want = [[0, 0] for _ in range(4)]
+            for lot in a_box[0].lots:
+                if lot.card.person_id not in owned:
+                    want[au.band(lot.card)][0] += 1
+                    want[au.band(lot.card)][1] += (lot.card.display or 0) >= 85
+            assert au.band_supply(a_box[0]) == [tuple(x) for x in want]
+        checked.append(sale)
+
+    a_box = []
+    real = au.Auction
+
+    def spy(*args, **kw):
+        a_box.append(real(*args, **kw))
+        return a_box[-1]
+
+    au.Auction = spy
+    try:
+        a = au.run_auction(deck, 5, on_sale=on_sale)
+    finally:
+        au.Auction = real
+    assert len(checked) > 40
+    total = sum(n for n, _ in au.band_supply(a))
+    assert total == len(a.lots) - sum(1 for lot in a.lots
+                                      if any(lot.card.person_id == c.person_id
+                                             for t in a.teams for c in t.squad))
+    assert total < len(a.lots)
 
 
 @needs_snapshot

@@ -2459,6 +2459,19 @@ class BriefOut(BaseModel):
     progress: str = ""
 
 
+class BandSupplyOut(BaseModel):
+    """[A291] Catalogue players nobody has bought yet, in one batting band (A76)."""
+    band: Literal["top", "middle", "finisher", "tail"]
+    available: int
+    good: int = Field(description=f"of them, rated {auction.QUALITY_MARK} or more")
+
+
+def _supply_out(a) -> list[BandSupplyOut]:
+    names = ("top", "middle", "finisher", "tail")
+    return [BandSupplyOut(band=names[b], available=n, good=g)
+            for b, (n, g) in enumerate(auction.band_supply(a))]
+
+
 class AuctionOut(BaseModel):
     state: str
     phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "rtm_watch", "fill",
@@ -2510,6 +2523,9 @@ class AuctionOut(BaseModel):
                                    "in this room, in order -- for the announcements")
     brief: list[BriefOut] = Field(default=[], description="[A232] the board's three targets "
                                   "for your franchise; story only, they change nothing")
+    band_supply: list[BandSupplyOut] = Field(default=[], description="[A291] who is still to "
+                                             "be had in each batting band")
+    quality_mark: int = auction.QUALITY_MARK
 
 
 # `RoomStateOut` refers to `AuctionOut` before it is defined; resolve that now it exists.
@@ -2596,6 +2612,7 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
         recent=_recent(r, auction_report.whispers(a)),
         sold=sum(1 for s in a.sales if s.winner is not None),
         top_price=_top_price(a),
+        band_supply=_supply_out(a),
         brief=_brief_out(auction_report.judge(
             auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega), a, you)),
     )
@@ -2656,6 +2673,8 @@ class AuctionCatalogueOut(BaseModel):
     nobody needs until they press the button."""
     sets: list[AuctionCatalogueSetOut]
     current_set: str | None
+    band_supply: list[BandSupplyOut] = []
+    quality_mark: int = auction.QUALITY_MARK
 
 
 def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
@@ -2687,7 +2706,7 @@ def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
     current = lot.set_code if live is not None else None
     for st in sets:
         st.current = st.code == current
-    return AuctionCatalogueOut(sets=sets, current_set=current)
+    return AuctionCatalogueOut(sets=sets, current_set=current, band_supply=_supply_out(a))
 
 
 def _auction(fn, *args) -> AuctionOut:
@@ -3280,6 +3299,7 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         recent=_recent(r, _room_whispers(r)),
         sold=sum(1 for x in a.sales if x.winner is not None),
         top_price=_top_price(a),
+        band_supply=_supply_out(a),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
     pause = room_auction.pause_state(room)

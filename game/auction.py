@@ -64,8 +64,21 @@ FRANCHISES = (                  # the ten current franchises: (short, canonical 
 # Ranking one pool by rating alone gave a catalogue 60% overseas (the strongest seasons
 # skew that way), every squad filled its six by mid-auction, and 95 overseas lots went
 # unsold while two teams were left with nobody domestic to buy at all.
-DOMESTIC_LOTS = 170
-OVERSEAS_LOTS = 90
+# [A291] 170/90 was still too many overseas: ten squads hold exactly 60 overseas players
+# and all ten always filled their six, so 25-45 overseas lots an auction went unsold (a
+# tail-ender sold 49% of the time, 26% in a mega auction) while Indians sold 77-99%. 68
+# leaves a real auction's margin of unsold overseas players and gives the rest to Indians.
+DOMESTIC_LOTS = 192
+OVERSEAS_LOTS = 68
+
+# [A291] Each passport's lots are shared out by BATTING BAND (top / middle / finisher /
+# tail, A76) rather than taken strongest-first. Strongest-first listed ~29 middle-order
+# batters for ten teams that each set out to buy three, and 132 tail-enders for 50 places:
+# finisher and middle-order seasons rate lower across the archive, so a rating cut-off
+# starves exactly the places only they can fill. Declared game design: each batting band
+# is listed at 1.4x the places the computer teams aim to buy in it (BAND_TARGET: 40/30/40),
+# and the tail takes the rest, since it carries the bowling every twelve needs five of.
+BAND_SHARES = (0.215, 0.16, 0.215, 0.41)
 MARQUEE_SIZE = 12
 SET_SIZE = 12
 
@@ -357,13 +370,36 @@ def draw_seasons(deck: Deck, seed: int) -> list[Card]:
     return drawn
 
 
+def band_quotas(lots: int) -> list[int]:
+    """`lots` shared over the four bands by BAND_SHARES, largest remainder, so the four
+    always add up to `lots` exactly."""
+    raw = [share * lots for share in BAND_SHARES]
+    out = [int(x) for x in raw]
+    for b in sorted(range(4), key=lambda b: (out[b] - raw[b], b))[:lots - sum(out)]:
+        out[b] += 1
+    return out
+
+
+def _listed(drawn: list[Card], lots: int) -> list[Card]:
+    """One passport's lots: the strongest of each band up to its quota, then -- where a band
+    ran short (a mega auction's retentions can thin one) -- the strongest of the rest."""
+    chosen: list[Card] = []
+    for b, n in enumerate(band_quotas(lots)):
+        chosen += [c for c in drawn if band(c) == b][:n]
+    if len(chosen) < lots:
+        ids = {c.person_id for c in chosen}
+        chosen += [c for c in drawn if c.person_id not in ids][:lots - len(chosen)]
+    return chosen
+
+
 def build_catalogue(deck: Deck, seed: int, exclude: frozenset[str] = frozenset()) -> list[Lot]:
-    """The strongest DOMESTIC_LOTS domestic and OVERSEAS_LOTS overseas draws, in sets run
-    the way the real auction runs them: marquee first, then a set of each category in
-    turn, then the second set of each... `exclude` is everyone already retained."""
+    """DOMESTIC_LOTS domestic and OVERSEAS_LOTS overseas draws, each shared out by batting
+    band [A291], in sets run the way the real auction runs them: marquee first, then a set
+    of each category in turn, then the second set of each... `exclude` is everyone already
+    retained."""
     drawn = [c for c in draw_seasons(deck, seed) if c.person_id not in exclude]
-    pool = ([c for c in drawn if c.overseas is not True][:DOMESTIC_LOTS]
-            + [c for c in drawn if c.overseas is True][:OVERSEAS_LOTS])
+    pool = (_listed([c for c in drawn if c.overseas is not True], DOMESTIC_LOTS)
+            + _listed([c for c in drawn if c.overseas is True], OVERSEAS_LOTS))
     pool.sort(key=lambda c: (-(c.display or 0), -c.rating, c.person_id))
 
     marquee, rest = pool[:MARQUEE_SIZE], pool[MARQUEE_SIZE:]
@@ -898,6 +934,25 @@ def run_auction(deck: Deck, seed: int, human_short: str | None = None,
                 on_sale(sale)
     _fill(auction, human)
     return auction
+
+
+# [A291] What the floor shows as "still available", by batting band. A lot not in anybody's
+# squad can still be had -- in its own turn, in the accelerated round, or for ₹30L in the
+# fill round -- so availability is read off the squads, not off the sale log.
+QUALITY_MARK = 85
+
+
+def band_supply(auction: Auction) -> list[tuple[int, int]]:
+    """(available, of which rated QUALITY_MARK or more) per band, top order first."""
+    taken = {c.person_id for t in auction.teams for c in t.squad}
+    out = [[0, 0] for _ in range(4)]
+    for lot in auction.lots:
+        if lot.card.person_id in taken:
+            continue
+        b = out[band(lot.card)]
+        b[0] += 1
+        b[1] += (lot.card.display or 0) >= QUALITY_MARK
+    return [tuple(x) for x in out]
 
 
 def reserve_of(deck: Deck) -> list[Card]:

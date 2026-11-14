@@ -2351,7 +2351,13 @@ Money is held in **lakh** as integers.
 ### 15.1 The catalogue
 
 One season of every player is drawn at random per auction (so "which Kohli" varies), then
-the strongest **170 domestic and 90 overseas** draws are listed. **The split is by
+**192 domestic and 68 overseas** draws are listed (170/90 until A291), **each passport shared
+out by batting band** -- top 21.5%, middle 16%, finisher 21.5%, tail 41% (`BAND_SHARES`, so
+41/31/41/79 domestic and 15/11/14/28 overseas) -- the strongest of each band, and where a
+band runs short the strongest of the rest. [A291] Strongest-first listed ~29 middle-order
+batters for 30 places and 132 tail-enders for 50, because finisher and middle-order seasons
+rate lower across the archive. The floor and both sets panels show what is still available
+in each band and how many of those are rated 85+ (`band_supply`). **The split is by
 nationality, not by rating alone**: ranked as one pool the catalogue came out 60% overseas,
 every squad filled its six overseas places by mid-auction, and 95 overseas lots went unsold
 while two teams had nobody domestic left to buy. Lots run in sets as the real auction does —

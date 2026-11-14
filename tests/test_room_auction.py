@@ -879,6 +879,21 @@ def test_the_sets_list_every_lot_in_calling_order_with_how_each_went(deck, clock
     assert all(x.status in ("sold", "unsold") for x in skipped.lots)
     assert [s.code for s in out.sets if s.current] == [r.lot.set_code] == [out.current_set]
     assert any(x.status == "sold" for x in skipped.lots)
+    # [A291] the panel's "still available" is the unsold rows, by band, counted here
+    by_band = {"top": [0, 0], "middle": [0, 0], "finisher": [0, 0], "tail": [0, 0]}
+    names = ("top", "middle", "finisher", "tail")
+    for s in out.sets:
+        for x in s.lots:
+            if x.status != "sold":
+                b = by_band[names[au.band(by_index[x.lot].card)]]
+                b[0] += 1
+                b[1] += (x.rating or 0) >= 85
+    assert [(x.band, x.available, x.good) for x in out.band_supply] == \
+        [(n, *by_band[n]) for n in names]
+    # and the floor's own response carries the same counts
+    from web.app import _room_auction_out
+    floor = _room_auction_out(load(conn, code), deck, host)
+    assert floor.band_supply == out.band_supply
 
 
 def test_the_sets_are_empty_until_retentions_are_done(deck, clock):
@@ -1328,3 +1343,15 @@ def test_the_sets_panel_shows_each_players_batting_band():
     row = re.search(r"function setLotRow\(x\)\{.*?\n\}", js, re.S)
     assert row, "setLotRow not found"
     assert "bandTag(x)" in row.group(0)
+
+
+def test_the_floor_and_both_sets_panels_show_band_supply():
+    """[A291] "Still available" by band is drawn in the squad panel and in both sets views,
+    from the server's own counts rather than recounted in the page."""
+    import re
+    from pathlib import Path
+    js = (Path(__file__).parent.parent / "web/static/auction.js").read_text()
+    for fn in ("renderSquad", "currentSetHtml", "allSetsHtml"):
+        body = re.search(rf"function {fn}\(.*?\n\}}", js, re.S)
+        assert body, f"{fn} not found"
+        assert "supplyHtml(d.band_supply, d.quality_mark)" in body.group(0), fn

@@ -560,7 +560,7 @@ function currentSetHtml(d){
   if (!set) return `<p class="auc-sets-empty">${d.sets.length
     ? 'No set is being called right now.' : 'The sets are drawn once retentions are done.'}</p>`;
   return `<div class="auc-sets-head"><span>This set</span><h3>${esc(set.label)}</h3>
-    <em>${setCounts(set)}</em></div>${setTable(set)}`;
+    <em>${setCounts(set)}</em></div>${supplyHtml(d.band_supply, d.quality_mark)}${setTable(set)}`;
 }
 
 function allSetsHtml(d, first){
@@ -568,6 +568,7 @@ function allSetsHtml(d, first){
   if (first && d.current_set) SETS_OPEN.add(d.current_set);
   return `<div class="auc-sets-head"><span>All sets · in calling order</span>
     <h3>${d.sets.length} sets</h3><em>Tap a set to see its players</em></div>
+    ${supplyHtml(d.band_supply, d.quality_mark)}
     ${d.sets.map((s, i) => `<details class="auc-sets-set${s.current ? ' now' : ''}" data-set="${esc(s.code)}"${
       SETS_OPEN.has(s.code) ? ' open' : ''}>
       <summary><i>${i + 1}</i><span>${esc(s.label)}${s.current ? ' <b>Now</b>' : ''}</span>
@@ -682,6 +683,18 @@ function bandTag(c){
   return b ? `<em class="auc-band band-${b}" title="${BAND_SHORT[b]} order: can bat at ${posRange(c)}"><span class="bn">${BAND_SHORT[b]} </span>${posRange(c)}</em>` : '';
 }
 
+// [A291] Who is still to be had in each batting band: catalogue players nobody has bought.
+// A band reads "short" when it holds fewer players rated 85+ than there are teams still
+// buying -- the moment somebody will have to settle for less there.
+function supplyHtml(supply, mark){
+  if (!supply || !supply.length) return '';
+  const buying = A && A.teams ? A.teams.filter(t => t.players < (A.squad_size || 18)).length : 0;
+  return `<div class="auc-supply"><span class="auc-supply-lbl">Still available</span>${supply.map(x => {
+    const short = buying && x.good < buying;
+    return `<span class="auc-band band-${x.band}${short ? ' short' : ''}" title="${x.available} ${BAND_SHORT[x.band].toLowerCase()}-order players unbought, ${x.good} of them rated ${mark}+${short ? ` -- fewer than the ${buying} teams still buying` : ''}"><b>${x.available}</b> ${BAND_SHORT[x.band]} <i>${x.good} at ${mark}+</i></span>`;
+  }).join('')}</div>`;
+}
+
 function renderSide(){
   const d = A;
   const you = yourTeam(d);
@@ -772,7 +785,8 @@ function renderSquad(d, you){
     <div class="auc-bands">${Object.keys(BAND_ORDER).map(b => {
       const n = cards.filter(c => bandOf(c) === b).length;
       return `<span class="auc-band band-${b}${n ? '' : ' none'}"><b>${n}</b> ${BAND_SHORT[b]}</span>`;
-    }).join('')}</div>`;
+    }).join('')}</div>
+    ${supplyHtml(d.band_supply, d.quality_mark)}`;
 
   $('#aucSquadCount').textContent = `${d.squad.length}/${d.squad_size}`;
   // Grouped by where they bat, top order first -- the order a twelve is built in.

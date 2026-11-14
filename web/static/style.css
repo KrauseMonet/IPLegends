@@ -2885,6 +2885,13 @@ html{scroll-padding-top:80px}
 .auc-bands .auc-band{font-size:11px;padding:3px 8px}
 .auc-bands .auc-band b{font-size:12px}
 .auc-bands .auc-band.none{opacity:.5}
+.auc-supply{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.auc-supply-lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-right:2px}
+.auc-supply .auc-band{font-size:11px;padding:3px 8px}
+.auc-supply .auc-band b{font-size:12px}
+.auc-supply .auc-band i{font-style:normal;opacity:.75;margin-left:2px}
+.auc-supply .auc-band.short{background:color-mix(in srgb,var(--red,#e5484d) 14%,transparent);border-color:color-mix(in srgb,var(--red,#e5484d) 55%,transparent)}
+.auc-sets-shell .auc-supply{margin:0 0 12px}
 .auc-slot.filled .auc-band{margin:2px 0}
 .auc-order-row .auc-band{margin-left:2px}
 .auc-order-row.fits{box-shadow:inset 3px 0 0 var(--mint)}

@@ -268,6 +268,41 @@ def squads(rows: list[dict]) -> dict[str, Squad]:
     return out
 
 
+def _same_player(a: dict, b: dict) -> bool:
+    if a["short"] != b["short"]:
+        return False
+    ida = a.get("person_id_checked") or a.get("person_id")
+    idb = b.get("person_id_checked") or b.get("person_id")
+    if ida and ida != "debutant" and ida == idb:
+        return True
+    return norm(a["name"]) == norm(b["name"]) or swapped(a["name"]) == swapped(b["name"])
+
+
+def carry_decisions(rows: list[dict], current: set[tuple], key: tuple[str, ...],
+                    decisions: list[str]) -> tuple[list[dict], list[str]]:
+    """A team that switches source (the transcription, then Wikipedia once complete) turns
+    every row into a new one and leaves the old rows -- holding the hand decisions -- as
+    orphans. Each orphan's decisions move to the current row for the SAME PLAYER (same
+    team, and the same person id or the same name in either order) where that row has none,
+    and the orphan is then dropped. An orphan whose player cannot be found is kept, and
+    named, so a decision is never lost silently."""
+    live = [r for r in rows if tuple(r[c] for c in key) in current]
+    orphans = [r for r in rows if tuple(r[c] for c in key) not in current]
+    kept, notes = [], []
+    for o in orphans:
+        if not any(o.get(c) for c in decisions):
+            continue                  # nothing decided in it: safe to drop
+        target = next((r for r in live if _same_player(o, r)), None)
+        if target is None:
+            kept.append(o)
+            notes.append(f"{o['short']}: a decision for {o['name']} has no current row; kept")
+            continue
+        for c in decisions:
+            if o.get(c) and not target.get(c):
+                target[c] = o[c]
+    return live + kept, notes
+
+
 # ---------------------------------------------------------------- birth dates (pure)
 
 def birth_rows(people: list[dict], wikidata: dict[str, list[str]], wikipedia: dict[str, str]) -> list[dict]:
@@ -287,6 +322,17 @@ def birth_rows(people: list[dict], wikidata: dict[str, list[str]], wikipedia: di
 
 # ---------------------------------------------------------------- commands
 
+def ipl_overseas() -> dict[str, str]:
+    """person -> 'yes'/'no' from the deck snapshot's latest card, where the passport is known."""
+    from tools.snapshot_deck import deck_from, read_document
+    out: dict[str, tuple[int, str]] = {}
+    for cards in deck_from(read_document()).cards_by_fs.values():
+        for c in cards:
+            if c.overseas is not None and c.season_year >= out.get(c.person_id, (0, ""))[0]:
+                out[c.person_id] = (c.season_year, "yes" if c.overseas else "no")
+    return {k: v for k, (_, v) in out.items()}
+
+
 def do_retained() -> None:
     wikitext = fetch({"action": "parse", "page": PAGE, "prop": "wikitext", "format": "json",
                       "formatversion": "2"})["parse"]["wikitext"]
@@ -296,6 +342,15 @@ def do_retained() -> None:
     for r in wiki + listed:
         r["person_id"], r["how"] = resolve(r, by_title, by_name)
     rows, notes = choose_rows(wiki, listed)
+    # A player with an IPL record takes his passport from our own nationality data, which
+    # check 21 holds against every real XI (A51), not from the page: Wikipedia's 2027 page
+    # listed Cameron Green, Finn Allen and Tim Seifert as Indian on 2026-11-17.
+    known = ipl_overseas()
+    for r in rows:
+        ours = known.get(r["person_id"])
+        if ours is not None and ours != r["overseas"]:
+            notes.append(f"{r['short']}: {r['name']} is overseas={ours} by our data, the source says {r['overseas'] or 'nothing'}")
+            r["overseas"] = ours
     for r in rows:
         if r["salary_lakh"] is None:      # unknown, written blank -- never the string "None"
             r["salary_lakh"] = ""
@@ -308,10 +363,20 @@ def do_retained() -> None:
                "person_id", "how", "person_id_checked"]
     counts = merge_override(RETAINED_CSV, columns, rows, key=key, decided="person_id_checked")
     report_merge(RETAINED_CSV, counts)
+    current = {tuple(str(r[c]) for c in key) for r in rows}
+    stored = read_override(RETAINED_CSV)
+    fields = list(stored[0].keys()) if stored else columns
+    merged, moved = carry_decisions(stored, current, key, [c for c in fields if c not in columns]
+                                    + ["person_id_checked"])
+    with RETAINED_CSV.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerows(merged)
+    for n in moved:
+        print("  CHECK:", n)
     print(f"  Wikipedia {len(wiki)} rows, transcribed list {len(listed)} rows")
     for n in notes:
         print("  CHECK:", n)
-    current = {tuple(str(r[c]) for c in key) for r in rows}
     print_summary([r for r in read_override(RETAINED_CSV) if tuple(r[c] for c in key) in current])
 
 

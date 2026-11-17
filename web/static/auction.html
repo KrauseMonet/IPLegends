@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=1e47ce323d">
+<link rel="stylesheet" href="/static/style.css?v=8bde1c5585">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -61,15 +61,17 @@
   <!-- ============ SETUP ============ -->
   <section id="aucSetup" class="hide">
     <div class="auc-hero">
-      <div class="auc-kicker">Mega auction · 19 seasons in one room</div>
+      <div class="auc-kicker" id="aucKicker">Mega auction · 19 seasons in one room</div>
       <h2 class="auc-title">Pick your <span>franchise</span></h2>
-      <p class="auc-lede">₹120 crore. Eighteen players. Every lot is one real season of one
+      <p class="auc-lede" id="aucLede">₹120 crore. Eighteen players. Every lot is one real season of one
         player, drawn at random, so the Kohli on offer might be 2016 or 2022. Nine franchises
         bid against you, and then your twelve play the season against them.</p>
     </div>
     <div id="aucFranchises" class="auc-franchises"></div>
     <div class="room-label" style="margin-top:26px">Format</div>
     <div class="room-choices" id="aucFormatChoices">
+      <button class="room-choice" data-format="mini" onclick="setFormat('mini')"
+        title="The real 2027 retained squads and purses, and our provisional list until the official one on 3 December.">IPL 2027 mini auction · new</button>
       <button class="room-choice" data-format="mega" onclick="setFormat('mega')"
         title="Keep up to five of your franchise's legends first; unused places become Right to Match cards.">Mega auction · retentions &amp; RTM</button>
       <button class="room-choice" data-format="open" onclick="setFormat('open')"
@@ -318,6 +320,6 @@
 <script src="/static/auth.js?v=bf7bef535d"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
 <script src="/static/auction_report.js?v=26ea24b6dc"></script>
-<script src="/static/auction.js?v=f48b831c4e"></script>
+<script src="/static/auction.js?v=9e6f8f6ec0"></script>
 </body>
 </html>

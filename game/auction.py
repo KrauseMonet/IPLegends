@@ -439,10 +439,22 @@ class Team:
     retained: int = 0               # how many of `squad` were kept before the auction
     rtm: int = 0                    # Right to Match cards left
     legend: Card | None = None      # [A215] a room seat's career legend, free in its squad
+    # [A297] A mini auction's real limits, per team: its retained squad plus the places it
+    # has left (25 at most), its overseas places (8 at most), and the 18 it must reach.
+    # The defaults are an open or mega auction's, where all three are the same for everyone.
+    squad_size: int = SQUAD_SIZE
+    overseas_cap: int = SQUAD_OVERSEAS_CAP
+    squad_min: int | None = None
 
     @property
     def open_places(self) -> int:
-        return SQUAD_SIZE - len(self.squad)
+        return self.squad_size - len(self.squad)
+
+    @property
+    def required_places(self) -> int:
+        """Places that MUST still be filled: up to `squad_min`, or every open place."""
+        floor = self.squad_size if self.squad_min is None else self.squad_min
+        return max(0, floor - len(self.squad))
 
     @property
     def overseas(self) -> int:
@@ -451,14 +463,14 @@ class Team:
     def max_bid(self) -> int:
         """The most this team may pay for the next player and still afford every place
         left after it at the minimum price."""
-        return self.purse - MIN_PRICE * max(0, self.open_places - 1)
+        return self.purse - MIN_PRICE * max(0, self.required_places - 1)
 
     def may_buy(self, card: Card) -> bool:
         """Every rule except price: room in the squad, room under the overseas cap, and a
         legal twelve still reachable with the card added."""
         if self.open_places <= 0:
             return False
-        if card.overseas is True and self.overseas >= SQUAD_OVERSEAS_CAP:
+        if card.overseas is True and self.overseas >= self.overseas_cap:
             return False
         if any(c.person_id == card.person_id for c in self.squad):
             return False
@@ -515,29 +527,34 @@ KEEPERS_WANTED = 2
 BOWLERS_WANTED = 7
 
 
-def value_curve(display: int | None, mega: bool = False) -> float:
-    a, k = MEGA_VALUE if mega else OPEN_VALUE
+def value_curve(display: int | None, mega: bool = False, mini: bool = False) -> float:
+    a, k = MINI_VALUE if mini else MEGA_VALUE if mega else OPEN_VALUE
     return a * math.exp(k * ((display or 70) - 70))
 
 
 def need(team: Team, card: Card) -> float:
+    # [A297] The targets are for a squad of eighteen; a mini auction's squads run to 25,
+    # so they scale with the squad (and are exactly the old ones at eighteen).
+    scale = team.squad_size / SQUAD_SIZE
     m = 1.0
     b = band(card)
+    target = round(BAND_TARGET[b] * scale)
     have = sum(band(c) == b for c in team.squad)
-    if have < BAND_TARGET[b]:
-        m *= min(1.3, 1.0 + 0.1 * (BAND_TARGET[b] - have))
-    elif have >= BAND_TARGET[b] + 2:
+    if have < target:
+        m *= min(1.3, 1.0 + 0.1 * (target - have))
+    elif have >= target + 2:
         m *= 0.55
     keepers = sum(c.keeper_eligible for c in team.squad)
     if card.keeper_eligible:
         if keepers == 0:
             m *= 1.4
-        elif keepers >= KEEPERS_WANTED and reads_as_keeper(card):
+        elif keepers >= round(KEEPERS_WANTED * scale) and reads_as_keeper(card):
             m *= 0.8
     if card.has_bowl:
         bowlers = sum(c.has_bowl for c in team.squad)
-        if bowlers < BOWLERS_WANTED:
-            m *= 1.0 + 0.05 * (BOWLERS_WANTED - bowlers)
+        wanted = round(BOWLERS_WANTED * scale)
+        if bowlers < wanted:
+            m *= 1.0 + 0.05 * (wanted - bowlers)
     if card.overseas is True and team.overseas >= OVERSEAS_CAP:
         m *= 0.7
     return m
@@ -787,6 +804,8 @@ class Auction:
     # [A141] Auction rooms only: legends a human claimed and lost to a better season,
     # {team index: [(card, winning team index)]}. Empty everywhere else.
     retention_lost: dict = field(default_factory=dict)
+    # [A297] A mini auction's market: ages, debutants and money a place. None otherwise.
+    market: "Market | None" = None
 
     @property
     def unsold(self) -> list[Lot]:
@@ -808,6 +827,8 @@ def lot_ceilings(auction: Auction, lot: Lot, round_name: str,
         if team.human:
             cap = min(human_ceiling, team.max_bid()) if team.may_buy(lot.card) else 0
             ceilings[team.index] = cap if cap >= lot.base else 0
+        elif auction.market is not None:
+            ceilings[team.index] = mini_ceiling(team, lot, auction.seed, round_no, auction.market)
         else:
             ceilings[team.index] = cpu_ceiling(team, lot, auction.seed, round_no, auction.mega)
     return ceilings
@@ -1004,7 +1025,7 @@ def _fill(auction: Auction, human: Human | None) -> None:
     it hands out, and a team it cannot finish is recorded in `stranded` rather than
     papered over."""
     while True:
-        short = [t for t in auction.teams if t.open_places > 0 and t.index not in auction.stranded]
+        short = [t for t in auction.teams if t.required_places > 0 and t.index not in auction.stranded]
         if not short:
             return
         team = min(short, key=lambda t: (len(t.squad), t.index))
@@ -1015,7 +1036,8 @@ def _fill(auction: Auction, human: Human | None) -> None:
         if team.human and human is not None:
             card = human.fill_choice(auction, team, options)
         else:
-            card = max(options, key=lambda c: need(team, c) * value_curve(c.display, auction.mega))
+            card = max(options, key=lambda c: need(team, c) * value_curve(c.display, auction.mega,
+                                                                           auction.market is not None))
         lot = next((lot for lot in auction.unsold if lot.card is card),
                    Lot(-1, card, "REG", MIN_PRICE))
         team.squad.append(card)
@@ -1099,3 +1121,129 @@ def twelve_value(squad: list[Card]) -> float | None:
         _TWELVE_VALUE[key] = (None if chosen is None
                               else sum(_card_value(c) for c in chosen) / TWELVE_SIZE)
     return _TWELVE_VALUE[key]
+
+
+# --- the 2027 mini auction [A297] ---------------------------------------------------------
+#
+# The real auction's starting point (`game.mini2027.Preset`): ten retained squads, what each
+# has left to spend, its places and overseas places, and the list. No retentions to make and
+# no Right to Match (none in a mini auction). Computer teams bid as in any auction, with three
+# things only a mini auction has, each measured on the real 2024 and 2026 mini auctions:
+#
+# * AGE. Of everyone shortlisted, each year past 30 cut the odds of being BOUGHT about a
+#   quarter (x0.77 a year, 95% x0.64-0.91); among those bought the price barely moved.
+#   Modelled as each team's view of a player falling AGE_FACTOR a year past AGE_FROM.
+# * DEBUTANTS. Only 11-17% of shortlisted players with no IPL record were bought, but those
+#   who were went for about twice a mega auction's debutant prices. Modelled as a scouting
+#   draw: SCOUTED of debutants are known to the computer teams, each team keen on one with
+#   chance KEEN, and a keen team values him at DEBUT_PREMIUM; the rest draw no bid at all.
+# * GAPS. Spending followed what a squad lacked (+Rs 1.73 cr spent a player short in a role),
+#   which `need` already carries, scaled to a squad of 25.
+#
+# Declared game design, tuned by `tools.mini_calibration` against those targets.
+
+# Measured by `tools.mini_calibration` (20 auctions, no human) against the real minis: spent
+# 89% of the purses (2024 ~87%), top price ~Rs 19 cr (max 21.5; real 24.75-25.2), 9 sold for
+# Rs 10 cr+ and 17 for Rs 5 cr+ (real 5-6 and 13-19, with ~25% less money than 2027's Rs
+# 298 cr), 10% of debutants bought (real 11-17%), and bought by age 28% / 27% / 36% / 26% /
+# 13% under 26 / 26-30 / 30-33 / 33-36 / 36+ (real 47 / 31 / 35 / 29 / 19 -- the young are
+# under-bought because the young players listed with an IPL record are mostly weak cards).
+MINI_VALUE = (45.0, 0.26)
+AGE_FROM = 30
+AGE_FACTOR = 0.8
+SCOUTED = 0.6
+KEEN = 0.5
+DEBUT_PREMIUM = 4.0
+
+
+@dataclass(frozen=True)
+class Market:
+    ages: dict
+    debutants: frozenset
+    per_place: float                    # money left a place across the league, in lakh
+
+
+def mini_ceiling(team: Team, lot: Lot, seed: int, round_no: int, market: Market) -> int:
+    card = lot.card
+    if not team.may_buy(card):
+        return 0
+    pid = _pid(card.person_id)
+    premium = 1.0
+    if card.person_id in market.debutants:
+        if _unit(seed, pid, 7) >= SCOUTED or _unit(seed, team.index, pid, 8) >= KEEN:
+            return 0
+        premium = DEBUT_PREMIUM
+    per_place = (team.purse - MIN_PRICE * team.open_places) / max(1, team.open_places)
+    pressure = max(0.3, min(2.5, per_place / market.per_place)) ** PURSE_PRESSURE
+    age = market.ages.get(card.person_id)
+    old = AGE_FACTOR ** max(0.0, age - AGE_FROM) if age is not None else 1.0
+    noise = 1.0 + NOISE * (2 * _unit(seed, team.index, lot.index, round_no, 4) - 1)
+    value = (value_curve(card.display, mini=True) * need(team, card) * pressure
+             * _personality(team, card) * old * premium * noise)
+    ceiling = min(int(value), team.max_bid(), int(MAX_SHARE * PURSE))
+    return ceiling if ceiling >= lot.base else 0
+
+
+def mini_catalogue(entries: list[tuple[Card, int, bool]], seed: int) -> list[Lot]:
+    """The list in sets, as a mini auction runs it: capped players first, a set of each
+    category in turn, the strongest first; then the uncapped the same way. Within a set the
+    order is drawn."""
+    sets: list[tuple[str, list[tuple[Card, int]]]] = []
+    for prefix, capped in (("", True), ("U", False)):
+        group = sorted([(c, b) for c, b, cap in entries if cap == capped],
+                       key=lambda cb: (-(cb[0].display or 0), cb[0].person_id))
+        grouped = {cat: [cb for cb in group if _category(cb[0]) == cat] for cat in _CATEGORY_ORDER}
+        round_no = 1
+        while any(grouped.values()):
+            for cat in _CATEGORY_ORDER:
+                chunk, grouped[cat] = grouped[cat][:SET_SIZE], grouped[cat][SET_SIZE:]
+                if chunk:
+                    sets.append((f"{prefix}{cat}{round_no}", chunk))
+            round_no += 1
+    lots: list[Lot] = []
+    for code, chunk in sets:
+        for c, base in sorted(chunk, key=lambda cb: _mix(seed, _pid(cb[0].person_id), 2)):
+            lots.append(Lot(len(lots), c, code, base))
+    return lots
+
+
+def make_mini_teams(preset, seed: int, human_short: str | None = None,
+                    humans: frozenset[str] = frozenset()) -> list[Team]:
+    teams = make_teams(seed, human_short, humans)
+    for t in teams:
+        squad = list(preset.squads.get(t.short, []))
+        t.squad, t.paid, t.retained = squad, [0] * len(squad), len(squad)
+        t.purse = preset.purse[t.short]
+        t.squad_size = preset.squad_size[t.short]
+        t.overseas_cap = preset.overseas_cap[t.short]
+        t.squad_min = MINI_SQUAD_MIN
+    return teams
+
+
+MINI_SQUAD_MIN = 18
+
+
+def mini_market(preset) -> Market:
+    places = sum(preset.squad_size[s] - len(preset.squads.get(s, [])) for s in preset.purse)
+    return Market(dict(preset.ages), frozenset(preset.debutants),
+                  sum(preset.purse.values()) / max(1, places))
+
+
+def run_mini_auction(preset, seed: int, human_short: str | None = None,
+                     human: Human | None = None,
+                     on_sale: Callable[[Sale], None] | None = None) -> Auction:
+    teams = make_mini_teams(preset, seed, human_short)
+    lots = mini_catalogue(preset.lots, seed)
+    auction = Auction(seed, lots, teams, register=[], reserve=[lot.card for lot in lots],
+                      market=mini_market(preset))
+    for round_name in ROUNDS:
+        lots = auction.lots if round_name == "main" else auction.unsold
+        for lot in lots:
+            if all(t.open_places == 0 for t in auction.teams):
+                break
+            sale = _offer(auction, lot, round_name, human)
+            auction.sales.append(sale)
+            if on_sale:
+                on_sale(sale)
+    _fill(auction, human)
+    return auction

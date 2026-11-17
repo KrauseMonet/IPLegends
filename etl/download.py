@@ -35,6 +35,19 @@ ARCHIVES = {
     "tests": "tests_male_json.zip",
     "odis": "odis_male_json.zip",
     "t20is": "t20s_male_json.zip",
+    # [A297] Other T20 leagues, for 2027 auction newcomers with no IPL record: who did
+    # well this season, and later a rating carried across from these leagues.
+    "sma": "sma_male_json.zip",      # Syed Mushtaq Ali Trophy (Indian domestic T20)
+    "bbl": "bbl_male_json.zip",
+    "sat": "sat_male_json.zip",      # SA20
+    "ilt": "ilt_male_json.zip",      # International League T20
+    "cpl": "cpl_male_json.zip",
+    "mlc": "mlc_male_json.zip",
+    "psl": "psl_male_json.zip",
+    "ntb": "ntb_male_json.zip",      # T20 Blast
+    "bpl": "bpl_male_json.zip",
+    "ssm": "ssm_male_json.zip",      # Super Smash
+    "lpl": "lpl_male_json.zip",
 }
 
 # The people register lives on a different page and is linked relatively.

@@ -41,3 +41,5 @@ assets/
 !data/leans_a260.json.gz
 # [A278] the career skill cut-offs: without it a career season earns no skill, silently
 !data/career_skill_cuts.json.gz
+# [A297] the 2027 mini auction preset
+!data/mini2027.json.gz

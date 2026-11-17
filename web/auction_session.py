@@ -6,6 +6,8 @@ scratch up to wherever it next needs the human.
 
     A{seed}-{SHORT}-{token}.{token}...       an open auction (everyone starts from scratch)
     AR{seed}-{SHORT}-{token}.{token}...      a mega auction: retentions and Right to Match
+    AM{seed}-{SHORT}-{token}.{token}...      [A297] the 2027 mini auction: the real retained
+                                             squads and purses, and our provisional list
 
 The two are different games and are told apart by the prefix, never by a token, so a state
 saved before retentions existed replays exactly as it did.
@@ -42,6 +44,7 @@ from etl.feasibility import Card, Deck, order_errors
 
 PREFIX = "A"
 MEGA = "AR"
+MINI = "AM"
 
 
 class InvalidState(ValueError):
@@ -56,13 +59,26 @@ def is_mega(state: str) -> bool:
     return state.startswith(MEGA)
 
 
+def is_mini(state: str) -> bool:
+    return state.startswith(MINI)
+
+
+def mini_preset():
+    """The committed 2027 preset, or an InvalidState if the deployment lacks it."""
+    from tools.snapshot_mini import load_preset
+    preset = load_preset()
+    if preset is None:
+        raise InvalidState("the 2027 auction is not available here")
+    return preset
+
+
 # --- encoding ----------------------------------------------------------------------------
 
 _TOKEN = re.compile(r"^(?:\d+o?|z\d+|p[A-Z]{1,2}\d+|pall|f\d+|t\d+(?:,\d+){11}"
                     r"|k(?:\d+(?:,\d+)*)?|r[01]|m[01]|x\d+)$")
 
 
-def encode(seed: int, short: str, tokens: list[str], mega: bool = False) -> str:
+def encode(seed: int, short: str, tokens: list[str], mega: bool = False, mini: bool = False) -> str:
     """Runs of closed zeros are folded into `zN`, so passing on a hundred lots costs a few
     characters rather than two hundred."""
     folded: list[str] = []
@@ -74,11 +90,11 @@ def encode(seed: int, short: str, tokens: list[str], mega: bool = False) -> str:
             folded.append("z1")
         else:
             folded.append(tok)
-    return f"{MEGA if mega else PREFIX}{seed}-{short}-" + ".".join(folded)
+    return f"{MINI if mini else MEGA if mega else PREFIX}{seed}-{short}-" + ".".join(folded)
 
 
 def decode(state: str) -> tuple[int, str, list[str]]:
-    m = re.fullmatch(r"AR?(\d+)-([A-Z]{2,4})-(.*)", state)
+    m = re.fullmatch(r"A[RM]?(\d+)-([A-Z]{2,4})-(.*)", state)
     if not m:
         raise InvalidState("not an auction state")
     seed, short, body = int(m.group(1)), m.group(2), m.group(3)
@@ -197,10 +213,11 @@ class Replay:
     rtm_other: au.Team | None = None
     twelve: tuple[list[Card], Card] | None = None     # chosen, once phase == "ready"
     suggestion: tuple[list[Card], Card] | None = None
+    mini: bool = False
 
     @property
     def state(self) -> str:
-        return encode(self.seed, self.short, self.tokens, self.mega)
+        return encode(self.seed, self.short, self.tokens, self.mega, self.mini)
 
     @property
     def franchise(self) -> str:
@@ -226,12 +243,15 @@ class Replay:
 
 def replay(deck: Deck, state: str) -> Replay:
     seed, short, tokens = decode(state)
-    mega = is_mega(state)
+    mega, mini = is_mega(state), is_mini(state)
     pool = au.retention_pool(deck, dict(au.FRANCHISES)[short]) if mega else None
     policy = _Replayer(tokens, pool)
-    base = dict(seed=seed, short=short, tokens=tokens, mega=mega)
+    base = dict(seed=seed, short=short, tokens=tokens, mega=mega, mini=mini)
     try:
-        auction = au.run_auction(deck, seed, human_short=short, human=policy, mega=mega)
+        if mini:
+            auction = au.run_mini_auction(mini_preset(), seed, human_short=short, human=policy)
+        else:
+            auction = au.run_auction(deck, seed, human_short=short, human=policy, mega=mega)
     except _Pause as p:
         info = p.info
         auction = info.get("auction")
@@ -269,16 +289,18 @@ def replay(deck: Deck, state: str) -> Replay:
 
 
 def _next_state(r: Replay, tokens: list[str]) -> str:
-    return encode(r.seed, r.short, tokens, r.mega)
+    return encode(r.seed, r.short, tokens, r.mega, r.mini)
 
 
 # --- moves -------------------------------------------------------------------------------
 
 
-def new_state(seed: int, short: str, mega: bool = False) -> str:
+def new_state(seed: int, short: str, mega: bool = False, mini: bool = False) -> str:
     if short not in {s for s, _ in au.FRANCHISES}:
         raise InvalidState(f"unknown franchise {short}")
-    return encode(seed, short, [], mega)
+    if mini:
+        mini_preset()
+    return encode(seed, short, [], mega and not mini, mini)
 
 
 def retain(deck: Deck, state: str, indexes: list[int]) -> Replay:

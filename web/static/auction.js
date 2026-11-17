@@ -37,7 +37,7 @@ const FORMAT_KEY = 'iplegends_auction_format';
 let A = null;              // the last AuctionOut drawn
 let CHOSEN_TEAM = null;
 let BID_STYLE = 'live';
-let FORMAT = 'mega';       // 'mega' = retentions and Right to Match [A138]; 'open' = none
+let FORMAT = 'mini';       // 'mini' = 2027 [A297]; 'mega' = retentions and RTM [A138]; 'open' = none
 let RETAIN = [];           // pool indexes picked, in the order picked (the slab order)
 let RETAIN_SEASON = {};    // person_id -> the pool index of the season showing for him
 let LIMIT = null;          // the limit being composed, in lakh
@@ -47,7 +47,7 @@ let TWELVE = null;         // [11 order indexes..., impact index] being edited
 let TWELVE_SEL = null;     // position in TWELVE the user tapped, awaiting a swap
 
 try { BID_STYLE = localStorage.getItem(STYLE_KEY) || 'live'; } catch(e) {}
-try { FORMAT = localStorage.getItem(FORMAT_KEY) || 'mega'; } catch(e) {}
+try { FORMAT = localStorage.getItem(FORMAT_KEY) || 'mini'; } catch(e) {}
 
 // --- money -----------------------------------------------------------------------------
 
@@ -104,18 +104,35 @@ function setBidStyle(style){
   if (A && A.phase === 'bid') renderBidControls();
 }
 
+// [A297] What the setup screen says for each format.
+const FORMAT_INTRO = {
+  mini: ['IPL 2027 mini auction · 16 December',
+         'The real retained squads and the money each franchise has left, as announced on ' +
+         '17 November. Fill your gaps from 358 players: the released, last year\'s unsold, ' +
+         'and newcomers who starred in this season\'s leagues. Our list until the official ' +
+         'register lands on 3 December. Cards for 2027 are projections from every earlier season.'],
+  mega: ['Mega auction · 19 seasons in one room',
+         '₹120 crore. Eighteen players. Every lot is one real season of one player, drawn at ' +
+         'random, so the Kohli on offer might be 2016 or 2022. Nine franchises bid against you, ' +
+         'and then your twelve play the season against them.'],
+};
+FORMAT_INTRO.open = FORMAT_INTRO.mega;
+
 function setFormat(format){
   FORMAT = format;
   try { localStorage.setItem(FORMAT_KEY, format); } catch(e) {}
   document.querySelectorAll('#aucFormatChoices .room-choice').forEach(b =>
     b.classList.toggle('sel', b.dataset.format === format));
+  const intro = FORMAT_INTRO[format] || FORMAT_INTRO.mega;
+  if ($('#aucKicker')) { $('#aucKicker').textContent = intro[0]; $('#aucLede').textContent = intro[1]; }
 }
 
 function startAuction(ctrl){
   if (!CHOSEN_TEAM) return;
   busyClick(ctrl, 'Opening the room…', async () => {
     const d = await api('/api/auction', {method: 'POST', retry: true, headers: {'Content-Type': 'application/json'},
-                                         body: JSON.stringify({team: CHOSEN_TEAM, mega: FORMAT === 'mega'})});
+                                         body: JSON.stringify({team: CHOSEN_TEAM, mega: FORMAT === 'mega',
+                                                               mini: FORMAT === 'mini'})});
     await apply(d, false);
   });
 }
@@ -614,7 +631,7 @@ function renderFloor(){
     ${c.crest ? `<img class="auc-card-wm" src="${c.crest}" alt="">` : ''}
     <div class="auc-card-top">
       <div>
-        <div class="auc-card-season">${crestImg(c.crest, 'auc-card-crest')}${[c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
+        <div class="auc-card-season">${crestImg(c.crest, 'auc-card-crest')}${d.mini ? (c.franchise ? esc(c.franchise) + ' · ' : '') + '2027' : [c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
         <div class="auc-card-name">${c.name}</div>
         <div class="auc-card-meta">${ICON[c.kind] || ''}${keeperBadge(c)}
           <span>${roleLabel(c)}</span>${tag}</div>
@@ -622,7 +639,8 @@ function renderFloor(){
       </div>
       <div class="auc-card-rating">${ratingBadge(c, true)}</div>
     </div>
-    <div class="colophon stat-tiles auc-stats">${cardStatHtml(c)}</div>
+    ${d.mini && !c.bat_balls && !c.bowl_balls ? '' : `<div class="colophon stat-tiles auc-stats">${cardStatHtml(c)}</div>`}
+    ${lot.note ? `<div class="auc-card-note">${esc(lot.note)}</div>` : ''}
     <div class="auc-card-base">Base price <b>${cr(lot.base)}</b></div>`;
 
   if (isRtm(d.phase) || d.phase === 'rtm_watch'){
@@ -702,9 +720,12 @@ function renderSide(){
   $('#aucPurse').textContent = cr(you.purse);
   const open = d.squad_size - you.players;
   const reserve = you.purse - d.max_bid;
-  $('#aucReserve').textContent = open > 1
-    ? `Must keep ${cr(reserve)} for ${open - 1} more place${open - 1 === 1 ? '' : 's'}`
-    : open === 1 ? 'Last place in your squad' : 'Squad complete';
+  // [A297] A mini auction need only reach its minimum; the reserve is for those places.
+  const owed = d.squad_min != null ? Math.max(0, d.squad_min - you.players) : open;
+  $('#aucReserve').textContent = open === 0 ? 'Squad complete'
+    : owed > 1 ? `Must keep ${cr(reserve)} for ${owed - 1} more place${owed - 1 === 1 ? '' : 's'}`
+    : d.squad_min != null ? `${open} place${open === 1 ? '' : 's'} open · ${owed ? 'one more to reach ' + d.squad_min : 'squad of ' + d.squad_min + ' reached'}`
+    : 'Last place in your squad';
   $('#aucPurseBar').style.width = (100 * you.purse / d.purse_total) + '%';
 
   $('#aucTeams').innerHTML = d.teams.map(t => `
@@ -712,7 +733,7 @@ function renderSide(){
       ${chip(t.short)}${t.owner ? `<em class="auc-owner">${esc(t.owner)}</em>` : ''}
       <div class="auc-team-bar crest-${t.short}"><i style="width:${100 * t.purse / d.purse_total}%;background:var(--team)"></i></div>
       <b>${cr(t.purse)}</b>
-      <span>${t.players}/${d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>
+      <span>${t.players}/${t.size || d.squad_size}${t.overseas ? ` · ${t.overseas} OS` : ''}${d.mega ? ` · ${t.rtm} RTM` : ''}</span>
     </div>`).join('');
 
   $('#aucSoldCount').textContent = d.sold;

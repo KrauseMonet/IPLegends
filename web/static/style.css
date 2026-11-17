@@ -1976,6 +1976,7 @@ body{
 .auc-card-base{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--ink-3);margin-top:14px}
 .auc-card-base b{color:var(--ink);font-size:13px;letter-spacing:0;margin-left:6px}
+.auc-card-note{font-size:12.5px;line-height:1.45;color:var(--muted);margin:10px 0 2px;max-width:46ch}
 
 .auc-stamp{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:10px;background:rgba(5,11,26,.72);pointer-events:none}

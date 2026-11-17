@@ -33,3 +33,5 @@ __pycache__/
 # [A278] the career skill cut-offs, measured from engine replays: without it a career season
 # earns no skill at all, silently
 !/data/career_skill_cuts.json.gz
+# [A297] the 2027 mini auction preset: retained squads, purses and our list
+!/data/mini2027.json.gz

@@ -73,7 +73,20 @@ def bat_delta(card: Card, model: Model) -> tuple[float, bool]:
     if card.bat is not None:
         return card.bat, True
     band = card.band if card.band in model.unrated_bat else "tail"
-    return model.unrated_bat[band] - model.season_mean[("batting", card.season_year)], False
+    return model.unrated_bat[band] - season_key(model.season_mean, "batting", card.season_year), False
+
+
+def season_key(table: dict, discipline: str, year: int | None):
+    """The centring constant for a season. [A297] A projected 2027 card belongs to a season
+    the archive does not have, so a year AFTER the latest is centred like the latest; any
+    other missing year still raises, since that would be a real gap."""
+    key = (discipline, year)
+    if key in table:
+        return table[key]
+    latest = max((y for d, y in table if d == discipline), default=None)
+    if latest is not None and year is not None and year > latest:
+        return table[(discipline, latest)]
+    raise KeyError(key)
 
 
 def bat_split(card: Card, model: Model) -> tuple[float, float]:
@@ -95,7 +108,7 @@ def bat_split(card: Card, model: Model) -> tuple[float, float]:
         return 0.0, 1.0
     band = card.band if card.band in split else "tail"
     raw, dismissal = split[band]
-    return raw - model.season_mean_scoring[("batting", card.season_year)], dismissal
+    return raw - season_key(model.season_mean_scoring, "batting", card.season_year), dismissal
 
 
 def to_player(card: Card, model: Model, is_impact: bool = False) -> Player:

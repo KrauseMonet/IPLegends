@@ -2339,6 +2339,8 @@ class AuctionTeamOut(BaseModel):
     retained: int = 0
     rtm: int = Field(default=0, description="Right to Match cards left")
     owner: str | None = Field(default=None, description="auction rooms: the person bidding")
+    size: int | None = Field(default=None, description="[A297] this team's squad limit, "
+                             "where teams' limits differ")
 
 
 class AuctionBidOut(BaseModel):
@@ -2376,6 +2378,8 @@ class AuctionLotOut(BaseModel):
     base: int
     card: CardOut
     upcoming: list[str] = Field(description="the rest of this set, in order")
+    note: str | None = Field(default=None, description="[A297] the 2027 auction: what this "
+                             "player's card rests on -- a projection, or no IPL record")
 
 
 class AuctionSquadOut(BaseModel):
@@ -2484,6 +2488,8 @@ class AuctionOut(BaseModel):
     phase: Literal["retain", "bid", "rtm_use", "rtm_match", "rtm_raise", "rtm_watch", "fill",
                    "trade", "twelve", "ready", "wait", "complete"]
     mega: bool = False
+    mini: bool = Field(default=False, description="[A297] the 2027 mini auction: real "
+                       "retained squads and purses, and our provisional list")
     you: str
     franchise: str
     lot: AuctionLotOut | None = None
@@ -2523,6 +2529,8 @@ class AuctionOut(BaseModel):
     twelve: list[int] | None = None
     squad_size: int = auction.SQUAD_SIZE
     squad_overseas_cap: int = auction.SQUAD_OVERSEAS_CAP
+    squad_min: int | None = Field(default=None, description="[A297] the squad a mini auction "
+                                  "must reach; null where every place must be filled")
     purse_total: int = auction.PURSE
     trade: TradeWindowOut | None = Field(default=None, description="[A174] auction rooms: "
                                          "the trade window, while it is open")
@@ -2587,7 +2595,8 @@ def _lot_out(r: auction_session.Replay) -> AuctionLotOut:
     return AuctionLotOut(
         lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
         set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
-        card=_card(lot.card), upcoming=[x.card.name for x in same_set])
+        card=_card(lot.card), upcoming=[x.card.name for x in same_set],
+        note=auction_session.mini_preset().notes.get(lot.card.person_id) if r.mini else None)
 
 
 def _top_price(a) -> int | None:
@@ -2607,12 +2616,16 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
                    for t in auction_report.board_brief(STATE["deck"], r.seed, r.short, True)])
     a, you = r.auction, r.you
     out = AuctionOut(
-        state=r.state, phase=r.phase, mega=r.mega, you=you.short, franchise=you.franchise,
-        max_bid=you.max_bid(),
+        state=r.state, phase=r.phase, mega=r.mega, mini=r.mini, you=you.short,
+        franchise=you.franchise, max_bid=you.max_bid(),
+        squad_size=you.squad_size, squad_overseas_cap=you.overseas_cap, squad_min=you.squad_min,
+        # [A297] a mini auction's purses differ: bars are drawn against the largest
+        purse_total=(max(auction_session.mini_preset().purse.values()) if r.mini else auction.PURSE),
         teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
                               purse=t.purse,
                               players=len(t.squad), overseas=t.overseas, human=t.human,
-                              retained=t.retained, rtm=t.rtm)
+                              retained=t.retained, rtm=t.rtm,
+                              size=t.squad_size if r.mini else None)
                for t in a.teams],
         squad=[AuctionSquadOut(card=_card(c), price=p, retained=i < you.retained)
                for i, (c, p) in enumerate(zip(you.squad, you.paid))],
@@ -2620,7 +2633,9 @@ def _auction_out(r: auction_session.Replay) -> AuctionOut:
         sold=sum(1 for s in a.sales if s.winner is not None),
         top_price=_top_price(a),
         band_supply=_supply_out(a),
-        brief=_brief_out(auction_report.judge(
+        # [A297] the board's brief is written for an auction from scratch; a mini auction's
+        # squads are already built, so it has none
+        brief=[] if r.mini else _brief_out(auction_report.judge(
             auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega), a, you)),
     )
     if r.phase in ("rtm_use", "rtm_match", "rtm_raise"):
@@ -2727,6 +2742,7 @@ class AuctionStartIn(BaseModel):
     team: str
     seed: int | None = None
     mega: bool = Field(default=True, description="retentions and Right to Match (A138)")
+    mini: bool = Field(default=False, description="[A297] the 2027 mini auction")
 
 
 class AuctionRetainIn(BaseModel):
@@ -2761,7 +2777,7 @@ class AuctionTwelveIn(BaseModel):
 def auction_start(body: AuctionStartIn) -> AuctionOut:
     seed = body.seed if body.seed is not None else sess.new_seed()
     try:
-        state = auction_session.new_state(seed, body.team, body.mega)
+        state = auction_session.new_state(seed, body.team, body.mega, body.mini)
     except auction_session.InvalidState as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _auction(auction_session.replay, state)

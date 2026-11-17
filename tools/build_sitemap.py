@@ -5,7 +5,7 @@
 
 Listed: the home page, the game and puzzle pages, the guides, the history pages
 (`tools.build_history`) and the about/legal pages. Left out on purpose: a page that is only
-someone's own state (profile, admin, a room, a season in progress) and the offline card.
+someone's own state (profile, the Hall of Fame, admin, a room, a season in progress) and the offline card.
 `/api/` is NOT disallowed in robots.txt: a crawler rendering a game page needs it.
 Run it after `tools.build_history`, which decides which history pages exist.
 """
@@ -38,7 +38,7 @@ def sitemap() -> str:
 
 
 def robots() -> str:
-    lines = ["User-agent: *", "Allow: /"] + [f"Disallow: {p}" for p in ("/admin", "/profile")]
+    lines = ["User-agent: *", "Allow: /"] + [f"Disallow: {p}" for p in ("/admin", "/profile", "/hall")]
     return "\n".join(lines) + f"\n\nSitemap: {ORIGIN}/sitemap.xml\n"
 
 

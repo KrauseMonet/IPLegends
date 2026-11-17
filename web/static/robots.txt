@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /admin
 Disallow: /profile
+Disallow: /hall
 
 Sitemap: https://fineleg.app/sitemap.xml

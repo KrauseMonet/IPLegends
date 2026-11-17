@@ -89,7 +89,7 @@ def test_the_sitemap_lists_every_written_page_and_nothing_private():
     locs = {e.text for e in tree.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")}
     for p in written_files():
         assert f"https://fineleg.app/{p.relative_to(STATIC).with_suffix('')}" in locs, p
-    for private in ("/profile", "/admin", "/season", "/offline"):
+    for private in ("/profile", "/hall", "/admin", "/season", "/offline"):
         assert f"https://fineleg.app{private}" not in locs
     assert build_sitemap.main(check=True) == 0
     assert "Sitemap: https://fineleg.app/sitemap.xml" in (STATIC / "robots.txt").read_text()

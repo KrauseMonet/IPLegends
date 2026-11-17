@@ -1846,7 +1846,7 @@ async function crKeep(d){
     const r = await api('/api/career/save', {method: 'POST', headers: CR_JSON, retry: true,
                                              body: JSON.stringify({token: d.token})});
     box.innerHTML = `<span>★ In your Hall of Fame · ${r.careers} career${r.careers === 1 ? '' : 's'}</span>
-      <a class="act" href="/profile#hall">See them</a>`;
+      <a class="act" href="/hall">See them</a>`;
   } catch(e){
     box.innerHTML = `<span>Could not save it just now.</span>
       <button class="act" onclick="crKeep(CR.data)">Try again</button>`;

@@ -361,6 +361,13 @@ def profile_page() -> FileResponse:
     return FileResponse(STATIC / "profile.html")
 
 
+@app.get("/hall", include_in_schema=False)
+def hall_page() -> FileResponse:
+    """Every saved career, the profile's Hall of Fame shown in full. Client-side sign-in
+    check, as /profile."""
+    return FileResponse(STATIC / "hall.html")
+
+
 @app.get("/admin", include_in_schema=False)
 def admin_page() -> FileResponse:
     """Served to anybody, like every page: the page itself holds nothing. Every figure on

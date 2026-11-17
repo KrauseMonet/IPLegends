@@ -1,5 +1,6 @@
 """Phase specialisation for Build a Career's own player (A248)."""
 
+import collections
 import dataclasses
 import json
 import random
@@ -218,6 +219,18 @@ def _pooled_share(deck, model, lean, built=None):
     return death / total
 
 
+def _death_overs(deck, model, lean, built=None):
+    """Your death overs in each innings you bowled in, over the same three seasons."""
+    out = []
+    for seed in (4, 5, 6):
+        for r in _season(deck, model, lean, seed=seed, built=built).season.results:
+            for inn in (r.home_innings, r.away_innings):
+                mine = [o for o in inn.over_log if o.bowler_id == C.YOU_ID]
+                if mine:
+                    out.append(sum(S.phase_of_over(o.over) == "death" for o in mine))
+    return out
+
+
 def test_a_placed_specialist_really_bowls_at_the_death(deck, model):
     plain = _pooled_share(deck, model, None)
     lean = (-0.03, -0.03, 0.09)
@@ -226,8 +239,15 @@ def test_a_placed_specialist_really_bowls_at_the_death(deck, model):
     # moves by chance. What must not happen is the PLACEMENT, which moves nearly all of them.
     assert abs(_pooled_share(deck, model, lean) - plain) < 0.05, \
         "a lean you did not choose moves no overs"
-    placed = _pooled_share(deck, model, lean, built={"bowl": [-0.02, -0.02, 0.06]})
-    assert placed > plain + 0.3, (plain, placed)
+    # [A293] A plan saves him for TWO death overs and no more, so placement no longer makes him
+    # "mostly a death bowler" (his share is about half at best). What it does is give him his
+    # two death overs nearly every innings: measured 28 of 34 innings placed, 8 of 36 not.
+    built = {"bowl": [-0.02, -0.02, 0.06]}
+    placed = _death_overs(deck, model, lean, built)
+    unplaced = _death_overs(deck, model, None)
+    two = lambda xs: sum(d == 2 for d in xs) / len(xs)
+    assert max(placed) <= 2, placed                        # the cap: two death overs, stated
+    assert two(placed) > two(unplaced) + 0.4, (two(unplaced), two(placed))
 
 
 def _drive(deck, model, setup, seed, answer, limit=60):
@@ -279,10 +299,18 @@ def test_taking_the_coachs_job_builds_the_lean_and_shows_it(deck, model):
     mine = [o for r in after.detail.results for inn in (r.home_innings, r.away_innings)
             for o in inn.over_log if o.bowler_id == C.YOU_ID]
     assert mine
-    share = sum(S.phase_of_over(o.over) == S.PLAN_PHASES[idx] for o in mine) / len(mine)
-    # unplaced, a bowler gets about the phase's own share of overs (0.25-0.3); never
-    # two running caps how far placement can push it
-    assert share > 0.45, share
+    # [A293] the job is the death (found above), where a plan gives him two overs an innings
+    # and no more: never more than two, and two in most innings he bowls in
+    per = collections.Counter()
+    for r in after.detail.results:
+        for inn in (r.home_innings, r.away_innings):
+            for o in inn.over_log:
+                if o.bowler_id == C.YOU_ID and S.phase_of_over(o.over) == "death":
+                    per[id(inn)] += 1
+    innings = {id(inn) for r in after.detail.results for inn in (r.home_innings, r.away_innings)
+               for o in inn.over_log if o.bowler_id == C.YOU_ID}
+    assert max(per.values()) <= 2, per
+    assert sum(per[i] == 2 for i in innings) / len(innings) > 0.5
     assert after.checkpoint.phase_offers == car.checkpoint.phase_offers + 1
     # the checkpoint carries it through a JSON round trip
     back = C.Checkpoint.from_dict(json.loads(json.dumps(after.checkpoint.to_dict())))

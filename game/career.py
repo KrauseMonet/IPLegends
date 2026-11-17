@@ -204,6 +204,38 @@ YOUTH_SEASONS = 2
 # club always signs you. Found by playing one: a fast bowler rated 96 was released.
 STAR_RATING = 85
 
+# [A294] Phase 2 of making a career harder. Your place is EARNED: the club picks its eleven
+# by its own rule (`opposition_xi`, the rule every real side in the game is picked by) and a
+# player it would leave out has a squad season. Measured before building: the natural eleven
+# holds 93% of real regulars, and a career player is left out on merit in 0-13% of seasons,
+# nearly all of them before a Rating of 80. A captain is always picked. A bowler outside the
+# side's five bowls as its change bowler (A239) rather than taking the fifth man's overs.
+EARN_ON = True
+# The three decline rules below are one switch: tests of rules written before A294 turn
+# them off, as they do the contract cycle (conftest).
+DECLINE_ON = True
+# Past the peak, clubs pay less for a player every season he is older: what a club bids on
+# your card at an auction is scaled by this for each season of decline, never below the
+# floor. Declared game design -- the archive holds no prices (A229) -- set against the
+# ratified targets (careers lasting ten seasons, A293). Applied at the mega and the mini
+# auction; at a mini auction an unsold player's career is over (A288).
+DECLINE_VALUE = 0.8
+DECLINE_VALUE_FLOOR = 0.25
+# Past the peak, a fast bowler's body is the first thing to go: his season's chance of an
+# injury is this many times his role's (`incidents.INJURY_RISK`). Declared.
+LATE_PACE_RISK = 1.6
+
+# [A295] Phase 3: traps -- choices that look good and can cost you, each flagged in its hint.
+# Workload: playing through (refusing the board's rest, a home league before the IPL,
+# strapping a hamstring, rushing back, bowling through a stress fracture) adds FATIGUE; each
+# point raises your injury chance that season by FATIGUE_RISK, a point wears off every season,
+# and agreeing to rest clears it. Declared game design: the archive records no injuries.
+TRAPS_ON = True
+FATIGUE_RISK = 0.5
+FATIGUE_MAX = 3.0
+FATIGUE_DECAY = 1.0
+FATIGUE_WORDS = {1: "Carrying a heavy workload", 2: "Running on empty", 3: "Running on empty"}
+
 # [A198] How much of the team's season you play, drawn per season from the real
 # distribution: the share of their team's matches that players with ten or more seasons
 # played in seasons they were REGULARS (A33's floors), 838 seasons, 20 quantiles (5%, 10%,
@@ -312,6 +344,44 @@ APPROACH_LABELS = {
     "bowler": ("Contain", "Balanced", "Attack the stumps"),
     "allrounder": ("Play it safe", "Balanced", "All out"),
 }
+
+
+# [A293] Your choices may make you a more aggressive or more cunning bowler, but never take
+# wickets faster than a real bowler at his best: in any phase, your wicket odds (the card's
+# multiplier, with its phase lean) stop at WICKET_CEILING -- or at your own ability's, if the
+# real seasons you are built from were already beyond it. WICKET_CEILING is the 99th
+# percentile of real regular seasons' multipliers (1.508 over 798 seasons of 150+ balls;
+# p90 1.30, max 1.62). Measured before it existed: temper, focus, the yorker drill, attacking
+# calls and the death overs stacked to a wicket every 12.0 balls for a career pace bowler,
+# against 19.9 for a real regular and 16.4 for the real seasons his ceilings are drawn from.
+# Past the ceiling an attacking choice still costs its runs; it simply buys no more wickets.
+WICKET_CEILING = 1.51
+WICKET_CEILING_ON = True
+
+
+def within_reach(card: Card, cap: float | None) -> Card:
+    """Your card with its wicket odds held to `cap` in every phase. The card itself when
+    nothing reaches it."""
+    if cap is None or card.bowl_dismissal is None:
+        return card
+    d = min(card.bowl_dismissal, cap)
+    lean = card.phase_wkt
+    if lean:
+        top = math.log(cap / d)
+        lean = tuple(min(x, round(top, 6)) for x in lean)
+    if d == card.bowl_dismissal and lean == card.phase_wkt:
+        return card
+    return dataclasses.replace(card, bowl_dismissal=d, phase_wkt=lean)
+
+
+def wicket_cap(card: Card, traits: dict | None) -> float | None:
+    """The ceiling your wicket odds stop at this season: WICKET_CEILING, or your ability's
+    own multiplier before your temper (`ct.styled`) if that is already higher."""
+    if not WICKET_CEILING_ON or card.bowl_dismissal is None:
+        return None
+    temper = (traits or {}).get("temper", 0.0)
+    own = card.bowl_dismissal / math.exp(TRADE_SLOPE * temper * ct.TEMPER_STEP)
+    return max(WICKET_CEILING, own)
 
 
 def approach_card(me: Card, choice: int) -> Card:
@@ -608,6 +678,8 @@ class EventOption:
     # `neutral`, and its hint names what it protects; a test holds every card to that.
     traits: tuple[tuple[str, float], ...] = ()
     neutral: bool = False
+    fatigue: float = 0.0                # [A295] workload: plus plays through, minus rests
+    trap_outcomes: tuple[Outcome, ...] = ()   # [A295] the outcomes when traps are on
 
 
 @dataclass(frozen=True)
@@ -653,11 +725,18 @@ EVENTS: tuple[Event, ...] = (
                        story="You turned the armband down, for now."))),
     Event("coach", "A new coach", "A new coach wants to rebuild your technique from scratch.", 3,
           (EventOption("Rebuild it", season=-3, tone="down", traits=(("work", 1.0),),
-                       hint="A hard season for a better game, if it works.",
+                       hint="A hard season for a better game, if it works. Some never find their way back.",
                        story="Rebuilding your technique cost you this season.",
                        outcomes=(Outcome(0.65, permanent=5,
                                          text="The rebuild paid off: the new technique is yours now."),
-                                 Outcome(0.35, permanent=1, text="The rebuild never quite took."))),
+                                 Outcome(0.35, permanent=1, text="The rebuild never quite took.")),
+                       # [A295] the gamble, when traps are on: it can fail for good
+                       trap_outcomes=(Outcome(0.5, permanent=5,
+                                              text="The rebuild paid off: the new technique is yours now."),
+                                      Outcome(0.3, permanent=1, text="The rebuild never quite took."),
+                                      Outcome(0.2, permanent=-3,
+                                              text="The rebuild broke your old game and never built "
+                                                   "a new one. Some of it is gone for good."))),
            EventOption("Stick with what works", neutral=True,
                        hint="It got you here, and you keep this season whole.",
                        story="You thanked the coach and kept your own game."))),
@@ -708,24 +787,26 @@ EVENTS: tuple[Event, ...] = (
     Event("workload", "The national board calls",
           "Your national board wants to manage your workload, and asks you to sit out the IPL's "
           "first fortnight.", 3,
-          (EventOption("Agree", missed=3, age=-0.5, tone="up",
+          (EventOption("Agree", missed=3, age=-0.5, tone="up", fatigue=-FATIGUE_MAX,
                        hint="Rest now, and last longer.",
                        story="You sat out the first fortnight on the board's orders, and felt fresher for it."),
-           EventOption("Tell them you want to play", standing=1, hint="Your club needs you from day one.",
+           EventOption("Tell them you want to play", standing=1, fatigue=1.0,
+                       hint="Your club needs you from day one. Your body keeps count.",
                        story="You turned the board down and played from the first match.")),
           when="capped"),
     Event("home_league", "A league back home",
           "Your home board wants you for its own T20 league, which runs into the IPL's opening weeks.", 2,
           (EventOption("Skip it", standing=1, hint="The IPL comes first.",
                        story="You skipped the league at home."),
-           EventOption("Play there first", permanent=1, missed=4, standing=-1,
-                       hint="A month of cricket at home, and four IPL matches missed.",
+           EventOption("Play there first", permanent=1, missed=4, standing=-1, fatigue=1.0,
+                       hint="A month of cricket at home, four IPL matches missed, and no break before them.",
                        story="A month of cricket at home sharpened you, at the cost of four IPL matches.")),
           when="overseas"),
     # [A224] A decision about how long you last, offered only to a senior player.
     Event("fitness", "A fitness programme", "A fitness coach offers a punishing off-season "
           "programme to keep you going for longer.", 1,
           (EventOption("Commit to it", season=-1, age=-0.5, tone="up", traits=(("work", 1.0),),
+                       fatigue=-1.0,
                        hint="Hard months now, more seasons later.",
                        story="The off-season programme left you heavy-legged this year, and younger for the next."),
            EventOption("Not this year", traits=(("work", -0.5),),
@@ -2173,6 +2254,22 @@ def draw_shape(seed: int) -> Shape:
     return Shape(peak, decline)
 
 
+def decline_value(shape: Shape, clock: float) -> float:
+    """What clubs knock off what they pay for a player past his peak (A294): nothing while he
+    is still growing or at it, then `DECLINE_VALUE` for each season of decline on the career
+    clock, never below `DECLINE_VALUE_FLOOR`."""
+    past = clock - (shape.rise + 1)
+    if past <= 0 or not DECLINE_ON:
+        return 1.0
+    return max(DECLINE_VALUE_FLOOR, DECLINE_VALUE ** past)
+
+
+def unsold_ends(sold: bool, shape: Shape, clock: float) -> bool:
+    """[A294] Going unsold at an auction past your peak ends a career, at a mega auction as at
+    a mini one (ratified: "unsold ends it"). Before the peak a club still signs you late."""
+    return DECLINE_ON and not sold and shape.declining(clock)
+
+
 def arc_point(k: float, permanent: float, season: float, shape: Shape = STANDARD) -> float:
     """Ability `t` at career clock `k` (a season count for a career from before A224)."""
     return max(ABILITY_FLOOR, min(ABILITY_CAP, shape.arc(k) + permanent + season))
@@ -2308,18 +2405,61 @@ def double_at_for(n: int) -> tuple[int, ...]:
     return DOUBLE_AT if n == 10 else tuple(range(1, n // 2 + 1))
 
 
-def xi_with(you: Card, squad: list[Card],
-            number: int | None = None) -> tuple[list[Card], Card | None]:
-    """Your franchise's eleven with you in it, then its Impact Player by the opposition's
-    own rule. If the squad's normal selection leaves you out, you replace the lowest-rated
-    player whose departure keeps the eleven legal (a keeper, five bowlers, four overseas)."""
-    from game.__main__ import OVERSEAS_LIMIT, opposition_xi, twelve_from_xi, viable
-
+def _selection_pool(you: Card, squad: list[Card]) -> list[Card]:
+    """The squad your franchise picks from, you in it."""
     if you.role == "keeper":
         # [A255] You keep: the squad's own keepers are picked, if at all, as batters.
         squad = [dataclasses.replace(c, role="batter") if c.role == "keeper" else c
                  for c in squad]
-    pool = squad + [you]
+    return squad + [you]
+
+
+def merit_rival(you: Card, squad: list[Card]) -> Card | None:
+    """[A294] The man you have to beat for a place: of the players in the club's own eleven
+    without you, the lowest-rated one you could replace and leave it legal (a keeper, five
+    bowlers, four overseas). So an overseas player competes with the overseas players, and a
+    batter never pushes out the fifth bowler. None if no swap is legal."""
+    from game.__main__ import OVERSEAS_LIMIT, opposition_xi, viable
+
+    xi = opposition_xi(squad)
+    if you.role == "keeper":
+        # [A255] You keep: the squad's keepers are batters to you, so any of them may go.
+        xi = [dataclasses.replace(c, role="batter") if c.role == "keeper" else c for c in xi]
+    outs = [out for out in xi
+            if viable([c for c in xi if c is not out] + [you])
+            and sum(c.overseas is True for c in xi if c is not out) + (you.overseas is True)
+            <= OVERSEAS_LIMIT]
+    return min(outs, key=lambda c: (c.display or 0, c.person_id)) if outs else None
+
+
+def picked_on_merit(you: Card, squad: list[Card], rating: int) -> bool:
+    """Would the club pick you (A294)? Clubs pick the better player, and the card's Rating is
+    the game's measure of better: you are in if you are rated at least as high as the man you
+    would replace. Not the side's own batting key (runs a ball): that is right for picking
+    among real players by volume and wrong for a card -- it left a finisher rated 99 out of
+    his side, the same finding as A54."""
+    rival = merit_rival(you, squad)
+    return rival is None or rating >= (rival.display or 0)
+
+
+def left_out_on_merit(you: Card, squad: list[Card], captain: bool, rating: int) -> bool:
+    """[A294] A season you start out of the side: the club's own selection leaves you out,
+    and you are not its captain (a captain picks himself)."""
+    return EARN_ON and not captain and not picked_on_merit(you, squad, rating)
+
+
+def xi_with(you: Card, squad: list[Card], number: int | None = None,
+            attack: bool = True) -> tuple[list[Card], Card | None]:
+    """Your franchise's eleven with you in it, then its Impact Player by the opposition's
+    own rule. If the squad's normal selection leaves you out, you replace the lowest-rated
+    player whose departure keeps the eleven legal (a keeper, five bowlers, four overseas).
+
+    `attack` ranks a bowler among the side's five whatever his place (A197). Under A294 only
+    a captain is ranked so: anyone else bowls where the side's own order puts him, and a
+    sixth bowler bowls as the change bowler."""
+    from game.__main__ import OVERSEAS_LIMIT, opposition_xi, twelve_from_xi, viable
+
+    pool = _selection_pool(you, squad)
     xi = opposition_xi(pool)
     if you not in xi:
         swaps = []
@@ -2331,7 +2471,7 @@ def xi_with(you: Card, squad: list[Card],
             raise CareerError("no legal eleven has room for you")
         xi = min(swaps, key=lambda s: s[:2])[2]
     home = number if number is not None else home_number(you)
-    if not bowls_for_you(you):
+    if not bowls_for_you(you) or not attack:
         order, impact = twelve_from_xi(xi, pool)
         return at_home(order, home), impact
     xi, you = _in_the_attack(xi, you)
@@ -2449,7 +2589,7 @@ def _side(cards: list[Card], xi: list[Card], impact: Card | None) -> Side:
 
 
 def year_sides(deck: Deck, year: int, you: Card | None = None,
-               number: int | None = None) -> tuple[list[Side], Side | None]:
+               number: int | None = None, attack: bool = True) -> tuple[list[Side], Side | None]:
     """Every real team of `year`, yours with you in it. Returns (sides, yours)."""
     from game.__main__ import opposition_twelve
 
@@ -2457,7 +2597,7 @@ def year_sides(deck: Deck, year: int, you: Card | None = None,
     for fs in year_fs_ids(deck, year):
         squad = list(deck.cards_by_fs[fs])
         if you is not None and fs == you.fs_id:
-            side = _side(squad, *xi_with(you, squad, number))
+            side = _side(squad, *xi_with(you, squad, number, attack))
             side.you = True
             home = number if number is not None else home_number(you)
             side.pinned = {YOU_ID: home} if home else None
@@ -2781,6 +2921,11 @@ class Offer:
     attack_rank: int | None = None  # where you would come in its attack, if you bowl
     contract_years: int = CONTRACT_YEARS   # the length of the deal `contract_year` counts in (A288)
     need: str = ""              # a trial club short in your band, in words (A288)
+    # [A295] The stacked club: whether its own selection would pick you, and if not, the man
+    # who keeps the spot and his card. Shown wherever you choose a club.
+    starts: bool = True
+    rival: str = ""
+    rival_rating: int | None = None
 
 
 def offers_for(deck: Deck, seed: int, k: int, year: int, current: str | None,
@@ -2909,12 +3054,14 @@ def mega_offer(deck: Deck, year: int, current: str | None, last_display: int | N
 
 
 def mega_ceilings(deck: Deck, seed: int, k: int, year: int, current: str | None,
-                  last_display: int | None, *, capped: bool) -> dict[int, int]:
+                  last_display: int | None, *, capped: bool,
+                  age: float = 1.0) -> dict[int, int]:
     """What each club that year will pay for you, lakh, by franchise-season: the auction's mega
-    value for your card, each club's own view of it, and your old club's loyalty premium."""
+    value for your card, each club's own view of it, and your old club's loyalty premium.
+    `age` is what clubs knock off for a player past his peak (`decline_value`, A294)."""
     from game.auction import LOYALTY
 
-    value = value_curve(last_display, mega=True) * (1 if capped else UNCAPPED_VALUE)
+    value = value_curve(last_display, mega=True) * (1 if capped else UNCAPPED_VALUE) * age
     out = {}
     for fs in year_fs_ids(deck, year):
         view = value * math.exp(random.Random(f"{seed}:mega:{k}:{fs}").gauss(0, MEGA_SPREAD))
@@ -2925,11 +3072,12 @@ def mega_ceilings(deck: Deck, seed: int, k: int, year: int, current: str | None,
 
 
 def mega_auction(deck: Deck, seed: int, k: int, year: int, current: str | None,
-                 last_display: int | None, base: int, *, capped: bool) -> MegaResult:
+                 last_display: int | None, base: int, *, capped: bool,
+                 age: float = 1.0) -> MegaResult:
     from game.auction import Lot, bid_log
 
     fss = year_fs_ids(deck, year)
-    by_fs = mega_ceilings(deck, seed, k, year, current, last_display, capped=capped)
+    by_fs = mega_ceilings(deck, seed, k, year, current, last_display, capped=capped, age=age)
     ceilings = {i: by_fs[fs] for i, fs in enumerate(fss)}
     lot = Lot(index=k, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="", base=base)
     bids = bid_log(lot, ceilings, seed, 0)
@@ -3216,13 +3364,14 @@ def debut_auction(deck: Deck, seed: int, year: int, value: float, attended: list
 
 
 def mini_auction(deck: Deck, seed: int, k: int, year: int, released_by: str | None,
-                 last_display: int | None, base: int, *, capped: bool) -> MegaResult:
+                 last_display: int | None, base: int, *, capped: bool,
+                 age: float = 1.0) -> MegaResult:
     """The mini auction: every club that year but the one that let you go bids on the mega
     value curve with its own view of you (A212's ceilings, no loyalty premium)."""
     from game.auction import Lot, bid_log
 
     fss = year_fs_ids(deck, year)
-    by_fs = mega_ceilings(deck, seed, k, year, None, last_display, capped=capped)
+    by_fs = mega_ceilings(deck, seed, k, year, None, last_display, capped=capped, age=age)
     ceilings = {i: by_fs[fs] for i, fs in enumerate(fss)
                 if canonical(deck.cards_by_fs[fs][0].franchise) != released_by}
     lot = Lot(index=k, card=Card(fs_id=0, person_id=YOU_ID, name="you"), set_code="", base=base)
@@ -3281,7 +3430,7 @@ def where_you_play(deck: Deck, you: Card, fs_id: int,
                    number: int | None = None) -> tuple[int, int | None]:
     """(batting position, place in the attack or None) for you in that franchise's eleven,
     by the same selection the season itself makes."""
-    xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]), number)
+    xi, _ = xi_with(you, list(deck.cards_by_fs[fs_id]), number, attack=not EARN_ON)
     position = next(i for i, c in enumerate(xi, 1) if c.person_id == YOU_ID)
     if not you.has_bowl:
         return position, None
@@ -3294,6 +3443,16 @@ def where_you_play(deck: Deck, you: Card, fs_id: int,
         return position, rank
     # [A239] A batter is in the attack only as its change bowler, an over or two when needed.
     return position, rank if rank <= BOWLERS_IN_TWELVE + CHANGE_BOWLERS else None
+
+
+def merit_fields(deck: Deck, you: Card, fs_id: int, rating: int, captain: bool = False) -> dict:
+    """[A295] For an offer: would that club pick you on merit (A294), and if not, who keeps
+    the spot. A captain picks himself; with the earn rule off everybody starts."""
+    squad = list(deck.cards_by_fs[fs_id])
+    if not left_out_on_merit(you, squad, captain, rating):
+        return {"starts": True}
+    rival = merit_rival(you, squad)
+    return {"starts": False, "rival": rival.name, "rival_rating": rival.display}
 
 
 def event_sequence(seed: int, overseas: bool = False, role: str | None = None) -> list[Event]:
@@ -3339,10 +3498,11 @@ def points_t(points: float, start: Card, ceiling: Card) -> float:
 
 def draw_outcome(seed: int, k: int, option: EventOption) -> Outcome | None:
     """Which way an answer turns out: seeded by the season, decided the moment you choose."""
-    if not option.outcomes:
+    outcomes = option.trap_outcomes if TRAPS_ON and option.trap_outcomes else option.outcomes
+    if not outcomes:
         return None
     rng = random.Random(f"{seed}:outcome:{k}")
-    return rng.choices(option.outcomes, weights=[o.chance for o in option.outcomes])[0]
+    return rng.choices(outcomes, weights=[o.chance for o in outcomes])[0]
 
 
 def absence_words(reason: str, missed: int, first: int) -> str:
@@ -3654,6 +3814,9 @@ class SeasonRecord:
     hat_tricks: int = 0                # (A209)
     best: tuple[int, int] = (0, 0)
     squad: bool = False                # a squad season: a poor one went before (A198)
+    left_out: bool = False             # [A294] ...or the club's own selection left you out
+    late: bool = False                 # [A294] a fast bowler past his peak: injuries come oftener
+    fatigue: float = 0.0               # [A295] the workload you carried into the season
     extra_missed: int = 0              # matches an event card cost you, inside `missed` (A200)
     contract_year: int = 0             # 1-3 on a three-year deal, 0 on a one-year (A200)
     missed: int = 0                    # league matches missed (A198)
@@ -4004,7 +4167,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                   rival: tuple[str, str] | None = None, spent: tuple[str, ...] = (),
                   full_time: bool = False, captain: bool = False,
                   traits: dict | None = None, cover_ok: bool = False,
-                  phase_built: dict | None = None, bat_at: int | None = None) -> Year:
+                  phase_built: dict | None = None, bat_at: int | None = None,
+                  late: bool = False, fatigue: float = 0.0) -> Year:
     """The year itself. Separate from the scoring so a test can hold the season's own
     leaders against `tournament_leaders`.
 
@@ -4019,7 +4183,8 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     a drop then adds to it."""
     from game.__main__ import opposition_twelve
 
-    sides, yours = year_sides(deck, you.season_year, you, bat_at)
+    sides, yours = year_sides(deck, you.season_year, you, bat_at,
+                              attack=captain or not EARN_ON)
     yours.bowling_plan = dict(plan) or None          # a captain's plan (A213)
     rng = random.Random(f"{seed}:season:{k}")
     rng.shuffle(sides)                  # who meets twice in a ten-team year is the draw's
@@ -4027,6 +4192,7 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     with_you = (yours.xi, yours.impact)
     without = opposition_twelve(list(deck.cards_by_fs[you.fs_id]))
     me = next(c for c in yours.xi if c.person_id == YOU_ID)
+    cap = wicket_cap(me, traits)                   # [A293]
     if yours.bowling_plan is None and PHASE_ON:
         where = phase_placement(me, phase_built)   # [A248] where you chose to specialise
         if where:
@@ -4075,7 +4241,9 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
     # [A230] The season's mid-season incident: which one it may be, and once it has come,
     # what it set going -- form for a while, a call kept for good, matches out.
     inc_kind = incidents.kind_of(me)
-    inc_key, inc_target = (incidents.candidate(seed, k, inc_kind, league_matches)
+    inc_key, inc_target = (incidents.candidate(seed, k, inc_kind, league_matches,
+                                               (LATE_PACE_RISK if late else 1.0)
+                                               * (1 + FATIGUE_RISK * fatigue))
                            if not squad and answers is not None else (None, 0))
     if inc_key in spent:
         inc_key = None                             # it has happened as often as a career allows
@@ -4153,9 +4321,10 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
                             else "")
         incident = {"key": key, "title": inc.title, "text": text, "choice": opt.label,
                     "story": opt.story, "turn": turn.text if turn else "", "at": seen + 1,
-                    "standing": opt.standing + (turn.standing if turn else 0),
+                    "standing": incident_standing(opt, turn),
                     "permanent": opt.permanent + (turn.permanent if turn else 0),
                     "age": opt.age, "thread": opt.thread, "tone": tone,
+                    "fatigue": opt.fatigue,
                     "injuries": [x for x in (opt.injury, turn.injury if turn else "") if x],
                     "traits": [list(x) for x in opt.traits],
                     "death_job": bool(opt.death),
@@ -4307,13 +4476,25 @@ def simulate_year(deck: Deck, model: Model, seed: int, k: int, you: Card,
 
     # [A278] every ball you face or bowl, against par, for the skills the season earns;
     # recording draws nothing, so the season is the season played without it
+    def held(hook):
+        """[A293] Your card as it takes the field, every change of the match made, held to
+        your wicket ceiling. A hook that pauses the season plays nothing, so has none."""
+        def run(a: Side, b: Side, season, stage: str) -> None:
+            hook(a, b, season, stage)
+            if cap is not None and (yours is a or yours is b):
+                yours.xi = [within_reach(c, cap) if c.person_id == YOU_ID else c
+                            for c in yours.xi]
+                if yours.impact is not None and yours.impact.person_id == YOU_ID:
+                    yours.impact = within_reach(yours.impact, cap)
+        return run
+
     collector = career_skills.Collector(YOU_ID)
     counter = career_focus.Counter(YOU_ID)          # [A285] the focus's challenge, per match
     try:
         with ball_log(career_focus.chain(collector, counter)):
-            season = run_league(model, sides, rng, double_at=double, before_match=league_hook,
-                                schedule=schedule)
-            season = run_playoffs(model, season, rng, before_match=playoff_hook)
+            season = run_league(model, sides, rng, double_at=double,
+                                before_match=held(league_hook), schedule=schedule)
+            season = run_playoffs(model, season, rng, before_match=held(playoff_hook))
     finally:
         yours.xi, yours.impact = with_you
         yours.breakdown = None
@@ -4639,7 +4820,7 @@ def play_season_detail(deck: Deck, model: Model, seed: int, k: int, you: Card,
                          full_time=bool(record.role and record.role.get("full_time")),
                          captain=record.captain, traits=record.traits or None,
                          cover_ok=record.cover_ok, phase_built=record.phase_built or None,
-                         bat_at=record.bat_at)
+                         bat_at=record.bat_at, late=record.late, fatigue=record.fatigue)
     season, yours, results = year.season, year.yours, year.results
     lines = season_lines(results, year.roster)
     record.missed = year.missed
@@ -5108,6 +5289,35 @@ def poor_bar(role: str) -> float:
     return ROLES.get(role, {}).get("poor_percentile", POOR_PERCENTILE)
 
 
+def incident_standing(opt, turn) -> int:
+    """What an answer to an incident does to your standing at the club: the answer's own, how
+    it turned out, and with traps on (A295) what an ego answer costs."""
+    return opt.standing + (turn.standing if turn else 0) + (opt.ego if TRAPS_ON else 0)
+
+
+def fatigue_after(fatigue: float, added: float) -> float:
+    """[A295] The workload carried into next season: a season wears a point off, and playing
+    through this season's niggle adds its own."""
+    return min(FATIGUE_MAX, max(0.0, fatigue - FATIGUE_DECAY) + added)
+
+
+def release_decision(released: bool, rating: int, prime: bool,
+                     standing: int) -> tuple[bool, str | None]:
+    """Whether the club lets you go after a season, and why it changed its mind if it did:
+    "star" kept a star (A214), "cold" released a player it has lost patience with (A288).
+
+    [A294] Both now depend on whether you are past your peak. A star is kept only in his
+    prime; past it, two poor seasons cost him his place like anybody, and a club that has
+    gone cold on a declining star lets him go too."""
+    star = rating >= STAR_RATING
+    prime = prime or not DECLINE_ON
+    if released and star and prime:
+        return False, "star"
+    if CYCLE_ON and not released and standing <= STANDING_COLD and (not star or not prime):
+        return True, "cold"
+    return released, None
+
+
 def form_after(squad: bool, percentile: float, bar: float | None = None) -> tuple[bool, bool]:
     """(next season is a squad season, released) after a season at this place among your
     kind of player. A poor season costs you your place; a second in a row costs you your
@@ -5199,6 +5409,7 @@ class Checkpoint:
     released_by: str | None = None
     # [A289] The band a club moved you up into ("" none): your card bats there from then on.
     up_band: str = ""
+    fatigue: float = 0.0                  # [A295] workload carried into the season
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -5234,7 +5445,8 @@ class Checkpoint:
                    drill_offers=d.get("drill_offers", 0),
                    ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
                    keeper_offers=d.get("keeper_offers", 0), focus=d.get("focus", ""),
-                   released_by=d.get("released_by"), up_band=d.get("up_band", ""))
+                   released_by=d.get("released_by"), up_band=d.get("up_band", ""),
+                   fatigue=d.get("fatigue", 0.0))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -5592,8 +5804,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 for fs in invites:
                     o = _club_offer(deck, fs, year, DEBUT_PRICE, False)
                     pos, rank = where_you_play(deck, at(fs), fs, batting_number(here, earned(cp)))
-                    placed.append(dataclasses.replace(o, position=pos, attack_rank=rank,
-                                                      need=need_words(needs[fs])))
+                    placed.append(dataclasses.replace(
+                        o, position=pos, attack_rank=rank, need=need_words(needs[fs]),
+                        **merit_fields(deck, at(fs), fs, rating_at(start, top, career_t(cp, start, top, shape)))))
                 career.pending = Pending("trials", year, k, offers=placed, squad=cp.squad)
                 return career
             attended = [invites[i] for i in parse_trials(move, len(invites))]
@@ -5625,8 +5838,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 break
             base = mo.bases[_index(move, "b", len(mo.bases))]
             a = career.auction = mini_auction(deck, seed, k, year, cp.released_by, market, base,
-                                              capped=capped)
-            if a.fs_id < 0:                            # released, and nobody wanted you
+                                              capped=capped, age=decline_value(shape, clock))
+            if a.fs_id < 0 or unsold_ends(a.sold, shape, clock):
+                # released and nobody wanted you; or past your peak and unsold (A294)
                 career.released, cp.ended = True, "released"
                 break
             offer = _club_offer(deck, a.fs_id, year, a.price, False)
@@ -5671,7 +5885,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     pos, rank = where_you_play(deck, here, mo.retain.fs_id,
                                                batting_number(here, earned(cp)))
                     mo = dataclasses.replace(mo, retain=dataclasses.replace(
-                        mo.retain, position=pos, attack_rank=rank))
+                        mo.retain, position=pos, attack_rank=rank,
+                        **merit_fields(deck, here, mo.retain.fs_id,
+                                       rating_at(start, top, career_t(cp, start, top, shape)),
+                                       captained)))
                 career.pending = Pending("mega", year, k, squad=cp.squad, mega=mo)
                 return career
             if move == "r":
@@ -5686,7 +5903,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             else:
                 base = mo.bases[_index(move, "b", len(mo.bases))]
                 a = career.auction = mega_auction(deck, seed, k, year, club_now,
-                                                  market, base, capped=capped)
+                                                  market, base, capped=capped,
+                                                  age=decline_value(shape, clock))
+                if unsold_ends(a.sold, shape, clock):
+                    career.released, cp.ended = True, "released"   # [A294] nobody wants you now
+                    break
                 offer = _club_offer(deck, a.fs_id, year, a.price, canonical(a.franchise) == cp.current)
                 if CYCLE_ON and cp.released_by is not None and a.sold:
                     cp.squad = squad_now = False         # [A288] a club that bought you starts you afresh
@@ -5757,7 +5978,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                     at = dataclasses.replace(card, fs_id=fs, franchise=o.franchise)
                     pos, rank = where_you_play(deck, at, fs, batting_number(at, earned(cp)))
                     return dataclasses.replace(o, position=pos, attack_rank=rank,
-                                               need=need_words(band_need(deck, at, fs)))
+                                               need=need_words(band_need(deck, at, fs)),
+                                               **merit_fields(deck, at, fs, rating_now))
                 shown = []
                 for a in events:
                     card = with_band(here, a.band) if a.kind == "higher" else (
@@ -5767,8 +5989,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                   "offer": placed(a.fs_id, card)})
                 pos, rank = where_you_play(deck, here, offer.fs_id, batting_number(here, earned(cp)))
                 career.pending = Pending("window", year, k, squad=squad_now,
-                                         offers=[dataclasses.replace(offer, position=pos,
-                                                                     attack_rank=rank)],
+                                         offers=[dataclasses.replace(
+                                             offer, position=pos, attack_rank=rank,
+                                             **merit_fields(deck, here, offer.fs_id, rating_now,
+                                                            captained))],
                                          window={"events": shown,
                                                  "clubs": [placed(fs, here) for fs in others],
                                                  "captain": captained})
@@ -6020,6 +6244,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                 mentor_taught = MENTOR_DRILL_WORDS[taught].format(who=person.name)
         extra = option.missed + landed_missed + (now.missed if now else 0)
         cp.standing += option.standing + (now.standing if now else 0)
+        if TRAPS_ON:
+            cp.fatigue = max(0.0, min(FATIGUE_MAX, cp.fatigue + option.fatigue))   # [A295]
         for line in (option.injury, now.injury if now else ""):
             if line:
                 cp.injuries.append([year, line])
@@ -6064,6 +6290,14 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                                        franchise=offer.franchise, role=rd),
                                                traits), start, top, t, cp.phase), cp.drills)
         career.phase_words = phase_words(you)
+        left_out = False
+        if not squad_now and left_out_on_merit(you, list(deck.cards_by_fs[offer.fs_id]),
+                                               option.captain or already, rating_at(start, top, t)):
+            # [A294] The club picks its eleven on merit and you are not in it.
+            squad_now = left_out = True
+            rival = merit_rival(you, list(deck.cards_by_fs[offer.fs_id]))
+            say(f"{offer.franchise} pick their best eleven, and you are not in it: "
+                f"{rival.name} keeps the spot. You will have to wait for your chances.", "down")
         captain_now = option.captain or (already and not squad_now)
         plan: tuple[tuple[str, str], ...] = ()
         bowlers: list[Card] = plan_bowlers(deck, you, offer.fs_id) if captain_now else []
@@ -6087,6 +6321,11 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                              if cp.contract else 0),
                               rating=rating_at(start, top, t), absence=absence_label,
                               tenure=tenure_at(cp.seasons, offer.franchise),
+                              left_out=left_out,
+                              fatigue=cp.fatigue,
+                              late=(DECLINE_ON and shape.declining(clock)
+                                    and you.role == "bowler"
+                                    and you.bowling_style == "pace"),
                               role=rd, coach=coach_rec, traits=traits,
                               cover_ok=cover_eligible(setup, cp, k, squad_now),
                               phase_built=dict(cp.phase), drills_built=dict(cp.drills),
@@ -6109,6 +6348,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                                     record.cover_ok, you.phase_bat, you.phase_bowl,
                                                     you.style_bat, you.burn, you.settle_offset, you.phase_wkt,
                                                     tuple(sorted((d, tuple(v)) for d, v in cp.phase.items())),
+                                                    record.late, record.fatigue,   # [A294, A295]
                                                     record.bat_at, role_key(rd), record.tenure),
                                                    answers, plan,
                                                    incidents_spent(cp.seasons))
@@ -6166,6 +6406,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if played.playoffs:
                 trait_moves.append(("nerve", CAPTAIN_NERVE))
         cp.standing = max(STANDING_MIN, min(STANDING_MAX, cp.standing))
+        if TRAPS_ON:
+            # [A295] A point of workload wears off each season; playing through adds more.
+            cp.fatigue = fatigue_after(cp.fatigue, inc.get("fatigue", 0.0) if inc else 0.0)
         played.milestones = career_milestones(
             cp.seasons, career.detail.feed if career.detail else None, played)
         # [A229] The selectors read the season; a new international is a milestone.
@@ -6314,13 +6557,12 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             cp.plan = current
         if released and cp.contract is not None and not CYCLE_ON:
             released = False                   # a contract year remains: you stay, benched
-        if released and played.rating >= STAR_RATING:
-            released = False                   # a star is never out of work (A214)
+        released, why = release_decision(released, played.rating, not shape.declining(clock),
+                                         cp.standing)
+        if why == "star":
             played.notes.append("Two poor seasons, but at your level somebody always signs you.")
             played.tones.append("")
-        if CYCLE_ON and not released and cp.standing <= STANDING_COLD \
-                and played.rating < STAR_RATING:
-            released = True                    # [A288] the club has lost patience with you
+        elif why == "cold":
             played.notes.append(f"{offer.franchise} have lost patience with you. You are released.")
             played.tones.append("down")
         elif CYCLE_ON and released:

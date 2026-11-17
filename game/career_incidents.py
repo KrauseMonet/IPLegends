@@ -76,6 +76,8 @@ class IncidentOption:
     thread: str = ""           # something a later season remembers
     tone: str = ""             # 'up' | 'down' | '' for the season card's mark
     turns: tuple[Turn, ...] = ()
+    fatigue: float = 0.0       # [A295] playing through adds workload (`career.FATIGUE_RISK`)
+    ego: int = 0               # [A295] standing an ego answer costs at the club, with traps on
     # [A245] What the choice makes of you, for good, after the season (`game.career_traits`):
     # certain, never a turn of luck. `neutral` marks an option with no lasting effect at all,
     # whose hint names what it protects.
@@ -119,9 +121,9 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         (IncidentOption("Sit out and let it heal", "Two matches off, and you come back whole.",
                         "You sat out two matches and the hamstring healed.", out=2,
                         injury="Hamstring strain, rested (2 matches)"),
-         IncidentOption("Strap it and play on", "It may hold. It may not.",
+         IncidentOption("Strap it and play on", "It may hold. It may not. Either way, your body keeps count.",
                         "You strapped the hamstring and played on, never quite at full stretch.",
-                        form=-1, tone="down",
+                        form=-1, tone="down", fatigue=1.0,
                         turns=(Turn(0.7, "The hamstring held."),
                                Turn(0.3, "It went again a match later, and you missed three more.",
                                     out=3, injury="Hamstring, torn after playing on (3 matches)")))),
@@ -133,8 +135,8 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         (IncidentOption("Take the full four weeks", "Do it properly, once.",
                         "Four weeks out, and the side strain healed properly.", out=5,
                         injury="Side strain (5 matches)"),
-         IncidentOption("Rush back", "Back in a fortnight, if the side holds.",
-                        "You rushed back from the side strain.", out=2,
+         IncidentOption("Rush back", "Back in a fortnight, if the side holds. Rushing it stays with you.",
+                        "You rushed back from the side strain.", out=2, fatigue=1.0,
                         injury="Side strain, rushed back (2 matches)",
                         turns=(Turn(0.65, "The side held up."),
                                Turn(0.35, "The strain came back, and rushing it cost you.",
@@ -149,7 +151,7 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
                         injury="Back stress fracture, surgery (season over)"),
          IncidentOption("Manage it and keep bowling", "Stay on the field. The body will remember.",
                         "You kept bowling through the fracture and lost a yard of pace for good.",
-                        form=-1, permanent=-3, age=0.5, tone="down",
+                        form=-1, permanent=-3, age=0.5, tone="down", fatigue=1.0,
                         injury="Back stress fracture, managed")),
         injury=True),
     Incident(
@@ -164,9 +166,11 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
                         traits=(("temper", -0.5),)),
          # [A245] It makes you angrier at the crease, for good: certain, not a coin flip. What
          # it does for the rest of THIS season is still a turn of the noise around you.
-         IncidentOption("Hit back at the press conference", "Give them a headline of your own.",
+         IncidentOption("Hit back at the press conference",
+                        "Give them a headline of your own. The club will not enjoy reading it.",
                         "You hit back at the press conference, and it made the back pages.",
                         thread="press_feud", traits=(("temper", 1.0), ("lead", -0.5)),
+                        ego=-1,                           # [A295] ego costs you at the club
                         turns=(Turn(0.5, "The anger got you going.", form=1),
                                Turn(0.5, "The row followed you round the grounds.")))),
         weight=3),
@@ -177,8 +181,10 @@ INCIDENTS: dict[str, Incident] = {i.key: i for i in (
         (IncidentOption("Back the captain", "The side needs to pull together, and be seen to.",
                         "You stood with the captain, and the dressing room settled.", standing=1,
                         tone="up", traits=(("lead", 0.5),)),
-         IncidentOption("Have it out with him", "Clear the air, whatever it costs.",
+         IncidentOption("Have it out with him",
+                        "Clear the air, whatever it costs. The management will hear of it.",
                         "You had it out with him behind closed doors.", traits=(("temper", 1.0),),
+                        ego=-1,                           # [A295] ego costs you at the club
                         turns=(Turn(0.5, "Clearing the air sharpened you.", form=1),
                                Turn(0.5, "Word of it got out, and the management were not pleased.",
                                     standing=-1))),
@@ -270,12 +276,14 @@ def kind_of(card) -> str:
     return "batter"
 
 
-def candidate(seed: int, k: int, kind: str, league_matches: int) -> tuple[str | None, int]:
+def candidate(seed: int, k: int, kind: str, league_matches: int,
+              risk_scale: float = 1.0) -> tuple[str | None, int]:
     """The incident this season may bring, and from which of your league matches a seeded
     one comes. Its own stream, so it never moves a match. An injury first, by role; otherwise
-    one of the others, or nothing."""
+    one of the others, or nothing. `risk_scale` raises the injury chance (a fast bowler past
+    his peak, A294) on the same draw, so it only ever adds an injury."""
     rng = random.Random(f"{seed}:incident:{k}")
-    risk = INJURY_RISK["opener" if kind == "batter" else kind]
+    risk = min(1.0, INJURY_RISK["opener" if kind == "batter" else kind] * risk_scale)
     target = rng.randrange(1, max(2, league_matches - 2))
     if rng.random() < risk:
         injuries = [i for i in INCIDENTS.values() if i.injury and kind in i.kinds]

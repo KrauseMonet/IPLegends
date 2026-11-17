@@ -122,7 +122,10 @@ def test_the_plan_reaches_your_overs(deck, model, captain_cp):
     power, _ = _season(deck, model, setup, cp, f"o{stay}", you_at("1"))
     d, p = _your_overs(death, cp.k), _your_overs(power, cp.k)
     assert d and p
-    assert sum(o >= 15 for o in d) / len(d) > 0.5          # mostly at the death
+    # [A293] a death plan saves him for two death overs an innings and no more, so about half
+    # his overs fall there; the powerplay plan puts few there at all
+    assert 0.35 < sum(o >= 15 for o in d) / len(d) <= 0.55
+    assert sum(o >= 15 for o in d) / len(d) > sum(o >= 15 for o in p) / len(p) + 0.2
     assert sum(o < 6 for o in p) / len(p) > 0.5             # mostly in the powerplay
     assert death.checkpoint.plan == {C.YOU_ID: "death"}     # remembered for next season
 

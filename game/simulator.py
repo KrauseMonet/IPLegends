@@ -679,6 +679,8 @@ class BowlerCard:
     # [A276] a batter covering a broken-down bowler's overs (A247): the next over is his,
     # whatever the style schedule says, as it always was when the rotation went by workload
     covering: bool = False
+    # [A293] overs he has been handed at the death this innings, for a plan's death cap
+    death_overs: int = 0
 
     @property
     def overs(self) -> str:
@@ -860,6 +862,13 @@ def choose_bowler(bowlers: list[BowlerCard], previous: BowlerCard | None,
 
     def key(b):
         planned = _plan_rank(plan.get(b.player.person_id), phase) if plan else 1
+        if planned != 1 and plan.get(b.player.person_id) == "death":
+            # [A293] a death plan is two death overs, not the whole phase: past them he is
+            # unplanned, and he is saved only for the death overs he still owes
+            left = b.max_overs - b.balls // BALLS_PER_OVER
+            if (planned == 0 and b.death_overs >= PLAN_DEATH_OVERS) or (
+                    planned == 2 and left > PLAN_DEATH_OVERS):
+                planned = 1
         # [A276] the style this over is given to first
         due = blind or not (b.covering and b.balls == 0)
         return (planned, due, _style(b) != lead) + default(b)
@@ -924,6 +933,13 @@ def change_bowler(bowlers: list[BowlerCard], chosen: BowlerCard,
 
 
 PLAN_PHASES = ("powerplay", "middle", "death")
+DEATH_FROM = 15                      # 0-based first over of the death (`phase_of_over`)
+# [A293] A captain's plan, or your side placing you (A248), gives a bowler at most this many
+# death overs an innings. Measured: of 787 real regular bowling seasons only 9 had half their
+# balls at the death, and those bowled 12 death balls a match (p90 13.2) -- two overs. With
+# the whole phase to bowl, a career pace bowler took a wicket every 12.0 balls against a
+# real regular's 19.9, because a death ball falls a wicket every 13.5 balls whoever bowls it.
+PLAN_DEATH_OVERS = 2
 PHASE_INDEX = {p: i for i, p in enumerate(PLAN_PHASES)}
 
 
@@ -1036,6 +1052,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 bowler.taken_off += 1
                 bowler = change
         previous = bowler
+        if full and over >= DEATH_FROM:
+            bowler.death_overs += 1
         over_wickets_by_bowler = 0
         over_start_runs, over_start_wickets = innings.runs, innings.wickets
         over_start_fours, over_start_sixes = innings.fours, innings.sixes

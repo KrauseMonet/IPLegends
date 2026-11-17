@@ -342,6 +342,7 @@ function crHead(d, hold){
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
+        ${d.workload ? `<div class="cr-standing cr-workload">${esc(d.workload)}</div>` : ''}
         ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
         ${crSlots(d)}
         ${crMastered(d.mastered, d.focus_now)}
@@ -537,6 +538,9 @@ function crRoll(done){
 }
 
 function crPlace(o){
+  // [A295] The stacked club: its own selection would leave you out.
+  if (o.starts === false)
+    return `Would not start: ${o.rival}${o.rival_rating != null ? ` (${o.rival_rating})` : ''} has the spot`;
   // [A239] Past the five, the change bowler: an over or two when someone is being hit.
   if (o.attack_rank != null && o.attack_rank > 5)
     return (o.position != null ? `Bats at ${o.position} · ` : '') + 'first change with the ball';

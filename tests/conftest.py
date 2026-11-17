@@ -135,3 +135,28 @@ def cycle_off(request, monkeypatch):
     from game import career
 
     monkeypatch.setattr(career, "CYCLE_ON", bool(getattr(request.module, "CYCLE_TESTS", False)))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def harder_off_everywhere():
+    """[A294] Earning your place and the decline rules (star protection only in his prime,
+    clubs paying less past the peak, a fast bowler's late injuries), and A295's traps, move
+    every seeded season. Off for the whole session; a module that tests them sets
+    `HARDER_TESTS = True`."""
+    from game import career
+
+    was = career.EARN_ON, career.DECLINE_ON, career.TRAPS_ON
+    career.EARN_ON = career.DECLINE_ON = career.TRAPS_ON = False
+    yield
+    career.EARN_ON, career.DECLINE_ON, career.TRAPS_ON = was
+
+
+@pytest.fixture(autouse=True)
+def harder_off(request, monkeypatch):
+    """...and per test."""
+    from game import career
+
+    on = bool(getattr(request.module, "HARDER_TESTS", False))
+    monkeypatch.setattr(career, "EARN_ON", on)
+    monkeypatch.setattr(career, "DECLINE_ON", on)
+    monkeypatch.setattr(career, "TRAPS_ON", on)          # [A295] the traps, likewise

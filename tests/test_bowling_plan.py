@@ -38,6 +38,8 @@ def _bowl_twenty(plan, n=5):
     for over in range(20):
         b = choose_bowler(attack, prev, over, plan)
         b.balls += 6
+        if over >= S.DEATH_FROM:                # as play_innings counts them (A293)
+            b.death_overs += 1
         order.append(b.player.person_id)
         prev = b
     return order
@@ -63,11 +65,18 @@ def test_planned_bowlers_take_their_phase():
     assert set(plain[:6]) != {"p0", "p1"}                     # and it would not have been
 
 
-def test_a_death_bowler_is_saved_until_needed():
+def test_a_death_bowler_is_saved_for_two_death_overs_and_no_more():
+    """[A293] A death plan is two death overs (PLAN_DEATH_OVERS, stated here as 2): he bowls
+    his other two earlier, and once he has bowled two at the death he is unplanned."""
     order = _bowl_twenty({"p4": "death"})
-    first = order.index("p4")
-    assert first >= 12, order                                   # held back as long as possible
     assert order.count("p4") == 4
+    assert order[15:].count("p4") == 2, order
+    assert order[:15].count("p4") == 2, order
+
+
+def test_two_death_bowlers_share_the_death_and_leave_one_over():
+    order = _bowl_twenty({"p3": "death", "p4": "death"})
+    assert order[15:].count("p3") == 2 and order[15:].count("p4") == 2, order
 
 
 def _brute_can_finish(quota, prev, overs):

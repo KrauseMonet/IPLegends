@@ -298,6 +298,9 @@ class OfferOut(BaseModel):
     strength_words: str = ""      # the squad in words (A230): the page shows no number
     contract_years: int = 3       # the deal `contract_year` counts in (A288)
     need: str = ""                # a trial club short in your band (A288)
+    starts: bool = True           # [A295] would that club pick you on merit
+    rival: str = ""               # ...if not, who keeps the spot, and his card
+    rival_rating: int | None = None
 
 
 class MegaOut(BaseModel):
@@ -601,6 +604,7 @@ class CareerOut(BaseModel):
     caps: int = 0
     in_side: bool = False
     standing: str = ""            # how your club sees you, in words; "" when neutral (A230)
+    workload: str = ""            # the workload you carry, in words; "" when fresh (A295)
     traits: list[str] = []        # who your player has become, in words, never numbers (A245)
     skill_slots: list[SlotOut] = []   # [A282] the last season's skills, by tier
     combo_hint: str = ""          # [A282] the nearest combination, one skill away
@@ -785,7 +789,8 @@ def _offer(o: C.Offer, year: int) -> OfferOut:
                     contract_year=o.contract_year, strength=o.strength, stay=o.stay,
                     position=o.position, attack_rank=o.attack_rank,
                     strength_words=strength_words(o.strength),
-                    contract_years=o.contract_years, need=o.need)
+                    contract_years=o.contract_years, need=o.need,
+                    starts=o.starts, rival=o.rival, rival_rating=o.rival_rating)
 
 
 def _auction(a: C.MegaResult, year: int) -> AuctionOut:
@@ -1054,6 +1059,8 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         age=C.DEBUT_AGE + (career.pending.k if career.pending else len(career.seasons) - 1),
         injuries=[f"{y} · {t}" for y, t in (career.checkpoint.injuries if career.checkpoint else [])],
         standing=(C.STANDING_WORDS.get(career.checkpoint.standing, "")
+                  if career.checkpoint and not career.summary else ""),
+        workload=(C.FATIGUE_WORDS.get(int(career.checkpoint.fatigue), "")
                   if career.checkpoint and not career.summary else ""),
         traits=_trait_words(career), **_skill_view(career))
 

@@ -73,7 +73,15 @@ def _one(job: tuple[str, str, int]) -> dict:
         "matches": s.matches, "runs": s.runs, "wickets": s.wickets, "titles": s.titles,
         "peak": s.peak_display, "yoy": [b - a for a, b in zip(cards, cards[1:])],
         "mean_card": st.fmean(cards), "missed": sum(r.missed for r in career.seasons),
+        # [Phase 0] the rates behind the totals: balls bowled and conceded, balls faced, and
+        # the caps, so a total can be split into seasons x matches x a rate
+        "bowl_balls": sum(r.bowl_balls for r in career.seasons),
+        "bowl_runs": sum(r.bowl_runs for r in career.seasons),
+        "bat_balls": sum(r.balls for r in career.seasons),
+        "purple": sum(r.purple_cap for r in career.seasons),
+        "orange": sum(r.orange_cap for r in career.seasons),
         "regular": s.regular_seasons, "released": career.released,
+        "left_out": sum(getattr(r, "left_out", False) for r in career.seasons),   # [A294]
         "bowled_every_season": all(r.bowl_balls > 0 for r in career.seasons),
         "start": career.start.display, "ceiling": career.ceiling.display,
         # [A224] where the Rating peaked, as a share of the career, and the potential earned
@@ -227,11 +235,53 @@ def report(rows: list[dict], real: dict, alltime: dict) -> None:
                   f"lasted 10+ {sum(x['seasons'] >= 10 for x in g) / len(g):3.0%} "
                   f"15+ {sum(x['seasons'] >= 15 for x in g) / len(g):3.0%} "
                   f"(regular {st.median(x['regular'] for x in g):4.1f}, "
-                  f"released {sum(x['released'] for x in g) / len(g):3.0%})  "
+                  f"released {sum(x['released'] for x in g) / len(g):3.0%}, "
+                  f"left out {sum(x['left_out'] for x in g) / sum(x['seasons'] for x in g):3.0%} of seasons)  "
                   f"{mps:4.1f} m/season (missed {sum(x['missed'] for x in g) / sum(x['seasons'] for x in g):.1f})  titles {st.mean(x['titles'] for x in g):.1f}"
                   + ("" if kind == "batter" else
                      f"  bowled every season {sum(x['bowled_every_season'] for x in g)}/{len(g)}")
                   + _shape_line(g))
+            print(" " * 32 + _rate_line(kind, g))
+        print(" " * 32 + _real_rates(kind))
+
+
+def _rate_line(kind: str, g: list[dict]) -> str:
+    """[Phase 0] The rates a career total is built from, beside `_real_rates`."""
+    seasons = sum(x["seasons"] for x in g)
+    bat = (f"bat SR {100 * sum(x['runs'] for x in g) / max(1, sum(x['bat_balls'] for x in g)):5.1f} "
+           f"runs/season {sum(x['runs'] for x in g) / seasons:5.0f} "
+           f"orange caps {sum(x['orange'] for x in g) / seasons:4.1%} of seasons")
+    if kind == "batter":
+        return bat
+    w, bb = sum(x["wickets"] for x in g), sum(x["bowl_balls"] for x in g)
+    bowl = (f"bowl SR {bb / max(1, w):5.1f} econ {6 * sum(x['bowl_runs'] for x in g) / max(1, bb):4.2f} "
+            f"wkts/season {w / seasons:4.1f} balls/match {bb / max(1, sum(x['matches'] for x in g)):4.1f} "
+            f"purple caps {sum(x['purple'] for x in g) / seasons:4.1%} of seasons")
+    return bowl if kind == "bowler" else bowl + " | " + bat
+
+
+def _real_rates(kind: str) -> str:
+    """[Phase 0] The same rates for real REGULAR seasons of the kind, and how many wickets a
+    real Purple Cap took. A real season's matches are not on the card, so no balls/match."""
+    from game.career import _kind, _regular
+
+    cards = [c for cs in _STATE["deck"].cards_by_fs.values() for c in cs
+             if _kind(c) == kind and _regular(c)]
+    if not cards:
+        return ""
+    if kind == "batter":
+        r, b = sum(c.bat_runs or 0 for c in cards), sum(c.bat_balls or 0 for c in cards)
+        return f"real regulars: bat SR {100 * r / max(1, b):5.1f} runs/season {r / len(cards):5.0f}"
+    w = sum(c.bowl_wickets or 0 for c in cards)
+    bb = sum(c.bowl_balls or 0 for c in cards)
+    caps = defaultdict(int)
+    for cs in _STATE["deck"].cards_by_fs.values():
+        for c in cs:
+            caps[c.season_year] = max(caps[c.season_year], c.bowl_wickets or 0)
+    return (f"real regulars: bowl SR {bb / max(1, w):5.1f} "
+            f"econ {6 * sum(c.bowl_runs or 0 for c in cards) / max(1, bb):4.2f} "
+            f"wkts/season {w / len(cards):4.1f}; a real Purple Cap took "
+            f"{st.median(caps.values()):.0f} wickets (median of {len(caps)} seasons)")
 
 
 def _shape_line(g: list[dict]) -> str:

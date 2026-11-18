@@ -623,3 +623,82 @@ def test_the_paper_without_ratings_quotes_none_and_drops_the_rating_judged_stori
     top_base = max(l.base for l in left)
     assert unsold.body[0].startswith(max((l for l in left if l.base == top_base),
                                          key=lambda l: -l.index).card.name)
+
+
+# ---------------------------------------------------------------- batting bands [A302]
+
+def _pmatch(innings, people=None):
+    reg = {n: f"id-{n}" for n in (people or "ABCDEFGHIJKL")}
+    return {"info": {"registry": {"people": reg}}, "innings": innings}
+
+
+def test_a_batting_position_is_the_order_a_man_first_appears_at_either_end():
+    inn = {"overs": [{"deliveries": [
+        {"batter": "A", "non_striker": "B"}, {"batter": "B", "non_striker": "A"},
+        {"batter": "C", "non_striker": "A"},           # B out: C in at three
+        {"batter": "A", "non_striker": "D"},           # C out: D in at four, at the far end
+    ]}]}
+    sup = {"super_over": True, "overs": [{"deliveries": [{"batter": "E", "non_striker": "F"}]}]}
+    assert L.innings_positions(_pmatch([inn, sup])) == [
+        {"id-A": 1, "id-B": 2, "id-C": 3, "id-D": 4}]
+
+
+@pytest.mark.parametrize("name,archive,ok", [
+    ("Abhimanyu Easwaran", "AR Easwaran", True),          # initials only: they agree in order
+    ("Abhishek Tiwari", "Anurag Tiwari", False),          # a spelled-out name must match
+    ("Ravi Kumar", "R Vinay Kumar", False),               # ... wherever it is written
+    ("M.Dheeraj Kumar", "M Dheeraj Kumar", True),
+    ("Dhurmil Matkar", "Dhrumil Matkar", True),           # a one-letter slip
+    ("Mani Sankar Mura Singh", "MN Singh", False),        # M, S against M, N
+    ("Tiaan Van Vuuren", "ZJ van Vuuren", False),         # 'van' is part of the surname
+    ("Ekant Sen", "EC Sen", True),
+])
+def test_a_list_name_links_to_an_archive_name_only_when_the_given_names_agree(name, archive, ok):
+    assert (L.person_link(name, {"x": archive}) == "x") is ok
+
+
+def test_a_link_must_be_unique_and_an_indian_links_only_to_a_domestic_player():
+    counts = {"d1": {1: 10}, "d2": {7: 9}, "us": {3: 30}, "a1": {2: 8}}
+    where = {"d1": {"sma"}, "d2": {"sma"}, "us": {"sma", "mlc", "t20is"}, "a1": {"bbl"}}
+    register = {"d1": ("Ravi Sen", ""), "d2": ("R Sen", ""), "us": ("Kiran Patel", ""),
+                "a1": ("J Smith", "")}
+    players = [("new:ravisen", "Ravi Sen", "", False),        # two archive men fit: neither
+               ("new:kiranpatel", "Kiran Patel", "", False),  # only a player abroad fits
+               ("new:johnsmith", "John Smith", "", True),
+               ("new:jacksmith", "Jack Smith", "", True),     # two list names, one man: neither
+               ("ipl1", "Someone", "d1", False)]              # an id needs no link
+    rows = {r["key"]: r for r in L.position_rows(players, counts, where, register)}
+    assert rows["new:ravisen"]["registry_id"] == "" and rows["new:kiranpatel"]["registry_id"] == ""
+    assert rows["new:johnsmith"]["registry_id"] == rows["new:jacksmith"]["registry_id"] == ""
+    assert (rows["ipl1"]["registry_id"], rows["ipl1"]["how"], rows["ipl1"]["positions"]) == ("d1", "id", "1:10")
+
+
+def test_a_band_needs_five_innings_and_follows_the_a76_rule():
+    assert M.band_positions({1: 2, 2: 2}) is None
+    assert M.band_positions({1: 3, 2: 2}) == frozenset({1, 2, 3})
+    assert M.band_positions({4: 3, 6: 1, 3: 1}) == frozenset({3, 4, 5})
+    assert M.band_positions({9: 4, 7: 1}) == frozenset({8, 9, 10, 11})
+    assert M.parse_positions("1:12 3:4") == {1: 12, 3: 4}
+
+
+def test_a_2027_band_is_last_season_then_other_leagues_then_the_record():
+    """[A302] IPL 2026 decides a band when he played it; otherwise where he mostly batted in
+    other T20 cricket, five innings or more; otherwise his last IPL season or the default."""
+    tail = frozenset({8, 9, 10, 11})
+    cards = [_card("p26", 2026, 80, positions=tail), _card("old", 2019, 78, positions=tail),
+             _card("thin", 2019, 78, positions=tail)] + \
+            [_card(f"d{i}", 2016, 75 + i % 5) for i in range(40)] + \
+            [_card(f"b{i}", 2016, 74 + i % 5, bat_balls=10, bowl_balls=120, role="bowler",
+                   positions=tail) for i in range(40)]
+    listed = [dict(source=s, name=n, person_id=pid, capped="no", overseas="no", role="Bowler",
+                   base_2026_lakh="30", include="", evidence="")
+              for s, n, pid in (("released", "P Twentysix", "p26"), ("unsold", "Old Hand", "old"),
+                                ("unsold", "Thin Hand", "thin"), ("unsold", "New Lad", ""))]
+    positions = [dict(key="p26", positions="1:30"), dict(key="old", positions="6:9 7:2"),
+                 dict(key="thin", positions="1:3"), dict(key="new:newlad", positions="4:6")]
+    p = M.build_preset(_deck(cards), [], listed, [], [], au.base_price, positions)
+    by = {c.person_id: c.positions for c, _, _ in p.lots}
+    assert by["p26"] == tail                                 # 2026 decides, whatever else says
+    assert by["old"] == frozenset({5, 6, 7})                 # other leagues over an old season
+    assert by["thin"] == tail                                # three innings: not enough
+    assert by["new:newlad"] == frozenset({3, 4, 5})          # a newcomer, from other leagues

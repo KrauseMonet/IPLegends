@@ -30,7 +30,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date
 
-from etl.feasibility import Card, Deck
+from etl.batting_roles import MIN_INNINGS_FOR_ROLE, dominant_band
+from etl.feasibility import BATTING_ROLE_SLOTS, Card, Deck
 
 DECAY_DISPLAY, K_DISPLAY = 0.7, 600      # the backtest's best rule for the card
 DECAY_HALF, K_HALF = 0.7, 300            # and for the engine's halves
@@ -267,9 +268,36 @@ def newcomer_id(name: str, cricsheet: str = "") -> str:
     return "new:" + "".join(ch for ch in name.lower() if ch.isalpha())
 
 
+def parse_positions(text: str) -> dict[int, int]:
+    """'1:12 3:4' -> {1: 12, 3: 4}: a player's innings at each batting position."""
+    out = {}
+    for part in (text or "").split():
+        pos, n = part.split(":")
+        out[int(pos)] = int(n)
+    return out
+
+
+def band_positions(counts: dict[int, int]) -> frozenset[int] | None:
+    """[A302] The batting positions a 2027 card may take, from innings outside the IPL: the
+    band A76's rule reads from them (`etl.batting_roles.dominant_band`), at least
+    MIN_INNINGS_FOR_ROLE innings or nothing."""
+    if sum(counts.values()) < MIN_INNINGS_FOR_ROLE:
+        return None
+    return BATTING_ROLE_SLOTS[dominant_band(counts)]
+
+
 def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
-                 purse_rows: list[dict], birth_rows: list[dict], base_price) -> Preset:
-    """`base_price(card)` is the auction's own tier rule, for a player with no real base."""
+                 purse_rows: list[dict], birth_rows: list[dict], base_price,
+                 position_rows: list[dict] = ()) -> Preset:
+    """`base_price(card)` is the auction's own tier rule, for a player with no real base.
+
+    [A302] A card's batting band is where the player batted LAST SEASON, IPL 2026, when he
+    played it -- his projected card keeps that season's positions. Otherwise it is where he
+    has MOSTLY batted in the other T20 cricket Cricsheet holds (`position_rows`, written by
+    `etl.list2027 --positions`), when that is five innings or more; and only failing both,
+    his last IPL season's, or a newcomer's pooled role default."""
+    elsewhere = {r["key"]: band_positions(parse_positions(r.get("positions", "")))
+                 for r in position_rows}
     hist = history(deck)
     mean = deck_mean(deck)
     ref = [c.display for cs in deck.cards_by_fs.values() for c in cs if c.season_year == SEASON - 1]
@@ -297,6 +325,8 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
             last = h[max(h)]
             card = projected_card(h, shown[pid], franchise)
             where = f"{last.season_year} with {last.franchise}" if last.franchise else str(last.season_year)
+            if last.season_year != SEASON - 1 and elsewhere.get(pid):
+                card = replace(card, positions=elsewhere[pid])
             if last.season_year == SEASON - 1:
                 status[pid] = "played"
                 notes[pid] = f"IPL {where}."
@@ -317,6 +347,8 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
         card = newcomer_card(newcomer_id(row["name"], row.get("cricsheet_id", "")), row["name"], role,
                              row["overseas"] == "yes", level, franchise)
         pid = card.person_id
+        if elsewhere.get(pid):
+            card = replace(card, positions=elsewhere[pid])
         if source == "newcomer":
             status[pid] = "new"
             notes[pid] = "New to the list this year. " + form_words(row.get("evidence", ""))

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import collections
 import csv
+import difflib
 import json
 import re
 import sys
@@ -196,6 +197,146 @@ def surname_link(name: str, candidates: dict[str, str]) -> str:
     hits = [pid for pid, cname in candidates.items()
             if [norm(w) for w in cname.split()][-1:] == words[-1:] and cname[:1].lower() == words[0][:1]]
     return hits[0] if len(hits) == 1 else ""
+
+
+# ---------------------------------------------------------------- batting positions [A302]
+#
+# A 2027 card's batting band comes from where the player batted LAST SEASON (IPL 2026) when
+# he played it, and otherwise from where he has MOSTLY batted in the other T20 cricket the
+# Cricsheet archives hold -- the ten leagues, the SMAT and T20Is, every season -- by A76's
+# own band rule (`etl.batting_roles.dominant_band`), so a 2027 band means what every other
+# band means. The counts are written to POSITIONS_CSV, one row per player the preset holds,
+# and `game.mini2027.build_preset` reads them.
+
+POSITIONS_CSV = OVERRIDES / "positions_2027.csv"
+POSITION_ARCHIVES = LEAGUES + ("sma", "t20is")     # keys of `etl.download.ARCHIVES`
+
+
+def innings_positions(match: dict) -> list[dict[str, int]]:
+    """Registry id -> batting position for each innings of one match: the order each man
+    first appears at either end (A4, `etl.positions.batting_order`). Super overs skipped."""
+    reg = match["info"]["registry"]["people"]
+    out = []
+    for inn in match["innings"]:
+        if inn.get("super_over"):
+            continue
+        order: dict[str, int] = {}
+        for over in inn["overs"]:
+            for d in over["deliveries"]:
+                for name in (d["batter"], d["non_striker"]):
+                    pid = reg.get(name)
+                    if pid is not None and pid not in order:
+                        order[pid] = len(order) + 1
+        out.append(order)
+    return out
+
+
+def league_positions() -> tuple[dict[str, collections.Counter], dict[str, set[str]]]:
+    """(registry id -> position -> innings, registry id -> the archives he batted in),
+    over every season of every archive in POSITION_ARCHIVES."""
+    counts: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    where: dict[str, set[str]] = collections.defaultdict(set)
+    from etl.download import ARCHIVES
+    for arc in POSITION_ARCHIVES:
+        with zipfile.ZipFile(data_dir() / ARCHIVES[arc]) as zf:
+            for n in zf.namelist():
+                if n.endswith(".json"):
+                    for order in innings_positions(json.loads(zf.read(n))):
+                        for pid, pos in order.items():
+                            counts[pid][pos] += 1
+                            where[pid].add(arc)
+    return counts, where
+
+
+def _initials(word: str) -> bool:
+    """An archive word of one to three capitals is initials ('AR', 'K')."""
+    return word.isupper() and len(word) <= 3 and word.isalpha()
+
+
+def _same_name(a: str, b: str) -> bool:
+    a, b = norm(a), norm(b)
+    return a == b or (min(len(a), len(b)) >= 5 and difflib.SequenceMatcher(None, a, b).ratio() >= 0.8)
+
+
+# Surname particles: 'van' in Tiaan van Vuuren is part of the surname, not a given name.
+PARTICLES = frozenset({"van", "von", "de", "der", "den", "du", "da", "di", "le", "la", "del"})
+
+
+def given_names_agree(listed: list[str], archived: list[str]) -> bool:
+    """Whether a list name's given names fit an archive name's (both without the surname).
+    Where the archive spells a given name out ('R Vinay Kumar', 'Dhrumil Matkar') that name
+    must be one of the list's, a one-letter slip apart at most; only an archive name of
+    initials alone ('AR Easwaran') may agree on a first letter. So Ravi Kumar is never
+    R Vinay Kumar and Abhishek Tiwari never Anurag Tiwari."""
+    listed = [w for w in listed if norm(w) not in PARTICLES]
+    archived = [w for w in archived if norm(w) not in PARTICLES]
+    if not listed or not archived:
+        return False
+    spelled = [w for w in archived if not _initials(w)]
+    listed_spelled = [w for w in listed if len(norm(w)) > 1]
+    if spelled:
+        return any(_same_name(a, b) for a in spelled for b in listed_spelled)
+    # initials alone: they must agree in order as far as both names go ('AR Easwaran' is
+    # Abhimanyu Easwaran; 'MN Singh' is not Mani Sankar Mura Singh)
+    have = "".join(w for w in archived).lower()
+    want = "".join(norm(w)[:1] for w in listed)
+    k = min(len(have), len(want))
+    return have[:k] == want[:k]
+
+
+def person_link(name: str, candidates: dict[str, str]) -> str:
+    """[A302] A registry id for a list name by surname AND given names (`given_names_agree`),
+    only where exactly one archive player fits. Stricter than `surname_link`, which checks
+    the first initial alone: domestic archive names spell given names out, and an initial
+    linked several wrong players in the first run."""
+    words = [w for w in re.split(r"[\s.\-]+", name) if norm(w)]
+    if len(words) >= 3 and norm(words[0]) in NAME_PREFIXES:
+        words = words[1:]
+    if len(words) < 2:
+        return ""
+    hits = []
+    for pid, cname in candidates.items():
+        cw = cname.split()
+        if len(cw) >= 2 and norm(cw[-1]) == norm(words[-1]) and given_names_agree(words[:-1], cw[:-1]):
+            hits.append(pid)
+    return hits[0] if len(hits) == 1 else ""
+
+
+def position_rows(players: list[tuple[str, str, str, bool]], counts, where,
+                  register: dict[str, tuple[str, str]]) -> list[dict]:
+    """One generated row per (preset key, name, registry id or '', overseas) the preset holds.
+    A player with no registry id is linked by `person_link` against the archive's players --
+    Indians against the SMAT's, everyone else against the rest -- and only where that is
+    unique, so a common surname links nobody rather than the wrong man."""
+    # an Indian on the list links only to a purely domestic player: one with SMAT innings and
+    # nothing abroad (a US T20I player who once played the SMAT is not him)
+    home = {pid: register[pid][0] for pid, arcs in where.items() if arcs == {"sma"} and pid in register}
+    away = {pid: register[pid][0] for pid, arcs in where.items() if "sma" not in arcs and pid in register}
+    linked = {}
+    for key, name, rid, overseas in players:
+        if not rid:
+            linked[key] = person_link(name, away if overseas else home)
+    claims = collections.Counter(v for v in linked.values() if v)
+    rows = []
+    for key, name, rid, overseas in players:
+        how = "id" if rid else ""
+        if not rid:
+            rid = linked[key] if claims[linked[key]] == 1 else ""   # two names, one man: neither
+            how = "name" if rid else ""
+        c = counts.get(rid, collections.Counter()) if rid else collections.Counter()
+        rows.append(dict(key=key, name=name, registry_id=rid, how=how,
+                         innings=sum(c.values()),
+                         positions=" ".join(f"{p}:{n}" for p, n in sorted(c.items())),
+                         archives=" ".join(sorted(where.get(rid, ()))) if rid else ""))
+    return rows
+
+
+def write_positions(rows: list[dict]) -> None:
+    cols = ["key", "name", "registry_id", "how", "innings", "positions", "archives"]
+    with open(POSITIONS_CSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
+        w.writeheader()
+        w.writerows(sorted(rows, key=lambda r: (r["key"], r["name"])))
 
 
 # ---------------------------------------------------------------- build
@@ -552,7 +693,37 @@ def build() -> list[dict]:
     return rows
 
 
+def preset_players(list_rows: list[dict], retained_rows: list[dict]) -> list[tuple[str, str, str, bool]]:
+    """(preset key, name, registry id or '', overseas) for everyone the preset will hold, keyed
+    exactly as `game.mini2027.build_preset` keys its cards: the checked or matched IPL id, else
+    the newcomer id."""
+    from game.mini2027 import newcomer_id
+    out, seen = [], set()
+    for r in list_rows + retained_rows:
+        pid = (r.get("person_id_checked") or r.get("person_id") or "").strip()
+        pid = "" if pid == "debutant" else pid
+        cs = (r.get("cricsheet_id") or "").strip()
+        key = pid or newcomer_id(r["name"], cs)
+        if key in seen:
+            continue
+        seen.add(key)
+        ovs = (r.get("overseas") or "").strip().lower()      # 'yes'/'no', or a country code
+        overseas = ovs not in ("", "no", "ind", "india")
+        out.append((key, r["name"], pid or cs, overseas))
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
+    if "--positions" in (argv or []):
+        counts, where = league_positions()
+        players = preset_players(read_override(LIST_CSV), read_override(RETAINED_CSV))
+        rows = position_rows(players, counts, where, register_names())
+        write_positions(rows)
+        linked = [r for r in rows if r["registry_id"]]
+        enough = [r for r in rows if r["innings"] >= 5]
+        print(f"  {POSITIONS_CSV.name}: {len(rows)} players, {len(linked)} linked, "
+              f"{len(enough)} with 5+ innings outside the IPL")
+        return
     rows = build()
     report_merge(LIST_CSV, merge_override(LIST_CSV, COLUMNS[:-2] + ["include"], rows, key=("source", "name"),
                                           decided="include"))

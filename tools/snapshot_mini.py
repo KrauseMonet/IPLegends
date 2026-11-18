@@ -4,8 +4,8 @@
     uv run python -m tools.snapshot_mini --check   # exit 1 if it disagrees with its sources
 
 The preset (`game.mini2027.build_preset`) is a pure function of the committed deck snapshot
-and four override files -- the retained squads, the purses, our auction list and the birth
-dates -- so this needs no database and no network, and the file is byte-stable (A107: gzip
+and five override files -- the retained squads, the purses, our auction list, the birth
+dates and where each player has batted outside the IPL (A302) -- so this needs no database and no network, and the file is byte-stable (A107: gzip
 written with mtime 0, keys sorted). The app loads it at boot; `--check` is a deploy gate,
 since a list edited without regenerating it would otherwise ship the old list silently.
 """
@@ -31,7 +31,8 @@ def build() -> Preset:
                         read_override(OVERRIDES / "auction_2027_list.csv"),
                         read_override(OVERRIDES / "purse_2027.csv"),
                         read_override(OVERRIDES / "birth_dates.csv"),
-                        au.base_price)
+                        au.base_price,
+                        read_override(OVERRIDES / "positions_2027.csv"))
 
 
 def to_document(p: Preset) -> dict:

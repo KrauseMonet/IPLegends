@@ -149,16 +149,18 @@
                 <button class="room-choice" data-mode="memory" onclick="pickRoomDraftMode('memory')">Memory</button>
               </div>
 
-              <div class="room-label auction-only hide">Retentions &amp; Right to Match</div>
+              <div class="room-label auction-only hide">Which auction</div>
               <div class="room-choices auction-only hide" id="megaChoices">
-                <button class="room-choice sel" data-mega="on" onclick="pickMega(true)"
+                <button class="room-choice sel" data-game="mini" onclick="pickAuctionGame('mini')"
+                  title="The real 2027 retained squads and the money each franchise has left. Our provisional list until the official register on 3 December. No ratings shown.">IPL 2027 mini auction · new</button>
+                <button class="room-choice" data-game="mega" onclick="pickAuctionGame('mega')"
                   title="Each franchise keeps up to five of its own legends first; unused places become Right to Match cards.">Mega auction</button>
-                <button class="room-choice" data-mega="off" onclick="pickMega(false)"
+                <button class="room-choice" data-game="auction" onclick="pickAuctionGame('auction')"
                   title="Every franchise starts from nothing with ₹120 crore.">Open auction</button>
               </div>
 
-              <div class="room-label auction-only hide">Trade window</div>
-              <div class="room-choices auction-only hide" id="tradesChoices">
+              <div class="room-label auction-only trades-only hide">Trade window</div>
+              <div class="room-choices auction-only trades-only hide" id="tradesChoices">
                 <button class="room-choice" data-trades="on" onclick="pickTrades(true)"
                   title="After the fill round, the people in the room can swap players one for one -- two trades each, never with a computer franchise.">Trades on</button>
                 <button class="room-choice sel" data-trades="off" onclick="pickTrades(false)"
@@ -256,6 +258,6 @@
 
 <script src="/static/common.js?v=79f3d77c8b"></script>
 <script src="/static/auth.js?v=bf7bef535d"></script>
-<script src="/static/rooms-setup.js?v=9310211158"></script>
+<script src="/static/rooms-setup.js?v=84dc8601ec"></script>
 </body>
 </html>

@@ -935,9 +935,10 @@ class CreateRoomIn(BaseModel):
         description="true lists this room publicly (GET /api/rooms/open) so anyone can "
                     "join without the code; false (default) is code-only, same as every "
                     "room before this field existed")
-    game: Literal["draft", "auction", "mega"] = Field(
+    game: Literal["draft", "auction", "mega", "mini"] = Field(
         default="draft", description="'auction' plays a live auction [A139]; 'mega' adds "
-                                     "retentions and Right to Match [A140]; league only")
+                                     "retentions and Right to Match [A140]; 'mini' is the "
+                                     "2027 mini auction [A301]; league only")
     kit: KitIn | None = Field(default=None, description="the host's kit [A151]; draft "
                               "rooms only, dropped if invalid")
     trades: bool = Field(default=False, description="[A174] auction rooms: open a trade "
@@ -3359,7 +3360,17 @@ def _room_player_out(player: rooms.RoomPlayer, seat: rooms.SeatProgress, *,
 def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionOut:
     """The auction floor as ONE seat sees it [A139]. Nobody else's limit is ever sent:
     a room shows the bidding, exactly as much as a real auction room would."""
+    mini = room.game == "mini"
+    with _mini_view(mini):
+        out = _room_auction_shown(room, deck, caller_id)
+    out.ratings_hidden = mini
+    return out
+
+
+def _room_auction_shown(room: rooms.Room, deck, caller_id: str | None) -> AuctionOut:
     r = room_auction.replay(room, deck)
+    mini = room.game == "mini"
+    notes = room_auction.mini_preset().notes if mini else {}
     a = r.auction
     owners = {p.franchise: p.name for p in room.players.values() if not p.is_cpu}
     you_idx = r.team_of.get(caller_id)
@@ -3380,11 +3391,12 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         state=room.code, phase=phase, you=you.short if you else "",
         franchise=you.franchise if you else "",
         max_bid=you.max_bid() if you else 0,
-        mega=room.game == "mega",
+        mega=room.game == "mega", mini=mini,
         teams=[AuctionTeamOut(short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
                               purse=t.purse,
                               players=len(t.squad), overseas=t.overseas, human=t.human,
-                              owner=owners.get(t.short), retained=t.retained, rtm=t.rtm)
+                              owner=owners.get(t.short), retained=t.retained, rtm=t.rtm,
+                              size=t.squad_size if mini else None)
                for t in a.teams],
         squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained,
                                legend=c is you.legend)
@@ -3395,10 +3407,15 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
         band_supply=_supply_out(a),
         waiting_on=[names[pid] for pid in r.waiting_on() if pid in names],
     )
+    if mini:                  # [A301] the real places, purses and squad rules (A297)
+        out.purse_total = max(room_auction.mini_preset().purse.values())
+        if you is not None:
+            out.squad_size, out.squad_overseas_cap = you.squad_size, you.overseas_cap
+            out.squad_min = you.squad_min
     pause = room_auction.pause_state(room)
     if pause is not None:
         out.paused, out.paused_left = True, pause["left"]
-    if you is not None:
+    if you is not None and not mini:       # a mini auction has no board's brief (A297)
         out.brief = _brief_out(auction_report.judge(
             auction_report.board_brief(deck, room.seed, you.short, room.game == "mega"),
             a, you))
@@ -3429,7 +3446,8 @@ def _room_auction_out(room: rooms.Room, deck, caller_id: str | None) -> AuctionO
             lot=lot.index, lots_total=len(a.lots), round=auction.ROUNDS[r.round_no],
             set_code=lot.set_code, set_label=_set_label(lot.set_code), base=lot.base,
             card=_card(lot.card),
-            upcoming=[] if r.round_no == 1 else [x.card.name for x in same_set])
+            upcoming=[] if r.round_no == 1 else [x.card.name for x in same_set],
+            note=notes.get(lot.card.person_id))
         out.bids = [AuctionBidOut(team=a.teams[b.team].short, price=b.price) for b in r.bids]
         out.leader = a.teams[r.leader].short if r.bids else None
         out.price = r.bids[-1].price if r.bids else None
@@ -3545,7 +3563,13 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
 
 def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> RoomStateOut:
     """An auction room's state. Seats carry their franchise; once the auction is over they
-    carry their twelve too, which is what the squad-review screen and the season read."""
+    carry their twelve too, which is what the squad-review screen and the season read.
+    [A301] A mini room shows no ratings anywhere, as the single-player mini does (A298)."""
+    with _mini_view(room.game == "mini"):
+        return _auction_room_state_shown(room, deck, caller_id)
+
+
+def _auction_room_state_shown(room: rooms.Room, deck, caller_id: str | None) -> RoomStateOut:
     sides = {}
     if room.status == "complete":
         sides = {pid: (order, impact) for pid, _p, order, impact
@@ -3554,7 +3578,7 @@ def _auction_room_state_out(room: rooms.Room, deck, caller_id: str | None) -> Ro
     for pid, p in room.players.items():
         order, impact = sides.get(pid, ([None] * XI_SIZE, None))
         done = pid in sides
-        rating = team_rating(list(order) + [impact]) if done else None
+        rating = team_rating(list(order) + [impact]) if done and not _ratings_hidden() else None
         players.append(RoomPlayerOut(
             player_id=pid, name=p.name, is_cpu=p.is_cpu, franchise=p.franchise,
             crest=crest_url(dict(auction.FRANCHISES).get(p.franchise)),
@@ -4363,7 +4387,8 @@ def room_auction_sets(code: str) -> AuctionCatalogueOut:
         r = room_auction.replay(room, STATE["deck"])
     except room_auction.AuctionRoomError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _catalogue_out(r.auction, r.lot, r.phase)
+    with _mini_view(room.game == "mini"):
+        return _catalogue_out(r.auction, r.lot, r.phase)
 
 
 @app.post("/api/rooms/{code}/auction/limit", response_model=RoomStateOut)
@@ -4564,6 +4589,9 @@ def room_auction_report(code: str, player_id: str | None = None) -> AuctionRepor
         arranged = room_auction.best_twelve_for(r, t)
         twelves[t.index] = (list(arranged[0]) + [arranged[1]]) if arranged else None
     owners = {p.franchise: p.name for p in room.players.values() if not p.is_cpu}
+    if room.game == "mini":        # [A301] no ratings, no squad ranking, no brief (A298)
+        with _mini_view(True):
+            return _report_out(a, you, {}, [], owners)
     brief = (auction_report.board_brief(STATE["deck"], room.seed, a.teams[you].short,
                                         room.game == "mega") if you is not None else [])
     return _report_out(a, you, twelves, brief, owners)
@@ -4599,10 +4627,12 @@ def room_auction_verdict(code: str, player_id: str) -> VerdictOut:
                 team_of_side[id(side)] = by_short[p.franchise]
     finish = next((n for n, row in enumerate(replay.table or [], 1) if row.pid == player_id),
                   None)
-    return _verdict_out(a, [e.result for e in replay.results if e.result is not None],
-                        team_of_side, you, finish,
-                        auction_report.board_brief(deck, room.seed, a.teams[you].short,
-                                                   room.game == "mega"))
+    mini = room.game == "mini"
+    with _mini_view(mini):
+        return _verdict_out(a, [e.result for e in replay.results if e.result is not None],
+                            team_of_side, you, finish,
+                            [] if mini else auction_report.board_brief(
+                                deck, room.seed, a.teams[you].short, room.game == "mega"))
 
 
 @app.post("/api/rooms/{code}/auction/twelve", response_model=RoomStateOut)
@@ -4705,7 +4735,13 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
     """Maps `web.room_match.RoomMatchReplay` (pids throughout, since that module has no
     concept of display names) to the wire format (names, plus per-caller `you_decide_*`
     flags telling the frontend whether IT is the seat that can act -- the toss winner's
-    own seat for a fixture's toss, the host's for advancing the round)."""
+    own seat for a fixture's toss, the host's for advancing the round).
+    [A301] A mini room's match phase shows no ratings either."""
+    with _mini_view(room.game == "mini"):
+        return _room_match_shown(room, replay, player_id, deck)
+
+
+def _room_match_shown(room: rooms.Room, replay, player_id: str | None, deck) -> RoomMatchOut:
 
     # A filler seat's display name is its historical squad's own name (`room_sides`'s
     # own override, `RoomPlayer.name` for a REAL seat) -- read from ONE `room_sides`
@@ -4758,7 +4794,7 @@ def _room_match_out(room: rooms.Room, replay, player_id: str | None, deck) -> Ro
             ([], None))
         all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
         squad = [_journey_entry(c, journey.acc) for c in all_twelve]
-        rating = team_rating(all_twelve)
+        rating = None if _ratings_hidden() else team_rating(all_twelve)
 
     return RoomMatchOut(
         format=room.format,

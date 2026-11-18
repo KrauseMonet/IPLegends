@@ -1315,11 +1315,17 @@ function fillToolsEl(){
 function renderFill(){
   const d = A;
   const you = yourTeam(d);
-  const need = d.squad_size - you.players;
+  // [A301] A mini auction's fill round only takes a squad to 18 (`squad_min`); the places
+  // above that may stay open. Everywhere else every place must be filled.
+  const need = (d.squad_min || d.squad_size) - you.players;
   const gaps = squadGaps(d);
-  $('#aucFillLede').textContent = `The hammer has fallen with ${need} place${need === 1 ? '' : 's'} `
-    + `still open in your squad. Every player here costs ₹30L, and every one keeps a legal `
-    + `twelve within reach.`;
+  $('#aucFillLede').textContent = d.squad_min
+    ? `The hammer has fallen and your squad needs ${need} more player${need === 1 ? '' : 's'} `
+      + `to reach ${d.squad_min}. Every player here costs ₹30L, and every one keeps a legal `
+      + `twelve within reach.`
+    : `The hammer has fallen with ${need} place${need === 1 ? '' : 's'} `
+      + `still open in your squad. Every player here costs ₹30L, and every one keeps a legal `
+      + `twelve within reach.`;
   const tools = fillToolsEl();
 
   // The squad's gaps and its batting spread, as the floor's squad panel shows them.

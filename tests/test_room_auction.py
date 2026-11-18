@@ -1355,3 +1355,122 @@ def test_the_floor_and_both_sets_panels_show_band_supply():
         body = re.search(rf"function {fn}\(.*?\n\}}", js, re.S)
         assert body, f"{fn} not found"
         assert "supplyHtml(d.band_supply, d.quality_mark)" in body.group(0), fn
+
+
+# --- the 2027 mini auction in a room [A301] -----------------------------------------------
+
+def mini_room(conn, deck, clock, humans=(("Asha", "MI"), ("Ben", "CSK"))):
+    (host_name, host_team), *rest = humans
+    room, host = rooms.create_room(conn, "league", 30, host_name, game="mini",
+                                   trades=True, legends=True)
+    pids = [host]
+    rooms.choose_franchise(conn, room.code, host, host_team)
+    for name, team in rest:
+        room, pid = rooms.join_room(conn, room.code, name, deck)
+        rooms.choose_franchise(conn, room.code, pid, team)
+        pids.append(pid)
+    rooms.start_room(conn, room.code, host, deck)
+    return room.code, pids
+
+
+def test_a_mini_room_has_no_trade_window_and_no_legends(deck, clock):
+    """[A301] The squads are the real retained ones: asking for either at creation is
+    ignored, and the host cannot turn either on in the lobby."""
+    conn = FakeConn()
+    room, host = rooms.create_room(conn, "league", 30, "Asha", game="mini",
+                                   trades=True, legends=True)
+    assert room.game == "mini" and room.trades is False and room.legends is None
+    with pytest.raises(rooms.RoomError):
+        rooms.set_trades(conn, room.code, host, True)
+    with pytest.raises(rooms.RoomError):
+        rooms.set_legends(conn, room.code, host, True)
+
+
+def test_a_mini_room_starts_from_the_real_retained_squads(deck, clock):
+    from tools.snapshot_mini import load_preset
+    preset = load_preset()
+    conn = FakeConn()
+    code, (host, guest) = mini_room(conn, deck, clock)
+    r = ra.replay(load(conn, code), deck)
+    assert r.phase == "bid" and r.auction.market is not None
+    for t in r.auction.teams:
+        assert [c.person_id for c in t.squad] == [c.person_id for c in preset.squads[t.short]]
+        assert (t.purse, t.squad_size, t.overseas_cap) == \
+               (preset.purse[t.short], preset.squad_size[t.short], preset.overseas_cap[t.short])
+        assert t.squad_min == 18
+    assert r.auction.teams[r.team_of[host]].short == "MI"
+    # the list is the 2027 one, in the mini auction's sets
+    assert {lot.card.person_id for lot in r.auction.lots} == \
+           {c.person_id for c, _, _ in preset.lots}
+
+
+def test_a_mini_room_completes_with_every_squad_inside_the_real_rules(deck, clock):
+    conn = FakeConn()
+    code, _ = mini_room(conn, deck, clock)
+    room = run_to_the_end(conn, code, deck, clock)
+    assert room.status == "complete"
+    r = ra.replay(room, deck)
+    for t in r.auction.teams:
+        assert au.MINI_SQUAD_MIN <= len(t.squad) <= t.squad_size
+        assert t.overseas <= t.overseas_cap and t.purse >= 0
+    for pid, player, order, impact in rooms.room_sides(room, deck):
+        team = next(t for t in r.auction.teams if t.short == player.franchise)
+        assert order_errors(order, impact, team.squad) == []
+
+
+def test_a_one_person_mini_room_is_the_single_player_mini_auction(deck, clock):
+    """[A301] The room's own bidding loop and the single-player one (`run_mini_auction`
+    behind an AM state) must be the same auction: same seed, same person passing on
+    everything and taking the first option in the fill round -- every sale identical."""
+    import web.auction_session as S
+    conn = FakeConn()
+    code, (host,) = mini_room(conn, deck, clock, humans=(("Asha", "MI"),))
+    room = run_to_the_end(conn, code, deck, clock)
+    rr = ra.replay(room, deck)
+    r = S.pass_lots(deck, S.new_state(room.seed, "MI", mini=True), "all")
+    while r.phase == "fill":
+        r = S.fill(deck, r.state, 0)
+    sale = lambda s: (s.lot.card.person_id, s.round, s.winner, s.price)
+    assert [sale(s) for s in rr.auction.sales] == [sale(s) for s in r.auction.sales]
+    assert len(rr.auction.sales) > 40
+
+
+def test_a_mini_room_shows_no_rating_on_the_floor_or_the_finished_squads(deck, clock):
+    """[A301] As the single-player mini (A298): no rating, skill or 85+ count anywhere a
+    mini room's seats can read, and an ordinary auction room keeps its ratings."""
+    from tests.test_mini_auction import _no_ratings
+    from web import app as web_app
+    web_app.STATE["deck"] = deck
+    conn = FakeConn()
+    code, (host, guest) = mini_room(conn, deck, clock)
+    floor = web_app._room_auction_out(load(conn, code), deck, host).model_dump()
+    assert floor["mini"] and floor["ratings_hidden"] and floor["lot"]["card"]["status"]
+    assert floor["lot"]["note"]
+    _no_ratings(floor)
+    room = run_to_the_end(conn, code, deck, clock)
+    state = web_app._auction_room_state_out(room, deck, host).model_dump()
+    assert all(p["order"][0] for p in state["players"])          # the twelves are there
+    _no_ratings(state)
+    conn2 = FakeConn()
+    code2, host2, _ = two_human_room(conn2, deck, clock)
+    plain = web_app._room_auction_out(load(conn2, code2), deck, host2).model_dump()
+    assert not plain["ratings_hidden"] and plain["lot"]["card"]["rating"] is not None
+
+
+def test_a_mini_room_s_computer_teams_fill_as_the_single_player_ones_do(deck, clock, monkeypatch):
+    """[A301] In a real mini auction the computer teams reach 18 by bidding, so their
+    fill-round choice never acts; with every computer ceiling forced to nothing, every team
+    fills, and the room must choose exactly as `run_mini_auction` does."""
+    import web.auction_session as S
+    monkeypatch.setattr(au, "mini_ceiling", lambda *a, **k: 0)
+    conn = FakeConn()
+    code, (host,) = mini_room(conn, deck, clock, humans=(("Asha", "MI"),))
+    room = run_to_the_end(conn, code, deck, clock)
+    rr = ra.replay(room, deck)
+    r = S.pass_lots(deck, S.new_state(room.seed, "MI", mini=True), "all")
+    while r.phase == "fill":
+        r = S.fill(deck, r.state, 0)
+    fills = [s for s in rr.auction.sales if s.round == "fill" and s.winner != rr.team_of[host]]
+    assert len(fills) >= 3                     # teams short of 18 after their retentions
+    sale = lambda s: (s.lot.card.person_id, s.round, s.winner, s.price)
+    assert [sale(s) for s in rr.auction.sales] == [sale(s) for s in r.auction.sales]

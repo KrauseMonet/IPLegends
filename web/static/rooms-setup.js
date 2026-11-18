@@ -7,7 +7,9 @@
 // game for anyone who skimmed past the list.
 let CHOSEN_FORMAT = null, CHOSEN_TIMER = 30, CHOSEN_ROOM_DRAFT_MODE = 'stat';
 let CHOSEN_VISIBILITY = false;   // is_open -- closed (false) is the default, A95
-let CHOSEN_MEGA = true;          // auction rooms: retentions and Right to Match [A140]
+// Auction rooms: 'mini' (the 2027 mini auction, A301), 'mega' (retentions and Right to
+// Match, A140) or 'auction' (everyone from nothing). The mini auction is the default.
+let CHOSEN_AUCTION = 'mini';
 let CHOSEN_TRADES = false;       // auction rooms: a trade window after the fill round [A174]
 function pickTrades(on){
   CHOSEN_TRADES = on;
@@ -15,10 +17,13 @@ function pickTrades(on){
     .forEach(b => b.classList.toggle('sel', (b.dataset.trades === 'on') === on));
 }
 
-function pickMega(on){
-  CHOSEN_MEGA = on;
+function pickAuctionGame(game){
+  CHOSEN_AUCTION = game;
   document.querySelectorAll('#megaChoices .room-choice')
-    .forEach(b => b.classList.toggle('sel', (b.dataset.mega === 'on') === on));
+    .forEach(b => b.classList.toggle('sel', b.dataset.game === game));
+  // a mini auction's squads are the real retained ones: no trade window [A301]
+  document.querySelectorAll('#roomConfig .trades-only')
+    .forEach(el => el.classList.toggle('hide', CHOSEN_FORMAT !== 'auction' || game === 'mini'));
 }
 let ROOM_OPEN_POLL = null;       // polls GET /api/rooms/open while the join tab is showing
 
@@ -40,6 +45,7 @@ function pickFormat(f){
     .forEach(el => el.classList.toggle('hide', f === 'auction'));
   document.querySelectorAll('#roomConfig .auction-only')
     .forEach(el => el.classList.toggle('hide', f !== 'auction'));
+  pickAuctionGame(CHOSEN_AUCTION);
   document.querySelectorAll('#formatChoices .pick')
     .forEach(b => b.classList.toggle('sel', b.dataset.format === f));
   $('#formatChoices').classList.add('picked');   // retires the "choose one" prompt
@@ -214,10 +220,10 @@ async function createRoom(ctrl){
         body: JSON.stringify({
           // An auction room plays the ten-team league afterwards [A139].
           format: CHOSEN_FORMAT === 'auction' ? 'league' : CHOSEN_FORMAT,
-          game: CHOSEN_FORMAT !== 'auction' ? 'draft' : (CHOSEN_MEGA ? 'mega' : 'auction'),
+          game: CHOSEN_FORMAT !== 'auction' ? 'draft' : CHOSEN_AUCTION,
           timer_seconds: CHOSEN_TIMER, host_name: name,
           draft_mode: CHOSEN_ROOM_DRAFT_MODE, is_open: CHOSEN_VISIBILITY,
-          trades: CHOSEN_FORMAT === 'auction' && CHOSEN_TRADES,
+          trades: CHOSEN_FORMAT === 'auction' && CHOSEN_AUCTION !== 'mini' && CHOSEN_TRADES,
           // [A151] Your saved kit, if you have one; an auction room ignores it.
           kit: savedKit()})});
       enterRoom(r.room.code, r.player_id);

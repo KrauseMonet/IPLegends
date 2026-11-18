@@ -88,7 +88,8 @@ OPEN_ROOMS_LIMIT = 30
 # his season stats, 'memory' shows neither. Chosen once by the host at creation and
 # binding on every seat (migration 023); the join flow gets no choice of its own.
 DRAFT_MODES = ("stat", "memory")
-GAMES = ("draft", "auction", "mega")   # 'mega' = retentions and Right to Match [A140]
+GAMES = ("draft", "auction", "mega", "mini")   # 'mega' = retentions and Right to Match
+                                               # [A140]; 'mini' = the 2027 mini auction [A301]
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 6
 
@@ -439,8 +440,8 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     host_id = secrets.token_urlsafe(8)
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
                 seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
-                game=game, trades=bool(trades) and game != "draft",
-                legends={} if legends and game != "draft" else None)
+                game=game, trades=bool(trades) and game not in ("draft", "mini"),
+                legends={} if legends and game not in ("draft", "mini") else None)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     room.players[host_id].kit = _arriving_kit(room, host_id, kit)
     _save_room(conn, room)
@@ -597,6 +598,8 @@ def set_trades(conn, code: str, player_id: str, on: bool) -> Room:
     room = _load_room(conn, code)
     if room.game == "draft":
         raise RoomError("only an auction room has a trade window")
+    if room.game == "mini":           # [A301] the squads are the real retained ones
+        raise RoomError("the 2027 mini auction has no trade window")
     if player_id != room.host_id:
         raise RoomError("only the host can change the trade window")
     if room.status != "lobby":
@@ -612,6 +615,8 @@ def set_legends(conn, code: str, player_id: str, on: bool) -> Room:
     room = _load_room(conn, code)
     if room.game == "draft":
         raise RoomError("only an auction room has career legends")
+    if room.game == "mini":           # [A301] the squads are the real retained ones
+        raise RoomError("the 2027 mini auction has no career legends")
     if player_id != room.host_id:
         raise RoomError("only the host can change career legends")
     if room.status != "lobby":

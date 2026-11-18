@@ -627,17 +627,22 @@ function renderRoomLobby(r){
   $('#lobbySeats').textContent = `${r.players.length} of ${r.seats} seats`;
   const chips = !auction
     ? [r.format.charAt(0).toUpperCase() + r.format.slice(1), `${r.timer_seconds}s a pick`, r.draft_mode === 'memory' ? 'Memory draft' : 'Stat draft']
-    : [r.game === 'mega' ? 'Mega auction · retentions & RTM' : 'Auction · league',
-       '15s a lot · a bid leaves 10s', '₹120 crore each'];
+    : r.game === 'mini'
+      // [A301] the real retained squads and purses; no ratings, legends or trades
+      ? ['IPL 2027 mini auction', 'Real retained squads & purses', 'No ratings shown',
+         '15s a lot · a bid leaves 10s']
+      : [r.game === 'mega' ? 'Mega auction · retentions & RTM' : 'Auction · league',
+         '15s a lot · a bid leaves 10s', '₹120 crore each'];
   if (r.is_open != null) chips.push(r.is_open ? 'Open room' : 'Private room');
   $('#lobbyChips').innerHTML = chips.map(c => `<span class="dr-chip">${esc(c)}</span>`).join('');
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyFranchises(r);
-  $('#lobbyTradesWrap').classList.toggle('hide', !auction);
-  if (auction) renderLobbyTrades(r);
-  $('#lobbyLegendsWrap').classList.toggle('hide', !auction);
-  if (auction) renderLobbyLegends(r);
+  const extras = auction && r.game !== 'mini';     // [A301] no trades or legends in a mini
+  $('#lobbyTradesWrap').classList.toggle('hide', !extras);
+  if (extras) renderLobbyTrades(r);
+  $('#lobbyLegendsWrap').classList.toggle('hide', !extras);
+  if (extras) renderLobbyLegends(r);
   const mine = r.players.find(p => p.player_id === MY_PID);
   $('#lobbyKitWrap').classList.toggle('hide', auction || !mine || !mine.kit);
   if (!auction && mine && mine.kit) $('#lobbyKit').innerHTML = roomKitStrip(mine);
@@ -1624,7 +1629,8 @@ function renderRoomStartReview(m){
       <div class="rs-squad-id">${me.kit ? kitBadge(me.kit, 'rs-squad-badge') : ''}
         <div class="rs-title">${esc(me.kit ? me.kit.name : me.name)}</div></div>
       ${me.kit ? `<button class="act minor rs-kit" onclick="editRoomKit()">Edit kit</button>` : ''}
-      <div class="rs-ratings">${teamRatingsHtml(me)}</div>
+      ${ROOM && ROOM.game === 'mini' ? '' :      /* [A301] a mini room shows no ratings */
+        `<div class="rs-ratings">${teamRatingsHtml(me)}</div>`}
       ${actions}
     </div>
     <div class="room-gap rs-list">${rows.join('')}</div>`;

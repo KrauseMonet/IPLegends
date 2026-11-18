@@ -84,7 +84,8 @@ PAUSE_MAX_S = 300        # [A249] ratified: a pause resumes by itself after five
 RESUME_FLOOR = BID_WINDOW   # [A249] a resume leaves at least this long on the clock
 CONTROL_KINDS = ("pause", "resume")
 
-AUCTION_GAMES = ("auction", "mega")   # 'mega' adds retentions and Right to Match [A140]
+AUCTION_GAMES = ("auction", "mega", "mini")   # 'mega' adds retentions and Right to Match
+                                               # [A140]; 'mini' is the 2027 mini auction [A301]
 
 
 def is_auction(room) -> bool:
@@ -293,9 +294,11 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     the room once a second would otherwise rebuild the same auction over and over."""
     humans = {pid: p.franchise for pid, p in room.players.items() if not p.is_cpu}
     mega = room.game == "mega"
-    trades = bool(getattr(room, "trades", False))
-    legends = legend_cards(room)
-    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, trades,
+    mini = room.game == "mini"
+    # [A301] a mini auction's squads are the real retained ones: no legends, no trades
+    trades = bool(getattr(room, "trades", False)) and not mini
+    legends = {} if mini else legend_cards(room)
+    key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, mini, trades,
            tuple(sorted((pid, c.person_id, c.display, c.bat_scoring, c.bowl_scoring)
                         for pid, c in legends.items())))
     hit = _CACHE.get(key)
@@ -303,7 +306,7 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
         _CACHE.move_to_end(key)
         return hit
     moves = [m for m in room.moves if m.get("k") not in CONTROL_KINDS]   # [A249]
-    result = _replay(room.seed, humans, moves, deck, mega, trades, legends)
+    result = _replay(room.seed, humans, moves, deck, mega, trades, legends, mini)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
@@ -442,10 +445,27 @@ def _reserve(deck: Deck) -> list[Card]:
     return _RESERVE[key]
 
 
+def mini_preset():
+    """[A301] The committed 2027 preset (A297), or an AuctionRoomError when the deployment
+    lacks it -- a mini room cannot be played without the real retained squads."""
+    from tools.snapshot_mini import load_preset
+    preset = load_preset()
+    if preset is None:
+        raise AuctionRoomError("the 2027 mini auction is not available on this server")
+    return preset
+
+
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             mega: bool = False, trades: bool = False,
-            legends: dict[str, Card] | None = None) -> RoomAuctionReplay:
-    teams = au.make_teams(seed, humans=frozenset(humans.values()))
+            legends: dict[str, Card] | None = None, mini: bool = False) -> RoomAuctionReplay:
+    """[A301] `mini` plays the 2027 mini auction: the real retained squads, purses and
+    places (`game.mini2027.Preset`), our provisional list, the mini computer bidding
+    (`game.auction.mini_ceiling`), and a fill round that stops at a squad of 18 -- exactly
+    `game.auction.run_mini_auction`'s rules, with people in the seats. No retentions, no Right
+    to Match, no legends, no trades."""
+    preset = mini_preset() if mini else None
+    teams = (au.make_mini_teams(preset, seed, humans=frozenset(humans.values())) if mini
+             else au.make_teams(seed, humans=frozenset(humans.values())))
     by_short = {t.short: t.index for t in teams}
     team_of = {pid: by_short[short] for pid, short in humans.items()}
     human_idx = set(team_of.values())
@@ -496,11 +516,16 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
         if t.legend is not None:
             t.squad.append(t.legend)
             t.paid.append(0)
-    lots = au.build_catalogue(deck, seed, frozenset(kept))
-    listed = {lot.card.person_id for lot in lots} | kept
-    register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
-    auction = au.Auction(seed, lots, teams, mega=mega, register=register,
-                         reserve=_reserve(deck))
+    if mini:
+        lots = au.mini_catalogue(preset.lots, seed)
+        auction = au.Auction(seed, lots, teams, register=[], reserve=[lot.card for lot in lots],
+                             market=au.mini_market(preset))
+    else:
+        lots = au.build_catalogue(deck, seed, frozenset(kept))
+        listed = {lot.card.person_id for lot in lots} | kept
+        register = [c for c in au.draw_seasons(deck, seed) if c.person_id not in listed]
+        auction = au.Auction(seed, lots, teams, mega=mega, register=register,
+                             reserve=_reserve(deck))
     if mega:
         auction.retention_lost = lost
     flags: dict[int, set] = {i: set() for i in human_idx}
@@ -511,7 +536,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 break
             state = RoomAuctionReplay(auction, team_of, "bid", lot=lot, round_no=round_no,
                                       flags=flags)
-            auto = {t.index: au.cpu_ceiling(t, lot, seed, round_no, mega)
+            auto = {t.index: (au.mini_ceiling(t, lot, seed, round_no, auction.market) if mini
+                              else au.cpu_ceiling(t, lot, seed, round_no, mega))
                     for t in teams if not t.human}
 
             def reply():
@@ -605,7 +631,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     # single-player auction and a room use, so the two cannot drift [A150].
     stranded: set[int] = set()
     while True:
-        short = [t for t in teams if t.open_places > 0 and t.index not in stranded]
+        # places a team MUST fill: all of them, or up to 18 in a mini auction [A301]
+        short = [t for t in teams if t.required_places > 0 and t.index not in stranded]
         if not short:
             break
         team = min(short, key=lambda t: (len(t.squad), t.index))
@@ -626,7 +653,7 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
                 raise AuctionRoomError("no such fill option")
             card = options[mv["i"]]
         else:
-            card = max(options, key=lambda c: au.need(team, c) * au.value_curve(c.display, mega))
+            card = max(options, key=lambda c: au.need(team, c) * au.value_curve(c.display, mega, mini))
         team.squad.append(card)
         team.paid.append(au.MIN_PRICE)
         team.purse -= au.MIN_PRICE

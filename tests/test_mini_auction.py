@@ -114,6 +114,78 @@ def test_the_retired_table_and_the_smat_tables_are_read_by_section():
                                           "Pragnay Reddy": "Wicketkeeper"}
 
 
+def _smat_match(t1, t2, runs1="", wickets1="", runs2="", wickets2="", motm=""):
+    return f"""{{{{Single-innings cricket match collapsible
+| team1 = {{{{cr-IND|{t1}}}}}
+| team2 = {{{{cr-IND|{t2}}}}}
+| runs1 = {runs1}
+| wickets1 = {wickets1}
+| runs2 = {runs2}
+| wickets2 = {wickets2}
+| motm = {motm}
+}}}}"""
+
+
+def test_smat_form_counts_showings_from_the_match_summaries():
+    """[A299] A showing: top-scoring with 40+ at 130+, leading the attack with 3+ at 8 an
+    over or less, or Player of the Match. A bowler is credited to the side he bowled for."""
+    page = "\n".join([
+        _smat_match("mum", "del", runs1="[[Big Hitter|B Hitter]] 61 (30)",
+                    wickets1="[[Seamer One]] 3/24 (4 overs)",       # bowled for Delhi
+                    runs2="Slow Coach 45 (40)",                     # 112.5: too slow
+                    wickets2="Leaky Quick 3/33 (4 overs)",          # 8.25: too dear
+                    motm="[[Big Hitter|B Hitter]] <small>(Mumbai)</small>"),
+        _smat_match("del", "kar", runs1="Slow Coach 40 (30)",       # exactly 40 at 133
+                    wickets2="[[Seamer One]] 3/32 (4 overs)"),       # exactly 8.0: counts
+        _smat_match("man", "miz", runs1="[[Big Hitter|B Hitter]] 99 (40)",   # Plate: skipped
+                    motm="[[Big Hitter|B Hitter]] <small>(x)</small>"),
+    ])
+    f = L.smat_form(page)
+    assert (f["B Hitter"].knocks, f["B Hitter"].poms, f["B Hitter"].showings) == (1, 1, 2)
+    assert f["B Hitter"].title == "Big Hitter" and f["B Hitter"].team == "mum"
+    assert (f["Seamer One"].hauls, f["Seamer One"].team, f["Seamer One"].wickets) == (2, "del", 6)
+    assert f["Seamer One"].overs_balls == 48 and f["Seamer One"].conceded == 56
+    assert (f["Slow Coach"].knocks, f["Slow Coach"].tops, f["Slow Coach"].runs) == (1, 2, 85)
+    assert f["Leaky Quick"].hauls == 0 and f["Leaky Quick"].leads == 1
+    assert f["Seamer One"].role() == "Bowler" and f["B Hitter"].role() == "Batter"
+    assert f["Seamer One"].evidence() == ("SMAT 2025-26 for Delhi: led the attack twice, "
+                                          "6 wkts at 7.00 an over")
+    assert L._overs_to_balls("3.4") == 22
+
+
+def _row(overseas, source="unsold", pid="", evidence="", base="30"):
+    return dict(source=source, overseas=overseas, person_id=pid, evidence=evidence,
+                base_2026_lakh=base)
+
+
+def test_the_balance_gives_each_passport_the_same_lots_a_place():
+    """[A299] 41 Indian places and 25 overseas: 10 overseas lots keep round(10 * 41/25) = 16
+    Indian ones, and the weakest evidence goes first."""
+    # each stronger row sits LAST on the register, so only its own rule can keep it
+    rows = [_row("yes") for _ in range(10)]
+    rows += [_row("no") for _ in range(16)]                                  # nothing to go on
+    rows += [_row("no", base="75")]                                          # a higher base
+    rows += [_row("no", evidence="SMAT 2025-26 for Goa: x")]                 # SMAT form
+    rows += [_row("no", pid="p")]                                            # an IPL record
+    rows += [_row("no", source="released", pid="r", base="")]                 # kept first
+    L.balance(rows, 66, 25)
+    assert L.balance_cut(rows, 66, 25) == 16
+    indian = [r for r in rows if r["overseas"] == "no"]
+    assert sum(r["balance"] != "out" for r in indian) == 16
+    assert all(r["balance"] == "" for r in indian[-4:])
+    # among equals, the later row on the register goes first
+    plain = indian[:16]
+    assert [r["balance"] for r in plain] == [""] * 12 + ["out"] * 4
+    assert all(r["balance"] == "" for r in rows if r["overseas"] == "yes")
+
+
+def test_a_hand_include_overrides_the_balance_either_way():
+    assert M.listed({"balance": "out", "include": "y"})
+    assert not M.listed({"balance": "", "include": "n"})
+    assert not M.listed({"balance": "out", "include": ""})
+    assert M.listed({"balance": "", "include": ""})
+
+
 def test_a_hand_decision_follows_its_player_when_the_source_changes():
     key = ("short", "source", "name")
     rows = [dict(short="RR", source="wikipedia", name="Aman Rao", person_id="", person_id_checked="", note=""),
@@ -228,20 +300,42 @@ def test_the_preset_counts_places_from_the_official_table_and_lists_nobody_twice
                    role="Batter", base_2026_lakh="50", include=""),
               dict(source="newcomer", name="League Star", person_id="", capped="no", overseas="yes",
                    role="Bowler", base_2026_lakh="", include="",
-                   evidence="18 m (MLC, SAT); 9 runs off 14, SR 64; 38 wkts, econ 8.27; +352 runs above par")]
+                   evidence="18 m (MLC, SAT); 9 runs off 14, SR 64; 38 wkts, econ 8.27; +352 runs above par"),
+              dict(source="newcomer", name="D One Back", person_id="d1", capped="no", overseas="no",
+                   role="Batter", base_2026_lakh="", include="",
+                   evidence="SMAT 2025-26 for Goa: top-scored twice, 120 runs off 70"),
+              dict(source="unsold", name="Form Lad", person_id="", capped="no", overseas="no",
+                   role="Bowler", base_2026_lakh="30", include="",
+                   evidence="SMAT 2025-26 for Assam: led the attack twice, 10 wkts at 5.00 an over"),
+              dict(source="unsold", name="Cut Lad", person_id="", capped="no", overseas="no",
+                   role="Batter", base_2026_lakh="30", include="", balance="out"),
+              dict(source="unsold", name="Kept Lad", person_id="", capped="no", overseas="no",
+                   role="Batter", base_2026_lakh="30", include="y", balance="out")]
     purse = [dict(short="KKR", purse_left_lakh="4165", slots="8", overseas_slots="3")]
     births = [dict(person_id="o1", birth_date="1990-12-16")]
     p = M.build_preset(_deck(cards), retained, listed, purse, births, au.base_price)
     assert [c.person_id for c in p.squads["KKR"]] == ["r1", "new:newkid"]
     assert p.squad_size["KKR"] == 2 + 8 and p.overseas_cap["KKR"] == 0 + 3
     # retained and 'n' left out; an IPL player's name is the deck's, never the list row's
-    assert [c.name for c, _, _ in p.lots] == ["o1", "Unknown Lad", "d0", "League Star"]
+    # the balance's cut leaves a row out unless a hand `include = y` keeps it [A299]
+    assert [c.name for c, _, _ in p.lots] == ["o1", "Unknown Lad", "d0", "League Star", "d1",
+                                              "Form Lad", "Kept Lad"]
     assert p.lots[1][1] == 30 and p.lots[0][1] == au.base_price(p.lots[0][0])
     assert p.ages["o1"] == pytest.approx(36.0, abs=0.01)
-    assert p.debutants == {"new:newkid", "new:unknownlad", "new:leaguestar"}
+    assert p.debutants == {"new:newkid", "new:unknownlad", "new:leaguestar", "new:keptlad",
+                           "new:formlad"}
     # [A298] where each stands going in, in place of a rating
     assert p.status == {"r1": "played", "new:newkid": "idle", "o1": "played",
-                        "new:unknownlad": "unsold", "d0": "unsold", "new:leaguestar": "new"}
+                        "new:unknownlad": "unsold", "d0": "unsold", "new:leaguestar": "new",
+                        "d1": "new", "new:keptlad": "unsold", "new:formlad": "unsold"}
+    # an unsold player shows this season's SMAT figures, and never an IPL 'last card' [A299]
+    assert p.notes["new:formlad"] == ("Unsold at the 2026 auction. Yet to play in the IPL. This "
+                                      "season: SMAT 2025-26 for Assam: led the attack twice, 10 "
+                                      "wkts at 5.00 an over.")
+    assert M.form_words("last card 86") == ""
+    # back on the list on this season's form, with an old IPL record: new, not idle [A299]
+    assert p.notes["d1"] == ("New to the list this year. Last IPL season: 2016. This season: "
+                             "SMAT 2025-26 for Goa: top-scored twice, 120 runs off 70.")
     assert p.notes["o1"] == "IPL 2026."
     assert p.notes["d0"] == "Unsold at the 2026 auction. Last IPL season: 2016."
     assert p.notes["new:unknownlad"] == "Unsold at the 2026 auction. Yet to play in the IPL."

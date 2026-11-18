@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 
 from etl.db import data_dir
 from etl.derive_people import OVERRIDES, merge_override, national_teams, read_override, report_merge
+from game.mini2027 import listed
 from etl.mini2027 import FULL_NAMES, PAGE, RETAINED_CSV, fetch, name_index, norm, resolve, title_of
 
 LIST_CSV = OVERRIDES / "auction_2027_list.csv"
@@ -62,7 +63,8 @@ HOME = "India"
 ROLE = {"batter": "Batter", "bowler": "Bowler", "allrounder": "All-Rounder", "keeper": "Wicketkeeper"}
 
 COLUMNS = ["source", "name", "person_id", "how", "ipl_last", "country", "overseas", "role",
-           "capped", "base_2026_lakh", "cricsheet_id", "evidence", "include", "person_id_checked"]
+           "capped", "base_2026_lakh", "cricsheet_id", "evidence", "balance", "include",
+           "person_id_checked"]
 
 
 # ---------------------------------------------------------------- league season (pure)
@@ -242,6 +244,156 @@ def full_names_for(cricinfo: dict[str, str]) -> dict[str, str]:
     return out
 
 
+# [A299] SMAT 2025-26 form, read off every match summary on the season's Wikipedia page: each
+# innings names its top scorer and its leading wicket-taker, and each match its Player of
+# the Match. A showing is one of those three, good enough to be worth a scout's note; a
+# player with SMAT_MIN_SHOWINGS of them joins the list. Declared, not fitted -- the page
+# records only each innings' best, so a steady 30 every match is invisible here.
+SMAT_KNOCK_RUNS, SMAT_KNOCK_SR = 40, 130.0   # a top score of 40+ at a strike rate of 130+
+SMAT_HAUL_WKTS, SMAT_HAUL_ECON = 3, 8.0      # leading the attack with 3+ for 8 an over or less
+SMAT_MIN_SHOWINGS = 2
+# SMAT page names that are a listed player under another spelling, checked by hand: the
+# page links K.S. Bharat by a redirect, last year's register misspells Thyagarajan, and it
+# writes two names in full or with initials where the page does not.
+SMAT_ALIASES = {"Srikar Bharat": "K.S. Bharat", "Tanay Thyagarajan": "Tanay Thyagarajann",
+                "Satyanarayana Raju": "PV.Satyanarayana Raju",
+                "Vishvaraj Jadeja": "Vishvarajsinh Jadeja"}
+# The Plate group plays only itself, against the weakest sides in the country, so a
+# showing there is not counted.
+SMAT_PLATE = frozenset({"man", "miz", "meg", "nag", "sik", "ap"})
+SMAT_TEAMS = {
+    "mum": "Mumbai", "vid": "Vidarbha", "and": "Andhra", "ker": "Kerala", "rai": "Railways",
+    "ass": "Assam", "chh": "Chhattisgarh", "odi": "Odisha", "mp": "Madhya Pradesh",
+    "up": "Uttar Pradesh", "cha": "Chandigarh", "jak": "Jammu and Kashmir", "hyd": "Hyderabad",
+    "mah": "Maharashtra", "goa": "Goa", "bih": "Bihar", "bar": "Baroda", "ben": "Bengal",
+    "guj": "Gujarat", "pun": "Punjab", "har": "Haryana", "hp": "Himachal Pradesh",
+    "ser": "Services", "pon": "Puducherry", "del": "Delhi", "sau": "Saurashtra",
+    "raj": "Rajasthan", "jha": "Jharkhand", "kar": "Karnataka", "tn": "Tamil Nadu",
+    "utt": "Uttarakhand", "tri": "Tripura", "man": "Manipur", "miz": "Mizoram",
+    "meg": "Meghalaya", "nag": "Nagaland", "sik": "Sikkim", "ap": "Arunachal Pradesh",
+}
+
+
+@dataclass
+class SmatForm:
+    """One player's 2025-26 SMAT showings, as the match summaries record them."""
+    name: str
+    title: str = ""            # his Wikipedia article, where the page links one
+    team: str = ""
+    knocks: int = 0            # top scores of SMAT_KNOCK_RUNS+ at SMAT_KNOCK_SR+
+    runs: int = 0              # in every innings he top-scored, qualifying or not
+    balls: int = 0
+    tops: int = 0
+    hauls: int = 0             # leading the attack with SMAT_HAUL_WKTS+ at SMAT_HAUL_ECON or less
+    wickets: int = 0           # in every innings he led the attack
+    overs_balls: int = 0
+    conceded: int = 0
+    leads: int = 0
+    poms: int = 0
+
+    @property
+    def showings(self) -> int:
+        return self.knocks + self.hauls + self.poms
+
+    def role(self) -> str:
+        if self.tops and self.leads:
+            return "All-Rounder"
+        return "Bowler" if self.leads else "Batter"
+
+    def evidence(self) -> str:
+        bits = []
+        if self.tops:
+            bits.append(f"top-scored {_times(self.tops)}, {self.runs} runs off {self.balls}")
+        if self.leads:
+            econ = self.conceded * 6 / self.overs_balls if self.overs_balls else 0.0
+            bits.append(f"led the attack {_times(self.leads)}, {self.wickets} wkts at {econ:.2f} an over")
+        if self.poms:
+            bits.append(f"Player of the Match {_times(self.poms)}")
+        return f"SMAT 2025-26 for {SMAT_TEAMS.get(self.team, self.team)}: " + "; ".join(bits)
+
+
+def _times(n: int) -> str:
+    return {1: "once", 2: "twice"}.get(n, f"{n} times")
+
+
+def _overs_to_balls(overs: str) -> int:
+    whole, _, part = overs.partition(".")
+    return int(whole) * 6 + (int(part) if part else 0)
+
+
+def _linked(cell: str) -> tuple[str, str, str]:
+    """(shown name, article title, the rest) from '[[Title|Name]] 61 (30)' or 'Name 61 (30)'."""
+    m = re.match(r"\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*(.*)", cell)
+    if m:
+        return (m.group(2) or m.group(1)).strip(), m.group(1).strip(), m.group(3)
+    m = re.match(r"\s*([^\d\[<]+?)\s+(\d.*)", cell)
+    return (m.group(1).strip(), "", m.group(2)) if m else ("", "", cell)
+
+
+def smat_form(wikitext: str) -> dict[str, SmatForm]:
+    """Every player the 2025-26 SMAT page's match summaries name, with his showings. Plate
+    group matches are skipped (SMAT_PLATE). A player's team is the one he played for."""
+    out: dict[str, SmatForm] = {}
+
+    def form(name: str, title: str, team: str) -> SmatForm:
+        f = out.setdefault(name, SmatForm(name))
+        f.title, f.team = f.title or title, f.team or team
+        return f
+
+    for block in re.findall(r"\{\{Single-innings cricket match collapsible(.*?)\n\}\}", wikitext, re.S):
+        field_ = dict(re.findall(r"\|\s*(\w+)\s*=\s*(.*)", block))
+        code = {k: (re.search(r"cr-IND\|(\w+)", field_.get(f"team{k}", "")) or [None, ""])[1] for k in "12"}
+        if code["1"] in SMAT_PLATE or code["2"] in SMAT_PLATE:
+            continue
+        for side, other in (("1", "2"), ("2", "1")):
+            for cell in re.split(r"<br\s*/?>", field_.get("runs" + side, "")):
+                name, title, rest = _linked(cell)
+                m = re.match(r"(\d+)\*?\s*\((\d+)\)", rest.strip())
+                if name and m:
+                    f, r, b = form(name, title, code[side]), int(m.group(1)), int(m.group(2))
+                    f.tops, f.runs, f.balls = f.tops + 1, f.runs + r, f.balls + b
+                    f.knocks += r >= SMAT_KNOCK_RUNS and b and 100 * r / b >= SMAT_KNOCK_SR
+            for cell in re.split(r"<br\s*/?>", field_.get("wickets" + side, "")):
+                name, title, rest = _linked(cell)
+                m = re.match(r"(\d+)/(\d+)\s*\(([\d.]+)\s*overs?\)", rest.strip())
+                if name and m:
+                    # team1's bowlers are named under wickets2: they bowled at team2
+                    f = form(name, title, code[other])
+                    w, c, bb = int(m.group(1)), int(m.group(2)), _overs_to_balls(m.group(3))
+                    f.leads, f.wickets, f.conceded, f.overs_balls = f.leads + 1, f.wickets + w, f.conceded + c, f.overs_balls + bb
+                    f.hauls += w >= SMAT_HAUL_WKTS and bb and c * 6 / bb <= SMAT_HAUL_ECON
+        name, title, _ = _linked(re.sub(r"<small>.*", "", field_.get("motm", "")))
+        if name:
+            form(name, title, "").poms += 1
+    return out
+
+
+def balance_cut(rows: list[dict], places: int, os_places: int) -> int:
+    """How many Indian lots the list keeps so each passport has as many lots a place [A299]:
+    Indian lots / Indian places = overseas lots / overseas places."""
+    os_lots = sum(r["overseas"] == "yes" for r in rows)
+    return round(os_lots * (places - os_places) / os_places)
+
+
+def balance(rows: list[dict], places: int, os_places: int) -> None:
+    """Mark Indian lots past the balance `out` in the generated `balance` column, the
+    weakest evidence first: last year's unsold with no IPL record and no SMAT form, by lowest
+    2026 base, last on the register. A hand `include = y` still lists one (main reads it)."""
+    keep = balance_cut(rows, places, os_places)
+    indian = [i for i, r in enumerate(rows) if r["overseas"] != "yes"]
+
+    def strength(i: int) -> tuple:
+        r = rows[i]
+        return (r["source"] != "unsold", bool(r["person_id"]), r["evidence"].startswith("SMAT"),
+                int(r["base_2026_lakh"] or 0), -i)
+
+    ranked = sorted(indian, key=strength, reverse=True)
+    for n, i in enumerate(ranked):
+        rows[i]["balance"] = "" if n < keep else "out"
+    for r in rows:
+        r.setdefault("balance", "")
+
+
 SMAT_TABLE_ROLE = (          # which statistics table a name comes from says what he does
     ("Most dismissals", "Wicketkeeper"), ("Most Wickets", "Bowler"), ("Best bowling", "Bowler"),
     ("Most Runs", "Batter"), ("Highest Individual", "Batter"), ("Most catches", ""),
@@ -356,16 +508,47 @@ def build() -> list[dict]:
                          base_2026_lakh="", cricsheet_id=pid,
                          evidence=f"{evidence(ln)}; {impact(ln, par):+.0f} runs above par"))
         added += 1
-    smat = fetch({"action": "parse", "page": SMAT_PAGE, "prop": "wikitext", "format": "json", "formatversion": "2"})
-    listed_names = {norm(r["name"]) for r in rows}
-    for name, role in smat_leaders(smat["parse"]["wikitext"]):
-        pid, how = resolve({"wikipedia": "", "name": name}, by_title, by_name)
-        if pid or norm(name) in listed_names or norm(name) in retained_names:
+    # 4. [A299] SMAT 2025-26 form: a listed Indian gets his figures as evidence; a player
+    # with SMAT_MIN_SHOWINGS joins the list. The leader tables count as showings too, and
+    # are where a keeper is named.
+    smat_text = fetch({"action": "parse", "page": SMAT_PAGE, "prop": "wikitext", "format": "json",
+                       "formatversion": "2"})["parse"]["wikitext"]
+    forms = smat_form(smat_text)
+    # a catches table says nothing about his batting or bowling, so it qualifies nobody
+    leaders = {n: role for n, role in smat_leaders(smat_text) if role}
+    for name in leaders:                       # a leader-table name the summaries never name
+        forms.setdefault(name, SmatForm(name))
+    by_key = {name_key(r["name"]): r for r in rows if r["overseas"] != "yes"}
+    by_pid = {r["person_id"]: r for r in rows if r["person_id"]}
+    for f in sorted(forms.values(), key=lambda f: (-f.showings, -(f.runs + 25 * f.wickets), f.name)):
+        checked = decided.get(f.name, {}).get("person_id_checked", "")
+        pid, how = (checked, "checked") if checked else resolve({"wikipedia": f.title, "name": f.name},
+                                                                 by_title, by_name)
+        same = by_key.get(name_key(SMAT_ALIASES.get(f.name, f.name))) or by_pid.get(pid)
+        if same is not None:                   # already listed: his SMAT form is evidence,
+            if not same["evidence"] or same["evidence"].startswith("last card"):  # over a card
+                same["evidence"] = f.evidence() if f.tops or f.leads or f.poms else same["evidence"]
             continue
-        rows.append(dict(source="newcomer", name=name, person_id="", how="smat", ipl_last="", country=HOME,
-                         overseas="no", role=role, capped="no", base_2026_lakh="", cricsheet_id="",
-                         evidence="a 2025-26 Syed Mushtaq Ali Trophy leader (Wikipedia's statistics tables)"))
-        listed_names.add(norm(name))
+        leader = f.name in leaders
+        if (f.showings < SMAT_MIN_SHOWINGS and not leader) or pid in seen \
+                or name_key(f.name) in retained_keys or norm(f.name) in retained_names:
+            continue
+        if pid and pid in last and last[pid].season_year == 2026:
+            continue                           # a 2026 player is retained or released already
+        role = leaders.get(f.name) if leaders.get(f.name) == "Wicketkeeper" else f.role()
+        r = (card_row("newcomer", pid, how, {}) if pid in last else
+             dict(source="newcomer", name=f.name, person_id="", how="smat", ipl_last="",
+                  country=HOME, overseas="no", role=role, capped="no", base_2026_lakh="",
+                  cricsheet_id=""))
+        r.update(name=f.name, how="smat", country=HOME, overseas="no", role=role,
+                 evidence=f.evidence() if f.showings or f.tops or f.leads else
+                 "a 2025-26 Syed Mushtaq Ali Trophy leader (Wikipedia's statistics tables)")
+        rows.append(r)
+        by_key[name_key(f.name)] = r
+        if pid:
+            seen.add(pid)
+    purse = read_override(OVERRIDES / "purse_2027.csv")
+    balance(rows, sum(int(x["slots"]) for x in purse), sum(int(x["overseas_slots"]) for x in purse))
     return rows
 
 
@@ -373,7 +556,7 @@ def main(argv: list[str] | None = None) -> None:
     rows = build()
     report_merge(LIST_CSV, merge_override(LIST_CSV, COLUMNS[:-2] + ["include"], rows, key=("source", "name"),
                                           decided="include"))
-    kept = [r for r in read_override(LIST_CSV) if (r.get("include") or "").lower() != "n"]
+    kept = [r for r in read_override(LIST_CSV) if listed(r)]
     by = collections.Counter((r["source"], r["overseas"]) for r in kept)
     print(f"  {len(kept)} listed: " + ", ".join(f"{s}/{'overseas' if o == 'yes' else 'Indian' if o == 'no' else '?'} {n}"
                                                for (s, o), n in sorted(by.items())))

@@ -224,6 +224,23 @@ class Preset:
     status: dict[str, str] = field(default_factory=dict)
 
 
+def listed(row: dict) -> bool:
+    """[A299] Whether a list row goes under the hammer: a hand `include` decides (y or n),
+    and otherwise the demand balance's generated cut does (`etl.list2027.balance`)."""
+    inc = (row.get("include") or "").strip().lower()
+    if inc in ("n", "y"):
+        return inc == "y"
+    return row.get("balance", "") != "out"
+
+
+def form_words(evidence: str) -> str:
+    """[A299] What a list row's evidence can show a player: this season's league or SMAT
+    figures. Anything else (an IPL player's 'last card N') is a rating and shows nothing."""
+    if evidence.startswith("SMAT") or re.match(r"\d+ m \(", evidence):
+        return season_words(evidence)
+    return ""
+
+
 def season_words(evidence: str) -> str:
     """A newcomer's evidence column as a fan reads it [A298]. Its runs-above-par figure is
     dropped: it is a rating by another name, and the mini auction shows none."""
@@ -283,11 +300,15 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
             if last.season_year == SEASON - 1:
                 status[pid] = "played"
                 notes[pid] = f"IPL {where}."
+            elif source == "newcomer":         # [A299] back on the list on this season's form
+                status[pid] = "new"
+                notes[pid] = (f"New to the list this year. Last IPL season: {where}. "
+                              + season_words(row.get("evidence", ""))).strip()
             else:
                 status[pid] = "unsold" if source == "unsold" else "idle"
                 lead = (f"Unsold at the {SEASON - 1} auction." if source == "unsold"
                         else f"In a {SEASON - 1} squad without playing a match.")
-                notes[pid] = f"{lead} Last IPL season: {where}."
+                notes[pid] = f"{lead} Last IPL season: {where}. {form_words(row.get('evidence', ''))}".strip()
             return card
         role = LIST_ROLE[(row.get("role_checked") or row.get("role") or "").strip()]
         # chosen for this season's form, or retained by a franchise: the full debut level;
@@ -298,10 +319,11 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
         pid = card.person_id
         if source == "newcomer":
             status[pid] = "new"
-            notes[pid] = "New to the list this year. " + season_words(row.get("evidence", ""))
+            notes[pid] = "New to the list this year. " + form_words(row.get("evidence", ""))
         elif source == "unsold":
             status[pid] = "unsold"
-            notes[pid] = f"Unsold at the {SEASON - 1} auction. Yet to play in the IPL."
+            notes[pid] = (f"Unsold at the {SEASON - 1} auction. Yet to play in the IPL. "
+                          + form_words(row.get("evidence", ""))).strip()
         else:
             status[pid] = "idle"
             notes[pid] = f"In a {SEASON - 1} squad without playing a match. Yet to play in the IPL."
@@ -319,7 +341,7 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
     taken = {c.person_id for cs in squads.values() for c in cs}
     lots = []
     for r in list_rows:
-        if (r.get("include") or "").strip().lower() == "n":
+        if not listed(r):
             continue
         card = card_for(r, None)
         if card.person_id in taken:

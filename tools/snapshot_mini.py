@@ -22,7 +22,7 @@ from game.mini2027 import Preset, build_preset
 from tools.snapshot_deck import _card_doc, _card_from, deck_from, read_document
 
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "data" / "mini2027.json.gz"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2      # [A298] adds each player's status
 
 
 def build() -> Preset:
@@ -41,6 +41,7 @@ def to_document(p: Preset) -> dict:
         "purse": p.purse, "squad_size": p.squad_size, "overseas_cap": p.overseas_cap,
         "lots": [[_card_doc(c), base, capped] for c, base, capped in p.lots],
         "ages": p.ages, "debutants": sorted(p.debutants), "notes": p.notes,
+        "status": p.status,
     }
 
 
@@ -50,6 +51,7 @@ def from_document(d: dict) -> Preset:
         purse=d["purse"], squad_size=d["squad_size"], overseas_cap=d["overseas_cap"],
         lots=[(_card_from(c), base, capped) for c, base, capped in d["lots"]],
         ages=d["ages"], debutants=frozenset(d["debutants"]), notes=d["notes"],
+        status=d["status"],
     )
 
 

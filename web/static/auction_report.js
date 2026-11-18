@@ -62,9 +62,9 @@ function aucReportHtml(rep){
     ${paper.length ? aucClip(paper[0], 'lead', rep.paper_name) : ''}
     ${paper.length > 1 ? `<div class="np-grid">${paper.slice(1).map(c => aucClip(c, 'small', rep.paper_name)).join('')}</div>` : ''}
     ${aucBriefHtml(rep.brief)}
-    <div class="auc-rep-head"><b>Every squad, ranked</b>
+    ${(rep.teams || []).length ? `<div class="auc-rep-head"><b>Every squad, ranked</b>
       <em>by the face value of its best twelve -- ranked, not graded: the ten sit a few points apart</em></div>
-    <div class="auc-rep-scroll">${aucSquadTableHtml(rep.teams || [])}</div>
+    <div class="auc-rep-scroll">${aucSquadTableHtml(rep.teams)}</div>` : ''}
   </div>`;
 }
 

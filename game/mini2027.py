@@ -24,6 +24,7 @@ nothing about him is invented. Cross-league ratings are a later phase.
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
@@ -38,6 +39,8 @@ SEASON = 2027
 DISPLAY_FLOOR, DISPLAY_CAP = 72, 99      # A267's scale
 FIRST_SEASON = 2008
 SPLIT_MIN = 20                           # pooled debut levels split by passport only above this
+
+STATUSES = ("played", "unsold", "new", "idle")
 
 LIST_ROLE = {"Batter": "batter", "Bowler": "bowler", "All-Rounder": "allrounder",
              "Wicketkeeper": "keeper"}
@@ -214,7 +217,24 @@ class Preset:
     lots: list[tuple[Card, int, bool]]     # (card, base price in lakh, capped) in list order
     ages: dict[str, float] = field(default_factory=dict)   # person -> age on auction day
     debutants: frozenset[str] = frozenset()                # no IPL record
-    notes: dict[str, str] = field(default_factory=dict)    # person -> what his card rests on
+    notes: dict[str, str] = field(default_factory=dict)    # person -> a line about him, no rating
+    # person -> where he stands going in, shown in place of a rating [A298]: 'played' (an
+    # IPL season in 2026, whose figures are shown), 'unsold' (unsold at the 2026 auction),
+    # 'new' (added to this year's list) or 'idle' (in a 2026 squad without playing)
+    status: dict[str, str] = field(default_factory=dict)
+
+
+def season_words(evidence: str) -> str:
+    """A newcomer's evidence column as a fan reads it [A298]. Its runs-above-par figure is
+    dropped: it is a rating by another name, and the mini auction shows none."""
+    if not evidence:
+        return ""
+    if evidence.startswith("a ") and "Mushtaq Ali" in evidence:
+        return "Among the leading players of the 2025-26 Syed Mushtaq Ali Trophy."
+    parts = [x.strip() for x in evidence.split(";") if "above par" not in x]
+    text = "; ".join(parts)
+    text = re.sub(r"^(\d+) m \(", lambda m: f"{m.group(1)} match{'es' if m.group(1) != '1' else ''} (", text)
+    return f"This season: {text}." if text else ""
 
 
 def age_on(birth: str) -> float:
@@ -248,28 +268,43 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
     shown = stretch({p: project_display(hist[p], mean) for p in sorted(with_record)}, ref_mean, ref_sd)
 
     notes: dict[str, str] = {}
+    status: dict[str, str] = {}
 
     def card_for(row: dict, franchise: str | None) -> Card:
+        """[A298] Nothing written here may carry a rating: the mini auction shows none, so a
+        player is described by what he did last season, or why he has nothing to show."""
         pid = pid_of(row)
+        source = row.get("source", "")
         if pid in hist:
             h = hist[pid]
             last = h[max(h)]
-            n = len(h)
-            notes[pid] = (f"A 2027 projection from {n} IPL season{'s' if n != 1 else ''}. "
-                          f"Figures shown: {last.season_year} with {last.franchise}.")
-            return projected_card(h, shown[pid], franchise)
+            card = projected_card(h, shown[pid], franchise)
+            where = f"{last.season_year} with {last.franchise}" if last.franchise else str(last.season_year)
+            if last.season_year == SEASON - 1:
+                status[pid] = "played"
+                notes[pid] = f"IPL {where}."
+            else:
+                status[pid] = "unsold" if source == "unsold" else "idle"
+                lead = (f"Unsold at the {SEASON - 1} auction." if source == "unsold"
+                        else f"In a {SEASON - 1} squad without playing a match.")
+                notes[pid] = f"{lead} Last IPL season: {where}."
+            return card
         role = LIST_ROLE[(row.get("role_checked") or row.get("role") or "").strip()]
         # chosen for this season's form, or retained by a franchise: the full debut level;
         # last year's unsold with no record: the weaker half
-        level = weaker if row.get("source") == "unsold" else pools
+        level = weaker if source == "unsold" else pools
         card = newcomer_card(newcomer_id(row["name"], row.get("cricsheet_id", "")), row["name"], role,
                              row["overseas"] == "yes", level, franchise)
-        why = ("Unsold last year: carded at the weaker half of IPL debut seasons for his role."
-               if row.get("source") == "unsold" else
-               "Carded at the average IPL debut season for his role.")
-        seen = (f" This season: {row['evidence']}." if row.get("evidence") and row.get("source") == "newcomer"
-                else "")
-        notes[card.person_id] = f"No IPL record. {why}{seen}"
+        pid = card.person_id
+        if source == "newcomer":
+            status[pid] = "new"
+            notes[pid] = "New to the list this year. " + season_words(row.get("evidence", ""))
+        elif source == "unsold":
+            status[pid] = "unsold"
+            notes[pid] = f"Unsold at the {SEASON - 1} auction. Yet to play in the IPL."
+        else:
+            status[pid] = "idle"
+            notes[pid] = f"In a {SEASON - 1} squad without playing a match. Yet to play in the IPL."
         return card
 
     squads: dict[str, list[Card]] = defaultdict(list)
@@ -297,4 +332,5 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
     ages = {p: round(age_on(births[p]), 2) for p in taken if p in births}
     debutants = frozenset(p for p in taken if p not in hist)
     return Preset(dict(squads), purse, size, cap, lots, ages, debutants,
-                  {p: t for p, t in notes.items() if p in taken})
+                  {p: t for p, t in notes.items() if p in taken},
+                  {p: t for p, t in status.items() if p in taken})

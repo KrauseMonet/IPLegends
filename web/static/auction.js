@@ -110,7 +110,8 @@ const FORMAT_INTRO = {
          'The real retained squads and the money each franchise has left, as announced on ' +
          '17 November. Fill your gaps from 358 players: the released, last year\'s unsold, ' +
          'and newcomers who starred in this season\'s leagues. Our list until the official ' +
-         'register lands on 3 December. Cards for 2027 are projections from every earlier season.'],
+         'register lands on 3 December. No ratings: you get each player\'s 2026 figures, or ' +
+         'whether he went unsold last year or is new to the list, and the judging is yours.'],
   mega: ['Mega auction · 19 seasons in one room',
          '₹120 crore. Eighteen players. Every lot is one real season of one player, drawn at ' +
          'random, so the Kohli on offer might be 2016 or 2022. Nine franchises bid against you, ' +
@@ -503,7 +504,7 @@ function renderSetButtons(){
   const bar = $('.auc-lotbar');
   if (!bar || $('#aucSetBtns')) return;
   bar.insertAdjacentHTML('beforeend', `<span class="auc-sound" id="aucSetBtns">
-    <button class="auc-sound-btn on" onclick="openSets('set')" title="Every player in the set being called, with ratings">This set</button>
+    <button class="auc-sound-btn on" onclick="openSets('set')" title="Every player in the set being called">This set</button>
     <button class="auc-sound-btn on" onclick="openSets('all')" title="Every set in calling order">All sets</button></span>`);
   document.body.insertAdjacentHTML('beforeend', `
     <div id="aucSetsOverlay" class="card-overlay hide" onclick="closeSets(event)">
@@ -558,7 +559,7 @@ function setLotRow(x){
   return `<tr class="auc-sets-${x.status}">
     <td class="auc-sets-rt">${x.rating != null ? `<span class="rating-badge${ratingTier(x.rating)}">${x.rating}</span>` : ''}</td>
     <td><div class="auc-sets-name">${ICON[x.kind] || ''}${esc(x.name)}${bandTag(x)}${x.overseas === true ? ' <span class="auc-tag os">OS</span>' : ''}</div>
-      <div class="auc-sets-where">${esc(where)}</div></td>
+      <div class="auc-sets-where">${x.history ? statusTag(x, true) : esc(where)}</div></td>
     <td class="auc-sets-st">${status}</td></tr>`;
 }
 
@@ -611,6 +612,25 @@ function renderSoundControls(){
       VOICE_STYLE === 'british' ? 'British' : 'Indian'}</button>`;
 }
 
+// [A298] The 2027 mini auction shows no ratings: a player is known by his 2026 season, or by
+// why he has none. `all` also tags a player who played, for lists without his figures.
+function statusTag(c, all){
+  // a catalogue row's `status` is how its lot went; its player's is `history`
+  const st = c && (c.history || c.status), words = st && CARD_STATUS[st];
+  if (!words || (st === 'played' && !all)) return '';
+  return `<em class="auc-tag st-${st}" title="${esc(words.long)}">${esc(words.short)}</em>`;
+}
+
+// [A298] On the twelve screen, with no rating to read: his 2026 season in a few words, or
+// the tag that says why there is none.
+function miniLine(c){
+  if (c.status !== 'played') return statusTag(c);
+  const bits = [];
+  if (c.bat_balls) bits.push(`${c.bat_runs} runs · SR ${c.bat_strike_rate.toFixed(0)}`);
+  if (c.bowl_balls) bits.push(`${c.bowl_wickets} wkts · econ ${c.bowl_economy.toFixed(1)}`);
+  return bits.length ? `<em class="auc-o-line">${bits.join(' · ')}</em>` : statusTag(c, true);
+}
+
 // --- the floor ---------------------------------------------------------------------------
 
 function renderFloor(){
@@ -634,7 +654,7 @@ function renderFloor(){
         <div class="auc-card-season">${crestImg(c.crest, 'auc-card-crest')}${d.mini ? (c.franchise ? esc(c.franchise) + ' · ' : '') + '2027' : [c.franchise, c.season_year].filter(Boolean).join(' · ')}</div>
         <div class="auc-card-name">${c.name}</div>
         <div class="auc-card-meta">${ICON[c.kind] || ''}${keeperBadge(c)}
-          <span>${roleLabel(c)}</span>${tag}</div>
+          <span>${roleLabel(c)}</span>${tag}${statusTag(c)}</div>
         ${skillChips(c, true)}
       </div>
       <div class="auc-card-rating">${ratingBadge(c, true)}</div>
@@ -706,6 +726,9 @@ function bandTag(c){
 // buying -- the moment somebody will have to settle for less there.
 function supplyHtml(supply, mark){
   if (!supply || !supply.length) return '';
+  if (A && A.ratings_hidden)        // [A298] a count of 85+ players is a rating too
+    return `<div class="auc-supply"><span class="auc-supply-lbl">Still available</span>${supply.map(x =>
+      `<span class="auc-band band-${x.band}" title="${x.available} ${BAND_SHORT[x.band].toLowerCase()}-order players unbought"><b>${x.available}</b> ${BAND_SHORT[x.band]}</span>`).join('')}</div>`;
   const buying = A && A.teams ? A.teams.filter(t => t.players < (A.squad_size || 18)).length : 0;
   return `<div class="auc-supply"><span class="auc-supply-lbl">Still available</span>${supply.map(x => {
     const short = buying && x.good < buying;
@@ -741,7 +764,7 @@ function renderSide(){
   $('#aucFeed').innerHTML = d.recent.slice().reverse().slice(0, 14).map(s => `
     ${(s.whispers || []).map(w => `<div class="auc-whisper">${esc(w)}</div>`).join('')}
     <div class="auc-feed-row${s.team ? '' : ' unsold'}${s.team === d.you ? ' mine' : ''}">
-      <span class="auc-feed-name">${esc(shortName(s.name))} <em>${s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
+      <span class="auc-feed-name">${esc(shortName(s.name))} <em>${A && A.mini ? '' : s.season_year || ''}</em>${s.rtm_holder && s.rtm_matched ? ' <em class="auc-rtm-tag">RTM</em>' : ''}</span>
       ${s.team ? `${chip(s.team)}<b class="${tierOf(s.price)}">${cr(s.price)}</b>` : '<b class="dim">unsold</b>'}
     </div>`).join('') || '<div class="note">Nothing sold yet.</div>';
 
@@ -825,7 +848,7 @@ function renderSquad(d, you){
       <div class="auc-slot filled ${crestClass(c.crest)}${isNew ? ' new' : ''}"
         onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
         <div class="auc-slot-top">${ICON[c.kind] || ''}${c.overseas === true ? '<em class="auc-slot-os">OS</em>' : ''}
-          ${c.rating != null ? `<i class="auc-slot-rt">${c.rating}</i>` : ''}</div>
+          ${c.rating != null ? `<i class="auc-slot-rt">${c.rating}</i>` : statusTag(c)}</div>
         <span>${esc(c.name)}</span>${bandTag(c)}<b class="${tierOf(s.price)}">${s.legend ? 'Legend · free' : cr(s.price) + (s.retained ? ' · kept' : '')}</b>
       </div>`;
   });
@@ -1234,6 +1257,9 @@ const BAND_CHIPS = [['any', 'Any'], ['top', 'Top 1–3'], ['middle', 'Middle 3�
 const ORIGIN_CHIPS = [['any', 'Any'], ['domestic', 'Domestic'], ['overseas', 'Overseas']];
 const FILL_SORTS = [['rating', 'Best rating'], ['position', 'By batting position'],
                     ['role', 'By role'], ['name', 'Name A–Z'], ['season', 'Newest season']];
+// [A298] with ratings hidden there is no rating to sort on, and every card says 2027
+const fillSorts = () => A && A.ratings_hidden
+  ? FILL_SORTS.filter(([k]) => k !== 'rating' && k !== 'season') : FILL_SORTS;
 const ROLE_NAME = {batter: 'Batters', keeper: 'Wicketkeepers', allrounder: 'All-rounders',
                    bowler: 'Bowlers', unrated: 'Others'};
 const BAND_NAME = {top: 'Top order · bats 1–3', middle: 'Middle order · bats 3–5',
@@ -1325,6 +1351,8 @@ function renderFill(){
   const originCounts = {any: opts.length, overseas: opts.filter(o => o.c.overseas === true).length,
                         domestic: opts.filter(o => o.c.overseas !== true).length};
   const hasGap = gaps.keeper || gaps.bowlers;
+  // [A298] a saved sort the mini auction cannot offer falls back to batting position
+  const sortBy = fillSorts().some(([k]) => k === FILL_VIEW.sort) ? FILL_VIEW.sort : 'position';
   tools.innerHTML = `
     ${chipRow('Role', 'role', ROLE_CHIPS, roleCounts)}
     ${chipRow('Bats at', 'band', BAND_CHIPS, bandCounts)}
@@ -1334,7 +1362,7 @@ function renderFill(){
           title="Only players who fill a gap a legal twelve needs">Fills a gap</button>` : ''}</div>
     <div class="row"><span class="lbl">Sort</span>
       <select class="fsort" onchange="setFillView('sort', this.value)" aria-label="Sort">
-        ${FILL_SORTS.map(([v, t]) => `<option value="${v}"${FILL_VIEW.sort === v ? ' selected' : ''}>${t}</option>`).join('')}
+        ${fillSorts().map(([v, t]) => `<option value="${v}"${sortBy === v ? ' selected' : ''}>${t}</option>`).join('')}
       </select></div>`;
 
   let shown = opts.filter(o => roleMatch(o.c, FILL_VIEW.role)
@@ -1342,20 +1370,24 @@ function renderFill(){
     && originMatch(o.c, FILL_VIEW.origin)
     && (!FILL_VIEW.need || !hasGap || fillsGap(o.c, gaps).length));
   const rating = c => (c.rating == null ? -1 : c.rating);
+  // [A298] the server sends the options strongest first, so with ratings hidden a tie
+  // must not fall back on that order: it would rank the list by the hidden rating
+  const tie = d.ratings_hidden ? (a, b) => a.c.name.localeCompare(b.c.name)
+                               : (a, b) => rating(b.c) - rating(a.c) || a.i - b.i;
   const sorts = {
     rating: (a, b) => rating(b.c) - rating(a.c) || a.i - b.i,
     position: (a, b) => (Math.min(...(a.c.positions || [12])) - Math.min(...(b.c.positions || [12])))
-                        || rating(b.c) - rating(a.c),
-    role: (a, b) => (KIND_ORDER[a.c.kind] ?? 9) - (KIND_ORDER[b.c.kind] ?? 9) || rating(b.c) - rating(a.c),
+                        || tie(a, b),
+    role: (a, b) => (KIND_ORDER[a.c.kind] ?? 9) - (KIND_ORDER[b.c.kind] ?? 9) || tie(a, b),
     name: (a, b) => a.c.name.localeCompare(b.c.name),
-    season: (a, b) => (b.c.season_year || 0) - (a.c.season_year || 0) || rating(b.c) - rating(a.c),
+    season: (a, b) => (b.c.season_year || 0) - (a.c.season_year || 0) || tie(a, b),
   };
-  shown.sort(sorts[FILL_VIEW.sort] || sorts.rating);
+  shown.sort(sorts[sortBy] || sorts.position);
 
   // Grouped under headings when the sort is a grouping one; one block otherwise.
   const groups = [];
-  const groupKey = FILL_VIEW.sort === 'position' ? o => bandOf(o.c) || 'none'
-                 : FILL_VIEW.sort === 'role' ? o => o.c.kind : () => 'all';
+  const groupKey = sortBy === 'position' ? o => bandOf(o.c) || 'none'
+                 : sortBy === 'role' ? o => o.c.kind : () => 'all';
   shown.forEach(o => {
     const k = groupKey(o);
     let g = groups.find(x => x.k === k);
@@ -1363,7 +1395,7 @@ function renderFill(){
     g.items.push(o);
   });
   const title = k => k === 'all' ? `${shown.length} player${shown.length === 1 ? '' : 's'}`
-    : FILL_VIEW.sort === 'position' ? (BAND_NAME[k] || 'Anywhere') : (ROLE_NAME[k] || k);
+    : sortBy === 'position' ? (BAND_NAME[k] || 'Anywhere') : (ROLE_NAME[k] || k);
 
   const list = $('#aucFillList');
   list.className = 'auc-fill-groups';
@@ -1376,9 +1408,9 @@ function renderFill(){
         <div class="fcard ${crestClass(c.crest)}${fills.length ? ' wanted' : ''}">
           <div class="top">${ICON[c.kind] || ''}${keeperBadge(c)}${bandTag(c)}
             ${c.overseas ? '<span class="auc-tag os">OS</span>' : ''}
-            <span class="rt">${ratingBadge(c, true)}</span></div>
+            <span class="rt">${ratingBadge(c, true) || statusTag(c, true)}</span></div>
           <div class="nm" onclick='showStat(${JSON.stringify(c).replace(/'/g, "&#39;")})'>${c.name}
-            <em>${[roleLabel(c), [c.franchise, c.season_year].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</em></div>
+            <em>${[roleLabel(c), c.status ? '' : [c.franchise, c.season_year].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</em></div>
           ${skillChips(c, true)}
           ${fills.length ? `<div class="fills">Fills: ${fills.join(' + ')}</div>` : ''}
           <button class="act minor" onclick="takeFill(${i}, this)">Take · ₹30L</button>
@@ -1744,13 +1776,13 @@ function drawTwelve(){
     return `<div class="order-row auc-order-row${TWELVE_SEL === i ? ' sel' : ''}${ok ? '' : ' bad'}${swap}"
         onclick="twelveTap(${i})">
       <span class="auc-pos">${slotName(i)}</span>${ICON[c.kind] || ''}${keeperBadge(c)}
-      <span class="auc-o-name">${c.name}</span>${bandTag(c)}${ratingBadge(c, true)}<b>${cr(s.price)}</b>
+      <span class="auc-o-name">${c.name}${c.status ? miniLine(c) : ''}</span>${bandTag(c)}${ratingBadge(c, true)}<b>${cr(s.price)}</b>
     </div>`;
   }).join('');
   $('#aucBench').innerHTML = squad.map((s, si) => inTwelve.has(si) ? '' : `
     <div class="order-row auc-order-row bench${TWELVE_SEL != null ? ' target' : ''}${hint(s.card)}" onclick="benchTap(${si})">
       ${ICON[s.card.kind] || ''}${keeperBadge(s.card)}
-      <span class="auc-o-name">${s.card.name}</span>${bandTag(s.card)}${ratingBadge(s.card, true)}<b>${cr(s.price)}</b>
+      <span class="auc-o-name">${s.card.name}${s.card.status ? miniLine(s.card) : ''}</span>${bandTag(s.card)}${ratingBadge(s.card, true)}<b>${cr(s.price)}</b>
     </div>`).join('');
 
   const cards = TWELVE.map(i => squad[i].card);

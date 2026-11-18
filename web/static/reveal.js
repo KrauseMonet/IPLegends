@@ -970,7 +970,9 @@ async function drawJourneyCard(d, header, side){
 
   // --- four stat tiles ---------------------------------------------------------------------
   y = HEAD_H + REC_H;
-  const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES'], [d.overall_rating, 'TEAM RATING']];
+  // [A298] the 2027 mini auction shows no ratings, so its card counts wins instead
+  const tiles = [[d.runs, 'RUNS'], [d.wickets, 'WICKETS'], [d.played, 'MATCHES'],
+                 d.overall_rating == null && d.won != null ? [d.won, 'WON'] : [d.overall_rating, 'TEAM RATING']];
   const tg = 18, tw4 = (inner - tg * 3) / 4;
   tiles.forEach(([val, label], i) => {
     const x = M + i * (tw4 + tg);

@@ -646,11 +646,22 @@ function cardStatHtml(card){
   return out || '<div class="note">No batting or bowling record this season.</div>';
 }
 
+// [A298] The 2027 mini auction shows no ratings: each card carries where its player stands
+// going in instead, and only a 2026 season's figures.
+const CARD_STATUS = {
+  played: {short: 'IPL 2026', long: 'Played in IPL 2026: these are his figures'},
+  unsold: {short: 'Unsold 2026', long: 'Unsold at the 2026 auction'},
+  new:    {short: 'New', long: 'New to the auction list this year'},
+  idle:   {short: 'No 2026 games', long: 'In a 2026 squad without playing a match'},
+};
+
 function showStat(card){
   if (!card) return;
+  const st = card.status && CARD_STATUS[card.status];
   $('#statName').textContent = card.name;
-  $('#statSub').textContent = [card.franchise, card.season_year].filter(Boolean).join(' · ');
-  $('#statBody').innerHTML = cardStatHtml(card);
+  $('#statSub').textContent = st ? st.short : [card.franchise, card.season_year].filter(Boolean).join(' · ');
+  $('#statBody').innerHTML = st && card.status !== 'played'
+    ? `<div class="note">${esc(st.long)}.</div>` : cardStatHtml(card);
   $('#statOverlay').classList.remove('hide');
 }
 

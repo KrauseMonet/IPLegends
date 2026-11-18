@@ -3,6 +3,7 @@ built from the real retained squads, the engine's per-team limits and mini biddi
 `AM` session state. No network and no database: the list's league rules run on hand-built
 matches, and everything else on hand-built cards or the committed snapshots."""
 import math
+import re
 import statistics
 
 import pytest
@@ -222,19 +223,33 @@ def test_the_preset_counts_places_from_the_official_table_and_lists_nobody_twice
               dict(source="unsold", name="Left Out", person_id="x1", capped="no", overseas="no",
                    role="Batter", base_2026_lakh="40", include="n"),
               dict(source="unsold", name="Unknown Lad", person_id="", capped="no", overseas="no",
-                   role="Bowler", base_2026_lakh="30", include="")]
+                   role="Bowler", base_2026_lakh="30", include=""),
+              dict(source="unsold", name="Old Hand", person_id="d0", capped="yes", overseas="no",
+                   role="Batter", base_2026_lakh="50", include=""),
+              dict(source="newcomer", name="League Star", person_id="", capped="no", overseas="yes",
+                   role="Bowler", base_2026_lakh="", include="",
+                   evidence="18 m (MLC, SAT); 9 runs off 14, SR 64; 38 wkts, econ 8.27; +352 runs above par")]
     purse = [dict(short="KKR", purse_left_lakh="4165", slots="8", overseas_slots="3")]
     births = [dict(person_id="o1", birth_date="1990-12-16")]
     p = M.build_preset(_deck(cards), retained, listed, purse, births, au.base_price)
     assert [c.person_id for c in p.squads["KKR"]] == ["r1", "new:newkid"]
     assert p.squad_size["KKR"] == 2 + 8 and p.overseas_cap["KKR"] == 0 + 3
     # retained and 'n' left out; an IPL player's name is the deck's, never the list row's
-    assert [c.name for c, _, _ in p.lots] == ["o1", "Unknown Lad"]
+    assert [c.name for c, _, _ in p.lots] == ["o1", "Unknown Lad", "d0", "League Star"]
     assert p.lots[1][1] == 30 and p.lots[0][1] == au.base_price(p.lots[0][0])
     assert p.ages["o1"] == pytest.approx(36.0, abs=0.01)
-    assert p.debutants == {"new:newkid", "new:unknownlad"}
-    assert p.notes["new:unknownlad"].startswith("No IPL record. Unsold last year")
-    assert p.notes["o1"].startswith("A 2027 projection from 1 IPL season.")
+    assert p.debutants == {"new:newkid", "new:unknownlad", "new:leaguestar"}
+    # [A298] where each stands going in, in place of a rating
+    assert p.status == {"r1": "played", "new:newkid": "idle", "o1": "played",
+                        "new:unknownlad": "unsold", "d0": "unsold", "new:leaguestar": "new"}
+    assert p.notes["o1"] == "IPL 2026."
+    assert p.notes["d0"] == "Unsold at the 2026 auction. Last IPL season: 2016."
+    assert p.notes["new:unknownlad"] == "Unsold at the 2026 auction. Yet to play in the IPL."
+    assert p.notes["new:newkid"].startswith("In a 2026 squad without playing a match.")
+    # the evidence's runs above par is a rating by another name, and is dropped
+    assert p.notes["new:leaguestar"] == ("New to the list this year. This season: 18 matches "
+                                         "(MLC, SAT); 9 runs off 14, SR 64; 38 wkts, econ 8.27.")
+    assert all("rat" not in n and "par" not in n for n in p.notes.values())
 
 
 # ---------------------------------------------------------------- the engine
@@ -354,3 +369,116 @@ def test_a_future_season_is_centred_like_the_latest_and_a_missing_past_one_still
     assert season_key(table, "batting", 2027) == 0.2
     with pytest.raises(KeyError):
         season_key(table, "batting", 2024)
+
+
+# ---------------------------------------------------------------- no ratings shown [A298]
+
+def _walk(obj, path=""):
+    """Every (path, key, value) in a JSON document."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield path, k, v
+            yield from _walk(v, f"{path}.{k}")
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _walk(v, f"{path}[{i}]")
+
+
+def _no_ratings(doc):
+    """Nothing that is a rating, or opens with one, anywhere in a response."""
+    for path, k, v in _walk(doc):
+        if k in ("rating", "overall_rating"):
+            assert v is None, f"{path}.{k} = {v}"
+        if k == "skills":
+            assert v == [], f"{path}.skills"
+        if k == "good":
+            assert v == 0, f"{path}.good"
+        if isinstance(v, str):
+            assert not re.search(r"\brated\b", v), f"{path}.{k}: {v}"
+
+
+def _cards(doc):
+    return [v for _, k, v in _walk(doc) if isinstance(v, dict) and "person_id" in v
+            and "kind" in v and "rating" in v]
+
+
+@pytest.fixture(scope="module")
+def client(preset):
+    from fastapi.testclient import TestClient
+    from web.app import app
+    with TestClient(app) as c:
+        yield c
+
+
+def test_a_mini_auction_shows_no_rating_anywhere_from_the_floor_to_the_season(client, preset):
+    post = lambda url, body: client.post(url, json=body)
+    d = post("/api/auction", {"team": "MI", "mini": True, "seed": 4}).json()
+    assert d["mini"] and d["ratings_hidden"] and d["phase"] == "bid"
+    _no_ratings(d)
+    seen = _cards(d)
+    sets = client.get(f"/api/auction/{d['state']}/sets").json()
+    assert sets["ratings_hidden"]
+    _no_ratings(sets)
+    rows = [x for st in sets["sets"] for x in st["lots"]]
+    assert {x["history"] for x in rows} == {"played", "unsold", "new"}
+    d = post(f"/api/auction/{d['state']}/pass", {"scope": "all"}).json()
+    while d["phase"] == "fill":
+        _no_ratings(d)
+        seen += _cards(d)
+        d = post(f"/api/auction/{d['state']}/fill", {"index": 0}).json()
+    assert d["phase"] == "twelve"
+    _no_ratings(d)
+    seen += _cards(d)
+    rep = client.get(f"/api/auction/{d['state']}/report").json()
+    _no_ratings(rep)
+    assert rep["teams"] == [] and rep["brief"] == [] and rep["paper"]
+    assert not any(c["key"] in ("steal", "splurge") for c in rep["paper"])
+    order, impact = d["suggestion"][:11], d["suggestion"][11]
+    d = post(f"/api/auction/{d['state']}/twelve", {"order": order, "impact": impact}).json()
+    s = post(f"/api/season/{d['state']}/skip", {"scope": "tournament"}).json()
+    assert s["complete"] and s["overall_rating"] is None
+    _no_ratings(s)
+    v = client.get(f"/api/season/{s['state']}/verdict").json()
+    _no_ratings(v)
+    assert v["brief"] == []
+    # every card carries its status, and figures only for a 2026 season
+    stats = ("bat_runs", "bat_balls", "bat_strike_rate", "bowl_wickets", "bowl_runs",
+             "bowl_balls", "bowl_economy")
+    assert seen and all(c["status"] == preset.status[c["person_id"]] for c in seen)
+    for c in seen:
+        if c["status"] != "played":
+            assert all(c[k] is None for k in stats), c["name"]
+    played = [c for c in seen if c["status"] == "played"]
+    assert played and any(c["bat_balls"] or c["bowl_balls"] for c in played)
+
+
+def test_an_ordinary_auction_still_shows_its_ratings(client):
+    """The hiding is the mini auction's alone: a mega auction's cards keep their numbers."""
+    d = client.post("/api/auction", json={"team": "MI", "mega": False, "seed": 4}).json()
+    assert not d["ratings_hidden"] and d["lot"]["card"]["rating"] is not None
+    assert d["lot"]["card"]["status"] is None
+    sets = client.get(f"/api/auction/{d['state']}/sets").json()
+    assert all(x["rating"] is not None and x["history"] is None
+               for st in sets["sets"] for x in st["lots"])
+
+
+def test_the_paper_without_ratings_quotes_none_and_drops_the_rating_judged_stories(preset):
+    # Run on an open auction: a mini auction's list never produces a steal, so the rule
+    # that drops one would have nothing to act on there.
+    import game.auction_report as R
+    from tools.snapshot_deck import deck_from, read_document
+    # seed 2: the unsold lot with the highest base is not the unsold lot with the best card
+    a = au.run_auction(deck_from(read_document()), 2)
+    full = R.morning_after(a, 0)
+    bare = R.morning_after(a, 0, ratings=False)
+    assert {"record", "steal", "splurge", "yours", "unsold"} <= {c.key for c in full}
+    assert any(re.search(r"\brated\b", " ".join(c.body)) for c in full)
+    assert not any(re.search(r"\brated\b", " ".join(c.body)) for c in bare)
+    assert {c.key for c in bare} == {c.key for c in full} - {"steal", "splurge"}
+    # the biggest name nobody bought is the one with the highest base, not the best card
+    unsold = next(c for c in bare if c.key == "unsold")
+    sold = {s.lot.index for s in a.sales if s.winner is not None and s.round != "fill"}
+    left = [l for l in a.lots if l.index not in sold]
+    top_base = max(l.base for l in left)
+    assert unsold.body[0].startswith(max((l for l in left if l.base == top_base),
+                                         key=lambda l: -l.index).card.name)

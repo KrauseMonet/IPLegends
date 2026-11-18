@@ -1972,6 +1972,15 @@ body{
 .auc-tag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
   border:1px solid var(--line-strong);border-radius:4px;padding:2px 7px;color:var(--ink-2)}
 .auc-tag.os{border-color:rgba(61,220,151,.5);color:var(--mint)}
+/* [A298] the mini auction's status tags, in place of a rating */
+.auc-tag.st-new{border-color:rgba(245,184,61,.55);color:var(--gold)}
+.auc-tag.st-unsold{color:var(--ink-3)}
+.auc-tag.st-idle{color:var(--ink-3)}
+.auc-tag.st-played{color:var(--ink)}
+.auc-slot-top .auc-tag{margin-left:auto;font-size:8px;padding:1px 4px;letter-spacing:.08em}
+.auc-sets-where .auc-tag{font-size:9px;letter-spacing:.08em;padding:1px 5px}
+.auc-o-name .auc-o-line{display:block;font-style:normal;font:500 11px var(--mono);color:var(--ink-3);margin-top:2px}
+.auc-o-name .auc-tag{display:inline-block;margin-top:3px;font-size:8.5px;padding:1px 5px;letter-spacing:.08em}
 .auc-stats{justify-content:flex-start;margin:18px 0 4px;gap:30px}
 .auc-card-base{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--ink-3);margin-top:14px}

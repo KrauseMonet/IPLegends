@@ -17,7 +17,8 @@ import os
 import pathlib
 import re
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from typing import Literal
 
 import psycopg
@@ -546,6 +547,9 @@ class CardOut(BaseModel):
         default_factory=list,
         description="[A265] what this season earned, as many as its rating or the "
                     "player's career standing opens (A258); empty for most cards")
+    status: str | None = Field(default=None, description="[A298] the 2027 mini auction "
+                               "only, which shows no ratings: played (2026 figures shown) | "
+                               "unsold | new | idle")
 
 
 class DealOut(BaseModel):
@@ -1523,7 +1527,39 @@ def _skills(card: Card) -> list[SkillOut]:
             for s in shown]
 
 
+# [A298] The 2027 mini auction shows no ratings and no skills (a skill only opens at a
+# rating, A265) -- a player is known by what he did in 2026, or by why he has nothing to
+# show. Set for the length of one response by `_mini_view`; holds the preset's statuses.
+_MINI_VIEW: ContextVar[dict[str, str] | None] = ContextVar("mini_view", default=None)
+
+
+@contextmanager
+def _mini_view(on: bool):
+    token = _MINI_VIEW.set(auction_session.mini_preset().status if on else None)
+    try:
+        yield
+    finally:
+        _MINI_VIEW.reset(token)
+
+
+def _ratings_hidden() -> bool:
+    return _MINI_VIEW.get() is not None
+
+
 def _card(card: Card, blocked: str | None = None) -> CardOut:
+    statuses = _MINI_VIEW.get()
+    if statuses is not None:
+        out = _card_shown(card, blocked)
+        status = statuses.get(card.person_id)
+        out.rating, out.skills, out.status = None, [], status
+        if status != "played":      # older figures, or none: only a 2026 season is shown
+            out.bat_runs = out.bat_balls = out.bat_strike_rate = None
+            out.bowl_wickets = out.bowl_runs = out.bowl_balls = out.bowl_economy = None
+        return out
+    return _card_shown(card, blocked)
+
+
+def _card_shown(card: Card, blocked: str | None = None) -> CardOut:
     return CardOut(
         person_id=card.person_id, name=card.name, franchise=card.franchise,
         season_year=card.season_year, crest=crest_url(card.franchise, card.season_year),
@@ -1549,7 +1585,8 @@ def _journey_entry(card: Card, acc: JourneyAccumulator) -> JourneySquadEntryOut:
         sim_bat_runs=acc.runs.get(pid), sim_bat_balls=acc.balls_faced.get(pid),
         sim_bat_fours=acc.fours.get(pid), sim_bat_sixes=acc.sixes.get(pid),
         sim_bowl_wickets=acc.wickets.get(pid), sim_bowl_runs=acc.runs_conceded.get(pid),
-        sim_bowl_balls=acc.balls_bowled.get(pid), skills=_skills(card),
+        sim_bowl_balls=acc.balls_bowled.get(pid),
+        skills=[] if _ratings_hidden() else _skills(card),
     )
 
 
@@ -1945,6 +1982,13 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
                           ) -> SeasonProgressOut:
     """Shared by all four season routes -- a `SeasonReplay` either carries a pending
     decision or is complete; this shapes whichever one into the wire format."""
+    draft_state, _ = season_session.decode_full(state)
+    with _mini_view(auction_session.is_mini(draft_state)):
+        return _season_progress_shown(state, replay)
+
+
+def _season_progress_shown(state: str, replay: season_session.SeasonReplay
+                           ) -> SeasonProgressOut:
     yours, season = replay.yours, replay.season
     your_results = [_result_out(r, yours) for r in season.results
                     if r.home is yours or r.away is yours]
@@ -2000,7 +2044,7 @@ def _season_progress_out(state: str, replay: season_session.SeasonReplay
         orange_cap_side=_cap_side(leaders.top_scorer_side, yours),
         purple_cap_side=_cap_side(leaders.top_wicket_taker_side, yours),
         bracket=[_result_out(r, yours) for r in season.playoffs],
-        overall_rating=rating.overall,
+        overall_rating=None if _ratings_hidden() else rating.overall,
         squad=[_journey_entry(c, replay.stats) for c in all_twelve],
     )
 
@@ -2479,7 +2523,8 @@ class BandSupplyOut(BaseModel):
 
 def _supply_out(a) -> list[BandSupplyOut]:
     names = ("top", "middle", "finisher", "tail")
-    return [BandSupplyOut(band=names[b], available=n, good=g)
+    hidden = _ratings_hidden()       # [A298] a count of 85+ players is a rating too
+    return [BandSupplyOut(band=names[b], available=n, good=0 if hidden else g)
             for b, (n, g) in enumerate(auction.band_supply(a))]
 
 
@@ -2541,6 +2586,8 @@ class AuctionOut(BaseModel):
     band_supply: list[BandSupplyOut] = Field(default=[], description="[A291] who is still to "
                                              "be had in each batting band")
     quality_mark: int = auction.QUALITY_MARK
+    ratings_hidden: bool = Field(default=False, description="[A298] the mini auction shows "
+                                 "no ratings, skills or quality counts")
 
 
 # `RoomStateOut` refers to `AuctionOut` before it is defined; resolve that now it exists.
@@ -2553,8 +2600,8 @@ def _sale_out(r, sale: auction.Sale, whispers: list[str] | None = None) -> Aucti
     return AuctionSaleOut(
         lot=sale.lot.index, round=sale.round, set_code=sale.lot.set_code, name=c.name,
         season_year=c.season_year, franchise=c.franchise,
-        crest=crest_url(c.franchise, c.season_year), rating=c.display,
-        base=sale.lot.base, team=teams[sale.winner].short if sale.winner is not None else None,
+        crest=crest_url(c.franchise, c.season_year),
+        rating=None if _ratings_hidden() else c.display, base=sale.lot.base, team=teams[sale.winner].short if sale.winner is not None else None,
         price=sale.price, bids=[AuctionBidOut(team=teams[b.team].short, price=b.price)
                                 for b in sale.bids],
         rtm_holder=teams[sale.rtm.holder].short if sale.rtm else None,
@@ -2606,6 +2653,13 @@ def _top_price(a) -> int | None:
 
 
 def _auction_out(r: auction_session.Replay) -> AuctionOut:
+    with _mini_view(r.mini):
+        out = _auction_shown(r)
+    out.ratings_hidden = r.mini
+    return out
+
+
+def _auction_shown(r: auction_session.Replay) -> AuctionOut:
     if r.phase == "retain":
         return AuctionOut(
             state=r.state, phase="retain", mega=True, you=r.short, franchise=r.franchise,
@@ -2678,6 +2732,8 @@ class AuctionCatalogueLotOut(BaseModel):
                                  description="[A275] batting numbers this season (A76)")
     base: int = Field(description="lakh")
     status: str = Field(description="sold | unsold | current | upcoming")
+    history: str | None = Field(default=None, description="[A298] mini auction: played | "
+                                "unsold | new | idle, shown in place of the rating")
     team: str | None = Field(default=None, description="buyer's short code, when sold")
     price: int | None = Field(default=None, description="lakh, when sold")
 
@@ -2697,6 +2753,7 @@ class AuctionCatalogueOut(BaseModel):
     current_set: str | None
     band_supply: list[BandSupplyOut] = []
     quality_mark: int = auction.QUALITY_MARK
+    ratings_hidden: bool = False
 
 
 def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
@@ -2719,8 +2776,11 @@ def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
         else:
             status = "sold" if sale.winner is not None else "unsold"
         sold = status == "sold"
+        statuses = _MINI_VIEW.get()
         sets[-1].lots.append(AuctionCatalogueLotOut(
-            lot=x.index, name=c.name, rating=c.display, kind=_kind(c), overseas=c.overseas,
+            lot=x.index, name=c.name, rating=None if statuses is not None else c.display,
+            history=statuses.get(c.person_id) if statuses is not None else None,
+            kind=_kind(c), overseas=c.overseas,
             franchise=c.franchise, season_year=c.season_year,
             positions=sorted(c.positions), base=x.base, status=status,
             team=a.teams[sale.winner].short if sold else None,
@@ -2728,7 +2788,8 @@ def _catalogue_out(a: auction.Auction | None, lot: auction.Lot | None,
     current = lot.set_code if live is not None else None
     for st in sets:
         st.current = st.code == current
-    return AuctionCatalogueOut(sets=sets, current_set=current, band_supply=_supply_out(a))
+    return AuctionCatalogueOut(sets=sets, current_set=current, band_supply=_supply_out(a),
+                               ratings_hidden=_ratings_hidden())
 
 
 def _auction(fn, *args) -> AuctionOut:
@@ -2795,7 +2856,8 @@ def auction_sets(state: str) -> AuctionCatalogueOut:
         r = auction_session.replay(STATE["deck"], state)
     except auction_session.InvalidState as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _catalogue_out(r.auction, r.lot, r.phase)
+    with _mini_view(r.mini):
+        return _catalogue_out(r.auction, r.lot, r.phase)
 
 
 # --- the auction told as a story [A232] -------------------------------------------------------
@@ -2870,8 +2932,10 @@ def _report_clip(c) -> ReportClipOut:
 
 def _report_out(a, you: int | None, twelves: dict, brief, owners: dict | None = None
                 ) -> AuctionReportOut:
+    hidden = _ratings_hidden()
     teams = []
-    for row in auction_report.squad_report(a, twelves):
+    # [A298] every squad ranked is a ranking by rating, so the mini auction has none
+    for row in ([] if hidden else auction_report.squad_report(a, twelves)):
         top = row.top_buy
         teams.append(ReportTeamOut(
             rank=row.rank, short=row.short, franchise=row.franchise,
@@ -2881,7 +2945,8 @@ def _report_out(a, you: int | None, twelves: dict, brief, owners: dict | None = 
             top_price=top[1] if top else None, spent=row.spent, purse=row.purse,
             strength=row.strength, gap=row.gap, notes=row.notes))
     statuses = auction_report.judge(brief, a, a.teams[you]) if you is not None else []
-    return AuctionReportOut(paper=[_report_clip(c) for c in auction_report.morning_after(a, you)],
+    return AuctionReportOut(paper=[_report_clip(c) for c in auction_report.morning_after(
+                                a, you, ratings=not hidden)],
                             teams=teams, brief=_brief_out(statuses))
 
 
@@ -2918,6 +2983,9 @@ def auction_report_route(state: str) -> AuctionReportOut:
     if r.phase not in ("twelve", "ready"):
         raise HTTPException(status_code=409, detail="the auction is not over yet")
     a, you = r.auction, r.you.index
+    if r.mini:          # [A298] no squad ranking, no board's brief (A297), no ratings
+        with _mini_view(True):
+            return _report_out(a, you, {}, [])
     twelves = {t.index: auction.best_twelve(t.squad) for t in a.teams}
     return _report_out(a, you, twelves,
                        auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega))
@@ -2940,8 +3008,10 @@ def season_verdict_route(state: str) -> VerdictOut:
     team_of_side = {id(side): (you if side is replay.yours else by_short[side.short])
                     for side in s.sides}
     finish = next(n for n, row in enumerate(s.table, 1) if row.side is replay.yours)
-    return _verdict_out(a, s.results + s.playoffs, team_of_side, you, finish,
-                        auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega))
+    with _mini_view(r.mini):
+        return _verdict_out(a, s.results + s.playoffs, team_of_side, you, finish,
+                            [] if r.mini else      # A297: a mini auction has no brief
+                            auction_report.board_brief(STATE["deck"], r.seed, r.short, r.mega))
 
 
 @app.post("/api/auction/{state}/bid", response_model=AuctionOut)

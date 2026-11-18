@@ -122,10 +122,14 @@ def _pick(seed: int, key: str, options: list[str]) -> str:
 # --- the morning-after paper ---------------------------------------------------------------
 
 
-def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
+def morning_after(a: au.Auction, you: int | None = None, ratings: bool = True) -> list[Clipping]:
     """The paper the morning after: the record, the longest war, the steal and the splurge,
     your headline signing, the biggest name nobody bought, a Right to Match, and who spent.
-    Each appears only when the auction actually produced one; ordered by `weight`."""
+    Each appears only when the auction actually produced one; ordered by `weight`.
+
+    [A298] `ratings=False` is the 2027 mini auction, which shows none: no story quotes a
+    rating, the steal and the splurge go (each is judged against what players of the same
+    rating fetched), and the biggest name nobody bought is the one with the highest base."""
     teams = a.teams
     sales = _auction_sales(a)
     out: list[Clipping] = []
@@ -146,7 +150,8 @@ def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
             f"{_cr(record.price)}: {c.name} goes to {t.short}",
             f"{t.short} pay {_cr(record.price)} for {c.name}",
             f"Record day: {c.name} sold for {_cr(record.price)}"])
-        body = [f"{c.name}, rated {c.display} on the strength of {c.season_year}, was the "
+        rated = f", rated {c.display} on the strength of {c.season_year}," if ratings else ""
+        body = [f"{c.name}{rated} was the "
                 f"most expensive player of the auction, bought by {t.franchise} for "
                 f"{_cr(record.price)} from a base of {_cr(record.lot.base)}."]
         if last_rival:
@@ -175,7 +180,7 @@ def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
               f"{_cr(war.lot.base)} to {_cr(war.price)} before {t.short} were left standing."],
              70, c.franchise, "", c.season_year)
 
-    st = steal_of(a)
+    st = steal_of(a) if ratings else None
     if st is not None:
         s, fair = st
         c, t = s.lot.card, teams[s.winner]
@@ -188,7 +193,7 @@ def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
               f"auction. {t.franchise} paid {_cr(s.price)} for {c.name}."],
              80, c.franchise, "gold", c.season_year)
 
-    sp = splurge_of(a)
+    sp = splurge_of(a) if ratings else None
     if sp is not None:
         s, fair = sp
         c, t = s.lot.card, teams[s.winner]
@@ -212,7 +217,7 @@ def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
                 f"{yt.short} build around {c.name}"])
             body = [f"{yt.franchise} came to the table with {_cr(opening_purse(yt))} and "
                     f"left with {_cr(yt.purse)}. Their biggest outlay was {_cr(p)} on "
-                    f"{c.name}, rated {c.display}."]
+                    f"{c.name}{f', rated {c.display}' if ratings else ''}."]
         else:
             head = f"{yt.short} sit on their purse"
             body = [f"{yt.franchise} won nothing under the hammer and filled the squad "
@@ -224,12 +229,13 @@ def morning_after(a: au.Auction, you: int | None = None) -> list[Clipping]:
     sold_ids = {s.lot.index for s in a.sales if s.winner is not None and s.round != "fill"}
     unsold = [lot for lot in a.lots if lot.index not in sold_ids]
     if unsold:
-        lot = max(unsold, key=lambda l: (l.card.display or 0, -l.index))
+        lot = max(unsold, key=(lambda l: (l.card.display or 0, -l.index)) if ratings else
+                  (lambda l: (l.base, -l.index)))
         fill = next((s for s in a.sales if s.round == "fill" and s.winner is not None
                      and s.lot.card.person_id == lot.card.person_id), None)
         c = lot.card
         offers = sum(1 for s in a.sales if s.lot.index == lot.index and s.round != "fill")
-        body = [f"{c.name}, rated {c.display}, went unsold "
+        body = [f"{c.name}{f', rated {c.display},' if ratings else ''} went unsold "
                 f"{'twice' if offers > 1 else 'under the hammer'} at a base of {_cr(lot.base)}."]
         if fill is not None:
             body.append(f"{teams[fill.winner].short} picked the lot up afterwards for "

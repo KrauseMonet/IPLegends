@@ -1136,24 +1136,41 @@ def twelve_value(squad: list[Card]) -> float | None:
 # * DEBUTANTS. Only 11-17% of shortlisted players with no IPL record were bought, but those
 #   who were went for about twice a mega auction's debutant prices. Modelled as a scouting
 #   draw: SCOUTED of debutants are known to the computer teams, each team keen on one with
-#   chance KEEN, and a keen team values him at DEBUT_PREMIUM; the rest draw no bid at all.
+#   chance KEEN, and a keen team values an UNCAPPED one at DEBUT_PREMIUM. A CAPPED debutant
+#   is an international with no IPL record, and real minis paid those about half what an
+#   overseas player with a record fetched (Rs 3.9 / 2.4 cr against 7.4 / 5.7 cr in 2024 /
+#   2026), so he is valued at CAPPED_DEBUT, not at the premium [A300]. The rest draw no bid.
 # * GAPS. Spending followed what a squad lacked (+Rs 1.73 cr spent a player short in a role),
 #   which `need` already carries, scaled to a squad of 25.
+# * PASSPORT [A300]. Overseas and Indian cards sit in the same rating range, but real minis
+#   spent 58-63% of their money on the overseas players who filled 38% of the places: a side
+#   fields only four, so an overseas place is worth more. OVERSEAS_PREMIUM is declared, set
+#   to reproduce that split. Without it a 78-rated Indian journeyman fetched Rs 6-7 cr in
+#   nearly every auction.
 #
 # Declared game design, tuned by `tools.mini_calibration` against those targets.
 
-# Measured by `tools.mini_calibration` (20 auctions, no human) against the real minis: spent
-# 89% of the purses (2024 ~87%), top price ~Rs 19 cr (max 21.5; real 24.75-25.2), 9 sold for
-# Rs 10 cr+ and 17 for Rs 5 cr+ (real 5-6 and 13-19, with ~25% less money than 2027's Rs
-# 298 cr), 10% of debutants bought (real 11-17%), and bought by age 28% / 27% / 36% / 26% /
-# 13% under 26 / 26-30 / 30-33 / 33-36 / 36+ (real 47 / 31 / 35 / 29 / 19 -- the young are
-# under-bought because the young players listed with an IPL record are mostly weak cards).
-MINI_VALUE = (45.0, 0.26)
+# Measured by `tools.mini_calibration` (20 auctions, no human) against the real minis [A300]:
+# spent 85% of the purses (2024 ~87%); top Rs 25.0 cr, the MINI_TOP cap (real 24.75-25.2); 3.5
+# sold for Rs 10 cr+ and 16.1 for Rs 5 cr+ (real 5-6 and 13-19, with about a third less money);
+# Indians took 42% of the money (real 42% / 37%), 6.8 of them at Rs 5 cr+ (real 7 / 6); average
+# prices overseas with a record Rs 7.9 cr (real 7.4 / 5.7), overseas debutants 4.3 (3.9 / 2.4),
+# Indians with a record 3.0 (real 2.0-4.9), Indian debutants 2.5 (2.2 / 1.7); 10% of
+# debutants bought (real 11-17%); bought by age 25% / 32% / 33% / 18% / 18% under 26 / 26-30 /
+# 30-33 / 33-36 / 36+ (real 47 / 31 / 35 / 29 / 19). The curve is steep on purpose: a shallow
+# one paid depth too well. AGE_FACTOR went 0.8 -> 0.68 with it, keeping a year's discount at
+# about the same number of rating points. NOT matched: Indians bought are 46% players with an
+# IPL record against a real 18-29%, because our list's Indian unknowns carry the weaker half
+# of debut seasons (A297); that is the list's cards, left for the real register.
+MINI_VALUE = (13.0, 0.45)
 AGE_FROM = 30
-AGE_FACTOR = 0.8
+AGE_FACTOR = 0.68
 SCOUTED = 0.6
 KEEN = 0.5
-DEBUT_PREMIUM = 4.0
+DEBUT_PREMIUM = 2.5
+CAPPED_DEBUT = 0.35     # [A300] a capped debutant's view, against a known player's
+MINI_TOP = 2520         # [A300] the highest price paid in a real mini auction (Green, 2026)
+OVERSEAS_PREMIUM = 2.3  # [A300] an overseas player's value against an Indian's of the same card
 
 
 @dataclass(frozen=True)
@@ -1161,6 +1178,9 @@ class Market:
     ages: dict
     debutants: frozenset
     per_place: float                    # money left a place across the league, in lakh
+    # [A300] capped players on the list: a capped debutant is an international, priced as
+    # a known player, never with the debut premium
+    capped: frozenset = frozenset()
 
 
 def mini_ceiling(team: Team, lot: Lot, seed: int, round_no: int, market: Market) -> int:
@@ -1172,15 +1192,16 @@ def mini_ceiling(team: Team, lot: Lot, seed: int, round_no: int, market: Market)
     if card.person_id in market.debutants:
         if _unit(seed, pid, 7) >= SCOUTED or _unit(seed, team.index, pid, 8) >= KEEN:
             return 0
-        premium = DEBUT_PREMIUM
+        premium = CAPPED_DEBUT if card.person_id in market.capped else DEBUT_PREMIUM
     per_place = (team.purse - MIN_PRICE * team.open_places) / max(1, team.open_places)
     pressure = max(0.3, min(2.5, per_place / market.per_place)) ** PURSE_PRESSURE
     age = market.ages.get(card.person_id)
     old = AGE_FACTOR ** max(0.0, age - AGE_FROM) if age is not None else 1.0
     noise = 1.0 + NOISE * (2 * _unit(seed, team.index, lot.index, round_no, 4) - 1)
+    passport = OVERSEAS_PREMIUM if card.overseas is True else 1.0
     value = (value_curve(card.display, mini=True) * need(team, card) * pressure
-             * _personality(team, card) * old * premium * noise)
-    ceiling = min(int(value), team.max_bid(), int(MAX_SHARE * PURSE))
+             * _personality(team, card) * old * premium * passport * noise)
+    ceiling = min(int(value), team.max_bid(), MINI_TOP)
     return ceiling if ceiling >= lot.base else 0
 
 
@@ -1226,7 +1247,8 @@ MINI_SQUAD_MIN = 18
 def mini_market(preset) -> Market:
     places = sum(preset.squad_size[s] - len(preset.squads.get(s, [])) for s in preset.purse)
     return Market(dict(preset.ages), frozenset(preset.debutants),
-                  sum(preset.purse.values()) / max(1, places))
+                  sum(preset.purse.values()) / max(1, places),
+                  frozenset(c.person_id for c, _, capped in preset.lots if capped))
 
 
 def run_mini_auction(preset, seed: int, human_short: str | None = None,

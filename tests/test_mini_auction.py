@@ -393,10 +393,50 @@ def test_an_unscouted_debutant_draws_no_bid_and_age_lowers_a_view():
             if au.mini_ceiling(team, _lot(young), s, 0, _market(debutants=frozenset({"young"}))) > 0]
     # scouted (60%) and keen (half of those): about 30% of seeds
     assert 0.2 < len(seen) / 200 < 0.4
-    m = _market(ages={"young": 37.0})
-    old_view = [au.mini_ceiling(team, _lot(young), s, 0, m) for s in range(50)]
-    plain = [au.mini_ceiling(team, _lot(young), s, 0, _market()) for s in range(50)]
-    assert sum(old_view) < 0.3 * sum(plain)                     # 0.8 ** 7 = 0.21
+    # a card below the price cap, and high enough that seven years off still clears his base
+    mid = _card("mid", 2026, 82)
+    m = _market(ages={"mid": 37.0})
+    old_view = [au.mini_ceiling(team, _lot(mid), s, 0, m) for s in range(50)]
+    plain = [au.mini_ceiling(team, _lot(mid), s, 0, _market()) for s in range(50)]
+    assert max(plain) < au.MINI_TOP
+    assert all(v > 0 for v in old_view)
+    assert sum(old_view) == pytest.approx(0.68 ** 7 * sum(plain), rel=0.02)
+
+
+def _views(team, card, market):
+    return [au.mini_ceiling(team, _lot(card), s, 0, market) for s in range(200)]
+
+
+def test_a_capped_debutant_is_valued_as_a_known_player_not_at_the_debut_premium():
+    """[A300] A capped debutant is an international: real minis paid about half a known
+    overseas player's price for one, not the uncapped debutant's premium."""
+    team = au.Team(1, "MI", "Mumbai Indians", purse=4000, squad_size=25, squad_min=18,
+                   squad=[_card(f"p{i}", 2026, 80) for i in range(16)])
+    deb = _card("deb", 2026, 80)        # high enough that a capped view clears his base
+    known = [v for v in _views(team, deb, _market()) if v]
+    uncapped = _views(team, deb, _market(debutants=frozenset({"deb"})))
+    capped = _views(team, deb, _market(debutants=frozenset({"deb"}), capped=frozenset({"deb"})))
+    # the same scouting draw decides who bids at all
+    assert [v > 0 for v in uncapped] == [v > 0 for v in capped]
+    bid = [i for i, v in enumerate(uncapped) if v]
+    plain = _views(team, deb, _market())
+    assert bid and known
+    cap = min(au.MINI_TOP, team.max_bid())
+    assert all(uncapped[i] == cap if 2.5 * plain[i] >= cap
+               else uncapped[i] == pytest.approx(2.5 * plain[i], rel=0.01) for i in bid)
+    assert all(capped[i] == pytest.approx(0.35 * plain[i], rel=0.01) for i in bid)
+
+
+def test_an_overseas_player_is_worth_more_and_nobody_passes_the_record_price():
+    """[A300] Same card, an overseas player is valued OVERSEAS_PREMIUM times an Indian, and no
+    ceiling passes MINI_TOP, the highest price a real mini auction has paid."""
+    team = au.Team(1, "MI", "Mumbai Indians", purse=9000, squad_size=25, squad_min=18,
+                   squad=[_card(f"p{i}", 2026, 80) for i in range(16)])
+    ind, os_ = _card("ind", 2026, 76), _card("os", 2026, 76, overseas=True)
+    a, b = _views(team, ind, _market()), _views(team, os_, _market())
+    assert all(y == pytest.approx(2.3 * x, rel=0.01) for x, y in zip(a, b) if 2.3 * x < 2400)
+    star = _card("star", 2026, 95)
+    assert max(_views(team, star, _market())) == au.MINI_TOP == 2520
 
 
 def test_the_catalogue_runs_capped_sets_first_strongest_first():
@@ -415,6 +455,13 @@ def preset():
     if p is None:
         pytest.skip("no 2027 preset snapshot")
     return p
+
+
+def test_the_market_knows_who_is_capped(preset):
+    """[A300] the capped-debutant rule only acts if the market carries the list's caps"""
+    m = au.mini_market(preset)
+    assert m.capped == {c.person_id for c, _, capped in preset.lots if capped}
+    assert m.capped & m.debutants                  # capped debutants exist on the list
 
 
 def test_a_real_mini_auction_keeps_every_rule(preset):

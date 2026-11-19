@@ -702,3 +702,51 @@ def test_a_2027_band_is_last_season_then_other_leagues_then_the_record():
     assert by["old"] == frozenset({5, 6, 7})                 # other leagues over an old season
     assert by["thin"] == tail                                # three innings: not enough
     assert by["new:newlad"] == frozenset({3, 4, 5})          # a newcomer, from other leagues
+
+
+# ---------------------------------------------------------------- thin 2026 seasons [A303]
+
+def test_a_thin_2026_season_decides_when_most_of_it_is_one_band():
+    tail, top = frozenset({8, 9, 10, 11}), frozenset({1, 2, 3})
+    assert M.THIN_MIN_INNINGS == 3
+    assert M.thin_season_positions({2: 1, 8: 1, 9: 2}) == tail     # Narine 2026: 3 of 4
+    assert M.thin_season_positions({6: 3}) == frozenset({5, 6, 7})
+    assert M.thin_season_positions({6: 2}) is None                  # two innings: not enough
+    assert M.thin_season_positions({8: 2, 6: 1, 4: 1}) is None      # exactly half: no majority
+    assert M.thin_season_positions({8: 5}) is None                  # five: the card's own season
+    assert M.thin_season_positions({3: 2, 6: 1}) == top             # 3 alone resolves to top
+    assert M.thin_season_positions({5: 3}) == frozenset({3, 4, 5})  # 5 alone resolves to middle
+
+
+def test_a_thin_2026_season_reaches_the_2027_card():
+    top, tail = frozenset({1, 2, 3}), frozenset({8, 9, 10, 11})
+    cards = [_card("thin26", 2026, 80, positions=top), _card("split26", 2026, 80, positions=top)] + \
+            [_card(f"d{i}", 2016, 75 + i % 5) for i in range(40)] + \
+            [_card(f"b{i}", 2016, 74 + i % 5, bat_balls=10, bowl_balls=120, role="bowler",
+                   positions=tail) for i in range(40)]
+    listed = [dict(source="released", name=n, person_id=pid, capped="no", overseas="no",
+                   role="Bowler", base_2026_lakh="30", include="", evidence="")
+              for n, pid in (("Thin One", "thin26"), ("Split One", "split26"))]
+    positions = [dict(key="thin26", positions="1:40", ipl2026="2:1 8:1 9:2"),
+                 dict(key="split26", positions="", ipl2026="2:2 9:2")]
+    p = M.build_preset(_deck(cards), [], listed, [], [], au.base_price, positions)
+    by = {c.person_id: c.positions for c, _, _ in p.lots}
+    assert by["thin26"] == tail                 # not his career, not other leagues
+    assert by["split26"] == top                 # a split season keeps the card's own band
+
+
+def test_the_positions_file_counts_ipl_2026_only_for_ipl_players():
+    import collections
+    rows = {r["key"]: r for r in L.position_rows(
+        [("ipl1", "Someone", "d1", False), ("new:x", "Nobody Here", "", False)],
+        {"d1": collections.Counter({1: 10})}, {"d1": {"sma"}}, {},
+        {"d1": collections.Counter({8: 1, 9: 2})})}
+    assert rows["ipl1"]["ipl2026"] == "8:1 9:2"
+    assert rows["new:x"]["ipl2026"] == ""
+
+
+def test_narine_reads_lower_order_in_the_2027_preset():
+    from tools.snapshot_mini import load_preset
+    p = load_preset()
+    narine = next(c for c in p.squads["KKR"] if c.person_id == "9d430b40")
+    assert narine.positions == frozenset({8, 9, 10, 11})

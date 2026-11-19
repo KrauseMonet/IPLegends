@@ -30,7 +30,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date
 
-from etl.batting_roles import MIN_INNINGS_FOR_ROLE, dominant_band
+from etl.batting_roles import MIN_INNINGS_FOR_ROLE, band_totals, dominant_band
 from etl.feasibility import BATTING_ROLE_SLOTS, Card, Deck
 
 DECAY_DISPLAY, K_DISPLAY = 0.7, 600      # the backtest's best rule for the card
@@ -286,17 +286,38 @@ def band_positions(counts: dict[int, int]) -> frozenset[int] | None:
     return BATTING_ROLE_SLOTS[dominant_band(counts)]
 
 
+# [A303] For the mini auction only: an IPL 2026 season of this many innings or more, short
+# of MIN_INNINGS_FOR_ROLE, decides the 2027 band when more than half of them fall in one
+# band. A76 sends such a season to the career; this does not, because a 2027 card is
+# about last season.
+THIN_MIN_INNINGS = 3
+
+
+def thin_season_positions(counts: dict[int, int]) -> frozenset[int] | None:
+    """[A303] The positions a thin IPL 2026 season decides on its own: THIN_MIN_INNINGS up to
+    (not including) MIN_INNINGS_FOR_ROLE innings, more than half in one band (positions 3
+    and 5 resolved as `band_totals` resolves them). None otherwise."""
+    n = sum(counts.values())
+    if not THIN_MIN_INNINGS <= n < MIN_INNINGS_FOR_ROLE:
+        return None
+    band = dominant_band(counts)
+    return BATTING_ROLE_SLOTS[band] if 2 * band_totals(counts)[band] > n else None
+
+
 def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
                  purse_rows: list[dict], birth_rows: list[dict], base_price,
                  position_rows: list[dict] = ()) -> Preset:
     """`base_price(card)` is the auction's own tier rule, for a player with no real base.
 
     [A302] A card's batting band is where the player batted LAST SEASON, IPL 2026, when he
-    played it -- his projected card keeps that season's positions. Otherwise it is where he
+    played it -- his projected card keeps that season's positions, and [A303] a season of
+    3-4 innings, more than half in one band, decides it too rather than his career. Otherwise it is where he
     has MOSTLY batted in the other T20 cricket Cricsheet holds (`position_rows`, written by
     `etl.list2027 --positions`), when that is five innings or more; and only failing both,
     his last IPL season's, or a newcomer's pooled role default."""
     elsewhere = {r["key"]: band_positions(parse_positions(r.get("positions", "")))
+                 for r in position_rows}
+    thin_2026 = {r["key"]: thin_season_positions(parse_positions(r.get("ipl2026", "")))
                  for r in position_rows}
     hist = history(deck)
     mean = deck_mean(deck)
@@ -327,6 +348,8 @@ def build_preset(deck: Deck, retained_rows: list[dict], list_rows: list[dict],
             where = f"{last.season_year} with {last.franchise}" if last.franchise else str(last.season_year)
             if last.season_year != SEASON - 1 and elsewhere.get(pid):
                 card = replace(card, positions=elsewhere[pid])
+            if thin_2026.get(pid):                  # only a 2026 player has 2026 innings
+                card = replace(card, positions=thin_2026[pid])
             if last.season_year == SEASON - 1:
                 status[pid] = "played"
                 notes[pid] = f"IPL {where}."

@@ -248,6 +248,24 @@ def league_positions() -> tuple[dict[str, collections.Counter], dict[str, set[st
     return counts, where
 
 
+def ipl_positions(year: int) -> dict[str, collections.Counter]:
+    """[A303] Registry id -> position -> innings in the IPL season played in `year`, read by
+    match date (never `info.season`), with the same rule as `league_positions`."""
+    counts: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    from etl.download import ARCHIVES
+    with zipfile.ZipFile(data_dir() / ARCHIVES["ipl"]) as zf:
+        for n in zf.namelist():
+            if not n.endswith(".json"):
+                continue
+            match = json.loads(zf.read(n))
+            if not str(match["info"]["dates"][0]).startswith(str(year)):
+                continue
+            for order in innings_positions(match):
+                for pid, pos in order.items():
+                    counts[pid][pos] += 1
+    return counts
+
+
 def _initials(word: str) -> bool:
     """An archive word of one to three capitals is initials ('AR', 'K')."""
     return word.isupper() and len(word) <= 3 and word.isalpha()
@@ -303,7 +321,7 @@ def person_link(name: str, candidates: dict[str, str]) -> str:
 
 
 def position_rows(players: list[tuple[str, str, str, bool]], counts, where,
-                  register: dict[str, tuple[str, str]]) -> list[dict]:
+                  register: dict[str, tuple[str, str]], ipl_last=None) -> list[dict]:
     """One generated row per (preset key, name, registry id or '', overseas) the preset holds.
     A player with no registry id is linked by `person_link` against the archive's players --
     Indians against the SMAT's, everyone else against the rest -- and only where that is
@@ -327,12 +345,17 @@ def position_rows(players: list[tuple[str, str, str, bool]], counts, where,
         rows.append(dict(key=key, name=name, registry_id=rid, how=how,
                          innings=sum(c.values()),
                          positions=" ".join(f"{p}:{n}" for p, n in sorted(c.items())),
-                         archives=" ".join(sorted(where.get(rid, ()))) if rid else ""))
+                         archives=" ".join(sorted(where.get(rid, ()))) if rid else "",
+                         ipl2026=_positions_text((ipl_last or {}).get(rid)) if how == "id" else ""))
     return rows
 
 
+def _positions_text(c) -> str:
+    return " ".join(f"{p}:{n}" for p, n in sorted((c or {}).items()))
+
+
 def write_positions(rows: list[dict]) -> None:
-    cols = ["key", "name", "registry_id", "how", "innings", "positions", "archives"]
+    cols = ["key", "name", "registry_id", "how", "innings", "positions", "archives", "ipl2026"]
     with open(POSITIONS_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, lineterminator="\n")
         w.writeheader()
@@ -717,7 +740,7 @@ def main(argv: list[str] | None = None) -> None:
     if "--positions" in (argv or []):
         counts, where = league_positions()
         players = preset_players(read_override(LIST_CSV), read_override(RETAINED_CSV))
-        rows = position_rows(players, counts, where, register_names())
+        rows = position_rows(players, counts, where, register_names(), ipl_positions(2026))
         write_positions(rows)
         linked = [r for r in rows if r["registry_id"]]
         enough = [r for r in rows if r["innings"] >= 5]

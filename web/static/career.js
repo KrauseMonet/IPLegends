@@ -348,6 +348,7 @@ function crHead(d, hold){
           <div class="cr-pot-bar"><i style="width:${pct}%"></i>${earned ? `<u style="left:${from}%"></u>` : ''}</div>
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
+        ${d.dynasty ? `<div class="cr-standing cr-dyn-tag">${crestImg(crDynCrest(d.dynasty), 'cr-dyn-tag-crest')}${esc(d.dynasty)} dynasty career</div>` : ''}
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
         ${d.workload ? `<div class="cr-standing cr-workload">${esc(d.workload)}</div>` : ''}
         ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
@@ -1898,6 +1899,8 @@ async function crSlotsLoad(){
   if (typeof ME === 'undefined' || !ME || !ME.account_id){ CR.slots = null; return crSlotsDraw(); }
   try { CR.slots = await api('/api/career/slots'); }
   catch(e){ CR.slots = null; }
+  try { CR.dyn = await api('/api/career/dynasty'); }
+  catch(e){ CR.dyn = null; }
   crSlotsDraw();
 }
 
@@ -1906,7 +1909,8 @@ function crSlotsDraw(){
   if (!box) return;
   const S = CR.slots;
   // Nobody without a pass and without kept careers sees the box at all.
-  if (!S || (!S.premium && !S.slots.length)){ box.classList.add('hide'); return; }
+  const D = CR.dyn;
+  if (!S || (!S.premium && !S.slots.length && !(D && D.club))){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
   const creating = !CR.data;
   const mine = crStore().slot || null;
@@ -1946,9 +1950,10 @@ function crSlotsDraw(){
     action = `<div class="cr-saved-into">Your pass has ended: you can still open or delete these.</div>`;
   }
   box.open = creating;
+  const dynNote = D && D.club ? ` · ${esc(D.club)} dynasty` : '';
   box.innerHTML = `<summary>Your careers · ${S.slots.length} of ${S.max} kept${
-      mine && CR.data ? ` · this one is in slot ${mine}` : ''}</summary>
-    <ol class="cr-saved-list">${rows.join('')}</ol>${action}`;
+      mine && CR.data ? ` · this one is in slot ${mine}` : ''}${dynNote}</summary>
+    <ol class="cr-saved-list">${rows.join('')}</ol>${action}${crDynHtml(creating)}`;
 }
 
 async function crCloudSave(d){
@@ -1957,6 +1962,12 @@ async function crCloudSave(d){
   try {
     const r = await api(`/api/career/slots/${slot}`, {method: 'POST', headers: CR_JSON, retry: true,
                                                       body: JSON.stringify({token: d.token})});
+    if (r.joined_dynasty){
+      // [A307] finished, so it joined the dynasty and left its slot
+      crSave({slot: null});
+      slip(`${d.name} joins your ${CR.dyn && CR.dyn.club ? CR.dyn.club : ''} dynasty. Slot ${slot} is free again.`);
+      return crSlotsLoad();
+    }
     CR.slots.slots = CR.slots.slots.filter(x => x.slot !== slot).concat([r]).sort((a, b) => a.slot - b.slot);
     crSlotsDraw();
   } catch(e){ slip('Could not keep this career on your account just now. It is still in this browser.'); }
@@ -1999,6 +2010,98 @@ async function crSlotDelete(n){
   } catch(e){ slip(e.message || 'Could not delete that career.'); }
 }
 document.addEventListener('signedin', crSlotsLoad);
+
+// --- club dynasty [A307] ------------------------------------------------------------------
+// One club per account. A career started while it is set is a dynasty career and starts a
+// step warmer there; a finished one joins the dynasty's history and frees its slot. The card
+// is worked out on the server from those careers each time (game/dynasty.py).
+const crDynCrest = club => {
+  const c = CR.dyn && (CR.dyn.clubs || []).find(x => x.name === club);
+  return c ? c.crest : null;
+};
+
+function crDynHtml(creating){
+  const D = CR.dyn;
+  if (!D || (!D.premium && !D.club)) return '';
+  if (!D.club || CR.dynPicking){
+    return `<div class="cr-dyn">
+      <div class="cr-label">${D.club ? 'Change your dynasty club' : 'Start a dynasty'}</div>
+      <p class="cr-dyn-dim">Pick one club. Careers you start from now on are its dynasty careers:
+        they begin a step warmer there, and when one finishes it joins the club's history.
+        ${D.club ? 'Changing club starts a new dynasty; the old one is kept if you come back.' : ''}</p>
+      <div class="cr-dyn-clubs">${D.clubs.map(c => `
+        <button class="cr-dyn-club${c.name === D.club ? ' sel' : ''}" onclick="crDynSet(this.dataset.c)" data-c="${esc(c.name)}">
+          ${crestImg(c.crest, 'cr-dyn-crest')}<span>${esc(c.name)}</span></button>`).join('')}</div>
+      ${D.club ? '<button class="act minor" onclick="CR.dynPicking=false;crSlotsDraw()">Keep ' + esc(D.club) + '</button>' : ''}
+    </div>`;
+  }
+  const c = D.card;
+  const line = [];
+  for (let y = c.first_year; y <= c.last_year; y++){
+    const on = c.covered.includes(y), won = c.titles.includes(y);
+    line.push(`<i class="${won ? 'won' : on ? 'on' : ''}" title="${y}${won ? ' · title' : on ? '' : ' · none of yours'}"></i>`);
+  }
+  const list = (rows, f) => rows.length ? `<ol>${rows.map(f).join('')}</ol>` : '<p class="cr-dyn-dim">None yet.</p>';
+  const warm = !D.premium ? '' : c.next_bonus
+    ? `Your next career starts a step warmer at ${esc(c.club)}.`
+    : `Your last dynasty career was released by ${esc(c.club)}, so the next one starts with no head start there.`;
+  if (!c.careers){
+    return `<div class="cr-dyn">
+      <div class="cr-dyn-head">${crestImg(c.crest, 'cr-dyn-crest big')}<div><b>${esc(c.club)} dynasty</b>
+        <span>No careers finished yet</span></div></div>
+      <p class="cr-dyn-dim">${creating ? 'The career you start now will be a ' + esc(c.club) + ' dynasty career. ' : ''}${warm}
+        When a dynasty career that played for ${esc(c.club)} finishes in a slot, it joins this history.</p>
+      ${D.premium ? '<button class="act minor" onclick="CR.dynPicking=true;crSlotsDraw()">Change club</button>' : ''}
+    </div>`;
+  }
+  return `<div class="cr-dyn">
+    <div class="cr-dyn-head">${crestImg(c.crest, 'cr-dyn-crest big')}<div><b>${esc(c.club)} dynasty</b>
+      <span>${c.careers} career${c.careers === 1 ? '' : 's'} · ${c.covered.length} of ${c.last_year - c.first_year + 1} seasons · score ${c.score}</span></div></div>
+    <div class="cr-dyn-stats">
+      <div><b>${c.titles.length}</b><span>titles</span></div>
+      <div><b>${c.finals_lost.length}</b><span>finals lost</span></div>
+      <div><b>${c.caps.length}</b><span>caps</span></div>
+      <div><b>${c.eras.length}</b><span>eras</span></div>
+    </div>
+    <div class="cr-label">The unbroken line · ${c.covered.length} of ${c.last_year - c.first_year + 1}</div>
+    <div class="cr-dyn-line">${line.join('')}</div>
+    <div class="cr-dyn-line-years"><span>${c.first_year}</span><span>${c.last_year}</span></div>
+    ${c.eras.length ? `<div class="cr-label">Eras</div>${list(c.eras, e => `<li><b>${esc(e.label)}</b> · ${e.titles} titles</li>`)}` : ''}
+    ${c.titles.length ? `<div class="cr-label">Titles</div><p>${c.titles.join(' · ')}</p>` : ''}
+    <div class="cr-dyn-cols">
+      <div><div class="cr-label">Most runs</div>${list(c.runs, r => `<li>${esc(r.name)} <b>${crNum(r.value)}</b></li>`)}</div>
+      <div><div class="cr-label">Most wickets</div>${list(c.wickets, r => `<li>${esc(r.name)} <b>${r.value}</b></li>`)}</div>
+    </div>
+    ${c.caps.length ? `<div class="cr-label">Caps</div>${list(c.caps, k => `<li>${k[0]} · ${k[1] === 'orange' ? 'Orange' : 'Purple'} Cap · ${esc(k[2])}</li>`)}` : ''}
+    ${c.captains.length ? `<div class="cr-label">Captains</div>${list(c.captains, k => `<li>${esc(k[0])} · ${k[1]} season${k[1] === 1 ? '' : 's'}</li>`)}` : ''}
+    <div class="cr-label">Best seasons</div>${list(c.best, b => `<li>${esc(b.name)} ${b.year} · grade <b>${b.grade}</b></li>`)}
+    ${c.rival ? `<div class="cr-label">Rival</div><p>${crestImg(c.rival.crest, 'cr-dyn-tag-crest')}${esc(c.rival.club)} · ${c.rival.won}–${c.rival.lost} in knockouts</p>` : ''}
+    <div class="cr-label">The players</div>${list(c.timeline, t => `<li>${esc(t.name)} · ${t.years[0]}${t.years.length > 1 ? '–' + t.years[t.years.length - 1] : ''} · ${t.years.length} season${t.years.length === 1 ? '' : 's'}</li>`)}
+    <p class="cr-dyn-dim">${warm}</p>
+    <div class="cr-dyn-actions">
+      <button class="act minor lead" onclick="crDynShare()">Share</button>
+      ${D.premium ? '<button class="act minor" onclick="CR.dynPicking=true;crSlotsDraw()">Change club</button>' : ''}
+    </div>
+  </div>`;
+}
+
+async function crDynSet(club){
+  if (CR.dyn && CR.dyn.club && club !== CR.dyn.club
+      && !confirm(`Make ${club} your dynasty club? Careers you start from now on will be ${club} dynasty careers. The ${CR.dyn.club} dynasty is kept if you come back to it.`)) return;
+  try {
+    CR.dyn = await api('/api/career/dynasty', {method: 'POST', headers: CR_JSON,
+                                               body: JSON.stringify({franchise: club})});
+    CR.dynPicking = false;
+    crSlotsDraw();
+  } catch(e){ slip(e.message || 'Could not set the dynasty club.'); }
+}
+
+function crDynShare(){
+  const text = CR.dyn && CR.dyn.card && CR.dyn.card.share;
+  if (!text) return;
+  if (navigator.share) return navigator.share({text}).catch(() => {});
+  navigator.clipboard.writeText(text).then(() => slip('Copied.'), () => slip(text));
+}
 
 function crNew(){
   crSave({token: null, prev: null, slot: null});   // a new career on purpose: nothing to fall back to

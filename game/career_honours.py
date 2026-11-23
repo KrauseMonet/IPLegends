@@ -39,6 +39,7 @@ def season_feats(feed, rival: list | None, captain: bool) -> dict:
     won = played = 0
     best = None
     vs_rival = [0, 0, 0, 0]               # matches, won, runs, wickets against his side
+    ko = []                               # [A307] [stage, canonical club, won] per knockout played
     rival_club = canonical(rival[0]) if rival else None
     for l in feed or []:
         if not l.played:
@@ -54,6 +55,7 @@ def season_feats(feed, rival: list | None, captain: bool) -> dict:
             po[0] += 1
             po[1] += l.runs
             po[2] += l.wickets
+            ko.append([l.stage, club, int(l.result == "W")])
         if l.stage == "Final":
             finals.append([l.runs, l.wickets, int(l.result == "W"), int(l.pom)])
         if l.batted and not l.out and l.runs >= 20 and l.chasing and l.result == "W":
@@ -72,7 +74,7 @@ def season_feats(feed, rival: list | None, captain: bool) -> dict:
                     "bowl_runs": l.bowl_runs, "bowl_balls": l.bowl_balls,
                     "result": l.result, "margin": l.margin, "pom": bool(l.pom)}
     out = {"po": po, "finals": finals, "opp": opp, "chases": chases, "won": won,
-           "played": played, "best": best, "captain": bool(captain)}
+           "played": played, "best": best, "captain": bool(captain), "ko": ko}
     if rival:
         out["rival"] = [rival[1], rival[0], *vs_rival]
     return out

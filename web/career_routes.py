@@ -14,6 +14,7 @@ puts back what replay gave for free: the page cannot hand the server a season it
 from __future__ import annotations
 
 import base64
+import dataclasses
 import datetime
 import hmac
 import json
@@ -29,6 +30,9 @@ from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
 from web import admin as admin_lib
 from web import auth, bingo_routes, career_results, career_slots, crests, db
+from web import dynasty as dynasty_db
+from game import dynasty as D
+from etl.franchise_map import franchise_map
 from web import premium as premium_lib
 
 router = APIRouter()
@@ -59,7 +63,8 @@ def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) 
                        "setup": [setup.name, setup.role, setup.debut, setup.overseas,
                                  setup.number, setup.home, setup.celebration,
                                  list(setup.ambitions), setup.country,
-                                 setup.bat_hand, setup.bowl_arm, setup.bowl_type],
+                                 setup.bat_hand, setup.bowl_arm, setup.bowl_type,
+                                 setup.dynasty, setup.dynasty_bonus],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -85,16 +90,18 @@ def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]
         if d.get("v") != TOKEN_VERSION:
             raise ValueError("old token")
         # Four fields before A228 (no identity, no ambitions), eight before A229 (no country),
-        # nine before A287 (no batting hand, bowling arm or bowling type).
+        # nine before A287 (no batting hand, bowling arm or bowling type), twelve before
+        # A307 (no dynasty).
         name, role, debut, overseas, *rest = d["setup"]
-        defaults = [None, "", "", [], "", "R", "R", ""]
-        number, home, celebration, ambitions, country, bat_hand, bowl_arm, bowl_type = (
-            rest + defaults[len(rest):])[:8]
+        defaults = [None, "", "", [], "", "R", "R", "", "", 0]
+        (number, home, celebration, ambitions, country, bat_hand, bowl_arm, bowl_type,
+         dynasty, dynasty_bonus) = (rest + defaults[len(rest):])[:10]
         return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
                                          None if number is None else int(number), str(home or ""),
                                          str(celebration or ""), tuple(str(a) for a in ambitions or ()),
                                          str(country or ""), str(bat_hand or "R"),
-                                         str(bowl_arm or "R"), str(bowl_type or "")),
+                                         str(bowl_arm or "R"), str(bowl_type or ""),
+                                         str(dynasty or ""), int(dynasty_bonus or 0)),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -576,6 +583,7 @@ class AmbitionOut(BaseModel):
 
 
 class CareerOut(BaseModel):
+    dynasty: str = ""              # [A307] the dynasty club this career is played for, if any
     token: str
     name: str
     role: str                     # the role you were created in
@@ -1047,6 +1055,7 @@ def _out(seed: int, career: C.Career, partial: list[str], full: bool = False) ->
         caps=int((career.checkpoint.national if career.checkpoint else {}).get("caps", 0)),
         in_side=bool((career.checkpoint.national if career.checkpoint else {}).get("in_side")),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
+        dynasty=st.dynasty,
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         role_now=career.role_now or st.role,
         role_now_label=C.role_label(career.role_now or st.role),
@@ -1180,9 +1189,27 @@ def career_start(body: StartIn, request: Request) -> CareerOut:
     if body.seed is not None and not seed_allowed(request):
         raise HTTPException(403, "Choosing a seed is for admins.")
     seed = body.seed or random.SystemRandom().randint(1, 2 ** 31)
+    club, bonus = _dynasty_for_start(request)
+    if club:
+        setup = dataclasses.replace(setup, dynasty=club, dynasty_bonus=bonus)
     deck, model = _state()
     career = C.play_career(deck, model, seed, setup, [], _facts())
     return _out(seed, career, [])
+
+
+def _dynasty_for_start(request: Request) -> tuple[str, int]:
+    """[A307] A career a pass holder starts while they have a dynasty club is a dynasty
+    career: the server sets it from the account, never from the page. ("", 0) otherwise,
+    and a signed-out start never touches the database."""
+    token = request.cookies.get(auth.COOKIE_NAME)
+    account_id = auth.verify_session_cookie(token) if token is not None else None
+    if account_id is None:
+        return "", 0
+    with db.connection() as conn:
+        club = dynasty_db.club_of(conn, account_id)
+        if not club or not premium_lib.has_premium(conn, account_id, _today()):
+            return "", 0
+        return club, dynasty_db.bonus(conn, account_id, club)
 
 
 class RerollIn(BaseModel):
@@ -1471,6 +1498,7 @@ class SlotSummaryOut(BaseModel):
     finished: bool
     rating: int | None
     updated_at: str
+    joined_dynasty: bool = False  # [A307] this save moved a finished career into the dynasty
 
 
 class SlotsOut(BaseModel):
@@ -1522,7 +1550,25 @@ def career_slot_save(slot: int, body: SlotSaveIn, request: Request,
             raise HTTPException(403, "Keeping careers on your account needs a pass.")
         career_slots.save(conn, account_id, slot, body.token, summary)
         row = next(r for r in career_slots.list_slots(conn, account_id) if r.slot == slot)
-    return _slot_out(row)
+        joined = _join_dynasty(conn, account_id, slot, body.token, setup, checkpoint)
+    return _slot_out(row).model_copy(update={"joined_dynasty": joined})
+
+
+def _join_dynasty(conn, account_id: int, slot: int, token: str, setup, checkpoint) -> bool:
+    """[A307] A dynasty career that has finished (its ending and its epilogue both
+    decided) joins the dynasty's history and leaves its slot, so five slots never cap a
+    dynasty. Only a career started for the account's CURRENT dynasty club, and only one that
+    played a season there."""
+    if checkpoint.ended is None or checkpoint.epilogue is None or not setup.dynasty:
+        return False
+    if dynasty_db.club_of(conn, account_id) != setup.dynasty:
+        return False
+    record = D.record_of(setup, checkpoint, C.canonical)
+    if not D.joins(record, setup.dynasty):
+        return False
+    dynasty_db.add(conn, account_id, career_results.natural_key(token), setup.dynasty, record)
+    career_slots.delete(conn, account_id, slot)
+    return True
 
 
 @router.post("/api/career/slots/{slot}/open")
@@ -1549,3 +1595,106 @@ def career_slot_delete(slot: int, request: Request, response: Response) -> dict:
     if not gone:
         raise HTTPException(404, "That slot is empty.")
     return {"deleted": slot}
+
+
+# --- club dynasty [A307] --------------------------------------------------------------------
+
+
+def _clubs() -> list[str]:
+    return sorted(set(franchise_map().values()))
+
+
+class ClubOut(BaseModel):
+    name: str
+    crest: str | None
+
+
+class LeaderOut(BaseModel):
+    name: str
+    value: int
+
+
+class EraOut(BaseModel):
+    label: str
+    first: int
+    last: int
+    titles: int
+
+
+class DynastyCardOut(BaseModel):
+    club: str
+    crest: str | None
+    careers: int
+    seasons: int
+    titles: list[int]
+    finals_lost: list[int]
+    caps: list[list]                 # [year, "orange"/"purple", name]
+    captains: list[list]             # [name, seasons as captain]
+    runs: list[LeaderOut]
+    wickets: list[LeaderOut]
+    best: list[dict]
+    eras: list[EraOut]
+    covered: list[int]
+    gaps: list[int]
+    first_year: int
+    last_year: int
+    rival: dict | None               # {club, crest, won, lost}
+    timeline: list[dict]
+    score: int
+    share: str
+    next_bonus: int                  # the standing a new dynasty career starts with
+
+
+class DynastyOut(BaseModel):
+    premium: bool
+    club: str | None
+    clubs: list[ClubOut]
+    card: DynastyCardOut | None
+
+
+def _card_out(history: list[dict], club: str) -> DynastyCardOut:
+    c = D.card(history, club)
+    return DynastyCardOut(
+        club=club, crest=crests.franchise_crest(club), careers=c.careers, seasons=c.seasons,
+        titles=c.titles, finals_lost=c.finals_lost, caps=[list(x) for x in c.caps],
+        captains=[list(x) for x in c.captains],
+        runs=[LeaderOut(name=x.name, value=x.value) for x in c.runs],
+        wickets=[LeaderOut(name=x.name, value=x.value) for x in c.wickets], best=c.best,
+        eras=[EraOut(label=e.label, first=e.first, last=e.last, titles=e.titles) for e in c.eras],
+        covered=c.covered, gaps=c.gaps, first_year=D.FIRST_YEAR, last_year=D.LAST_YEAR,
+        rival=({"club": c.rival[0], "crest": crests.franchise_crest(c.rival[0]),
+                "won": c.rival[1], "lost": c.rival[2]} if c.rival else None),
+        timeline=c.timeline, score=c.score, share=f"{D.share_text(c, club)} {SITE_ORIGIN}/career",
+        next_bonus=D.start_bonus(history, club))
+
+
+@router.get("/api/career/dynasty")
+def career_dynasty(request: Request, response: Response) -> DynastyOut:
+    """The account's dynasty: its club and card. Reading needs only the account, so a pass
+    that has ended never hides a dynasty already built."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    with db.connection() as conn:
+        premium = premium_lib.has_premium(conn, account_id, _today())
+        club = dynasty_db.club_of(conn, account_id)
+        history = dynasty_db.history(conn, account_id, club) if club else []
+    return DynastyOut(premium=premium, club=club,
+                      clubs=[ClubOut(name=n, crest=crests.franchise_crest(n)) for n in _clubs()],
+                      card=_card_out(history, club) if club else None)
+
+
+class DynastyIn(BaseModel):
+    franchise: str = Field(max_length=60)
+
+
+@router.post("/api/career/dynasty")
+def career_dynasty_set(body: DynastyIn, request: Request, response: Response) -> DynastyOut:
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    if body.franchise not in _clubs():
+        raise HTTPException(400, "Choose one of the IPL's clubs.")
+    with db.connection() as conn:
+        if not premium_lib.has_premium(conn, account_id, _today()):
+            raise HTTPException(403, "A dynasty needs a pass.")
+        dynasty_db.set_club(conn, account_id, body.franchise)
+    return career_dynasty(request, response)

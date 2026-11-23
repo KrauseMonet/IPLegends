@@ -957,6 +957,13 @@ class CareerError(ValueError):
 # --- setup and templates ---------------------------------------------------------------
 
 
+def club_standing(setup: "Setup", franchise: str, base: int) -> int:
+    """[A307] The standing a career starts with on joining a club: `base`, plus the
+    dynasty's step when the club is this career's dynasty club."""
+    bonus = setup.dynasty_bonus if setup.dynasty and canonical(franchise) == setup.dynasty else 0
+    return max(STANDING_MIN, min(STANDING_MAX, base + bonus))
+
+
 @dataclass(frozen=True)
 class Setup:
     name: str
@@ -977,6 +984,11 @@ class Setup:
     bat_hand: str = "R"
     bowl_arm: str = "R"
     bowl_type: str = ""
+    # [A307] A dynasty career: the pass holder's dynasty club (canonical) and the club
+    # standing it starts with there (game.dynasty.start_bonus). Set by the server from the
+    # account, never by the page. "" / 0 for every other career.
+    dynasty: str = ""
+    dynasty_bonus: int = 0
 
     @property
     def nation(self) -> str:
@@ -6042,8 +6054,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                                     cp.style, year, mentor=cp.coach_mentor, bat_band=cp.bat_band)
                     career.role_now = career.season_role = "allrounder"
         if canonical(offer.franchise) != cp.current:
-            cp.standing = 1 if wanted else 0   # a new club starts from nothing (A230)...
-                                               # ...unless it came for you (A289)
+            cp.standing = club_standing(setup, offer.franchise, 1 if wanted else 0)
+            # a new club starts from nothing (A230)... unless it came for you (A289), and a
+            # dynasty club a step warmer (A307)
         # The armband stays once taken, until you change club or have a poor season (A213).
         already = cp.captain is not None and cp.captain == canonical(offer.franchise)
         # [A238] What the coach offers before the season: a trial, the full-time role a good
@@ -6217,7 +6230,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             offer = _club_offer(deck, target, year, offer.price, False)
             if mates is not None:
                 mates.club = canonical(offer.franchise)
-            cp.standing = 1                    # they asked for you
+            cp.standing = club_standing(setup, offer.franchise, 1)   # they asked for you
             already = False
         mentor_taught = ""                             # [A281] a skill a mentor passed on
         season_mentors: list[str] = []                 # [A286] who taught you this season

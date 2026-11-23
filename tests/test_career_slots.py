@@ -165,6 +165,7 @@ def test_a_pass_holders_season_keeps_every_over_log_and_nobody_elses_does(
 
     asked = []
     monkeypatch.setattr(R.db, "connection", contextlib.nullcontext)
+    monkeypatch.setattr(R, "_dynasty_for_start", lambda request: ("", 0))   # [A307] not under test
     monkeypatch.setattr(R.premium_lib, "has_premium",
                         lambda conn, a, today: asked.append(a) or True)
     full = _first_season(client, deck, model, cookie=auth.make_session_cookie(42))

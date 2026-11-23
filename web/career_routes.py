@@ -14,6 +14,7 @@ puts back what replay gave for free: the page cannot hand the server a season it
 from __future__ import annotations
 
 import base64
+import datetime
 import hmac
 import json
 import random
@@ -27,7 +28,8 @@ from etl.franchise_map import canonical
 from game.auction import crore
 from game.site import SITE_NAME, SITE_ORIGIN
 from web import admin as admin_lib
-from web import auth, bingo_routes, career_results, crests, db
+from web import auth, bingo_routes, career_results, career_slots, crests, db
+from web import premium as premium_lib
 
 router = APIRouter()
 
@@ -557,6 +559,7 @@ class SeasonPlayOut(BaseModel):
     table: list[TableRowOut]
     watch: list[dict]             # ResultOut, the solo season's own match shape, for reveal.js
     cards: list[dict] = []        # every match of yours as a scorecard: ResultOut without the over log (A214)
+    cards_full: bool = False      # [A306] a pass holder's cards keep the over log, so any can be watched
     your_short: str
     your_name: str
     your_crest: str | None
@@ -871,7 +874,7 @@ def _summary(c: C.Career) -> SummaryOut:
 def _season_play(detail: C.SeasonDetail,
                  milestones: list[C.CareerMilestone] = (),
                  clips: list[press.Clipping] = (),
-                 hits: list[bool] | None = None) -> SeasonPlayOut:
+                 hits: list[bool] | None = None, full: bool = False) -> SeasonPlayOut:
     from web.app import _analysis_out, _result_out      # the solo season's own shapes
 
     yours = next((side for r in detail.watch for side in (r.home, r.away) if side.you), None)
@@ -897,8 +900,13 @@ def _season_play(detail: C.SeasonDetail,
                          runs_against=t.runs_against, overs_against=_overs(t.balls_against),
                          form=t.form, you=t.you) for i, t in enumerate(detail.table, 1)]
     watch = [_mark_you(r, _result_out(r, yours).model_dump()) for r in detail.watch]
-    cards = [_scorecard(_mark_you(r, _result_out(r, yours).model_dump())) for r in detail.cards]
-    return SeasonPlayOut(feed=feed, table=table, watch=watch, cards=cards, your_short=you_row.short,
+    # [A306] A pass holder keeps each match's over log, so any of them can be watched ball by
+    # ball; everyone else gets the scorecard alone (the over log is most of the size).
+    cards = [_mark_you(r, _result_out(r, yours).model_dump()) for r in detail.cards]
+    if not full:
+        cards = [_scorecard(r) for r in cards]
+    return SeasonPlayOut(feed=feed, table=table, watch=watch, cards=cards, cards_full=full,
+                         your_short=you_row.short,
                          your_name=you_row.name,
                          your_crest=next(x.crest for x in table if x.you),
                          complete=detail.complete,
@@ -1030,7 +1038,7 @@ def _bowls_as(career: C.Career) -> str | None:
     return (career.checkpoint.style if career.checkpoint else None) or career.start.bowling_style
 
 
-def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
+def _out(seed: int, career: C.Career, partial: list[str], full: bool = False) -> CareerOut:
     st = career.setup
     v = voice(seed, st)
     return CareerOut(
@@ -1051,7 +1059,7 @@ def _out(seed: int, career: C.Career, partial: list[str]) -> CareerOut:
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
         season_play=(_season_play(career.detail, career.live_milestones, _live_clips(seed, career),
-                                  _focus_hits(career))
+                                  _focus_hits(career), full=full)
                      if career.detail else None),
         auction=_auction(career.auction, _auction_year(career)) if career.auction else None,
         rating=_rating_now(career), potential=round(career.top.display),
@@ -1244,8 +1252,27 @@ def _retire_moves(deck, model, seed, setup, checkpoint, partial) -> list[str]:
     return ["r"]
 
 
+def _watch_all(request: Request, career: C.Career) -> bool:
+    """[A306] Whether this response may carry every match's over log: only for a pass
+    holder, and only asked when a season was actually played, so a move that plays nothing
+    never touches the database."""
+    if career.detail is None:
+        return False
+    token = request.cookies.get(auth.COOKIE_NAME)
+    account_id = auth.verify_session_cookie(token) if token is not None else None
+    if account_id is None:
+        return False
+    with db.connection() as conn:
+        return premium_lib.has_premium(conn, account_id, _today())
+
+
+def _today() -> datetime.date:
+    """UTC, the day boundary every pass is dated by (web/premium_routes.py)."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
 @router.post("/api/career/move")
-def career_move(body: MoveIn) -> CareerOut:
+def career_move(body: MoveIn, request: Request) -> CareerOut:
     seed, setup, checkpoint, partial = read_token(body.token)
     deck, model = _state()
     if body.move == "r":
@@ -1259,7 +1286,8 @@ def career_move(body: MoveIn) -> CareerOut:
         if restarted is not None:
             return _out(seed, restarted, [])
         raise HTTPException(409, str(e)) from None
-    return _out(seed, career, _moves_since_checkpoint(career, moves))
+    return _out(seed, career, _moves_since_checkpoint(career, moves),
+                full=_watch_all(request, career))
 
 
 class ViewIn(BaseModel):
@@ -1429,3 +1457,95 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
                                    **_legend_fields({"legend": x}))
                     for x in (r["card"].get("extra_legends") or []) if bring]))
     return out
+
+
+# --- cloud career slots [A306] --------------------------------------------------------------
+
+
+class SlotSummaryOut(BaseModel):
+    slot: int
+    name: str
+    role: str
+    year: int
+    seasons: int
+    finished: bool
+    rating: int | None
+    updated_at: str
+
+
+class SlotsOut(BaseModel):
+    premium: bool                 # may save; listing, opening and deleting need only the account
+    max: int = career_slots.SLOTS
+    slots: list[SlotSummaryOut]
+
+
+def _slot_out(r: career_slots.SlotRow) -> SlotSummaryOut:
+    s = r.summary
+    return SlotSummaryOut(slot=r.slot, name=s.name, role=s.role, year=s.year, seasons=s.seasons,
+                          finished=s.finished, rating=s.rating,
+                          updated_at=r.updated_at.isoformat())
+
+
+def _slot(slot: int) -> int:
+    try:
+        return career_slots.check_slot(slot)
+    except career_slots.SlotError as e:
+        raise HTTPException(400, str(e)) from None
+
+
+@router.get("/api/career/slots")
+def career_slots_list(request: Request, response: Response) -> SlotsOut:
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    with db.connection() as conn:
+        rows = career_slots.list_slots(conn, account_id)
+        premium = premium_lib.has_premium(conn, account_id, _today())
+    return SlotsOut(premium=premium, slots=[_slot_out(r) for r in rows])
+
+
+class SlotSaveIn(BaseModel):
+    token: str = Field(max_length=200_000)
+
+
+@router.post("/api/career/slots/{slot}")
+def career_slot_save(slot: int, body: SlotSaveIn, request: Request,
+                     response: Response) -> SlotSummaryOut:
+    """Keep a career in a slot. The token must be one this site signed (A199), so a slot
+    can never hold a career nobody played; what the list shows is read off it."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    slot = _slot(slot)
+    seed, setup, checkpoint, _partial = read_token(body.token)
+    summary = career_slots.summary_of(setup, checkpoint, C.ROLES[setup.role]["label"])
+    with db.connection() as conn:
+        if not premium_lib.has_premium(conn, account_id, _today()):
+            raise HTTPException(403, "Keeping careers on your account needs a pass.")
+        career_slots.save(conn, account_id, slot, body.token, summary)
+        row = next(r for r in career_slots.list_slots(conn, account_id) if r.slot == slot)
+    return _slot_out(row)
+
+
+@router.post("/api/career/slots/{slot}/open")
+def career_slot_open(slot: int, request: Request, response: Response) -> CareerOut:
+    """A kept career, as `/api/career/view` would show it. Needs only the account: a pass
+    that has ended still lets you open what you kept."""
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    slot = _slot(slot)
+    with db.connection() as conn:
+        token = career_slots.token_in(conn, account_id, slot)
+    if token is None:
+        raise HTTPException(404, "That slot is empty.")
+    return career_view(ViewIn(token=token))
+
+
+@router.delete("/api/career/slots/{slot}")
+def career_slot_delete(slot: int, request: Request, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    account_id = _account(request)
+    slot = _slot(slot)
+    with db.connection() as conn:
+        gone = career_slots.delete(conn, account_id, slot)
+    if not gone:
+        raise HTTPException(404, "That slot is empty.")
+    return {"deleted": slot}

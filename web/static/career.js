@@ -115,6 +115,7 @@ function crShowCreate(){
     `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
   crTechnique();
   Promise.resolve(CR.me).then(crSeedRow, crSeedRow);
+  crSlotsDraw();
 }
 
 // The bowling half of Technique follows the role: a pace or spin role picks its kind, an
@@ -212,6 +213,9 @@ async function crStart(btn){
       bowl_type: (crChosen('crType') || {}).v || '',
       ...(seed ? {seed: Number(seed)} : {})});
     CR.seen = 0;
+    const into = CR.slots && CR.slots.premium ? Number(($('#crSlotInto') || {}).value || 0) : 0;
+    crSave({slot: into || null});
+    if (into) crCloudSave(d);
     crShow(d, 'spin');
   } catch(e){ slip(e.message || 'Could not start a career.'); }
   finally { CR.busy = false; btn.disabled = false; }
@@ -225,6 +229,7 @@ async function crReroll(btn){
   try {
     const d = await crPost('/api/career/reroll', {token: CR.data.token});
     CR.seen = 0;
+    crCloudSave(d);
     crShow(d, 'spin');
   } catch(e){ slip(e.message || 'Could not reroll.'); }
   finally { CR.busy = false; btn.disabled = false; }
@@ -241,6 +246,7 @@ async function crMove(move){
   else if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
     const d = await crPost('/api/career/move', {token: CR.data.token, move});
+    if (d.seasons.length > before || !d.pending) crCloudSave(d);   // [A306] once a season, never per click
     const next = () => crShow(d, d.seasons.length > before ? 'season' : null);
     if (mega && d.auction){ CR.data = d; crHead(d); crTimeline(d); return crAuctionPlay(d.auction, next); }
     next();
@@ -259,6 +265,7 @@ function crLoading(text, sub){
 
 function crShow(d, moment){
   CR.data = d;
+  crSlotsDraw();
   $('#career').classList.add('started');
   $('#crCreate').classList.add('hide');
   $('#crMain').classList.remove('hide');
@@ -987,14 +994,23 @@ function crFeedMilestones(l){
 
 const crOvers = balls => balls % 6 ? `${Math.floor(balls / 6)}.${balls % 6}` : String(balls / 6);
 
+// [A306] A pass holder's season carries every match's over log (`cards_full`), so any match
+// with a scorecard can be watched ball by ball, not only the playoffs and key moments.
+function crCardsFull(){
+  const sp = (CR.feed && CR.feed.sp) || (CR.data && CR.data.season_play);
+  return !!(sp && sp.cards_full);
+}
+
 function crFeedRow(l, n){
   const open = l.card != null ? ` onclick="crScorecard(${l.card})" title="Open the scorecard"` : '';
+  const watch = l.card != null && l.watch == null && crCardsFull()
+    ? ` <button class="cr-fr-watch" title="Watch it ball by ball" onclick="event.stopPropagation();crWatchCard(${l.card})">▶</button>` : '';
   return `<li class="cr-fr ${l.result === 'W' ? 'won' : l.result === 'L' ? 'lost' : ''}${l.stage !== 'league' ? ' po' : ''}${open ? ' open' : ''}"${open}>
     <span class="cr-fr-n">${esc(crStageName(l.stage, n))}</span>
     <span class="cr-fr-res">${l.result}</span>
     <span class="cr-fr-opp">${crestImg(l.opp_crest, 'cr-fr-crest')}${esc(l.opp_short)}</span>
     <span class="cr-fr-you">${l.approach ? `<em class="cr-call${l.stop === 'make_or_break' ? ' mob' : ''}">${esc(l.approach)}</em> ` : ''}${crFigures(l)}${crVerdict(l)}${l.pom ? ' <em class="cr-pom" title="Player of the Match">PoM</em>' : ''}${l.challenge ? ' <em class="cr-chal" title="This match met your focus\'s challenge">✓ Challenge</em>' : ''}</span>
-    <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}</span>
+    <span class="cr-fr-score">${esc(l.score_for)} <i>v</i> ${esc(l.score_against)}${watch}</span>
   </li>`;
 }
 
@@ -1141,6 +1157,7 @@ async function crAnswer(i){
   try {
     const d = await crPost('/api/career/move', {token: CR.data.token, move: `i${i}`});
     CR.data = d;
+    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A306] the season it finished
     crHead(d, true);
     crTimeline(d, true);
     crFeed(d);
@@ -1178,6 +1195,7 @@ async function crCall(i){
     const move = `m${i}` + (CR.planDirty ? 'p' + CR.plan.join('') : '');
     const d = await crPost('/api/career/move', {token: CR.data.token, move});
     CR.data = d;
+    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A306] the season it finished
     crHead(d, true);
     crTimeline(d, true);
     crFeed(d);
@@ -1213,10 +1231,22 @@ function crAfterFeed(){
 
 // A playoff match ball by ball: the two innings in turn, as the daily plays its match.
 function crWatch(idx){
-  const f = CR.feed, m = f.sp.watch[idx];
-  const line = f.sp.feed.find(l => l.watch === idx);
-  CR.watchCard = line ? line.card : null;
-  MY_SIDE = {short: f.sp.your_short, name: f.sp.your_name, crest: f.sp.your_crest, kit: null};
+  const sp = CR.feed.sp, line = sp.feed.find(l => l.watch === idx);
+  crPlayMatch(sp, sp.watch[idx], line ? line.card : null);
+}
+
+// [A306] Any of a pass holder's matches, from its scorecard (which keeps its over log).
+function crWatchCard(i){
+  const sp = (CR.feed && CR.feed.sp) || (CR.data && CR.data.season_play);
+  const m = sp && sp.cards && sp.cards[i];
+  if (!m || !m.home_innings || !(m.home_innings.over_log || []).length) return crScorecard(i);
+  if (CR.feed) crFeedStop();
+  crPlayMatch(sp, m, i);
+}
+
+function crPlayMatch(sp, m, card){
+  CR.watchCard = card;
+  MY_SIDE = {short: sp.your_short, name: sp.your_name, crest: sp.your_crest, kit: null};
   const side = (short, name, crest) => short === MY_SIDE.short ? {...MY_SIDE}
     : {short, name: name || short, crest: crest || null, kit: null};
   const home = side(m.home, m.home_name, m.home_crest), away = side(m.away, m.away_name, m.away_crest);
@@ -1251,8 +1281,10 @@ function crWatchDone(){
   // waits behind it until it is closed.
   const card = CR.watchCard;
   CR.watchCard = null;
+  if (!CR.feed){ if (card != null) crScorecard(card); return; }   // from the season card
   if (card == null) return crFeedResume();
-  $('#crFeedAction').innerHTML = `<button class="act" onclick="crFeedSkip()">Skip to the next decision</button>`;
+  if (CR.feed.i < CR.feed.sp.feed.length)              // mid-feed; a pause card keeps its own
+    $('#crFeedAction').innerHTML = `<button class="act" onclick="crFeedSkip()">Skip to the next decision</button>`;
   CR.feed.paused = true;
   crScorecard(card);
 }
@@ -1854,8 +1886,122 @@ async function crKeep(d){
 }
 document.addEventListener('signedin', () => { if (CR.data && CR.data.summary) crKeep(CR.data); });
 
+// --- careers kept on the account [A306] ---------------------------------------------------
+// A pass holder may keep up to five careers on their account and open any of them on any
+// device. The career this browser holds remembers which slot it lives in (`slot` in its
+// store); the page saves it there once a season is played, never per click, because the
+// database's monthly transfer is small (A173). The server checks the pass and the token's
+// signature on every save; listing, opening and deleting need only the account, so a pass
+// that has ended never locks anybody out of careers they kept.
+async function crSlotsLoad(){
+  try { await CR.me; } catch(e){}
+  if (typeof ME === 'undefined' || !ME || !ME.account_id){ CR.slots = null; return crSlotsDraw(); }
+  try { CR.slots = await api('/api/career/slots'); }
+  catch(e){ CR.slots = null; }
+  crSlotsDraw();
+}
+
+function crSlotsDraw(){
+  const box = document.getElementById('crSlots');
+  if (!box) return;
+  const S = CR.slots;
+  // Nobody without a pass and without kept careers sees the box at all.
+  if (!S || (!S.premium && !S.slots.length)){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const creating = !CR.data;
+  const mine = crStore().slot || null;
+  const filled = {};
+  S.slots.forEach(r => { filled[r.slot] = r; });
+  const rows = [];
+  for (let n = 1; n <= S.max; n++){
+    const r = filled[n];
+    if (!r){ rows.push(`<li class="cr-saved-row empty"><b>${n}</b><span>Empty</span></li>`); continue; }
+    const here = mine === n && CR.data;
+    const meta = `${esc(r.role)} · ${r.finished ? 'Retired' : r.year} · ${r.seasons} season${r.seasons === 1 ? '' : 's'}`
+      + (r.rating ? ` · peak Rating ${r.rating}` : '');
+    rows.push(`<li class="cr-saved-row${here ? ' here' : ''}"><b>${n}</b>
+      <span class="cr-saved-who"><strong>${esc(r.name)}</strong><em>${meta}</em></span>
+      ${here ? '<span class="cr-saved-tag">Playing</span>'
+             : `<button class="act minor" onclick="crSlotOpen(${n})">Open</button>`}
+      <button class="act minor cr-saved-del" onclick="crSlotDelete(${n})" title="Delete this career">✕</button></li>`);
+  }
+  // Which slot a new career goes into, or keep the current one in a slot it is not in yet.
+  const free = [];
+  for (let n = 1; n <= S.max; n++) if (!filled[n]) free.push(n);
+  const opts = [];
+  if (S.premium){
+    for (let n = 1; n <= S.max; n++)
+      opts.push(`<option value="${n}">${filled[n] ? `Replace slot ${n} (${esc(filled[n].name)})` : `Slot ${n}`}</option>`);
+  }
+  const pick = sel => `<select id="crSlotInto">${sel}<option value="0">Don't keep it</option>${opts.join('')}</select>`;
+  let action = '';
+  if (S.premium && creating){
+    const first = free.length ? free[0] : 0;
+    action = `<div class="cr-saved-into">Keep the new career in
+      ${pick('').replace(`value="${first}">`, `value="${first}" selected>`)}</div>`;
+  } else if (S.premium && !mine && CR.data){
+    action = `<div class="cr-saved-into">This career is only in this browser.
+      ${pick('')} <button class="act minor lead" onclick="crSlotKeep()">Keep it</button></div>`;
+  } else if (!S.premium){
+    action = `<div class="cr-saved-into">Your pass has ended: you can still open or delete these.</div>`;
+  }
+  box.open = creating;
+  box.innerHTML = `<summary>Your careers · ${S.slots.length} of ${S.max} kept${
+      mine && CR.data ? ` · this one is in slot ${mine}` : ''}</summary>
+    <ol class="cr-saved-list">${rows.join('')}</ol>${action}`;
+}
+
+async function crCloudSave(d){
+  const slot = crStore().slot;
+  if (!slot || !d || !crTokenOk(d.token) || !CR.slots || !CR.slots.premium) return;
+  try {
+    const r = await api(`/api/career/slots/${slot}`, {method: 'POST', headers: CR_JSON, retry: true,
+                                                      body: JSON.stringify({token: d.token})});
+    CR.slots.slots = CR.slots.slots.filter(x => x.slot !== slot).concat([r]).sort((a, b) => a.slot - b.slot);
+    crSlotsDraw();
+  } catch(e){ slip('Could not keep this career on your account just now. It is still in this browser.'); }
+}
+
+async function crSlotKeep(){
+  const n = Number(($('#crSlotInto') || {}).value || 0);
+  if (!n || !CR.data) return;
+  const taken = CR.slots.slots.find(x => x.slot === n);
+  if (taken && !confirm(`Replace ${taken.name} in slot ${n}? That career will be gone.`)) return;
+  crSave({slot: n});
+  await crCloudSave(CR.data);
+}
+
+async function crSlotOpen(n){
+  if (CR.busy) return;
+  const s = crStore();
+  const loose = CR.data && !s.slot && CR.data.pending && CR.data.seasons.length;
+  if (loose && !confirm('The career in this browser is not kept on your account, and opening '
+                        + 'another will replace it. Open anyway?')) return;
+  CR.busy = true;
+  try {
+    const d = await crPost(`/api/career/slots/${n}/open`, {});
+    crSave({slot: n});
+    CR.seen = 0;
+    crShow(d, null);
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  } catch(e){ slip(e.message || 'Could not open that career.'); }
+  finally { CR.busy = false; }
+}
+
+async function crSlotDelete(n){
+  const r = CR.slots && CR.slots.slots.find(x => x.slot === n);
+  if (!r || !confirm(`Delete ${r.name} from slot ${n}? This cannot be undone.`)) return;
+  try {
+    await api(`/api/career/slots/${n}`, {method: 'DELETE'});
+    CR.slots.slots = CR.slots.slots.filter(x => x.slot !== n);
+    if (crStore().slot === n) crSave({slot: null});
+    crSlotsDraw();
+  } catch(e){ slip(e.message || 'Could not delete that career.'); }
+}
+document.addEventListener('signedin', crSlotsLoad);
+
 function crNew(){
-  crSave({token: null, prev: null});        // a new career on purpose: nothing to fall back to
+  crSave({token: null, prev: null, slot: null});   // a new career on purpose: nothing to fall back to
   crShowCreate();
   window.scrollTo({top: 0, behavior: 'smooth'});
 }
@@ -1882,6 +2028,7 @@ async function crResume(){
 (async function crBoot(){
   if (typeof restoreOverSpeed === 'function') restoreOverSpeed();
   CR.me = loadMe();                    // who you are decides whether a finished career is saved
+  crSlotsLoad();
   loadMeta().then(renderDeckStats).catch(() => {});
   try { CR.options = await api('/api/career/options'); }
   catch(e){ slip('Could not load the career page. Try again.'); return; }

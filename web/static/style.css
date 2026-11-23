@@ -4803,3 +4803,22 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 /* A small primary button: .minor drops the background, .lead keeps its dark text. */
 .act.lead.minor{background:linear-gradient(180deg,var(--gold-2),var(--gold));color:#1a1204;
   border-color:transparent}
+
+/* [A306] careers kept on the account, and watching any match */
+.cr-fr-watch{margin-left:8px;border:1px solid var(--line);background:transparent;color:var(--gold);
+  border-radius:6px;font-size:11px;line-height:1;padding:3px 6px;cursor:pointer}
+.cr-fr-watch:hover{background:rgba(245,184,61,.12)}
+.cr-saved{margin:0 0 18px;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:rgba(255,255,255,.02)}
+.cr-saved summary{cursor:pointer;font-weight:600;font-size:14px}
+.cr-saved-list{list-style:none;margin:10px 0 4px;padding:0;display:grid;gap:6px}
+.cr-saved-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.03)}
+.cr-saved-row>b{font-family:var(--mono);color:var(--ink-3);width:14px}
+.cr-saved-row.empty span{color:var(--ink-3)}
+.cr-saved-row.here{outline:1px solid var(--gold)}
+.cr-saved-who{flex:1;min-width:0;display:flex;flex-direction:column}
+.cr-saved-who strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-saved-who em{font-style:normal;color:var(--ink-3);font-size:12.5px}
+.cr-saved-tag{font-size:12px;color:var(--gold)}
+.cr-saved-del{padding:4px 9px}
+.cr-saved-into{margin-top:8px;font-size:13.5px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cr-saved-into select{background:var(--bg-2,#111);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 8px}

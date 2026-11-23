@@ -51,7 +51,9 @@ def history_files() -> list[pathlib.Path]:
 
 def written_files() -> list[pathlib.Path]:
     return (history_files() + sorted((STATIC / "guides").glob("*.html"))
-            + [STATIC / n for n in ("seasons.html", "teams.html", "guides.html", "contact.html")])
+            + sorted((STATIC / "articles").glob("*.html"))
+            + [STATIC / n for n in ("seasons.html", "teams.html", "guides.html", "contact.html",
+                                    "articles.html")])
 
 
 def test_there_is_a_page_for_every_season_and_every_franchise():
@@ -69,6 +71,7 @@ def test_every_written_page_is_served_by_the_app():
 
 
 @pytest.mark.parametrize("path", ["/seasons/1999", "/teams/nobody", "/guides/..%2Fprofile",
+                                  "/articles/nothing", "/articles/..%2Fprofile",
                                   "/teams/Chennai-Super-Kings"])
 def test_a_page_that_does_not_exist_is_a_404(path):
     assert CLIENT.get(path).status_code == 404
@@ -105,7 +108,7 @@ def test_every_sitemap_url_is_a_page_that_exists():
 
 def test_each_written_page_has_real_text_for_a_reader():
     """The reason these pages exist: AdSense rejected the site for too little to read."""
-    hubs = {STATIC / n for n in ("guides.html", "contact.html")}
+    hubs = {STATIC / n for n in ("guides.html", "contact.html", "articles.html")}
     for p in written_files():
         n = len(words_of(p).split())
         assert n >= (250 if p in hubs else 450), (p.name, n)

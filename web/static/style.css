@@ -4538,6 +4538,11 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .hx-card:hover{border-color:var(--gold)}
 .hx-card b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
 .hx-card span{color:var(--ink-2);font-size:13.5px;line-height:1.55}
+.hx-card em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:10px}
+.hx-byline{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin:10px 0 0}
+.hx-lede{font-size:17px!important;color:var(--ink)!important}
 @media (max-width:560px){
   .hx-table{font-size:12.5px}
   .hx-table td,.hx-table th{padding:7px 9px}

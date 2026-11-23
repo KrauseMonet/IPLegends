@@ -469,6 +469,18 @@ def guide_page(slug: str) -> FileResponse:
     return _subpage("guides", slug)
 
 
+# Articles: analysis written by hand from the site's own data; every figure in them is
+# `tools.article_figures`' and `tests/test_articles.py` holds the text to it.
+@app.get("/articles", include_in_schema=False)
+def articles_page() -> FileResponse:
+    return FileResponse(STATIC / "articles.html")
+
+
+@app.get("/articles/{slug}", include_in_schema=False)
+def article_page(slug: str) -> FileResponse:
+    return _subpage("articles", slug)
+
+
 def _subpage(folder: str, name: str) -> FileResponse:
     # A name is a year or a lowercase slug, never a path: nothing outside the folder is served.
     if not re.fullmatch(r"[a-z0-9-]+", name) or not (STATIC / folder / f"{name}.html").is_file():

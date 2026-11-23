@@ -68,7 +68,7 @@ function renderSavePrompt(d){
   // separate ask from the account one, and someone who already has an account is if
   // anything the likelier person to chip in.
   const tip = tipsEnabled()
-    ? `<p class="tip-inline">Enjoying this? It is free and stays free —
+    ? `<p class="tip-inline">Enjoying this? Every game here is free to play —
          <button onclick="openTipModal()">leave a tip</button> if you feel like it.</p>` : '';
   host.innerHTML = (signedIn ? '' : `
     <div class="save-prompt">

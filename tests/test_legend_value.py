@@ -171,6 +171,7 @@ def test_me_reports_the_limit_for_that_account_only(no_limit_env, monkeypatch):
     monkeypatch.setattr(app_mod, "_db", contextlib.nullcontext)
     monkeypatch.setattr(accounts_mod, "get_account", lambda conn, i: accounts_mod.Account(
         account_id=i, username=f"u{i}", email="e@x.y"))
+    monkeypatch.setattr(app_mod.premium_lib, "active_pass", lambda conn, i, today: None)
     with TestClient(app_mod.app) as client:
         got = {}
         for account in (7, 8):

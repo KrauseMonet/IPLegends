@@ -48,6 +48,7 @@ from web import auth
 from web import career_results
 from web import bingo_routes
 from web import career_routes, ground_routes, puzzle_routes, trio_routes
+from web import premium as premium_lib, premium_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -183,6 +184,7 @@ app.include_router(guess_routes.router)
 app.include_router(xi_routes.router)
 app.include_router(trio_routes.router)
 app.include_router(career_routes.router)
+app.include_router(premium_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -367,6 +369,13 @@ def hall_page() -> FileResponse:
     """Every saved career, the profile's Hall of Fame shown in full. Client-side sign-in
     check, as /profile."""
     return FileResponse(STATIC / "hall.html")
+
+
+@app.get("/premium", include_in_schema=False)
+def premium_page() -> FileResponse:
+    """[A305] The passes and how to pay. Static; the offer and your orders come from
+    /api/premium."""
+    return FileResponse(STATIC / "premium.html")
 
 
 @app.get("/admin", include_in_schema=False)
@@ -1237,6 +1246,9 @@ class MeOut(BaseModel):
         default=None, description="[A240] how many legends this account's auction picker "
                                   "lists; null lists them all. Display only: any of your own "
                                   "legends can still be brought.")
+    premium: premium_routes.ActiveOut | None = Field(
+        default=None, description="[A305] the pass this account holds today, or null. Display "
+                                  "only: every premium feature checks on the server.")
 
 
 class LeaderOut(BaseModel):
@@ -3082,6 +3094,7 @@ def me(request: Request) -> MeOut:
         return MeOut(account_id=None, username=None)
     with _db() as conn:
         account = accounts.get_account(conn, account_id)
+        active = premium_lib.active_pass(conn, account_id, _today()) if account else None
     if account is None:
         # A cookie that verifies (signature/expiry both fine) for an account that no
         # longer exists -- not possible today (nothing ever deletes an account), but
@@ -3089,7 +3102,8 @@ def me(request: Request) -> MeOut:
         return MeOut(account_id=None, username=None)
     return MeOut(account_id=account.account_id, username=account.username,
                  kit=_kit_out(account.kit), is_admin=admin_lib.is_admin(account.account_id),
-                 legend_limit=admin_lib.legend_limit(account.account_id))
+                 legend_limit=admin_lib.legend_limit(account.account_id),
+                 premium=premium_routes.active_out(active))
 
 
 @app.put("/api/account/kit", response_model=KitOut)

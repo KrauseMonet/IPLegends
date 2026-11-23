@@ -127,7 +127,8 @@ def overview(conn, today: datetime.date) -> dict:
             (select count(*) from puzzle_results
               where day = %(today)s and finished_at is not null),
             (select count(distinct account_id) from puzzle_results
-              where day = %(today)s and finished_at is not null)
+              where day = %(today)s and finished_at is not null),
+            (select count(*) from premium_passes where status = 'pending' and utr is not null)
         """, {"today": today}).fetchone()
     rooms_by_status = {s: n for s, n in conn.execute(
         "select status, count(*) from rooms group by status order by status")}
@@ -139,6 +140,7 @@ def overview(conn, today: datetime.date) -> dict:
         "daily_today": row[6], "daily_all_time": row[7],
         "open_lobbies": row[8], "rooms_by_status": rooms_by_status,
         "puzzles_today": row[9], "puzzle_players_today": row[10],
+        "payments_waiting": row[11],
         "signups_by_day": signups, "games_by_day": games,
     }
 

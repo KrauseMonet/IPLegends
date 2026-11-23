@@ -35,7 +35,7 @@ function renderAuthArea(){
       <a href="/profile" class="auth-me" title="Your player card">
         <span class="auth-avatar">${initial}</span>
         <span class="auth-me-text">
-          <b>${ME.username}</b>
+          <b>${esc(ME.username)}${ME.premium ? '<span class="auth-pass" title="' + esc(ME.premium.name) + '">★</span>' : ''}</b>
           <em>Player card →</em>
         </span>
       </a>

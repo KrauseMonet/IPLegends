@@ -36,6 +36,7 @@ function adminTab(tab){
   if (tab === 'daily') loadDaily();
   if (tab === 'puzzles') loadPuzzles();
   if (tab === 'rooms') loadRooms();
+  if (tab === 'payments') loadPayments();
 }
 
 // --- overview ------------------------------------------------------------------------
@@ -77,6 +78,7 @@ async function loadOverview(){
       ${statTile(o.puzzles_today, 'Puzzles finished today')}
       ${statTile(o.puzzle_players_today, 'Puzzle players today')}
       ${statTile(liveRooms, 'Live rooms')}
+      ${statTile(o.payments_waiting, 'Payments to check')}
     </div>
     <div class="adm-two">
       ${bars(o.signups_by_day, 'New accounts')}
@@ -393,6 +395,62 @@ async function adminDeleteRoom(ctrl, code){
   }
 }
 
+// --- payments [A305] ---------------------------------------------------------------------
+// A claim is a UTR a player says they paid with. Match it, and the reference in the UPI
+// note, against your own UPI app's payments before approving: approving is what starts the
+// pass, and nothing else checks that the money arrived.
+
+async function loadPayments(){
+  const el = $('#adminPayments');
+  const status = $('#adminPayStatus').value;
+  el.innerHTML = '<p class="adm-empty">Loading…</p>';
+  try {
+    const d = await api('/api/admin/payments?status=' + encodeURIComponent(status));
+    const sold = Object.entries(d.sold).map(([k, n]) => `${esc(k)} ${n}`).join(' · ');
+    if (!d.claims.length){
+      el.innerHTML = `<p class="adm-empty">Nothing here. Sold or waiting: ${sold}.</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="adm-scroll"><table class="adm-table">
+      <thead><tr><th>Player</th><th>Pass</th><th>Amount</th><th>Reference</th><th>UTR</th><th>Paid</th><th></th></tr></thead>
+      <tbody>${d.claims.map(c => {
+        const o = c.order;
+        const acts = status === 'pending'
+          ? `<button class="act lead minor" onclick="payDecide(this, ${o.pass_id}, 'approve', '${esc(c.username)}', ${o.rupees}, '${esc(o.utr)}')">Approve</button>
+             <button class="act minor" onclick="payDecide(this, ${o.pass_id}, 'reject', '${esc(c.username)}', ${o.rupees}, '${esc(o.utr)}')">Reject</button>`
+          : status === 'approved'
+          ? `<button class="act minor" onclick="payDecide(this, ${o.pass_id}, 'revoke', '${esc(c.username)}', ${o.rupees}, '${esc(o.utr)}')">Revoke</button>`
+          : '';
+        return `<tr>
+          <td><b>@${esc(c.username)}</b><div class="adm-dim">${esc(c.email)} · #${c.account_id}</div></td>
+          <td>${esc(o.name)}${o.ends_on ? `<div class="adm-dim">to ${esc(o.ends_on)}</div>` : ''}</td>
+          <td>₹${o.rupees}</td>
+          <td><b class="adm-mono">${esc(o.reference)}</b></td>
+          <td><span class="adm-mono">${esc(o.utr)}</span></td>
+          <td>${when(c.claimed_at)}${o.note_from_admin ? `<div class="adm-dim">${esc(o.note_from_admin)}</div>` : ''}</td>
+          <td>${acts}</td></tr>`;
+      }).join('')}</tbody></table></div>
+      <p class="room-note">Approve only after you have found the payment in your UPI app: the
+        amount, the UTR, and the reference in its note. Sold or waiting: ${sold}.</p>`;
+  } catch(e){ el.innerHTML = `<p class="adm-empty">${esc(e.message)}</p>`; }
+}
+
+async function payDecide(ctrl, passId, action, username, amount, utr){
+  let body = null;
+  if (action === 'approve'){
+    if (!confirm(`Start @${username}'s pass?\n\nOnly if you have received ₹${amount} with UTR ${utr}.`)) return;
+  } else {
+    const what = action === 'reject' ? 'Reject this claim' : 'Revoke this pass (for a refund)';
+    const note = prompt(`${what} for @${username}. A short note they will see:`, '');
+    if (note === null) return;
+    body = {note};
+  }
+  if (await adminPost(ctrl, `/api/admin/payments/${passId}/${action}`, body)){
+    slip({approve: 'Pass started.', reject: 'Claim rejected.', revoke: 'Pass revoked.'}[action]);
+    loadPayments();
+  }
+}
+
 // --- boot ------------------------------------------------------------------------------
 
 async function boot(){
@@ -410,7 +468,7 @@ async function boot(){
   ADM.loaded.overview = true;
   $('#adminBody').classList.remove('hide');
   const tab = location.hash.slice(1);
-  if (['accounts', 'daily', 'puzzles', 'rooms'].includes(tab)) adminTab(tab);
+  if (['accounts', 'daily', 'puzzles', 'rooms', 'payments'].includes(tab)) adminTab(tab);
 }
 
 boot();

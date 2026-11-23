@@ -749,8 +749,8 @@ function ensureTipChrome(){
           <div class="tip-eyebrow">Support Fine Leg XI</div>
           <div class="tip-title">Buy me a ball</div>
           <p class="tip-sub">This runs on a database, a host and a domain, paid for by one
-            person. Anything you send covers those. Nothing here is paywalled and nothing
-            ever will be — a tip buys you no advantage, just keeps the lights on.</p>
+            person. Anything you send covers those. Everything you can play today stays
+            free — a tip buys you no advantage, just keeps the lights on.</p>
         </div>
         <div class="tip-body">
           <img class="tip-qr" src="/static/upi-qr.png" alt="UPI QR code" width="188" height="188">

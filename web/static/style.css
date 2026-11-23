@@ -4750,3 +4750,56 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 
 .cr-spin-note{text-align:center;font-size:14px}
 @media (max-width:760px){.cb-role-icon{width:24px;height:24px}}
+
+/* --- premium [A305] ------------------------------------------------------------------- */
+.pm-page h2{font-family:var(--display);font-size:24px;letter-spacing:.02em;margin:34px 0 10px}
+.pm-lede{color:var(--ink-2);font-size:16px;line-height:1.6;max-width:60ch;margin:14px 0 0}
+.pm-lede b{color:var(--ink)}
+.pm-dim{color:var(--ink-3);font-size:13.5px;line-height:1.55}
+.pm-active{margin:22px 0 0;padding:14px 18px;border:1px solid var(--gold);border-radius:10px;
+  background:rgba(245,184,61,.08);color:var(--ink-2)}
+.pm-active b{color:var(--gold)}
+.pm-passes{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));
+  gap:16px;margin:26px 0 0}
+.pm-pass{display:flex;flex-direction:column;gap:8px;padding:22px;border-radius:12px;
+  background:var(--panel);border:1px solid var(--line-strong)}
+.pm-pass.pm-founder{border-color:var(--gold);
+  background:linear-gradient(160deg,rgba(245,184,61,.12),var(--panel) 55%)}
+.pm-name{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--gold)}
+.pm-price{font-family:var(--display);font-size:44px;line-height:1}
+.pm-price span{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--ink-3);
+  text-transform:uppercase;margin-left:8px}
+.pm-ends{color:var(--ink-2);font-size:13.5px}
+.pm-pass p{color:var(--ink-2);font-size:14.5px;line-height:1.55;margin:4px 0;flex:1}
+.pm-left{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--gold-2)}
+.pm-pass .act{margin-top:8px}
+.pm-includes ul,.pm-how ol{color:var(--ink-2);line-height:1.7;padding-left:20px;margin:8px 0}
+.pm-includes b{color:var(--ink)}
+.pm-order{margin:30px 0 0;padding:22px;border-radius:12px;background:var(--panel);
+  border:1px solid var(--gold)}
+.pm-order h2{margin-top:0}
+.pm-pay{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:22px;align-items:start}
+.pm-pay p{color:var(--ink-2);line-height:1.6;margin:8px 0}
+.pm-pay code,.pm-ref code{font-family:var(--mono);color:var(--ink);background:var(--panel-3);
+  padding:2px 7px;border-radius:5px;overflow-wrap:anywhere}
+.pm-ref{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3)}
+.pm-ref code{font-size:20px;letter-spacing:.18em;color:var(--gold)}
+.pm-upi{display:inline-block;margin:6px 0 2px;text-decoration:none}
+.pm-pay-qr{text-align:center;max-width:190px}
+.pm-pay-qr img{background:#fff;padding:8px;border-radius:6px}
+.pm-utr{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:18px}
+.pm-utr .room-label{flex-basis:100%}
+.pm-utr .room-input{flex:1;min-width:0}
+.pm-ok{color:var(--gold-2);margin:12px 0 0}
+.pm-orders table code{font-family:var(--mono)}
+.auth-pass{color:var(--gold);margin-left:4px}
+@media (max-width:640px){
+  .pm-pay{grid-template-columns:minmax(0,1fr)}
+  .pm-pay-qr{max-width:none}
+  .pm-utr .act{width:100%}
+}
+/* A small primary button: .minor drops the background, .lead keeps its dark text. */
+.act.lead.minor{background:linear-gradient(180deg,var(--gold-2),var(--gold));color:#1a1204;
+  border-color:transparent}

@@ -115,6 +115,7 @@ class Voice:
     number: int | None = None
     home: str = ""
     celebration: str = ""
+    commentator: str = ""       # [A308] a retired dynasty player on commentary, or ""
 
     @property
     def sur(self) -> str:
@@ -669,7 +670,18 @@ def render(fact: dict, v: Voice) -> Clipping | None:
     """A fact as a clipping, or None for a kind this version does not know (a token from a
     newer build read by an older one)."""
     fn = RENDER.get(fact.get("k"))
-    return _tidy(fn(fact, v)) if fn else None
+    if not fn:
+        return None
+    c = fn(fact, v)
+    if v.commentator and fact.get("k") in CALLED:
+        # [A308] he calls your big moments; a line chosen by the moment, never drawn
+        from game import dynasty
+        c.body = list(c.body) + [dynasty.commentary_line(v.commentator, fact["k"],
+                                                         fact.get("y", 0), v.seed)]
+    return _tidy(c)
+
+
+CALLED = ("hundred", "blitz", "five_for", "hattrick", "final_star", "playoff_hero", "title")
 
 
 def _tidy(c: Clipping) -> Clipping:

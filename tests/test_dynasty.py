@@ -41,7 +41,8 @@ def season(year, club=KKR, **kw):
 
 def rec(name, seasons, ended="retired", last_club=None):
     return {"name": name, "role": "opener", "debut": seasons[0]["year"], "ended": ended,
-            "epilogue": "", "last_club": last_club or seasons[-1]["club"], "seasons": seasons}
+            "finished": True, "epilogue": "", "last_club": last_club or seasons[-1]["club"],
+            "seasons": seasons}
 
 
 # --- the rules, on hand-built careers -------------------------------------------------------
@@ -49,7 +50,8 @@ def rec(name, seasons, ended="retired", last_club=None):
 def test_a_career_joins_only_once_finished_and_only_if_it_played_for_the_club():
     played = rec("A", [season(2012)])
     assert D.joins(played, KKR)
-    assert not D.joins({**played, "ended": None}, KKR)
+    assert not D.joins({**played, "finished": False}, KKR)
+    assert D.joins({**played, "ended": None}, KKR)        # ran out of years: still finished
     assert not D.joins(rec("B", [season(2012, club="Mumbai Indians")]), KKR)
 
 
@@ -148,6 +150,30 @@ def test_a_season_records_each_knockout_opponent_and_the_result():
                            ["Final", "Chennai Super Kings", 1]]
 
 
+def test_a_career_is_finished_once_its_epilogue_is_chosen_however_it_ended():
+    assert (D.LAST_YEAR, D.MAX_SEASONS) == (C.LAST_YEAR, C.MAX_SEASONS)
+    to_2026 = [NS(year=y) for y in range(2014, 2027)]
+    assert D.finished(NS(seasons=to_2026, ended=None, epilogue="coach"))
+    assert not D.finished(NS(seasons=to_2026, ended=None, epilogue=None))
+    assert D.finished(NS(seasons=to_2026[:3], ended="retired", epilogue="quiet"))
+    # an older token reads "" for an epilogue mid-career: not finished
+    assert not D.finished(NS(seasons=to_2026[:3], ended=None, epilogue=""))
+    nineteen = [NS(year=2008 + i) for i in range(19)]
+    assert D.finished(NS(seasons=nineteen[:-1] + [NS(year=2025)], ended=None, epilogue=""))
+
+
+@pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+@pytest.mark.usefixtures("no_incidents")
+def test_a_real_career_that_plays_on_to_2026_counts_as_finished():
+    """The shape the first version missed: most careers end by running out of seasons, with
+    no `ended`. Seed 1000, an opener debuting 2014, plays on to 2026 (measured)."""
+    deck, model = deck_from(DOC), model_from(DOC)
+    c, _ = C.auto_career(deck, model, 1000, C.Setup("Long", "opener", 2014), "random")
+    cp = c.checkpoint
+    assert cp.ended is None and cp.seasons[-1].year == 2026 and cp.epilogue
+    assert D.finished(cp)
+
+
 # --- the warmer start, in the engine --------------------------------------------------------
 
 def test_club_standing_adds_the_dynasty_step_only_at_the_dynasty_club():
@@ -198,7 +224,7 @@ def test_a_signed_out_start_never_asks_about_a_dynasty(monkeypatch):
     def no_db():
         raise AssertionError("the database was reached")
     monkeypatch.setattr(R.db, "connection", no_db)
-    assert R._dynasty_for_start(NS(cookies={})) == ("", 0)
+    assert R._dynasty_for_start(NS(cookies={})) == ("", 0, ())
 
 
 # --- the SQL and the routes, against a real Postgres (opt-in) -------------------------------
@@ -244,11 +270,12 @@ def _give_pass(pg, account):
     P.approve(pg, boss, row.pass_id, TODAY)
 
 
-def _finished_token(dynasty, club=KKR, ended="retired", epilogue="coach", name="Done"):
-    rec_ = C.SeasonRecord(k=0, year=2012, franchise=club, short="KKR", price=20, stayed=False,
-                          event="quiet", choice="", captain=False, ability=0.0, teams=9,
-                          runs=410, champion=True)
-    cp = C.Checkpoint(seasons=[rec_], ended=ended, epilogue=epilogue)
+def _finished_token(dynasty, club=KKR, ended="retired", epilogue="coach", name="Done",
+                    years=(2012,)):
+    recs = [C.SeasonRecord(k=i, year=y, franchise=club, short="KKR", price=20, stayed=False,
+                           event="quiet", choice="", captain=False, ability=0.0, teams=9,
+                           runs=410, champion=y == 2012) for i, y in enumerate(years)]
+    cp = C.Checkpoint(seasons=recs, ended=ended, epilogue=epilogue)
     setup = C.Setup(name, "opener", 2012, dynasty=dynasty, dynasty_bonus=1)
     return R.make_token(9, setup, NS(checkpoint=cp), [])
 
@@ -293,6 +320,8 @@ def test_a_finished_dynasty_career_joins_and_frees_its_slot(pg, client):
     client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(a))
     client.post("/api/career/dynasty", json={"franchise": KKR})
 
+    ran_out = _finished_token(KKR, ended=None, years=range(2014, 2027), name="Ran out")
+    assert client.post("/api/career/slots/5", json={"token": ran_out}).json()["joined_dynasty"] is True
     pending = _finished_token(KKR, epilogue=None)              # finished, epilogue not chosen
     assert client.post("/api/career/slots/1", json={"token": pending}).json()["joined_dynasty"] is False
     elsewhere = _finished_token(KKR, club="Mumbai Indians", name="Away")
@@ -307,9 +336,9 @@ def test_a_finished_dynasty_career_joins_and_frees_its_slot(pg, client):
     again = client.post("/api/career/slots/4", json={"token": done}).json()   # a retried save
     assert again["joined_dynasty"] is True
     (n,), = pg.execute("select count(*) from dynasty_careers where account_id = %s", (a,))
-    assert n == 1
+    assert n == 2
     card = client.get("/api/career/dynasty").json()["card"]
-    assert (card["careers"], card["titles"], card["covered"]) == (1, [2012], [2012])
+    assert (card["careers"], card["titles"]) == (2, [2012])
     assert "Done" not in card["share"]
 
 
@@ -343,3 +372,173 @@ def test_a_dynasty_goes_with_its_account(pg):
     for t in ("dynasties", "dynasty_careers"):
         (n,), = pg.execute(f"select count(*) from {t} where account_id = %s", (a,))
         assert n == 0
+
+
+# --- stage two: the retired players' jobs (A308) --------------------------------------------
+
+def test_the_staff_is_the_latest_retired_player_in_each_job_at_the_club():
+    first = {**rec("Old Coach", [season(2010)]), "epilogue": "coach", "temper": 1}
+    later = {**rec("New Coach", [season(2012)]), "epilogue": "coach", "temper": -1}
+    acad = {**rec("Academy Man", [season(2011)]), "epilogue": "academy"}
+    quiet = {**rec("Quiet One", [season(2013)]), "epilogue": "quiet"}
+    away = {**rec("Elsewhere", [season(2014, club="Mumbai Indians")]), "epilogue": "commentary"}
+    running = {**rec("Not Done", [season(2015)]), "epilogue": "commentary", "finished": False}
+    staff = D.staff_from([first, acad, later, quiet, away, running], KKR)
+    assert staff == (("coach", "New Coach", -1), ("academy", "Academy Man", 0))
+    assert D.staff_member(staff, "coach")[1] == "New Coach"
+    assert D.staff_member(staff, "commentary") is None
+
+
+def test_the_coachs_words_name_him():
+    assert D.staff_words("The coach takes you aside.", "Asha Rao") == "Asha Rao takes you aside."
+    assert D.staff_words("Make your case to the coach", "Asha Rao") == "Make your case to Asha Rao"
+    assert D.staff_words("A new coach wants to rebuild your technique.", "Asha Rao") == (
+        "Asha Rao, now the club's coach, wants to rebuild your technique.")
+    assert D.staff_words("The coach", "") == "The coach"
+
+
+def test_the_commentator_calls_only_the_big_moments_and_the_same_way_each_time():
+    from game import press
+    hundred = {"k": "hundred", "y": 2014, "match": 3, "stage": "league", "result": "W",
+               "margin": "by 20 runs", "runs": 104, "balls": 61, "out": False, "fours": 9,
+               "sixes": 5, "opp": "Mumbai Indians", "club": KKR, "batted": True}
+    plain = press.Voice("Dev Iyer", "opener", 7)
+    called = press.Voice("Dev Iyer", "opener", 7, commentator="Asha Rao")
+    a, b = press.render(hundred, plain), press.render(hundred, called)
+    assert a is not None and b is not None
+    assert b.body[:-1] == a.body and "Asha Rao" in b.body[-1] and "on air" in b.body[-1]
+    assert press.render(hundred, called).body == b.body                     # never drawn
+    debut = {"k": "debut", "y": 2012, "club": KKR, "franchise": KKR, "price": 20}
+    assert all("Asha Rao" not in x for x in (press.render(debut, called) or NS(body=[])).body)
+
+
+def test_the_token_carries_the_staff_and_an_older_token_reads_none(monkeypatch):
+    monkeypatch.setenv("SESSION_SECRET", "test-only-dynasty-secret")
+    staff = (("coach", "Asha Rao", 1), ("commentary", "Dev Iyer", 0))
+    s = C.Setup("T", "spin", 2012, dynasty=KKR, dynasty_bonus=1, staff=staff)
+    back = R.read_token(R.make_token(7, s, NS(checkpoint=C.Checkpoint()), []))[1]
+    assert back.staff == staff
+    import base64
+    import json
+    body = {"v": R.TOKEN_VERSION, "seed": 7, "cp": C.Checkpoint().to_dict(), "partial": [],
+            "setup": ["T", "spin", 2012, False, None, "", "", [], "", "R", "R", "", KKR, 1]}
+    payload = base64.urlsafe_b64encode(json.dumps(body).encode()).decode().rstrip("=")
+    assert R.decode_payload(payload)[1].staff == ()
+
+
+@pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+@pytest.mark.usefixtures("no_incidents")
+def test_an_academy_career_starts_with_a_step_of_work_and_says_so():
+    deck, model = deck_from(DOC), model_from(DOC)
+    plain = C.Setup("Acad", "opener", 2012)
+    acad = dataclasses.replace(plain, staff=(("academy", "Asha Rao", 0),))
+    work = lambda career: career.checkpoint.traits.get("work", 0.0)
+    # the step is there before anything is played (a card can then fall differently, since
+    # some cards read your traits, so the two careers are compared at their start)
+    assert work(C.play_career(deck, model, 5, acad, [])) == (
+        work(C.play_career(deck, model, 5, plain, [])) + D.ACADEMY_WORK) == 1.0
+
+    def first_season(setup):
+        moves = []
+        for _ in range(12):
+            c = C.play_career(deck, model, 5, setup, moves)
+            if c.seasons:
+                return c.seasons[0]
+            moves.append(C.policy_move(c, "random", random.Random(len(moves))))
+        raise AssertionError("no season played")
+    assert any("Asha Rao's academy" in n for n in first_season(acad).notes)
+    assert not any("academy" in n for n in first_season(plain).notes)
+
+
+def test_the_coachs_name_reaches_the_question_only_at_the_dynasty_club():
+    from web.career_routes import EventOptionOut, EventOut, OfferOut, PendingOut
+    offer = lambda club: OfferOut(franchise=club, short="X", crest=None, price="₹1 cr",
+                                  price3=None, contract_year=0, strength=80, stay=False,
+                                  position=None, attack_rank=None)
+    def pending(club):
+        return PendingOut(kind="event", year=2015, season_no=4, squad=False, offers=[offer(club)],
+                          event=EventOut(key="coach", title="A new coach",
+                                         text="A new coach wants to rebuild your technique.",
+                                         options=[EventOptionOut(label="Rebuild it",
+                                                                 hint="The coach thinks so.")]),
+                          can_retire=True)
+    staff = (("coach", "Asha Rao", 1),)
+    career = NS(setup=C.Setup("T", "opener", 2012, dynasty=KKR, staff=staff),
+                checkpoint=NS(current=KKR))
+    here = R._staff_said(pending(KKR), career)
+    assert here.event.text.startswith("Asha Rao, now the club's coach")
+    assert here.event.options[0].hint == "Asha Rao thinks so."
+    away = R._staff_said(pending("Mumbai Indians"), career)
+    assert away.event.text.startswith("A new coach")
+
+
+@needs_pg
+@pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+@pytest.mark.usefixtures("no_incidents")
+def test_a_new_dynasty_career_is_given_the_clubs_staff(pg, client):
+    from web import dynasty as W
+    a = _account(pg, "dyn_staff")
+    _give_pass(pg, a)
+    client.cookies.set(auth.COOKIE_NAME, auth.make_session_cookie(a))
+    client.post("/api/career/dynasty", json={"franchise": KKR})
+    W.add(pg, a, "c" * 64, KKR, {**rec("Asha Rao", [season(2012)]), "epilogue": "coach",
+                                  "temper": 1})
+    d = client.post("/api/career/start", json={"name": "Next", "role": "opener",
+                                                "debut": 2013}).json()
+    assert d["staff"] == [{"job": "coach", "name": "Asha Rao"}]
+    assert R.read_token(d["token"])[1].staff == (("coach", "Asha Rao", 1),)
+    card = client.get("/api/career/dynasty").json()["card"]
+    assert card["staff"] == [{"job": "coach", "name": "Asha Rao"}]
+
+
+MENTOR_SEED = 4      # an opener debuting 2012 draws the mentor card at his first club (search)
+
+
+def _to_mentor(deck, model, setup):
+    moves = []
+    for _ in range(30):
+        c = C.play_career(deck, model, MENTOR_SEED, setup, moves)
+        p = c.pending
+        if p is not None and p.kind == "event" and p.event.key == "mentor":
+            return c, moves
+        assert c.pending is not None and len(c.seasons) < 4, "no mentor card: re-find MENTOR_SEED"
+        moves.append(C.policy_move(c, "random", random.Random(len(moves))))
+    raise AssertionError("no mentor card: re-find MENTOR_SEED")
+
+
+@pytest.mark.skipif(DOC is None, reason="no deck snapshot")
+@pytest.mark.usefixtures("no_incidents")
+def test_at_the_dynasty_club_the_coach_is_the_mentor_and_passes_on_his_style():
+    deck, model = deck_from(DOC), model_from(DOC)
+    plain = C.Setup("Taught", "opener", 2012)
+    c, moves = _to_mentor(deck, model, plain)
+    club = C.canonical(c.pending.offers[0].franchise)
+    learn = moves + ["e0"]                                   # "Learn from him"
+
+    def taught(setup):
+        """Learn from him, then answer whatever else comes until the season is played."""
+        more = list(learn)
+        for _ in range(12):
+            career = C.play_career(deck, model, MENTOR_SEED, setup, more)
+            if career.seasons:
+                return career
+            more.append(C.policy_move(career, "random", random.Random(len(more))))
+        raise AssertionError("the season never played")
+
+    def coached(sign, at=club):
+        return dataclasses.replace(plain, dynasty=at, staff=(("coach", "Asha Rao", sign),))
+    real = taught(plain).seasons[0].mentors
+    assert real and "Asha Rao" not in real
+    bold, careful = taught(coached(1)), taught(coached(-1))
+    assert bold.seasons[0].mentors == careful.seasons[0].mentors == ["Asha Rao"]
+    temper = lambda career: career.checkpoint.traits.get("temper", 0.0)
+    assert temper(bold) - temper(careful) == pytest.approx(2 * C.MENTOR_LEAN)
+    # a coach of another club is no mentor here
+    elsewhere = taught(coached(1, at="Gujarat Lions" if club != "Gujarat Lions" else KKR))
+    assert elsewhere.seasons[0].mentors == real
+
+
+def test_a_careers_papers_carry_its_commentator():
+    st = C.Setup("T", "opener", 2012, dynasty=KKR, staff=(("commentary", "Dev Iyer", 0),))
+    assert R.voice(3, st).commentator == "Dev Iyer"
+    assert R.voice(3, C.Setup("T", "opener", 2012)).commentator == ""

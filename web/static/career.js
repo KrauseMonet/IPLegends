@@ -349,6 +349,7 @@ function crHead(d, hold){
           <span>Potential <b>${hi}</b>${earned ? ` <em>+${earned} earned</em>` : ''}</span></div>
         ${tot}
         ${d.dynasty ? `<div class="cr-standing cr-dyn-tag">${crestImg(crDynCrest(d.dynasty), 'cr-dyn-tag-crest')}${esc(d.dynasty)} dynasty career</div>` : ''}
+        ${d.staff && d.staff.length ? `<div class="cr-standing cr-dyn-staff">${crStaffWords(d.staff)}</div>` : ''}
         ${d.standing ? `<div class="cr-standing">${esc(d.standing)}</div>` : ''}
         ${d.workload ? `<div class="cr-standing cr-workload">${esc(d.workload)}</div>` : ''}
         ${(d.traits || []).length ? `<div class="cr-traits" title="Who your choices have made you">${d.traits.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
@@ -2020,6 +2021,10 @@ const crDynCrest = club => {
   return c ? c.crest : null;
 };
 
+// [A308] the retired dynasty players' jobs, in words
+const CR_JOB = {coach: 'Coach', academy: 'Academy', commentary: 'On commentary'};
+const crStaffWords = staff => staff.map(s => `${CR_JOB[s.job] || esc(s.job)}: ${esc(s.name)}`).join(' · ');
+
 function crDynHtml(creating){
   const D = CR.dyn;
   if (!D || (!D.premium && !D.club)) return '';
@@ -2076,6 +2081,8 @@ function crDynHtml(creating){
     ${c.captains.length ? `<div class="cr-label">Captains</div>${list(c.captains, k => `<li>${esc(k[0])} · ${k[1]} season${k[1] === 1 ? '' : 's'}</li>`)}` : ''}
     <div class="cr-label">Best seasons</div>${list(c.best, b => `<li>${esc(b.name)} ${b.year} · grade <b>${b.grade}</b></li>`)}
     ${c.rival ? `<div class="cr-label">Rival</div><p>${crestImg(c.rival.crest, 'cr-dyn-tag-crest')}${esc(c.rival.club)} · ${c.rival.won}–${c.rival.lost} in knockouts</p>` : ''}
+    ${c.staff && c.staff.length ? `<div class="cr-label">The club's staff</div><p>${crStaffWords(c.staff)}</p>
+      <p class="cr-dyn-dim">Retired players of yours with a job here. Your next dynasty career meets them.</p>` : ''}
     <div class="cr-label">The players</div>${list(c.timeline, t => `<li>${esc(t.name)} · ${t.years[0]}${t.years.length > 1 ? '–' + t.years[t.years.length - 1] : ''} · ${t.years.length} season${t.years.length === 1 ? '' : 's'}</li>`)}
     <p class="cr-dyn-dim">${warm}</p>
     <div class="cr-dyn-actions">

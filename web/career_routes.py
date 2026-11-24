@@ -64,7 +64,8 @@ def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) 
                                  setup.number, setup.home, setup.celebration,
                                  list(setup.ambitions), setup.country,
                                  setup.bat_hand, setup.bowl_arm, setup.bowl_type,
-                                 setup.dynasty, setup.dynasty_bonus],
+                                 setup.dynasty, setup.dynasty_bonus,
+                                 [list(x) for x in setup.staff]],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -91,17 +92,19 @@ def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]
             raise ValueError("old token")
         # Four fields before A228 (no identity, no ambitions), eight before A229 (no country),
         # nine before A287 (no batting hand, bowling arm or bowling type), twelve before
-        # A307 (no dynasty).
+        # A307 (no dynasty), fourteen before A308 (no staff).
         name, role, debut, overseas, *rest = d["setup"]
-        defaults = [None, "", "", [], "", "R", "R", "", "", 0]
+        defaults = [None, "", "", [], "", "R", "R", "", "", 0, []]
         (number, home, celebration, ambitions, country, bat_hand, bowl_arm, bowl_type,
-         dynasty, dynasty_bonus) = (rest + defaults[len(rest):])[:10]
+         dynasty, dynasty_bonus, staff) = (rest + defaults[len(rest):])[:11]
         return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
                                          None if number is None else int(number), str(home or ""),
                                          str(celebration or ""), tuple(str(a) for a in ambitions or ()),
                                          str(country or ""), str(bat_hand or "R"),
                                          str(bowl_arm or "R"), str(bowl_type or ""),
-                                         str(dynasty or ""), int(dynasty_bonus or 0)),
+                                         str(dynasty or ""), int(dynasty_bonus or 0),
+                                         tuple((str(j), str(n), int(t))
+                                               for j, n, t in staff or ())),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -584,6 +587,7 @@ class AmbitionOut(BaseModel):
 
 class CareerOut(BaseModel):
     dynasty: str = ""              # [A307] the dynasty club this career is played for, if any
+    staff: list[dict] = []         # [A308] the club's staff from earlier careers: {job, name}
     token: str
     name: str
     role: str                     # the role you were created in
@@ -825,7 +829,9 @@ def _best_bowling(seasons) -> str | None:
 
 
 def voice(seed: int, st: C.Setup) -> press.Voice:
-    return press.Voice(st.name, st.role, seed, st.number, st.home, st.celebration)
+    caller = D.staff_member(st.staff, "commentary")
+    return press.Voice(st.name, st.role, seed, st.number, st.home, st.celebration,
+                       commentator=caller[1] if caller else "")
 
 
 def main_club(seasons) -> str | None:
@@ -1055,15 +1061,16 @@ def _out(seed: int, career: C.Career, partial: list[str], full: bool = False) ->
         caps=int((career.checkpoint.national if career.checkpoint else {}).get("caps", 0)),
         in_side=bool((career.checkpoint.national if career.checkpoint else {}).get("in_side")),
         token=make_token(seed, st, career, partial), name=st.name, role=st.role,
-        dynasty=st.dynasty,
+        dynasty=st.dynasty, staff=[{"job": j, "name": n} for j, n, _t in st.staff],
         role_label=C.ROLES[st.role]["label"], debut=st.debut, overseas=st.overseas,
         role_now=career.role_now or st.role,
         role_now_label=C.role_label(career.role_now or st.role),
         season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
         seasons=_mark_new([_season(r, career.ceiling.display, v) for r in career.seasons]),
-        pending=(_pending(career.pending, career.season_role or st.role,
-                          career.checkpoint).model_copy(update={"club_gone": _club_gone(career)})
+        pending=(_staff_said(_pending(career.pending, career.season_role or st.role,
+                                      career.checkpoint)
+                             .model_copy(update={"club_gone": _club_gone(career)}), career)
                  if career.pending else None),
         summary=_summary(career) if career.summary else None,
         share=share_text(career) if career.summary else None,
@@ -1080,6 +1087,26 @@ def _out(seed: int, career: C.Career, partial: list[str], full: bool = False) ->
         workload=(C.FATIGUE_WORDS.get(int(career.checkpoint.fatigue), "")
                   if career.checkpoint and not career.summary else ""),
         traits=_trait_words(career), **_skill_view(career))
+
+
+def _staff_said(p: PendingOut, career: C.Career) -> PendingOut:
+    """[A308] At the dynasty club, the coach's words are a retired dynasty player's: the
+    event, the coach's offer and a mid-season incident name him. Words only."""
+    st = career.setup
+    coach = D.staff_member(st.staff, "coach")
+    cp = career.checkpoint
+    here = (p.offers[0].franchise if p.offers else None) or (cp.current if cp else None)
+    if coach is None or not st.dynasty or not here or C.canonical(here) != st.dynasty:
+        return p
+    for part in ("event", "coach", "incident"):
+        e = getattr(p, part)
+        if e is not None:
+            setattr(p, part, e.model_copy(update={
+                "text": D.staff_words(e.text, coach[1]),
+                "options": [o.model_copy(update={"label": D.staff_words(o.label, coach[1]),
+                                                 "hint": D.staff_words(o.hint, coach[1])})
+                            for o in e.options]}))
+    return p
 
 
 def _trait_words(career: C.Career) -> list[str]:
@@ -1189,27 +1216,29 @@ def career_start(body: StartIn, request: Request) -> CareerOut:
     if body.seed is not None and not seed_allowed(request):
         raise HTTPException(403, "Choosing a seed is for admins.")
     seed = body.seed or random.SystemRandom().randint(1, 2 ** 31)
-    club, bonus = _dynasty_for_start(request)
+    club, bonus, staff = _dynasty_for_start(request)
     if club:
-        setup = dataclasses.replace(setup, dynasty=club, dynasty_bonus=bonus)
+        setup = dataclasses.replace(setup, dynasty=club, dynasty_bonus=bonus, staff=staff)
     deck, model = _state()
     career = C.play_career(deck, model, seed, setup, [], _facts())
     return _out(seed, career, [])
 
 
-def _dynasty_for_start(request: Request) -> tuple[str, int]:
+def _dynasty_for_start(request: Request) -> tuple[str, int, tuple]:
     """[A307] A career a pass holder starts while they have a dynasty club is a dynasty
-    career: the server sets it from the account, never from the page. ("", 0) otherwise,
-    and a signed-out start never touches the database."""
+    career: the server sets it from the account, never from the page, with the club's staff
+    from earlier careers (A308). ("", 0, ()) otherwise, and a signed-out start never touches
+    the database."""
     token = request.cookies.get(auth.COOKIE_NAME)
     account_id = auth.verify_session_cookie(token) if token is not None else None
     if account_id is None:
-        return "", 0
+        return "", 0, ()
     with db.connection() as conn:
         club = dynasty_db.club_of(conn, account_id)
         if not club or not premium_lib.has_premium(conn, account_id, _today()):
-            return "", 0
-        return club, dynasty_db.bonus(conn, account_id, club)
+            return "", 0, ()
+        history = dynasty_db.history(conn, account_id, club)
+        return club, D.start_bonus(history, club), D.staff_from(history, club)
 
 
 class RerollIn(BaseModel):
@@ -1559,7 +1588,7 @@ def _join_dynasty(conn, account_id: int, slot: int, token: str, setup, checkpoin
     decided) joins the dynasty's history and leaves its slot, so five slots never cap a
     dynasty. Only a career started for the account's CURRENT dynasty club, and only one that
     played a season there."""
-    if checkpoint.ended is None or checkpoint.epilogue is None or not setup.dynasty:
+    if not D.finished(checkpoint) or not setup.dynasty:
         return False
     if dynasty_db.club_of(conn, account_id) != setup.dynasty:
         return False
@@ -1643,6 +1672,7 @@ class DynastyCardOut(BaseModel):
     score: int
     share: str
     next_bonus: int                  # the standing a new dynasty career starts with
+    staff: list[dict] = []           # [A308] who a new dynasty career would meet: {job, name}
 
 
 class DynastyOut(BaseModel):
@@ -1665,7 +1695,8 @@ def _card_out(history: list[dict], club: str) -> DynastyCardOut:
         rival=({"club": c.rival[0], "crest": crests.franchise_crest(c.rival[0]),
                 "won": c.rival[1], "lost": c.rival[2]} if c.rival else None),
         timeline=c.timeline, score=c.score, share=f"{D.share_text(c, club)} {SITE_ORIGIN}/career",
-        next_bonus=D.start_bonus(history, club))
+        next_bonus=D.start_bonus(history, club),
+        staff=[{"job": j, "name": n} for j, n, _t in D.staff_from(history, club)])
 
 
 @router.get("/api/career/dynasty")

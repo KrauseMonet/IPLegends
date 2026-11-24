@@ -53,6 +53,7 @@ from game.season import (
 )
 from game import career_incidents as incidents, career_traits as ct, national, press
 from game import career_focus, career_honours, career_skills, phase_skill as phase_data
+from game import dynasty
 from game.simulator import BALLS_PER_OVER, MAX_OVERS_PER_BOWLER, PLAN_PHASES, Model, ball_log
 
 # --- who you can be ------------------------------------------------------------------
@@ -989,6 +990,9 @@ class Setup:
     # account, never by the page. "" / 0 for every other career.
     dynasty: str = ""
     dynasty_bonus: int = 0
+    # [A308] the dynasty club's staff from earlier careers, fixed at the start so a career
+    # stays a pure function of its token: (job, name, his temper sign) per job held.
+    staff: tuple = ()
 
     @property
     def nation(self) -> str:
@@ -5737,6 +5741,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     setup.check()
     start, ceiling = spin(deck, seed, setup.role)
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
+    academy = dynasty.staff_member(setup.staff, "academy")
+    if resume is None and academy is not None:
+        # [A308] came up through a retired dynasty player's academy: a step of work
+        cp.traits = dict(cp.traits, work=cp.traits.get("work", 0.0) + dynasty.ACADEMY_WORK)
     if cp.ceiling_band:                    # [A255] a career from before keeps its start's band
         start = banded(start, ceiling, setup.role)
     start0 = start                         # [A289] before any move up the order
@@ -5787,6 +5795,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         year = setup.debut + k
         squad_now, mega_note = cp.squad, ""
         pre_notes: list[tuple[str, str]] = []  # [A288] the trials and the auction, in words
+        if cp.k == 0 and academy is not None:
+            pre_notes.append((f"You came up through {academy[1]}'s academy, and it shows in "
+                              "how hard you work.", "up"))
         window_ok, wanted = False, False        # [A289] a trade window opens this pre-season
         auction_before = career.auction         # [A288] the press reads only THIS season's
         traits = ct.nudge(cp.traits, ())       # [A245] who you are going into the season
@@ -6177,10 +6188,17 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
                            pupil_ok=pupil is not None)
         event = season_event(cp, k, year, offer, squad_now, already, seed, setup, ctx)
         person = event_person(deck, event, offer.fs_id, year, probe) if event.who else None
+        # [A308] At the dynasty club, a retired dynasty player coaching there is the mentor.
+        staff_coach = (dynasty.staff_member(setup.staff, "coach")
+                       if setup.dynasty and canonical(offer.franchise) == setup.dynasty else None)
+        coach_mentor_now = staff_coach if event.who == "mentor" and staff_coach else None
+        if coach_mentor_now is not None:
+            person = None
         target = (trade_target(deck, seed, k, year, canonical(offer.franchise))
                   if event.who == "trade" else None)
         club_name = deck.cards_by_fs[target][0].franchise if target is not None else ""
-        name = person.name if person is not None else ""
+        name = (person.name if person is not None
+                else coach_mentor_now[1] if coach_mentor_now is not None else "")
         boss = "coach" if already else "captain"      # a captain answers to the coach (A245)
         if len(event.options) == 1:
             option = event.options[0]
@@ -6255,6 +6273,9 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             if taught and cp.drills.get(taught, 0.0) < DRILL_MAX:
                 cp.drills[taught] = min(DRILL_MAX, cp.drills.get(taught, 0.0) + 1.0)
                 mentor_taught = MENTOR_DRILL_WORDS[taught].format(who=person.name)
+        if option.thread == "mentor" and coach_mentor_now is not None and coach_mentor_now[2]:
+            # [A308] ...and the coach passes on the way he played (his temper's sign)
+            trait_moves.append(("temper", MENTOR_LEAN * coach_mentor_now[2]))
         extra = option.missed + landed_missed + (now.missed if now else 0)
         cp.standing += option.standing + (now.standing if now else 0)
         if TRAPS_ON:
@@ -6282,6 +6303,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             cp.threads.append({"k": "mentor", "id": person.person_id, "name": person.name,
                                "year": year})
             season_mentors.append(person.name)
+        if option.thread == "mentor" and coach_mentor_now is not None:
+            season_mentors.append(coach_mentor_now[1])
         if option.thread == "pupil" and person is not None:
             cp.threads.append({"k": "pupil", "id": person.person_id, "name": person.name,
                                "year": year})

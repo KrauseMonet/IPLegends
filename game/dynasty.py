@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 FIRST_YEAR, LAST_YEAR = 2008, 2026     # the seasons a career can play (debuts 2008-2017)
+MAX_SEASONS = 19                       # game.career's, so this module needs no deck
 START_BONUS = 1                        # club standing a dynasty career starts with at the club
 ERA_GAP = 3                            # titles this close (in years) belong to one era...
 ERA_TITLES = 2                         # ...and an era needs at least this many
@@ -28,6 +29,19 @@ SCORE = {"title": 10, "final": 4, "cap": 3, "season": 1}
 
 
 # --- what a finished dynasty career keeps -------------------------------------------------
+
+def finished(checkpoint) -> bool:
+    """A career is over once its last season is behind it AND where the player went next
+    has been chosen. Most careers do not end by retiring or being released: they play on
+    until the real seasons run out (measured, 20 of 28 automatic careers), so `ended` stays
+    None and only the epilogue says the career is over. `ended`/the last year guard an
+    older token, which carries "" (never asked) for an epilogue at any point."""
+    if checkpoint.epilogue is None:
+        return False
+    s = checkpoint.seasons
+    return checkpoint.ended is not None or bool(s and (s[-1].year >= LAST_YEAR
+                                                        or len(s) >= MAX_SEASONS))
+
 
 def record_of(setup, checkpoint, canon) -> dict:
     """A finished career's seasons as the dynasty keeps them: small, and only what the card
@@ -41,10 +55,13 @@ def record_of(setup, checkpoint, canon) -> dict:
             "captain": bool(r.captain), "champion": bool(r.champion), "finalist": bool(r.finalist),
             "orange": bool(r.orange_cap), "purple": bool(r.purple_cap),
             "rating": r.rating, "grade": r.display, "ko": list(feats.get("ko") or [])})
+    temper = (checkpoint.traits or {}).get("temper", 0) if hasattr(checkpoint, "traits") else 0
     last = checkpoint.seasons[-1] if checkpoint.seasons else None
     return {"name": setup.name, "role": setup.role, "debut": setup.debut,
-            "ended": checkpoint.ended, "epilogue": checkpoint.epilogue or "",
-            "last_club": canon(last.franchise) if last else None, "seasons": seasons}
+            "ended": checkpoint.ended, "finished": finished(checkpoint),
+            "epilogue": checkpoint.epilogue or "",
+            "last_club": canon(last.franchise) if last else None, "seasons": seasons,
+            "temper": (temper > 0) - (temper < 0)}
 
 
 def at_club(rec: dict, club: str) -> list[dict]:
@@ -53,7 +70,7 @@ def at_club(rec: dict, club: str) -> list[dict]:
 
 def joins(rec: dict, club: str) -> bool:
     """A finished career joins the dynasty only if it played a season for the club."""
-    return rec["ended"] is not None and bool(at_club(rec, club))
+    return bool(rec.get("finished")) and bool(at_club(rec, club))
 
 
 def left_badly(rec: dict, club: str) -> bool:
@@ -201,3 +218,55 @@ def share_text(c: Card, display: str) -> str:
     if c.eras:
         line.append(f"{len(c.eras)} era{'' if len(c.eras) == 1 else 's'} of titles.")
     return " ".join(line)
+
+
+# --- stage two: the retired players' jobs [A308] ------------------------------------------
+#
+# Where a finished dynasty career's player went next (its epilogue, A228) becomes his job at
+# the club for every LATER dynasty career, from that career's start -- not from the year he
+# retired. Measured: 20 of 28 careers play on to 2026, so a job that waited for the year
+# after his last season would almost never reach a career that must debut by 2017. Each
+# career is its own version of those real seasons; the dynasty remembers all of them.
+# Ratified by the user, with all three jobs.
+
+JOBS = ("coach", "academy", "commentary")      # press.EPILOGUES keys; "quiet" takes no job
+ACADEMY_WORK = 1.0                             # one step of the work trait (A245)
+
+
+def staff_from(history: list[dict], club: str) -> tuple[tuple[str, str, int], ...]:
+    """The club's staff for a new dynasty career: for each job, the most recent finished
+    dynasty career at the club whose player took it -- (job, name, his temper sign)."""
+    out = []
+    for job in JOBS:
+        rec = next((r for r in reversed(history)
+                    if r.get("epilogue") == job and joins(r, club)), None)
+        if rec is not None:
+            out.append((job, rec["name"], int(rec.get("temper", 0))))
+    return tuple(out)
+
+
+def staff_member(staff, job: str) -> tuple[str, str, int] | None:
+    return next((s for s in staff if s[0] == job), None)
+
+
+def staff_words(text: str, coach: str) -> str:
+    """The coach's words in his name: "The coach takes you aside" -> "Asha Rao takes you
+    aside", and the new-coach card is his. Words only."""
+    if not text or not coach:
+        return text
+    return (text.replace("A new coach", f"{coach}, now the club's coach,")
+            .replace("The coach", coach).replace("the coach", coach))
+
+
+CALLS = ("What a moment for this club.",
+         "You will not see many better than that.",
+         "I have been in that dressing room. That is as good as it gets.",
+         "That is the one they will be talking about tonight.",
+         "Remember where you were when you saw that.")
+
+
+def commentary_line(name: str, key: str, year: int, salt: int) -> str:
+    """The retired player on commentary, calling a big moment. Chosen by a hash of the
+    moment, never a random draw, so the same clipping always says the same thing."""
+    h = sum(ord(ch) for ch in f"{key}:{year}:{salt}")
+    return f"“{CALLS[h % len(CALLS)]}” said {name}, calling it on air."

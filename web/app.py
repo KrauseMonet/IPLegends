@@ -656,6 +656,17 @@ class MilestoneOut(BaseModel):
     faced: int
 
 
+class OverBatterOut(BaseModel):
+    """[A309] One batter's part in ONE over. `pos` indexes the innings' own `batting`
+    list, so the name is not sent twenty times; runs are off the bat."""
+    pos: int
+    runs: int
+    balls: int
+    fours: int = 0
+    sixes: int = 0
+    out: bool = False
+
+
 class OverOut(BaseModel):
     over: int
     bowler: str
@@ -672,6 +683,10 @@ class OverOut(BaseModel):
     bowler_balls: int = Field(default=0, description="this over's bowler, cumulative")
     bowler_runs: int = 0
     bowler_wickets: int = 0
+    batters: list[OverBatterOut] = Field(
+        default_factory=list,
+        description="[A309] who faced a ball in THIS over and what he made of it, in the "
+                    "order they came in; the over's extras are over_runs less their runs")
 
 
 class InningsOut(BaseModel):
@@ -1935,7 +1950,10 @@ def _over_out(o) -> OverOut:
                    over_fours=o.over_fours, over_sixes=o.over_sixes,
                    striker=_crease_out(o.striker), non_striker=_crease_out(o.non_striker),
                    bowler_balls=o.bowler_balls, bowler_runs=o.bowler_runs,
-                   bowler_wickets=o.bowler_wickets)
+                   bowler_wickets=o.bowler_wickets,
+                   batters=[OverBatterOut(pos=b.position, runs=b.runs, balls=b.balls,
+                                          fours=b.fours, sixes=b.sixes, out=b.out)
+                            for b in o.batters])
 
 
 def _innings_out(innings) -> InningsOut:

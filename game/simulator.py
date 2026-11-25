@@ -701,6 +701,22 @@ class CreaseBatter:
     sixes: int
 
 
+@dataclass(frozen=True)
+class OverBatter:
+    """[A309] One batter's share of ONE over: what he scored and faced in it alone, and
+    whether he was out in it. Every batter who faced a ball in the over, in the order they
+    came in; a non-striker who faced nothing is left out, since he played no part in it."""
+
+    position: int        # his index in `Innings.batting`, 0 = the opener on strike
+    name: str
+    person_id: str
+    runs: int
+    balls: int
+    fours: int
+    sixes: int
+    out: bool
+
+
 # What `Milestone.kind` may be. Fifty and hundred are the batter's; the rest are the
 # bowler's. A hat-trick's third wicket also makes three in an over when all three fell in
 # one over, and only the hat-trick is recorded then -- it is the rarer and the one a
@@ -773,6 +789,10 @@ class OverSnapshot:
     bowler_balls: int = 0
     bowler_runs: int = 0
     bowler_wickets: int = 0
+    # [A309] who scored what in THIS over, so a Manhattan bar can say so. Empty only for a
+    # snapshot built by an older caller or a test. Runs here are off the bat: the over's
+    # extras are `over_runs` less their sum.
+    batters: tuple[OverBatter, ...] = ()
 
 
 def _crease(card: BatterCard) -> CreaseBatter:
@@ -1057,6 +1077,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
         over_wickets_by_bowler = 0
         over_start_runs, over_start_wickets = innings.runs, innings.wickets
         over_start_fours, over_start_sixes = innings.fours, innings.sixes
+        # [A309] each batter in so far, as he stood when the over began (read, never drawn)
+        over_start = {id(c): (c.runs, c.balls, c.fours, c.sixes) for c in cards[:next_in]}
 
         for _ in range(BALLS_PER_OVER):
             # A wide is not a ball faced and does not advance the over, so it is drawn
@@ -1204,10 +1226,27 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
             striker=_crease(non_striker), non_striker=_crease(striker),
             bowler_balls=bowler.balls, bowler_runs=bowler.runs,
             bowler_wickets=bowler.wickets,
+            batters=_over_batters(cards[:next_in], over_start),
         ))
         striker, non_striker = non_striker, striker
 
     return innings
+
+
+def _over_batters(came_in: list[BatterCard],
+                  start: dict[int, tuple[int, int, int, int]]) -> tuple[OverBatter, ...]:
+    """[A309] What each batter did in the over just completed: his figures now less his
+    figures when it began (a man who came in during it began on nothing). Only those who
+    faced a ball; a wicket always falls on a ball faced, so nobody out in the over is lost,
+    and a man out in an earlier over faced nothing in this one, so `out` means out IN it."""
+    out = []
+    for i, c in enumerate(came_in):
+        r0, b0, f0, s0 = start.get(id(c), (0, 0, 0, 0))
+        if c.balls == b0:
+            continue
+        out.append(OverBatter(i, c.player.name, c.player.person_id, c.runs - r0, c.balls - b0,
+                              c.fours - f0, c.sixes - s0, c.out))
+    return tuple(out)
 
 
 def _bowling_milestones(innings: Innings, bowler: BowlerCard, streak: int,

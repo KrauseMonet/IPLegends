@@ -640,6 +640,7 @@ function renderRoomLobby(r){
          '15s a lot · a bid leaves 10s', '₹120 crore each'];
   if (r.is_open != null) chips.push(r.is_open ? 'Open room' : 'Private room');
   if (r.pro) chips.push('★ Pro room');
+  if (auction && r.game !== 'mini') chips.push(r.perks ? 'Pass perks on' : 'Pass perks off');
   $('#lobbyChips').innerHTML = chips.map(c => `<span class="dr-chip">${esc(c)}</span>`).join('');
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
@@ -648,6 +649,8 @@ function renderRoomLobby(r){
   const extras = auction && r.game !== 'mini';     // [A301] no trades or legends in a mini
   $('#lobbyTradesWrap').classList.toggle('hide', !extras);
   if (extras) renderLobbyTrades(r);
+  $('#lobbyPerksWrap').classList.toggle('hide', !extras);
+  if (extras) renderLobbyPerks(r);
   $('#lobbyLegendsWrap').classList.toggle('hide', !extras);
   if (extras) renderLobbyLegends(r);
   const mine = r.players.find(p => p.player_id === MY_PID);
@@ -834,6 +837,34 @@ async function setRoomPro(on, ctrl){
   });
 }
 
+// [A312] Pass perks: pass holders bring one extra legend, and legends from careers played
+// with pass boosts may come in. On by default; the host may turn them off, and every legend
+// they let in is marked for everyone to see.
+function renderLobbyPerks(r){
+  const host = MY_PID === r.host_id;
+  const what = 'pass holders bring one extra legend, and legends from boosted careers may come in. Each is marked ★ below.';
+  $('#lobbyPerks').innerHTML = host
+    ? `<div class="room-choices">
+         <button class="room-choice${r.perks ? ' sel' : ''}" onclick="setRoomPerks(true, this)">Perks on</button>
+         <button class="room-choice${r.perks ? '' : ' sel'}" onclick="setRoomPerks(false, this)">Perks off</button>
+       </div><div class="note" style="margin-top:6px">${r.perks ? 'On: ' + what : 'Off: every seat brings the same number of legends, and no boosted career\'s legend.'}</div>`
+    : `<div class="note"><b>${r.perks ? 'On' : 'Off'}</b>${r.perks ? ' — ' + what : ' — every seat brings the same.'}</div>`;
+}
+async function setRoomPerks(on, ctrl){
+  if (!ROOM || !!ROOM.perks === on) return;
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/perks`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, on})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
 // [A215] Career legends. The host switches them on or off; once on, each person may bring
 // one saved career's best season. The server reads the career from YOUR Hall of Fame by
 // your sign-in, so the page only names which one.
@@ -912,10 +943,10 @@ function renderLobbyLegends(r){
   const chosen = r.players.filter(p => !p.is_cpu).flatMap(p =>
     seatLegends(r, p.player_id).map(l =>
       `<div class="lg-row"><span class="lg-rating">${l.rating}</span><b>${esc(l.name)}</b>
-      <i>${esc(l.role_label)} · ${l.year} · brought by ${esc(p.name)}${l.boosted ? ' · ★ boosted' : ''}</i></div>`)).join('');
+      <i>${esc(l.role_label)} · ${l.year} · brought by ${esc(p.name)}${l.boosted ? ' · ★ boosted career' : l.perk ? ' · ★ pass perk' : ''}</i></div>`)).join('');
   const mine = seatLegends(r, MY_PID), slots = legendSlots(r);
   const picker = slot => `<div class="lg-pick"><select id="lobbyLegendPick${slot}" class="room-input">
-         <option value="">${slot ? 'No second legend' : 'No legend'}</option>
+         <option value="">${['No legend', 'No second legend', 'No third legend'][slot]}${slot >= 1 + (r.pro ? 1 : 0) ? ' (★ pass perk)' : ''}</option>
          ${legendChoices(ROOM_HALL, mine[slot], ME.legend_limit).map(g => `<optgroup label="${esc(g.role)}">${g.items.map(c => { const l = c.card.legend || {};
            // [A225] a legend is a season, so the season is what is named
            return `<option value="${c.key}"${legendIsMine(c, mine[slot]) ? ' selected' : ''}>
@@ -961,7 +992,10 @@ function seatLegends(r, pid){
   const first = (r.legends || {})[pid];
   return first ? [first, ...(((r.more_legends || {})[pid]) || [])] : [];
 }
-function legendSlots(r){ return 1 + (r.pro ? 1 : 0); }
+function legendSlots(r){
+  const pass = typeof ME !== 'undefined' && ME && ME.premium;
+  return 1 + (r.pro ? 1 : 0) + (r.perks && pass ? 1 : 0);
+}
 
 async function chooseRoomLegend(ctrl, slot = 0){
   const career = $('#lobbyLegendPick' + slot).value || null;

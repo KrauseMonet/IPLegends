@@ -229,7 +229,7 @@ def test_an_unlimited_picker_lists_every_legend():
 
 def test_the_lobby_picker_is_fed_through_the_account_s_limit():
     body = re.search(r"function renderLobbyLegends[\s\S]*?\n}\n", JS.read_text()).group(0)
-    assert "legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit)" in body
+    assert "legendChoices(ROOM_HALL, mine[slot], ME.legend_limit)" in body   # [A311] per slot
     assert "legendsByValue(ROOM_HALL).map" not in body
 
 

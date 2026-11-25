@@ -665,8 +665,37 @@ def seat_legends(room: Room, player_id: str) -> list[dict]:
 
 
 def legend_slots(room: Room, holder: bool = False) -> int:
-    """How many legends a seat may bring: one, plus one in a Pro room [A311]."""
+    """How many legends a seat may bring: one, plus one in a Pro room [A311], plus one for a
+    pass holder while the room's pass perks are on [A312]."""
+    return LEGENDS_BASE + (1 if room.pro else 0) + (1 if room.perks and holder else 0)
+
+
+def _shared_slots(room: Room) -> int:
+    """Legends every seat may bring, pass or no pass; a legend past these is a pass perk."""
     return LEGENDS_BASE + (1 if room.pro else 0)
+
+
+def is_perk(legend: dict) -> bool:
+    """[A312] A legend only pass perks let in: a pass holder's extra one, or one from a
+    career played with pass boosts (A310). Marked so everyone in the room can see it."""
+    return bool(legend.get("perk") or legend.get("boosted"))
+
+
+def set_perks(conn, code: str, player_id: str, on: bool) -> Room:
+    """[A312] The host turns pass perks on or off, in the lobby (on by default, ratified by
+    the user). Turning them off drops every legend that only perks let in."""
+    room = _load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can change pass perks")
+    if room.status != "lobby":
+        raise RoomError("pass perks are decided before the room starts")
+    room.perks = bool(on)
+    if not room.perks and room.legends:
+        kept = {pid: [x for x in seat_legends(room, pid) if not is_perk(x)]
+                for pid in room.legends}
+        room.legends = {pid: v for pid, v in kept.items() if v}
+    _save_room(conn, room)
+    return room
 
 
 def set_legend(conn, code: str, player_id: str, legend: dict | None, slot: int = 0,
@@ -684,9 +713,9 @@ def set_legend(conn, code: str, player_id: str, legend: dict | None, slot: int =
         raise RoomError("legends are chosen before the auction starts")
     if legend is not None and not legend.get("skilled"):       # [A284]
         raise RoomError("only a legend built with skills can be brought into a room")
-    if legend is not None and legend.get("boosted"):           # [A310]
-        raise RoomError("a career played with pass boosts cannot bring its legend into "
-                        "this room")
+    if legend is not None and legend.get("boosted") and not room.perks:   # [A310, A312]
+        raise RoomError("the host has turned pass perks off: a career played with pass "
+                        "boosts cannot bring its legend into this room")
     slots = legend_slots(room, holder)
     if not 0 <= slot < min(slots, LEGEND_SLOTS_MAX):
         n = min(slots, LEGEND_SLOTS_MAX)
@@ -697,6 +726,8 @@ def set_legend(conn, code: str, player_id: str, legend: dict | None, slot: int =
         if base and any(i != slot and str(x.get("career") or "").partition("@")[0] == base
                         for i, x in enumerate(mine)):
             raise RoomError("that career is already one of your legends")
+    if legend is not None and slot >= _shared_slots(room):
+        legend = {**legend, "perk": True}                    # [A312] a pass holder's extra
     if slot < len(mine):
         if legend is None:
             mine.pop(slot)

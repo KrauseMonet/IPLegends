@@ -209,8 +209,13 @@ def test_a_boosted_careers_legend_is_marked_and_a_room_refuses_it(deck, model):
         setup, boosted=False)))
     assert "boosted" not in plain_leg
 
+    # [A312] with the room's pass perks off a boosted legend is refused; on (the default),
+    # it comes in, marked
     conn = FakeConn()
     room, host = rooms.create_room(conn, "league", 15, "Host", game="auction", legends=True)
+    rooms.set_perks(conn, room.code, host, False)
     with pytest.raises(rooms.RoomError, match="boosts"):
         rooms.set_legend(conn, room.code, host, {**leg, "skilled": True})
     rooms.set_legend(conn, room.code, host, {**plain_leg, "skilled": True})
+    rooms.set_perks(conn, room.code, host, True)
+    rooms.set_legend(conn, room.code, host, {**leg, "skilled": True})

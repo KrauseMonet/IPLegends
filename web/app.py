@@ -1101,6 +1101,7 @@ class RoomLegendOut(BaseModel):
     # can mark the one you brought among several of the same name, year and rating
     career: str | None = None
     boosted: bool = False          # [A312] from a career played with pass boosts
+    perk: bool = False             # [A312] in the room only because pass perks are on
 
 
 class CreatedRoomOut(BaseModel):
@@ -3584,7 +3585,7 @@ def _room_legends_all(room, caller_id: str | None) -> dict[str, list[RoomLegendO
         ls = [RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"],
                             year=v["year"], role_label=v["role_label"],
                             career=v.get("career") if pid == caller_id else None,
-                            boosted=bool(v.get("boosted")))
+                            boosted=bool(v.get("boosted")), perk=rooms.is_perk(v))
               for v in rooms.seat_legends(room, pid)
               if v.get("skilled") or room.status != "lobby"]
         if ls:
@@ -4571,6 +4572,18 @@ def room_pro(code: str, body: RoomProIn, request: Request) -> RoomStateOut:
             _require_pass(conn, request, "A Pro room needs a pass.")
         try:
             room = rooms.set_pro(conn, code, body.player_id, body.on)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+@app.post("/api/rooms/{code}/perks", response_model=RoomStateOut)
+def room_perks(code: str, body: RoomProIn) -> RoomStateOut:
+    """[A312] The host turns pass perks on or off, in the lobby. No pass needed either way:
+    it is the room's consent, not a perk of its own."""
+    with _db() as conn:
+        try:
+            room = rooms.set_perks(conn, code, body.player_id, body.on)
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)

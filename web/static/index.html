@@ -28,7 +28,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=023013314c">
+<link rel="stylesheet" href="/static/style.css?v=a3d886dfbc">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -43,9 +43,9 @@
       <a href="/draft" data-match="/draft /season">Draft</a>
       <a href="/auction" data-match="/auction">Auction</a>
       <a href="/career" data-match="/career">Career</a>
+      <a href="/almanack" data-match="/almanack /seasons /teams /articles /records">Almanack</a>
       <a href="/rooms" data-match="/rooms">Rooms</a>
-      <a href="/daily" data-match="/daily">Daily</a>
-      <a href="/puzzles" data-match="/puzzles /bingo /guess /common /xi /trio /flashback">Puzzles</a>
+      <a href="/puzzles" data-match="/puzzles /daily /bingo /guess /common /xi /trio /flashback">Puzzles</a>
     </div>
     <div class="topnav-r">
       <button class="install-pill hide" data-install onclick="installApp(this)"
@@ -140,15 +140,21 @@
       <b>Bingo · Guess the Player · Common Ground · Name the XI · Three to Make · Flashback</b>
       <span class="mode-go">See all puzzles →</span>
     </a>
-    <a class="puzzle-strip" href="/seasons">
-      <span class="mode-tag">The record · nineteen seasons, fifteen franchises</span>
-      <b>Every IPL season and every franchise, from 2008 to 2026</b>
-      <span class="mode-go">Read the history →</span>
-    </a>
-    <a class="puzzle-strip" href="/articles">
-      <span class="mode-tag">Analysis · from our own ratings and the ball-by-ball record</span>
-      <b>The best seasons ever · Does the best squad win? · Who owns the death overs</b>
-      <span class="mode-go">Read the articles →</span>
+    <a class="al-band" href="/almanack">
+      <div>
+        <span class="mode-tag">The Almanack · every ball since 2008</span>
+        <h3>Every player, season and record</h3>
+        <p>A career page for every IPL player: season by season, by phase and against pace and
+          spin, measured against the league in the same seasons. Plus every season, every
+          franchise and long reads from the ball-by-ball record.</p>
+        <span class="mode-go">Open the Almanack →</span>
+      </div>
+      <ul>
+        <li><b>Players</b> · career, phases, head to head</li>
+        <li><b>Seasons</b> · champions, tables, leaders</li>
+        <li><b>Franchises</b> · every name and every title</li>
+        <li><b>Articles</b> · the best seasons, the death overs</li>
+      </ul>
     </a>
 
     <div class="home-how">

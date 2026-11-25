@@ -7,7 +7,7 @@ Listed: the home page, the game and puzzle pages, the guides, the articles, the 
 (`tools.build_history`) and the about/legal pages. Left out on purpose: a page that is only
 someone's own state (profile, the Hall of Fame, admin, a room, a season in progress) and the offline card.
 `/api/` is NOT disallowed in robots.txt: a crawler rendering a game page needs it.
-Run it after `tools.build_history`, which decides which history pages exist.
+Run it after `tools.build_history` and `tools.build_almanack`, which decide which pages exist.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ STATIC = ROOT / "web" / "static"
 ORIGIN = "https://fineleg.app"
 
 PAGES = ["/", "/draft", "/auction", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
-         "/common", "/xi", "/trio", "/flashback", "/records", "/seasons", "/teams", "/guides", "/articles",
+         "/common", "/xi", "/trio", "/flashback", "/records", "/almanack", "/almanack/players", "/almanack/records", "/almanack/grounds",
+         "/almanack/head-to-head", "/seasons", "/teams", "/guides", "/articles",
          "/about", "/faq", "/contact", "/terms", "/privacy"]
 
 
@@ -28,6 +29,11 @@ def urls() -> list[str]:
     out = list(PAGES)
     for folder in ("guides", "articles", "seasons", "teams"):
         out += [f"/{folder}/{p.stem}" for p in sorted((STATIC / folder).glob("*.html"))]
+    # [A315] only the player pages that are indexed: a noindex page has no place in a sitemap.
+    for folder in ("players", "grounds"):
+        for p in sorted((STATIC / "almanack" / folder).glob("*.html")):
+            if 'name="robots" content="noindex' not in p.read_text():
+                out.append(f"/almanack/{folder}/{p.stem}")
     return out
 
 

@@ -468,6 +468,36 @@ def team_history_page(slug: str) -> FileResponse:
     return _subpage("teams", slug)
 
 
+# [A315] The Almanack: `tools.build_almanack` writes the front page, the index and a page
+# per player.
+@app.get("/almanack", include_in_schema=False)
+def almanack_page() -> FileResponse:
+    return FileResponse(STATIC / "almanack.html")
+
+
+@app.get("/almanack/players", include_in_schema=False)
+def almanack_players_page() -> FileResponse:
+    return FileResponse(STATIC / "almanack" / "players.html")
+
+
+@app.get("/almanack/players/{slug}", include_in_schema=False)
+def almanack_player_page(slug: str) -> FileResponse:
+    return _subpage("almanack/players", slug)
+
+
+# [A316] the record book, head to head and the grounds.
+@app.get("/almanack/{name}", include_in_schema=False)
+def almanack_section_page(name: str) -> FileResponse:
+    if name not in ("records", "grounds", "head-to-head"):
+        raise HTTPException(404, "no such page")
+    return _subpage("almanack", name)
+
+
+@app.get("/almanack/grounds/{slug}", include_in_schema=False)
+def almanack_ground_page(slug: str) -> FileResponse:
+    return _subpage("almanack/grounds", slug)
+
+
 @app.get("/guides", include_in_schema=False)
 def guides_page() -> FileResponse:
     return FileResponse(STATIC / "guides.html")

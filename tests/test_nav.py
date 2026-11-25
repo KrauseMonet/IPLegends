@@ -60,8 +60,9 @@ def test_every_puzzle_page_is_served_by_the_app_and_by_vercel():
 def test_the_top_bar_keeps_draft_and_auction_first_and_does_not_grow():
     links = re.findall(r'<a href="([^"]+)" data-match="([^"]+)">([^<]+)</a>',
                        (PARTIALS / "nav.html").read_text())
-    assert [text for _, _, text in links][:3] == ["Draft", "Auction", "Career"]   # the heroes lead
+    assert [text for _, _, text in links][:4] == ["Draft", "Auction", "Career", "Almanack"]  # heroes, then the record
     assert len(links) <= 6
+    assert "Daily" not in [text for _, _, text in links]                   # under Puzzles (A315)
     assert "Records" not in [text for _, _, text in links]                 # in the footer (A201)
     assert "Flashback" not in [text for _, _, text in links]               # it lives under Puzzles
     puzzles = [m for url, m, text in links if text == "Puzzles"]
@@ -88,6 +89,7 @@ def test_the_home_page_has_three_heroes_and_one_quiet_puzzle_strip():
     second = html.split('class="modes more"')[1].split("puzzle-strip")[0]
     assert sorted(re.findall(r'<a class="mode" href="([^"]+)"', second)) == ["/daily", "/rooms"]
     assert 'class="puzzle-strip" href="/puzzles"' in html
+    assert html.count('class="al-band" href="/almanack"') == 1                # [A315] one Almanack band
     assert not re.search(r'<a class="mode[^"]*" href="/(flashback|bingo|guess|common|xi)"', html)
 
 
@@ -102,10 +104,13 @@ def test_each_hub_card_reads_the_key_its_game_actually_saves_under(path, key_fil
     assert card and card.group(1) == saved_key
 
 
-def test_the_hub_lists_the_five_dailies_and_flashback_and_nothing_else():
+def test_the_hub_lists_the_five_dailies_the_daily_challenge_and_flashback_and_nothing_else():
     hub = (STATIC / "puzzles.html").read_text()
     cards = re.findall(r'<a class="pz-card" href="([^"]+)"', hub)
-    assert cards == ["/bingo", "/guess", "/common", "/xi", "/trio", "/flashback"]
+    assert cards == ["/bingo", "/guess", "/common", "/xi", "/trio", "/daily", "/flashback"]
+    # [A315] the daily challenge is on the hub, but it is not a puzzle: it carries no data-key,
+    # so the hub's one streak across the puzzles (A186) does not count it.
+    assert not re.search(r'<a class="pz-card" href="/daily" data-key', hub)
 
 
 def test_every_daily_game_records_a_finished_day_the_hub_can_count():
@@ -136,7 +141,21 @@ def test_the_top_bar_lights_puzzles_on_every_puzzle_page_and_only_there():
     spec = {text: m for m, text in links}["Puzzles"]
     for path in PUZZLE_PAGES.values():
         assert nav_matches(spec, path), path
-    for path in ("/", "/draft", "/season", "/auction", "/rooms", "/daily", "/records", "/profile"):
+    assert nav_matches(spec, "/daily")                  # [A315] the daily challenge lives here now
+    for path in ("/", "/draft", "/season", "/auction", "/rooms", "/records", "/profile", "/almanack"):
+        assert not nav_matches(spec, path), path
+
+
+@needs_node
+def test_the_almanack_lights_on_the_record_pages_and_nowhere_else():
+    """[A315] The Almanack is the umbrella for the written record: its own pages, the seasons,
+    the franchises, the articles and the records page all light it."""
+    links = re.findall(r'data-match="([^"]+)">([^<]+)</a>', (PARTIALS / "nav.html").read_text())
+    spec = {text: m for m, text in links}["Almanack"]
+    for path in ("/almanack", "/almanack/players", "/almanack/players/virat-kohli", "/seasons/2016",
+                 "/teams/mumbai-indians", "/articles/death-overs", "/records"):
+        assert nav_matches(spec, path), path
+    for path in ("/", "/draft", "/auction", "/career", "/puzzles", "/daily", "/guides/ratings"):
         assert not nav_matches(spec, path), path
 
 

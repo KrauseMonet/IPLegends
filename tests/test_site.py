@@ -90,7 +90,9 @@ def test_nothing_user_facing_still_carries_the_old_name():
              + list((ROOT / "web").glob("*.py")))
     for f in files:
         body = visible_text(f)
-        assert not re.search(r"almanack", body, re.I), f"{f.name} still says Almanack"
+        # [A315] "the Almanack" is now the stats section's name; the old SITE name was
+        # "The Legends Almanack", and that is what must never come back.
+        assert not re.search(r"legends\s+almanack", body, re.I), f"{f.name} still says Legends Almanack"
         assert "iplegends.vercel.app" not in body, f"{f.name} still names the old address"
 
 

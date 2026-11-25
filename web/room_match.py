@@ -252,7 +252,7 @@ class _Driver:
         self.room = room
         self.model = model
         self.pairs = pairs
-        self.rng = random.Random(room.seed)
+        self.rng = random.Random(match_seed(room))
         self.entries: list[RoomResultEntry] = []
 
     def _pid(self, side: Side) -> str:
@@ -291,7 +291,7 @@ class _Driver:
         # already claims ("attempted independently every replay pass") but the shared
         # stream did not actually deliver. `str` seeds hash deterministically
         # (unaffected by PYTHONHASHSEED), unlike a bare tuple.
-        fixture_rng = random.Random(f"{self.room.seed}:{stage}")
+        fixture_rng = random.Random(f"{match_seed(self.room)}:{stage}")
         try:
             r = play_open(self.model, side_a, side_b, fixture_rng, stage=stage, moves=cursor)
         except _OpenMatchNeedsToss as exc:
@@ -315,6 +315,24 @@ def _round_complete(states: list[RoomFixtureState]) -> bool:
 def _advance_recorded(room: Room, round_label: str) -> bool:
     return any(isinstance(mv, dict) and mv.get("kind") == "advance" and mv.get("round") == round_label
                for mv in room.match_moves)
+
+
+# [A311] "Run it back": a Pro room that has finished its tournament plays a fresh one with
+# the same squads. The squads come from the draft or auction (room.moves), which are kept;
+# only the match log is cleared, and it starts with {"kind": "run", "n": n}, which seeds the
+# matches afresh. A room with no run move plays on the room's own seed, so every
+# tournament played before this replays exactly as it did.
+
+def run_number(room: Room) -> int:
+    for mv in getattr(room, "match_moves", None) or ():
+        if isinstance(mv, dict) and mv.get("kind") == "run":
+            return int(mv.get("n", 0))
+    return 0
+
+
+def match_seed(room: Room):
+    n = run_number(room)
+    return room.seed if n == 0 else f"{room.seed}:run{n}"
 
 
 def _start_recorded(room: Room) -> bool:
@@ -359,7 +377,7 @@ def _league_seating(room: Room, pairs: list[tuple[str, Side]]) -> list[int]:
     """`seating[position] = index into pairs` for the group schedule. Seeded from the
     room's own seed under its own label, so it draws nothing from the match stream and
     every replay seats the room identically."""
-    rng = random.Random(f"{room.seed}:seating")
+    rng = random.Random(f"{match_seed(room)}:seating")
     n = len(pairs)
     humans = [k for k, (pid, _) in enumerate(pairs) if not room.players[pid].is_cpu]
     others = [k for k in range(n) if k not in humans]
@@ -578,7 +596,7 @@ _ROUND_ROBIN_CACHE: dict[tuple[str, int, int], tuple[list[RoomResultEntry], tupl
 def _round_robin_results(d: "_Driver", room: Room, pairs: list[tuple[str, Side]]
                           ) -> list[RoomResultEntry]:
     schedule = _schedule(room)
-    key = (room.code, room.seed, schedule)
+    key = (room.code, match_seed(room), schedule)
     cached = _ROUND_ROBIN_CACHE.get(key)
     if cached is not None:
         entries, rng_state = cached
@@ -992,6 +1010,25 @@ def start_matches(conn, code: str, player_id: str, deck, model) -> Room:
     if not replay.awaiting_start:
         raise RoomError("this room is not waiting to start right now")
     room.match_moves = room.match_moves + [_start_move()]
+    rooms._save_room(conn, room)
+    return room
+
+
+def run_it_back(conn, code: str, player_id: str, deck, model) -> Room:
+    """[A311] The host of a Pro room starts a fresh tournament with the same squads, once the
+    last one has finished. Idempotent: a repeat that lands after the new one has begun finds
+    it not yet complete and changes nothing."""
+    room = rooms._load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can run it back")
+    if not room.pro:
+        raise RoomError("Run it back is for Pro rooms")
+    replay = replay_room_matches(room, deck, model)
+    if not replay.complete:
+        if run_number(room):
+            return room                  # a second click: the new tournament has begun
+        raise RoomError("the tournament is still being played")
+    room.match_moves = [_stamped({"kind": "run", "n": run_number(room) + 1})]
     rooms._save_room(conn, room)
     return room
 

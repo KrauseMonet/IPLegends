@@ -295,7 +295,7 @@ def test_the_room_remembers_which_career_and_tells_only_its_own_seat(monkeypatch
 
     stored = {}
 
-    def capture(conn, code, player_id, legend):
+    def capture(conn, code, player_id, legend, slot=0, holder=False):
         stored.update(legend)
         raise rooms.RoomError("stop here")
     monkeypatch.setenv("SESSION_SECRET", "test-only-legend-secret")
@@ -357,6 +357,6 @@ def test_a_stored_legend_keeps_its_leans_through_the_room(monkeypatch):
 
     class P: is_cpu = False
     class Room: players = {"p1": P()}; legends = {"p1": {"name": "N", "card": _card_doc(c)}}
-    got = RA.legend_cards(Room())["p1"]
+    got = RA.legend_cards(Room())["p1"][0]
     assert got.style_bat == (0.05, -0.04) and got.settle_offset == (0.01, 0.02)
     hash(got)

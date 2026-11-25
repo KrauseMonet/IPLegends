@@ -384,9 +384,14 @@ function watchRoomVisibility(){
 // responses alike. A mutation is not automatically fresher than a poll already applied:
 // its own response was built before any poll issued after it, so ordering both by the
 // same server-assigned counter is what makes the two safe to interleave at all.
+let ROOM_RUN_SEEN = null;     // [A311] which run of the tournament this page has shown
 function applyRoom(room){
   if (room.version <= ROOM_VERSION_SEEN) return false;
   ROOM_VERSION_SEEN = room.version;
+  // [A311] Run it back: a new run is a new tournament on the same squads, so whatever this
+  // page remembers about the last one's matches is forgotten.
+  if (ROOM_RUN_SEEN !== null && (room.run || 0) !== ROOM_RUN_SEEN) resetRoomMatchState();
+  ROOM_RUN_SEEN = room.run || 0;
   ROOM = room;
   if (room.status === 'drafting'){
     // Only what the server actually asserts -- when the turn began, and how long a turn
@@ -634,10 +639,12 @@ function renderRoomLobby(r){
       : [r.game === 'mega' ? 'Mega auction · retentions & RTM' : 'Auction · league',
          '15s a lot · a bid leaves 10s', '₹120 crore each'];
   if (r.is_open != null) chips.push(r.is_open ? 'Open room' : 'Private room');
+  if (r.pro) chips.push('★ Pro room');
   $('#lobbyChips').innerHTML = chips.map(c => `<span class="dr-chip">${esc(c)}</span>`).join('');
   $('#lobbyStartBtn').textContent = auction ? 'Start auction' : 'Start draft';
   $('#lobbyFranchiseWrap').classList.toggle('hide', !auction);
   if (auction) renderLobbyFranchises(r);
+  renderLobbyPro(r);
   const extras = auction && r.game !== 'mini';     // [A301] no trades or legends in a mini
   $('#lobbyTradesWrap').classList.toggle('hide', !extras);
   if (extras) renderLobbyTrades(r);
@@ -762,7 +769,7 @@ async function randomiseRoomFranchises(ctrl){
 function renderLobbyTrades(r){
   const host = MY_PID === r.host_id;
   const note = r.trades
-    ? 'On: after the fill round, the people here can swap players one for one, two trades each.'
+    ? `On: after the fill round, the people here can swap players one for one, ${r.pro ? 'three' : 'two'} trades each.`
     : 'Off: squads go straight from the fill round to picking twelves.';
   $('#lobbyTrades').innerHTML = host
     ? `<div class="room-choices">
@@ -778,6 +785,46 @@ async function setRoomTrades(on, ctrl){
     const myGen = ++ROOM_GEN;
     try {
       const room = await roomApi(`/api/rooms/${ROOM_CODE}/trades`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({player_id: MY_PID, on})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// [A311] A Pro room: the host turns it on with their pass, and everybody in the room gets it.
+// What it gives depends on the game: a second legend and a third trade only mean anything in
+// an auction room, Run it back in every room.
+function proPerksText(r){
+  const auction = r.game !== 'draft' && r.game !== 'mini';
+  return (auction ? 'a second legend each, three trades instead of two, and ' : '')
+    + 'Run it back: a fresh tournament with the same squads once this one ends';
+}
+function renderLobbyPro(r){
+  const host = MY_PID === r.host_id;
+  const pass = typeof ME !== 'undefined' && ME && ME.premium;
+  const el = $('#lobbyPro');
+  if (!el) return;
+  if (!host){
+    el.innerHTML = `<div class="note"><b>${r.pro ? 'On' : 'Off'}</b>${r.pro ? ' — everyone here gets ' + proPerksText(r) + '.' : ''}</div>`;
+    return;
+  }
+  el.innerHTML = pass || r.pro
+    ? `<div class="room-choices">
+         <button class="room-choice${r.pro ? ' sel' : ''}" onclick="setRoomPro(true, this)">Pro on</button>
+         <button class="room-choice${r.pro ? '' : ' sel'}" onclick="setRoomPro(false, this)">Pro off</button>
+       </div><div class="note" style="margin-top:6px">Everyone here gets ${proPerksText(r)}.</div>`
+    : `<div class="note">With a pass, make this a Pro room: everyone here gets ${proPerksText(r)}.
+         <a href="/premium">See passes</a></div>`;
+}
+async function setRoomPro(on, ctrl){
+  if (!ROOM || !!ROOM.pro === on) return;
+  await busyClick(ctrl, null, async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/pro`, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({player_id: MY_PID, on})});
       if (myGen !== ROOM_GEN) return;
@@ -862,26 +909,29 @@ function renderLobbyLegends(r){
     $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">Off: every squad is bought at the auction.</div>`;
     return;
   }
-  const chosen = r.players.filter(p => !p.is_cpu && r.legends[p.player_id]).map(p => {
-    const l = r.legends[p.player_id];
-    return `<div class="lg-row"><span class="lg-rating">${l.rating}</span><b>${esc(l.name)}</b>
-      <i>${esc(l.role_label)} · ${l.year} · brought by ${esc(p.name)}</i></div>`;
-  }).join('');
+  const chosen = r.players.filter(p => !p.is_cpu).flatMap(p =>
+    seatLegends(r, p.player_id).map(l =>
+      `<div class="lg-row"><span class="lg-rating">${l.rating}</span><b>${esc(l.name)}</b>
+      <i>${esc(l.role_label)} · ${l.year} · brought by ${esc(p.name)}${l.boosted ? ' · ★ boosted' : ''}</i></div>`)).join('');
+  const mine = seatLegends(r, MY_PID), slots = legendSlots(r);
+  const picker = slot => `<div class="lg-pick"><select id="lobbyLegendPick${slot}" class="room-input">
+         <option value="">${slot ? 'No second legend' : 'No legend'}</option>
+         ${legendChoices(ROOM_HALL, mine[slot], ME.legend_limit).map(g => `<optgroup label="${esc(g.role)}">${g.items.map(c => { const l = c.card.legend || {};
+           // [A225] a legend is a season, so the season is what is named
+           return `<option value="${c.key}"${legendIsMine(c, mine[slot]) ? ' selected' : ''}>
+           ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}${c.extra ? ' · extra' : ''}</option>`; }).join('')}</optgroup>`).join('')}
+       </select><button class="act" onclick="chooseRoomLegend(this, ${slot})">Bring him</button></div>`;
+  // [A311] one picker per legend you may bring; the next appears once the one before is chosen
+  const pickers = () => Array.from({length: Math.min(slots, mine.length + 1)}, (_, i) => picker(i)).join('');
   const mineHtml = !ME || !ME.account_id
     ? `<div class="note">Sign in to bring one of your saved careers. <button class="act" onclick="openAuthModal('login')">Sign in</button></div>`
     : ROOM_HALL === null ? '<div class="note">Loading your Hall of Fame…</div>'
     : !ROOM_HALL.length ? '<div class="note">You have no saved careers yet. Finish one in <a href="/career">Build a Career</a>.</div>'
-    : `<div class="lg-pick"><select id="lobbyLegendPick" class="room-input">
-         <option value="">No legend</option>
-         ${legendChoices(ROOM_HALL, r.legends[MY_PID], ME.legend_limit).map(g => `<optgroup label="${esc(g.role)}">${g.items.map(c => { const l = c.card.legend || {};
-           // [A225] a legend is a season, so the season is what is named
-           return `<option value="${c.key}"${legendIsMine(c, r.legends[MY_PID]) ? ' selected' : ''}>
-           ${esc(c.name)} · ${l.year} · ${l.rating}${legendValueText(c)}${c.extra ? ' · extra' : ''}</option>`; }).join('')}</optgroup>`).join('')}
-       </select><button class="act" onclick="chooseRoomLegend(this)">Bring him</button></div>
+    : `${pickers()}
        ${ROOM_HALL.some(c => !c.legend && c.card && c.card.legend) ? `<div class="note" style="margin-top:4px">Careers built before skills can't be brought into a room; they stay in your Hall of Fame.</div>` : ''}
        ${ME.legend_limit != null && legendChoices(ROOM_HALL, null, null).some(g => g.total > ME.legend_limit) ? `<div class="note" style="margin-top:4px">Your best ${ME.legend_limit === 1 ? 'legend' : ME.legend_limit} in each role, by runs a match, of ${legendsByValue(ROOM_HALL).length} legends.</div>` : ''}`;
-  $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring one
-    saved career's best season, carded like a real one. He joins your squad free, takes one of the eighteen places and counts toward
+  $('#lobbyLegends').innerHTML = toggle + `<div class="note" style="margin-top:6px">On: each person may bring ${r.pro ? 'two' : 'one'}
+    saved career${r.pro ? 's\'' : '\'s'} best season${r.pro ? 's' : ''}, carded like ${r.pro ? 'real ones' : 'a real one'}. Each joins your squad free, takes one of the eighteen places and counts toward
     the overseas limit.</div>${chosen ? `<div class="lg-list">${chosen}</div>` : ''}${mineHtml}`;
   if (ME && ME.account_id && ROOM_HALL === null){
     ROOM_HALL = [];
@@ -906,14 +956,21 @@ async function setRoomLegends(on, ctrl){
   });
 }
 
-async function chooseRoomLegend(ctrl){
-  const career = $('#lobbyLegendPick').value || null;
+// [A311] A seat's legends in order, and how many it may bring.
+function seatLegends(r, pid){
+  const first = (r.legends || {})[pid];
+  return first ? [first, ...(((r.more_legends || {})[pid]) || [])] : [];
+}
+function legendSlots(r){ return 1 + (r.pro ? 1 : 0); }
+
+async function chooseRoomLegend(ctrl, slot = 0){
+  const career = $('#lobbyLegendPick' + slot).value || null;
   await busyClick(ctrl, null, async () => {
     const myGen = ++ROOM_GEN;
     try {
       const room = await roomApi(`/api/rooms/${ROOM_CODE}/legend`, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({player_id: MY_PID, career})});
+        body: JSON.stringify({player_id: MY_PID, career, slot})});
       if (myGen !== ROOM_GEN) return;
       applyRoom(room);
       renderRoom();
@@ -1793,7 +1850,10 @@ function showRoomMatchComplete(m){
   // player (not just the host) can fire it; the room resets in place (same code, same
   // seats) and everyone else's next poll picks the reset up on its own (roomPlayAgain's
   // own comment has the why), so this button doesn't need to coordinate with anyone.
-  const playAgainBtn = `<button class="act lead" onclick="roomPlayAgain(this)">Play again</button>`;
+  const playAgainBtn = `<button class="act lead" onclick="roomPlayAgain(this)">Play again</button>`
+    // [A311] a Pro room's host may also run the tournament again with the same squads
+    + (ROOM && ROOM.pro && MY_PID === ROOM.host_id
+      ? `<button class="act" onclick="roomRunBack(this)" title="A fresh tournament, the same squads">★ Run it back</button>` : '');
 
   if (m.format === 'final'){
     const res = m.results[0].result;
@@ -1920,15 +1980,34 @@ async function roomPlayAgain(ctrl){
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
       if (myGen !== ROOM_GEN) return;
       applyRoom(room);
-      // A fresh lobby has no match of its own yet -- cleared explicitly rather than
-      // left stale, so a later completion can never be masked by this game's leftovers
-      // (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut would
-      // otherwise show the game just finished instead of the new one).
-      ROOM_MATCH_DATA = null; ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
-      ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null;
-      ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
-      ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
-      ROOM_SAVE_ATTEMPTED = false;
+      resetRoomMatchState();
+      renderRoom();
+    } catch(e){ slip(e.message); }
+  });
+}
+
+// A fresh lobby, or a fresh run of the tournament, has no match of its own yet -- cleared
+// explicitly rather than left stale, so a later completion can never be masked by the last
+// game's leftovers (renderRoomResult's own "if ROOM_MATCH_DATA, skip the fetch" shortcut
+// would otherwise show the game just finished instead of the new one).
+function resetRoomMatchState(){
+  ROOM_MATCH_DATA = null; ROOM_MATCH_AT = -1; ROOM_MATCH_FETCHED = 0;
+  ROOM_PENDING = null; ROOM_REVEAL_ACTIVE = null;
+  ROOM_REVEALED = new Set(); ROOM_REVEAL_SYNCED = false;
+  ROOM_SPECTATE_SHOWN = false; ROOM_LEAGUE_REVEALED_THROUGH = 0;
+  ROOM_SAVE_ATTEMPTED = false;
+}
+
+// [A311] A Pro room's host plays a fresh tournament with the same squads.
+async function roomRunBack(ctrl){
+  await busyClick(ctrl, 'Starting…', async () => {
+    const myGen = ++ROOM_GEN;
+    try {
+      const room = await roomApi(`/api/rooms/${ROOM_CODE}/match/run-back`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({player_id: MY_PID})});
+      if (myGen !== ROOM_GEN) return;
+      applyRoom(room);
+      resetRoomMatchState();
       renderRoom();
     } catch(e){ slip(e.message); }
   });

@@ -150,6 +150,10 @@ class Room:
     # migration 050 -- career legends [A215]: None is off; otherwise {player_id: legend},
     # the legend each seat chose (a copy of its saved card). Set in the lobby, like trades.
     legends: dict | None = None
+    # migration 061 -- [A311] a Pro room (a pass-holding host made it one: two legends a
+    # seat, three trades, Run it back for everyone), and [A312] pass perks, on by default.
+    pro: bool = False
+    perks: bool = True
     # [A180] What `room_players` held when this room was READ, in `_seat_rows` form, so
     # `_save_room` can skip rewriting seats nothing changed -- one round trip on every
     # bid and pick. None for a room never read (just created), which always writes them.
@@ -271,7 +275,7 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                r.draft_mode, r.is_open, r.version,
                extract(epoch from (now() - r.updated_at)) as idle_seconds,
                p.player_id, p.name, p.is_cpu, r.game, p.franchise,
-               p.kit_name, p.kit_monogram, p.kit_colour, r.trades, r.legends
+               p.kit_name, p.kit_monogram, p.kit_colour, r.trades, r.legends, r.pro, r.perks
           from rooms r
           left join room_players p on p.room_code = r.code
           {"cross join _lock_bound" if lock else ""}
@@ -298,7 +302,8 @@ def _load_room(conn, code: str, *, lock: bool = True) -> Room:
                 draft_mode=draft_mode, is_open=is_open, version=version,
                 idle_seconds=float(idle_seconds or 0.0), game=rows[0][17],
                 trades=bool(rows[0][22]),
-                legends=dict(rows[0][23]) if rows[0][23] is not None else None)
+                legends=dict(rows[0][23]) if rows[0][23] is not None else None,
+                pro=bool(rows[0][24]), perks=bool(rows[0][25]))
     for row in rows:
         player_id, name, is_cpu, franchise = row[14], row[15], row[16], row[18]
         kit_name, kit_monogram, kit_colour = row[19], row[20], row[21]
@@ -340,12 +345,13 @@ def _save_room(conn, room: Room) -> None:
         """
         insert into rooms (code, format, timer_seconds, seed, host_id, status,
                             turn_started_at, failure_reason, moves, match_moves,
-                            draft_mode, is_open, version, game, trades, legends)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+                            draft_mode, is_open, version, game, trades, legends, pro, perks)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
         on conflict (code) do update set
             status = excluded.status, turn_started_at = excluded.turn_started_at,
             -- [A174, A215] the settings the host may change after creation, in the lobby
             trades = excluded.trades, legends = excluded.legends,
+            pro = excluded.pro, perks = excluded.perks,
             failure_reason = excluded.failure_reason, moves = excluded.moves,
             match_moves = excluded.match_moves,
             version = rooms.version + 1,
@@ -358,7 +364,7 @@ def _save_room(conn, room: Room) -> None:
         (room.code, room.format, room.timer_seconds, room.seed, room.host_id,
          room.status, room.turn_started_at, room.failure_reason, Json(room.moves),
          Json(room.match_moves), room.draft_mode, room.is_open, room.game, room.trades,
-         Json(room.legends) if room.legends is not None else None),
+         Json(room.legends) if room.legends is not None else None, room.pro, room.perks),
     ).fetchone()[0]
     # ONE multi-row insert, not one round trip per seat -- this used to loop and issue a
     # separate `conn.execute` per player, but every existing player's row is a guaranteed
@@ -423,7 +429,7 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
                  game: str = "draft", kit: dict | None = None,
                  trades: bool = False, legends: bool = False,
-                 kit_premium_ok: bool = False) -> tuple[Room, str]:
+                 kit_premium_ok: bool = False, pro: bool = False) -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
     if game != "draft" and fmt != "league":
@@ -442,7 +448,8 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
     room = Room(code=_new_code(conn), format=fmt, timer_seconds=timer_seconds,
                 seed=room_seed, host_id=host_id, draft_mode=draft_mode, is_open=is_open,
                 game=game, trades=bool(trades) and game not in ("draft", "mini"),
-                legends={} if legends and game not in ("draft", "mini") else None)
+                legends={} if legends and game not in ("draft", "mini") else None,
+                pro=bool(pro))
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
     room.players[host_id].kit = _arriving_kit(room, host_id, kit, kit_premium_ok)
     _save_room(conn, room)
@@ -628,9 +635,46 @@ def set_legends(conn, code: str, player_id: str, on: bool) -> Room:
     return room
 
 
-def set_legend(conn, code: str, player_id: str, legend: dict | None) -> Room:
+def set_pro(conn, code: str, player_id: str, on: bool) -> Room:
+    """[A311] The host makes the room a Pro room or not, in the lobby. That the host holds a
+    pass is the route's business (a seat has no account); this only keeps the setting.
+    Turning it off drops every legend past each seat's first."""
+    room = _load_room(conn, code)
+    if player_id != room.host_id:
+        raise RoomError("only the host can make this a Pro room")
+    if room.status != "lobby":
+        raise RoomError("a Pro room is decided before the room starts")
+    room.pro = bool(on)
+    if not room.pro and room.legends:
+        room.legends = {pid: seat_legends(room, pid)[:1] for pid in room.legends}
+    _save_room(conn, room)
+    return room
+
+
+LEGENDS_BASE = 1        # [A215] one legend a seat
+LEGEND_SLOTS_MAX = 3    # [A311, A312] one, a Pro room's second, a pass holder's extra
+
+
+def seat_legends(room: Room, player_id: str) -> list[dict]:
+    """[A311] A seat's legends in order. A room from before stored one object, which reads
+    as a list of one; every room since stores a list."""
+    v = (room.legends or {}).get(player_id)
+    if v is None:
+        return []
+    return [x for x in v if x] if isinstance(v, list) else [v]
+
+
+def legend_slots(room: Room, holder: bool = False) -> int:
+    """How many legends a seat may bring: one, plus one in a Pro room [A311]."""
+    return LEGENDS_BASE + (1 if room.pro else 0)
+
+
+def set_legend(conn, code: str, player_id: str, legend: dict | None, slot: int = 0,
+               holder: bool = False) -> Room:
     """[A215] A seat brings a legend (a copy of a saved career's best season), or none.
-    Who owns the career is the route's business: this only places it."""
+    Who owns the career is the route's business: this only places it. [A311] `slot` is
+    which of the seat's legends this is (0 first); `holder`, whether the caller holds a
+    pass, which only the route can know (a seat has no account)."""
     room = _load_room(conn, code)
     if room.legends is None:
         raise RoomError("career legends are off in this room")
@@ -643,11 +687,28 @@ def set_legend(conn, code: str, player_id: str, legend: dict | None) -> Room:
     if legend is not None and legend.get("boosted"):           # [A310]
         raise RoomError("a career played with pass boosts cannot bring its legend into "
                         "this room")
+    slots = legend_slots(room, holder)
+    if not 0 <= slot < min(slots, LEGEND_SLOTS_MAX):
+        n = min(slots, LEGEND_SLOTS_MAX)
+        raise RoomError(f"you may bring {n} legend{'s' if n != 1 else ''} in this room")
+    mine = seat_legends(room, player_id)
+    if legend is not None:
+        base = str(legend.get("career") or "").partition("@")[0]
+        if base and any(i != slot and str(x.get("career") or "").partition("@")[0] == base
+                        for i, x in enumerate(mine)):
+            raise RoomError("that career is already one of your legends")
+    if slot < len(mine):
+        if legend is None:
+            mine.pop(slot)
+        else:
+            mine[slot] = legend
+    elif legend is not None:
+        mine.append(legend)
     legends = dict(room.legends)
-    if legend is None:
-        legends.pop(player_id, None)
+    if mine:
+        legends[player_id] = mine
     else:
-        legends[player_id] = legend
+        legends.pop(player_id, None)
     room.legends = legends
     _save_room(conn, room)
     return room
@@ -775,7 +836,9 @@ def start_room(conn, code: str, player_id: str, deck: Deck) -> Room:
         # [A284] a legend chosen before the skills rule (it carries no `skilled` mark) is not
         # played; the seat simply starts without one
         if room.legends:
-            room.legends = {p: v for p, v in room.legends.items() if v.get("skilled")}
+            kept = {p: [x for x in seat_legends(room, p) if x.get("skilled")]
+                    for p in room.legends}
+            room.legends = {p: v for p, v in kept.items() if v}
         _start_auction(room, deck)
         _save_room(conn, room)
         return room

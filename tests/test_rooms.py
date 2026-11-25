@@ -105,17 +105,20 @@ class FakeConn:
             # after the player columns; game is stored at row index 13.
             game = row[13]
             trades = row[14] if len(row) > 14 else False   # migration 044
-            legends = row[15] if len(row) > 15 else None   # migration 050, last column
+            legends = row[15] if len(row) > 15 else None   # migration 050
+            pro = row[16] if len(row) > 16 else False      # migration 061
+            perks = row[17] if len(row) > 17 else True
             base = row[:13] + (idle,)
             if not seats:
                 # A room with no seats still returns exactly one row, with every column
                 # of the right-hand side NULL -- that is what an outer join does, and
                 # `_load_room` has an explicit branch for it.
                 return FakeCursor([base + (None, None, None, game, None, None, None, None,
-                                           trades, legends)])
+                                           trades, legends, pro, perks)])
             # The kit columns (migration 036) follow the franchise, as in the real SELECT.
             return FakeCursor([
-                base + (pid, name, is_cpu, game, franchise, kn, km, kc, trades, legends)
+                base + (pid, name, is_cpu, game, franchise, kn, km, kc, trades, legends,
+                        pro, perks)
                 for (_seat, pid, name, is_cpu, franchise, kn, km, kc) in seats
             ])
 
@@ -183,7 +186,7 @@ class FakeConn:
         if sql_norm.startswith("insert into rooms"):
             (code, fmt, timer_seconds, seed, host_id, status,
              turn_started_at, failure_reason, moves, match_moves, draft_mode,
-             is_open, game, trades, legends) = params
+             is_open, game, trades, legends, pro, perks) = params
             legends = legends.obj if hasattr(legends, "obj") else legends
             # `moves`/`match_moves` arrive wrapped in psycopg.types.json.Json in real
             # code; unwrap to the plain list each wraps, exactly what a real jsonb
@@ -197,7 +200,7 @@ class FakeConn:
                 self.rooms[code] = (code, fmt, timer_seconds, seed, host_id, status,
                                      turn_started_at, failure_reason, moves_value,
                                      match_moves_value, draft_mode, is_open, 1, game,
-                                     trades, legends)
+                                     trades, legends, pro, perks)
             else:
                 # Mirrors the real `on conflict (code) do update set` clause exactly --
                 # only status/turn_started_at/failure_reason/moves/match_moves are ever
@@ -217,7 +220,7 @@ class FakeConn:
                 self.rooms[code] = (ecode, efmt, etimer, eseed, ehost, status,
                                      turn_started_at, failure_reason, moves_value,
                                      match_moves_value, edraft, eopen, eversion + 1, egame,
-                                     trades, legends)   # [A174, A214] updated on conflict, as the real SQL
+                                     trades, legends, pro, perks)   # [A174, A214, A311] updated on conflict, as the real SQL
             # RETURNING version -- `_save_room` reads this back onto the Room object so
             # the response it serves carries the version its own write produced.
             self.updated_at[code] = time.time()

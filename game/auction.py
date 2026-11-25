@@ -438,7 +438,9 @@ class Team:
     paid: list[int] = field(default_factory=list)
     retained: int = 0               # how many of `squad` were kept before the auction
     rtm: int = 0                    # Right to Match cards left
-    legend: Card | None = None      # [A215] a room seat's career legend, free in its squad
+    # [A215] a room seat's career legends, free in its squad: one, or more in a Pro room or
+    # with pass perks (A311, A312)
+    legends: list[Card] = field(default_factory=list)
     # [A297] A mini auction's real limits, per team: its retained squad plus the places it
     # has left (25 at most), its overseas places (8 at most), and the 18 it must reach.
     # The defaults are an open or mega auction's, where all three are the same for everyone.

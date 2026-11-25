@@ -78,6 +78,12 @@ RETAIN_SECONDS = 150     # [A140] choosing retentions, everybody at once (was 90
 RTM_SECONDS = 15         # [A140] each Right to Match decision: play, raise, match
 TRADE_SECONDS = 120      # [A174] the trade window, closed early by the host or by everyone ready
 TRADES_PER_TEAM = 2      # [A174] ratified by the user
+TRADES_PRO = 3           # [A311] in a Pro room, ratified by the user
+
+
+def trades_limit(room) -> int:
+    """[A311] Trades each team may make: three in a Pro room, two otherwise."""
+    return TRADES_PRO if getattr(room, "pro", False) else TRADES_PER_TEAM
 MAX_OPEN_OFFERS = 3      # [A174] one seat's open offers at once, so nobody floods the others
 PAUSE_MAX_S = 300        # [A249] ratified: a pause resumes by itself after five minutes, so a
                          # host who closes the tab cannot freeze the room (A122's reasoning)
@@ -128,6 +134,7 @@ class RoomAuctionReplay:
     # has said they are done, and how many trades each team has used. `trades` stays on
     # every later phase too, so the room can announce a trade that closed the window.
     offers: list["Offer"] = field(default_factory=list)
+    trades_per_team: int = TRADES_PER_TEAM  # [A311] three in a Pro room
     trades: list["Trade"] = field(default_factory=list)
     trade_ready: set[int] = field(default_factory=set)
     # [A231] Answers derived from this state, kept with it so a poll does not recompute
@@ -217,10 +224,11 @@ class RoomAuctionReplay:
             return ["you cannot trade with yourself"]
         if b not in self.team_of.values():
             return ["trades are between the people in the room, not the computer franchises"]
-        if self.trades_used(a) >= TRADES_PER_TEAM:
-            errors.append(f"you have used your {TRADES_PER_TEAM} trades")
-        if self.trades_used(b) >= TRADES_PER_TEAM:
-            errors.append(f"{teams[b].short} has used its {TRADES_PER_TEAM} trades")
+        n = self.trades_per_team
+        if self.trades_used(a) >= n:
+            errors.append(f"you have used your {n} trades")
+        if self.trades_used(b) >= n:
+            errors.append(f"{teams[b].short} has used its {n} trades")
         if is_legend(give) or is_legend(get):
             errors.append("a career legend stays with the player who brought him")
         if give.person_id in self.arrived(a):
@@ -256,31 +264,37 @@ def legend_name(raw) -> str:
     return name.strip()[:30] or "Legend"
 
 
-def legend_cards(room) -> dict[str, Card]:
-    """[A215] Each person's career legend as a card: the saved card, with a person id of its
+def legend_cards(room) -> dict[str, list[Card]]:
+    """[A215] Each person's career legends as cards: the saved card, with a person id of its
     own (every legend was `career-you`) so two can share a squad list, a scorecard and the
-    caps without one being mistaken for the other."""
+    caps without one being mistaken for the other. [A311] A seat may hold more than one;
+    the first keeps the id a room has always given it, the rest add their place."""
     from tools.snapshot_deck import _card_from
+    from web.rooms import seat_legends
 
     out = {}
-    for pid, leg in (getattr(room, "legends", None) or {}).items():
+    for pid in (getattr(room, "legends", None) or {}):
         p = room.players.get(pid)
-        if p is None or p.is_cpu or not leg:
+        if p is None or p.is_cpu:
             continue
-        card = _card_from(leg["card"])
-        out[pid] = dataclasses.replace(card, person_id=LEGEND_PREFIX + pid,
-                                       name=legend_name(leg["name"]),
-                                       fs_id=0, franchise=None)
+        cards = []
+        for i, leg in enumerate(x for x in seat_legends(room, pid) if x):
+            card = _card_from(leg["card"])
+            cards.append(dataclasses.replace(
+                card, person_id=LEGEND_PREFIX + pid + (f":{i}" if i else ""),
+                name=legend_name(leg["name"]), fs_id=0, franchise=None))
+        if cards:
+            out[pid] = cards
     return out
 
 
 def legend_errors(team: au.Team, chosen: list[Card]) -> list[str]:
     """[A215] Retentions must leave room for the legend: he takes a place and may be
     overseas."""
-    if team.legend is None:
+    if not team.legends:
         return []
     errors = []
-    squad = chosen + [team.legend]
+    squad = chosen + list(team.legends)
     if sum(c.overseas is True for c in squad) > au.SQUAD_OVERSEAS_CAP:
         errors.append("too many overseas players with your legend")
     elif not au.twelve_feasible(squad, au.SQUAD_SIZE - len(squad)):
@@ -297,16 +311,18 @@ def replay(room, deck: Deck) -> RoomAuctionReplay:
     mini = room.game == "mini"
     # [A301] a mini auction's squads are the real retained ones: no legends, no trades
     trades = bool(getattr(room, "trades", False)) and not mini
+    limit = trades_limit(room)
     legends = {} if mini else legend_cards(room)
     key = (room.code, room.seed, len(room.moves), tuple(sorted(humans.items())), mega, mini, trades,
+           limit,
            tuple(sorted((pid, c.person_id, c.display, c.bat_scoring, c.bowl_scoring)
-                        for pid, c in legends.items())))
+                        for pid, cs in legends.items() for c in cs)))
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
         return hit
     moves = [m for m in room.moves if m.get("k") not in CONTROL_KINDS]   # [A249]
-    result = _replay(room.seed, humans, moves, deck, mega, trades, legends, mini)
+    result = _replay(room.seed, humans, moves, deck, mega, trades, legends, mini, limit)
     _CACHE[key] = result
     if len(_CACHE) > _CACHE_SIZE:
         _CACHE.popitem(last=False)
@@ -392,7 +408,7 @@ def _window_over(state: RoomAuctionReplay, humans: set[int]) -> bool:
     every human is done with, so neither needs a recorded move."""
     if humans <= state.trade_ready:
         return True
-    return sum(state.trades_used(h) < TRADES_PER_TEAM for h in humans) < 2
+    return sum(state.trades_used(h) < state.trades_per_team for h in humans) < 2
 
 
 class _Pause(Exception):
@@ -457,7 +473,8 @@ def mini_preset():
 
 def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
             mega: bool = False, trades: bool = False,
-            legends: dict[str, Card] | None = None, mini: bool = False) -> RoomAuctionReplay:
+            legends: dict[str, list[Card]] | None = None, mini: bool = False,
+            trades_per_team: int = TRADES_PER_TEAM) -> RoomAuctionReplay:
     """[A301] `mini` plays the 2027 mini auction: the real retained squads, purses and
     places (`game.mini2027.Preset`), our provisional list, the mini computer bidding
     (`game.auction.mini_ceiling`), and a fill round that stops at a squad of 18 -- exactly
@@ -469,9 +486,9 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     by_short = {t.short: t.index for t in teams}
     team_of = {pid: by_short[short] for pid, short in humans.items()}
     human_idx = set(team_of.values())
-    for pid, card in (legends or {}).items():
+    for pid, cards in (legends or {}).items():
         if pid in team_of:
-            teams[team_of[pid]].legend = card
+            teams[team_of[pid]].legends = list(cards)
     pos = 0
 
     kept: set[str] = set()
@@ -513,8 +530,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
     # [A215] A career legend joins his player's squad before the bidding: free, outside the
     # purse, one of the eighteen places. After retentions, which were checked to leave room.
     for t in teams:
-        if t.legend is not None:
-            t.squad.append(t.legend)
+        for lg in t.legends:
+            t.squad.append(lg)
             t.paid.append(0)
     if mini:
         lots = au.mini_catalogue(preset.lots, seed)
@@ -675,7 +692,7 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
         return RoomAuctionReplay(auction, team_of, "failed", failed_team=unfieldable[0].index)
 
     # [A174] The trade window, between the people only, if the room has one.
-    window = RoomAuctionReplay(auction, team_of, "trade")
+    window = RoomAuctionReplay(auction, team_of, "trade", trades_per_team=trades_per_team)
     if trades and len(human_idx) >= 2:
         pos = _trade_window(window, moves, pos, human_idx, team_of)
         if pos is None:
@@ -683,7 +700,8 @@ def _replay(seed: int, humans: dict[str, str], moves: list[dict], deck: Deck,
 
     # Every human picks a twelve, in any order.
     result = RoomAuctionReplay(auction, team_of, "twelve", offers=window.offers,
-                               trades=window.trades, trade_ready=window.trade_ready)
+                               trades=window.trades, trade_ready=window.trade_ready,
+                               trades_per_team=trades_per_team)
     while pos < len(moves):
         mv = moves[pos]
         pos += 1

@@ -955,6 +955,8 @@ class CreateRoomIn(BaseModel):
                          "change it in the lobby (POST /api/rooms/{code}/trades)")
     legends: bool = Field(default=False, description="[A215] auction rooms: each signed-in "
                           "player may bring a saved career's best season, free in their squad")
+    pro: bool = Field(default=False, description="[A311] a Pro room; the creator must be a "
+                      "signed-in pass holder")
 
 
 class JoinRoomIn(BaseModel):
@@ -1032,6 +1034,12 @@ class RoomStateOut(BaseModel):
     legends_on: bool = Field(default=False, description="[A215] career legends are on")
     legends: dict[str, "RoomLegendOut"] = Field(
         default_factory=dict, description="[A215] player_id -> the legend that seat brings")
+    more_legends: dict[str, list["RoomLegendOut"]] = Field(
+        default_factory=dict, description="[A311] player_id -> that seat's second and third "
+                                          "legends, in order")
+    pro: bool = Field(default=False, description="[A311] a Pro room")
+    perks: bool = Field(default=True, description="[A312] pass perks are on")
+    run: int = Field(default=0, description="[A311] which run of the tournament this is")
     auction: "AuctionOut | None" = Field(
         default=None, description="auction rooms only: the floor as the CALLER sees it")
     round: int = Field(description="len(moves) // seats -- which snake wave we're in")
@@ -1092,6 +1100,7 @@ class RoomLegendOut(BaseModel):
     # [A269] which saved career he came from, sent to his own seat only, so the lobby picker
     # can mark the one you brought among several of the same name, year and rating
     career: str | None = None
+    boosted: bool = False          # [A312] from a career played with pass boosts
 
 
 class CreatedRoomOut(BaseModel):
@@ -2498,7 +2507,7 @@ class TradeWindowOut(BaseModel):
     you: TradeSideOut
     partners: list[TradeSideOut]
     offers: list[TradeOfferOut] = Field(description="offers you made or received")
-    per_team: int = room_auction.TRADES_PER_TEAM
+    per_team: int = room_auction.TRADES_PER_TEAM     # [A311] three in a Pro room
     max_open: int = room_auction.MAX_OPEN_OFFERS
     seconds: int = room_auction.TRADE_SECONDS
 
@@ -3123,6 +3132,19 @@ def save_account_kit(body: KitIn, request: Request) -> KitOut:
     return _kit_out(k)
 
 
+def _holds_pass(conn, request: Request) -> bool:
+    """[A311] Is this request a signed-in pass holder's? A room seat has no account, so a
+    room perk asks the caller's own sign-in."""
+    account_id = _current_account_id(request)
+    return account_id is not None and premium_lib.has_premium(conn, account_id, _today())
+
+
+def _require_pass(conn, request: Request, message: str) -> bool:
+    if not _holds_pass(conn, request):
+        raise HTTPException(status_code=403, detail=message)
+    return True
+
+
 def _kit_premium_ok(conn, request: Request, colour: str | None) -> bool:
     """[A309] May this request choose a pass colour? A signed-in pass holder may; so may
     an account already wearing that very colour, since a lapsed pass never strips a kit.
@@ -3429,7 +3451,7 @@ def _room_auction_shown(room: rooms.Room, deck, caller_id: str | None) -> Auctio
                               size=t.squad_size if mini else None)
                for t in a.teams],
         squad=[AuctionSquadOut(card=_card(c), price=pr, retained=i < you.retained,
-                               legend=c is you.legend)
+                               legend=any(c is lg for lg in you.legends))
                for i, (c, pr) in enumerate(zip(you.squad, you.paid))] if you else [],
         recent=_recent(r, _room_whispers(r)),
         sold=sum(1 for x in a.sales if x.winner is not None),
@@ -3512,7 +3534,7 @@ def _trade_side_out(room, r, idx: int, owners: dict) -> TradeSideOut:
     return TradeSideOut(
         short=t.short, franchise=t.franchise, crest=crest_url(t.franchise),
         owner=owners.get(t.short), player_id=r.pid_of.get(idx),
-        trades_left=room_auction.TRADES_PER_TEAM - r.trades_used(idx),
+        trades_left=r.trades_per_team - r.trades_used(idx),
         ready=idx in r.trade_ready, overseas=t.overseas,
         squad=[TradePlayerOut(person_id=c.person_id, card=_card(c), price=p,
                               tradeable=c.person_id not in arrived)
@@ -3539,7 +3561,7 @@ def _trade_window_out(room, r, you_idx: int) -> TradeWindowOut:
         you=_trade_side_out(room, r, you_idx, owners),
         partners=[_trade_side_out(room, r, i, owners)
                   for i in sorted(set(r.team_of.values())) if i != you_idx],
-        offers=offers)
+        offers=offers, per_team=r.trades_per_team)
 
 
 def _trade_out(r, t, owners: dict) -> TradeOut:
@@ -3551,14 +3573,32 @@ def _trade_out(r, t, owners: dict) -> TradeOut:
         b_owner=owners.get(b.short), b_gave=_card(t.b_gave))
 
 
+def _room_legends_all(room, caller_id: str | None) -> dict[str, list[RoomLegendOut]]:
+    """[A215] Each seat's legends as the lobby shows them. [A269] The career each came from
+    goes to its own seat only: nobody else's picker needs it. [A311] A seat may hold more
+    than one."""
+    out = {}
+    for pid in room.legends or {}:
+        if pid not in room.players:
+            continue
+        ls = [RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"],
+                            year=v["year"], role_label=v["role_label"],
+                            career=v.get("career") if pid == caller_id else None,
+                            boosted=bool(v.get("boosted")))
+              for v in rooms.seat_legends(room, pid)
+              if v.get("skilled") or room.status != "lobby"]
+        if ls:
+            out[pid] = ls
+    return out
+
+
 def _room_legends_out(room, caller_id: str | None) -> dict[str, RoomLegendOut]:
-    """[A215] Each seat's legend as the lobby shows it. [A269] The career it came from goes to
-    its own seat only: nobody else's picker needs it."""
-    return {pid: RoomLegendOut(name=room_auction.legend_name(v["name"]), rating=v["rating"],
-                               year=v["year"], role_label=v["role_label"],
-                               career=v.get("career") if pid == caller_id else None)
-            for pid, v in (room.legends or {}).items()
-            if pid in room.players and (v.get("skilled") or room.status != "lobby")}
+    return {pid: ls[0] for pid, ls in _room_legends_all(room, caller_id).items()}
+
+
+def _room_more_legends_out(room, caller_id: str | None) -> dict[str, list[RoomLegendOut]]:
+    return {pid: ls[1:] for pid, ls in _room_legends_all(room, caller_id).items()
+            if len(ls) > 1}
 
 
 def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> RoomStateOut:
@@ -3588,6 +3628,7 @@ def _room_state_out(room: rooms.Room, deck, caller_id: str | None = None) -> Roo
         version=room.version,
         server_now=time.time(),
         turn_started_at=room.turn_started_at,
+        pro=room.pro, perks=room.perks, run=room_match_lib.run_number(room),
     )
 
 
@@ -3631,7 +3672,9 @@ def _auction_room_state_shown(room: rooms.Room, deck, caller_id: str | None) -> 
         server_now=time.time(), turn_started_at=room.turn_started_at,
         game=room.game, trades=room.trades, auction=auction_view,
         legends_on=room.legends is not None,
-        legends=_room_legends_out(room, caller_id))
+        legends=_room_legends_out(room, caller_id),
+        more_legends=_room_more_legends_out(room, caller_id),
+        pro=room.pro, perks=room.perks, run=room_match_lib.run_number(room))
 
 
 # --- the daily challenge ------------------------------------------------------------------
@@ -4147,7 +4190,8 @@ def create_room(body: CreateRoomIn, request: Request) -> CreatedRoomOut:
                 body.is_open, body.game, body.kit.model_dump() if body.kit else None,
                 body.trades, body.legends,
                 kit_premium_ok=_kit_premium_ok(conn, request,
-                                               body.kit.colour if body.kit else None))
+                                               body.kit.colour if body.kit else None),
+                pro=body.pro and _require_pass(conn, request, "A Pro room needs a pass."))
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -4479,6 +4523,8 @@ def room_legends(code: str, body: RoomTradesIn) -> RoomStateOut:
 
 class RoomLegendIn(BaseModel):
     player_id: str
+    slot: int = Field(default=0, ge=0, le=2, description="[A311] which of the seat's legends: "
+                                                         "0 the first")
     career: str | None = Field(default=None, pattern="^[0-9a-f]{64}(@[0-9]{4})?$",
                                description="a saved career's key (GET /api/career/hall), with "
                                            "'@<year>' for one of its extra seasons [A272], or "
@@ -4504,7 +4550,39 @@ def room_legend(code: str, body: RoomLegendIn, request: Request) -> RoomStateOut
             # [A269] which one, for the picker; [A284] skilled: it passed the skills check
             legend = {**legend, "career": body.career, "skilled": True}
         try:
-            room = rooms.set_legend(conn, code, body.player_id, legend)
+            room = rooms.set_legend(conn, code, body.player_id, legend, body.slot,
+                                    holder=_holds_pass(conn, request) if body.slot else False)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+class RoomProIn(BaseModel):
+    player_id: str
+    on: bool
+
+
+@app.post("/api/rooms/{code}/pro", response_model=RoomStateOut)
+def room_pro(code: str, body: RoomProIn, request: Request) -> RoomStateOut:
+    """[A311] The host makes this a Pro room, in the lobby. Turning it on needs a pass;
+    turning it off does not."""
+    with _db() as conn:
+        if body.on:
+            _require_pass(conn, request, "A Pro room needs a pass.")
+        try:
+            room = rooms.set_pro(conn, code, body.player_id, body.on)
+        except rooms.RoomError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
+
+
+@app.post("/api/rooms/{code}/match/run-back", response_model=RoomStateOut)
+def room_run_back(code: str, body: HostActionIn) -> RoomStateOut:
+    """[A311] A Pro room's host plays a fresh tournament with the same squads."""
+    with _db() as conn:
+        try:
+            room = room_match_lib.run_it_back(conn, code, body.player_id, STATE["deck"],
+                                              STATE["model"])
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)
@@ -4955,7 +5033,8 @@ def room_save(code: str, body: SaveResultIn, request: Request) -> SaveResultOut:
             ([], None))
         all_twelve = list(your_order) + ([your_impact] if your_impact is not None else [])
         squad = [_journey_entry(c, journey.acc) for c in all_twelve]
-        natural_key = f"{code}:{room.seed}:{body.player_id}"
+        run = room_match_lib.run_number(room)       # [A311] each Run it back is its own game
+        natural_key = f"{code}:{room.seed}:{body.player_id}" + (f":run{run}" if run else "")
         saved = accounts.save_game_result(
             conn, account_id, "room", natural_key, journey.champion, squad,
             matches_played=journey.played, matches_won=journey.won)

@@ -162,8 +162,8 @@ def test_a_legend_chosen_before_the_rule_is_dropped_at_the_start(deck, clock, ca
     rooms._save_room(conn, room)
     rooms.start_room(conn, code, host, deck)
     r = ra.replay(load(conn, code), deck)
-    assert r.auction.teams[r.team_of[host]].legend is None
-    assert r.auction.teams[r.team_of[guest]].legend is not None
+    assert r.auction.teams[r.team_of[host]].legends == []
+    assert len(r.auction.teams[r.team_of[guest]].legends) == 1
 
 
 def test_the_lobby_does_not_show_an_older_legend(deck, career):
@@ -182,7 +182,7 @@ def _post_legend(monkeypatch, legend_of_result, captured):
     monkeypatch.setattr(A, "_db", contextlib.nullcontext)
     monkeypatch.setattr(A.career_results, "legend_of", lambda conn, account_id, key: legend_of_result)
 
-    def set_legend(conn, code, player_id, legend):
+    def set_legend(conn, code, player_id, legend, slot=0, holder=False):
         captured.append(legend)
         raise rooms.RoomError("stop here")                    # the room is not the subject
     monkeypatch.setattr(A.rooms, "set_legend", set_legend)

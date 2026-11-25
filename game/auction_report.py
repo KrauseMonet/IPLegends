@@ -96,7 +96,7 @@ def bought(t: au.Team) -> list[tuple[Card, int]]:
     """Players the team paid for at the auction, fill round included -- not its retentions
     and not a career legend (A215), who came free."""
     return [(c, p) for i, (c, p) in enumerate(zip(t.squad, t.paid))
-            if i >= t.retained and c is not t.legend]
+            if i >= t.retained and not any(c is lg for lg in t.legends)]
 
 
 def spent(t: au.Team) -> int:
@@ -494,7 +494,7 @@ def whispers(a: au.Auction) -> dict[int, list[str]]:
     where it names one), so a long auction is not a wall of repeats."""
     teams = a.teams
     out: dict[int, list[str]] = {}
-    squads = {t.index: list(t.squad[:t.retained]) + ([t.legend] if t.legend else [])
+    squads = {t.index: list(t.squad[:t.retained]) + list(t.legends)
               for t in teams}
     spend = {t.index: 0 for t in teams}
     opening = {t.index: opening_purse(t) for t in teams}
@@ -603,7 +603,8 @@ def _lines(a: au.Auction, results, team_of_side) -> dict[int, dict[str, BuyLine]
     lines: dict[int, dict[str, BuyLine]] = {}
     for t in a.teams:
         lines[t.index] = {
-            c.person_id: BuyLine(c.person_id, c.name, c, p, i < t.retained, c is t.legend,
+            c.person_id: BuyLine(c.person_id, c.name, c, p, i < t.retained,
+                                 any(c is lg for lg in t.legends),
                                  False)
             for i, (c, p) in enumerate(zip(t.squad, t.paid))}
     owner = {pid: ti for ti, d in lines.items() for pid in d}

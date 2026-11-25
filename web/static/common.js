@@ -446,7 +446,8 @@ let META = null;
 // v2: the shape grew `showcase` and `crests` for the home page. A new key rather than a
 // tolerant reader, so a copy cached before them is never rendered as though complete.
 // v3: `kits` and `kit_default`, the team-kit palette [A151].
-const META_CACHE_KEY = 'iplegends_meta_v3';
+// v4: pass colours in `kits`, each marked `premium` [A309].
+const META_CACHE_KEY = 'iplegends_meta_v4';
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 
 function readMetaCache(){
@@ -878,8 +879,16 @@ function kitStyle(kit){
 }
 function kitBadge(kit, cls = ''){
   if (!kit) return '';
-  return `<span class="kit-badge ${cls}" style="${kitStyle(kit)}" title="${esc(kit.name)}"
+  const pass = kitColour(kit.colour)?.premium ? ' kit-premium' : '';
+  return `<span class="kit-badge${pass} ${cls}" style="${kitStyle(kit)}" title="${esc(kit.name)}"
     >${esc(kit.monogram)}</span>`;
+}
+// [A309] May this viewer choose a pass colour? With a pass, or when the kit already wears
+// it (a lapsed pass never strips a kit). The server decides; this only draws the lock.
+function kitColourOpen(c, wearing){
+  if (!c.premium) return true;
+  const me = (typeof ME !== 'undefined') ? ME : null;
+  return !!(me && me.premium) || c.key === wearing;
 }
 
 function localKit(){
@@ -956,9 +965,15 @@ function openKitEditor({kit, title, note, onSave}){
       <label class="room-label" for="kitMono">Monogram</label>
       <input id="kitMono" class="room-input kit-mono-input" maxlength="3" autocomplete="off">
       <span class="room-label">Colour</span>
-      <div class="kit-swatches">${kitPalette().map(c =>
+      <div class="kit-swatches">${kitPalette().filter(c => !c.premium).map(c =>
         `<button class="kit-swatch" data-colour="${c.key}" title="${c.label}" aria-label="${c.label}"
           style="--team:${c.team};--team-deep:${c.deep}"></button>`).join('')}</div>
+      <span class="room-label kit-pass-label">Pass colours</span>
+      <div class="kit-swatches">${kitPalette().filter(c => c.premium).map(c => {
+        const open = kitColourOpen(c, cur.colour);
+        return `<button class="kit-swatch kit-swatch-pass${open ? '' : ' locked'}" data-colour="${c.key}"
+          title="${c.label}${open ? '' : ' (comes with a pass)'}" aria-label="${c.label}${open ? '' : ', comes with a pass'}"
+          style="--team:${c.team};--team-deep:${c.deep}"></button>`; }).join('')}</div>
       <p class="room-note kit-note"></p>
       <div class="actions"><button class="act lead kit-save">Save kit</button></div>
     </div>`;
@@ -982,7 +997,13 @@ function openKitEditor({kit, title, note, onSave}){
     mono.value = mono.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     cur.monogram = mono.value; monoTouched = true; paint();
   };
-  el.querySelectorAll('.kit-swatch').forEach(b => b.onclick = () => { cur.colour = b.dataset.colour; paint(); });
+  el.querySelectorAll('.kit-swatch').forEach(b => b.onclick = () => {
+    if (b.classList.contains('locked')){
+      slip('Pass colours come with a pass. See fineleg.app/premium.');
+      return;
+    }
+    cur.colour = b.dataset.colour; paint();
+  });
   el.querySelector('.kit-editor-back').onclick = closeKitEditor;
   el.querySelector('.kit-editor-x').onclick = closeKitEditor;
   el.querySelector('.kit-save').onclick = async (e) => {

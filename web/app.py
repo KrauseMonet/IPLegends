@@ -3113,13 +3113,29 @@ def save_account_kit(body: KitIn, request: Request) -> KitOut:
     account_id = _current_account_id(request)
     if account_id is None:
         raise HTTPException(status_code=401, detail="sign in to save your kit")
-    try:
-        k = kit_lib.parse_kit(body.model_dump())
-    except kit_lib.KitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     with _db() as conn:
+        try:
+            k = kit_lib.parse_kit(body.model_dump(),
+                                  _kit_premium_ok(conn, request, body.colour))
+        except kit_lib.KitError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         accounts.set_kit(conn, account_id, k)
     return _kit_out(k)
+
+
+def _kit_premium_ok(conn, request: Request, colour: str | None) -> bool:
+    """[A309] May this request choose a pass colour? A signed-in pass holder may; so may
+    an account already wearing that very colour, since a lapsed pass never strips a kit.
+    Asks the database only when the colour is a pass colour."""
+    if not kit_lib.is_premium(colour):
+        return False
+    account_id = _current_account_id(request)
+    if account_id is None:
+        return False
+    if premium_lib.has_premium(conn, account_id, _today()):
+        return True
+    account = accounts.get_account(conn, account_id)
+    return bool(account and account.kit and account.kit.colour == colour)
 
 
 @app.get("/api/profile", response_model=ProfileOut)
@@ -4123,13 +4139,15 @@ def daily_board(limit: int = 50) -> list[DailyBoardRow]:
 
 
 @app.post("/api/rooms", response_model=CreatedRoomOut)
-def create_room(body: CreateRoomIn) -> CreatedRoomOut:
+def create_room(body: CreateRoomIn, request: Request) -> CreatedRoomOut:
     with _db() as conn:
         try:
             room, player_id = rooms.create_room(
                 conn, body.format, body.timer_seconds, body.host_name, body.draft_mode,
                 body.is_open, body.game, body.kit.model_dump() if body.kit else None,
-                body.trades, body.legends)
+                body.trades, body.legends,
+                kit_premium_ok=_kit_premium_ok(conn, request,
+                                               body.kit.colour if body.kit else None))
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -4138,11 +4156,14 @@ def create_room(body: CreateRoomIn) -> CreatedRoomOut:
 
 
 @app.post("/api/rooms/{code}/join", response_model=CreatedRoomOut)
-def join_room(code: str, body: JoinRoomIn) -> CreatedRoomOut:
+def join_room(code: str, body: JoinRoomIn, request: Request) -> CreatedRoomOut:
     with _db() as conn:
         try:
-            room, player_id = rooms.join_room(conn, code, body.name, STATE["deck"],
-                                              body.kit.model_dump() if body.kit else None)
+            room, player_id = rooms.join_room(
+                conn, code, body.name, STATE["deck"],
+                body.kit.model_dump() if body.kit else None,
+                kit_premium_ok=_kit_premium_ok(conn, request,
+                                               body.kit.colour if body.kit else None))
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return CreatedRoomOut(
@@ -4349,13 +4370,14 @@ def room_franchise_random(code: str, body: HostActionIn) -> RoomStateOut:
 
 
 @app.post("/api/rooms/{code}/kit", response_model=RoomStateOut)
-def room_kit(code: str, body: RoomKitIn) -> RoomStateOut:
+def room_kit(code: str, body: RoomKitIn, request: Request) -> RoomStateOut:
     """[A151] A draft room seat chooses its team kit -- until the matches start."""
     with _db() as conn:
         try:
             room = rooms.set_kit(conn, code, body.player_id,
                                  {"name": body.name, "monogram": body.monogram,
-                                  "colour": body.colour})
+                                  "colour": body.colour},
+                                 _kit_premium_ok(conn, request, body.colour))
         except rooms.RoomError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _room_state_out(room, STATE["deck"], caller_id=body.player_id)

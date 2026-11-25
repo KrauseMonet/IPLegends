@@ -1861,7 +1861,34 @@ async function crDrawCard(d){
     ctx.fillText(`${fin.toUpperCase()} FINISH`, W - M, 40);
     ctx.restore();
   }
+  // [A309] A pass holder's card is the Pass edition: a foil sweep across the header and
+  // gold corner brackets, inside the earned finish frame and never in place of it -- the
+  // finish says what the career won, this only says who printed it.
+  if (typeof ME !== 'undefined' && ME && ME.premium) crPassEdition(ctx, W, H, HEAD_H, M, gold, gold2);
   $('#crCardDownload').href = canvas.toDataURL('image/png');
+}
+
+function crPassEdition(ctx, W, H, HEAD_H, M, gold, gold2){
+  ctx.save();
+  const foil = ctx.createLinearGradient(0, 0, W, HEAD_H);
+  foil.addColorStop(0, 'rgba(255,255,255,0)');
+  foil.addColorStop(.42, 'rgba(255,240,200,0)');
+  foil.addColorStop(.5, 'rgba(255,240,200,.16)');
+  foil.addColorStop(.58, 'rgba(180,230,255,.10)');
+  foil.addColorStop(.7, 'rgba(255,255,255,0)');
+  ctx.fillStyle = foil; ctx.fillRect(0, 10, W, HEAD_H - 10);
+  const inset = 30, len = 70;
+  ctx.strokeStyle = gold; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  [[inset, inset, 1, 1], [W - inset, inset, -1, 1], [inset, H - inset, 1, -1],
+   [W - inset, H - inset, -1, -1]].forEach(([x, y, dx, dy]) => {
+    ctx.beginPath(); ctx.moveTo(x, y + dy * len); ctx.lineTo(x, y); ctx.lineTo(x + dx * len, y);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + dx * 10, y + dy * 10, 3, 0, Math.PI * 2);
+    ctx.fillStyle = gold2; ctx.fill();
+  });
+  ctx.fillStyle = gold; ctx.font = `700 16px ${CARD_FIGS}`; ctx.textAlign = 'center';
+  ctx.fillText('★ PASS EDITION', W / 2, H - 50);
+  ctx.restore();
 }
 
 // A finished career goes into the Hall of Fame on your profile [A210]: saved for a signed-in

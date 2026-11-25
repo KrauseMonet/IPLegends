@@ -422,7 +422,8 @@ def clean_player_name(raw: str) -> str:
 def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                  draft_mode: str = "stat", is_open: bool = False,
                  game: str = "draft", kit: dict | None = None,
-                 trades: bool = False, legends: bool = False) -> tuple[Room, str]:
+                 trades: bool = False, legends: bool = False,
+                 kit_premium_ok: bool = False) -> tuple[Room, str]:
     if game not in GAMES:
         raise RoomError(f"unknown game {game!r}: choose one of {GAMES}")
     if game != "draft" and fmt != "league":
@@ -443,13 +444,13 @@ def create_room(conn, fmt: str, timer_seconds: int, host_name: str,
                 game=game, trades=bool(trades) and game not in ("draft", "mini"),
                 legends={} if legends and game not in ("draft", "mini") else None)
     room.players[host_id] = RoomPlayer(host_id, host_name, is_cpu=False)
-    room.players[host_id].kit = _arriving_kit(room, host_id, kit)
+    room.players[host_id].kit = _arriving_kit(room, host_id, kit, kit_premium_ok)
     _save_room(conn, room)
     return room, host_id
 
 
 def join_room(conn, code: str, name: str, deck: Deck,
-              kit: dict | None = None) -> tuple[Room, str]:
+              kit: dict | None = None, kit_premium_ok: bool = False) -> tuple[Room, str]:
     name = clean_player_name(name)
     room = _load_room(conn, code)
     if room.status != "lobby":
@@ -458,7 +459,7 @@ def join_room(conn, code: str, name: str, deck: Deck,
         raise RoomError("this room is full")
     player_id = secrets.token_urlsafe(8)
     room.players[player_id] = RoomPlayer(player_id, name, is_cpu=False)
-    room.players[player_id].kit = _arriving_kit(room, player_id, kit)
+    room.players[player_id].kit = _arriving_kit(room, player_id, kit, kit_premium_ok)
     _save_room(conn, room)
     return room, player_id
 
@@ -493,7 +494,8 @@ def seat_kits(room: Room) -> dict[str, Kit]:
     return out
 
 
-def _arriving_kit(room: Room, player_id: str, raw: dict | None) -> Kit | None:
+def _arriving_kit(room: Room, player_id: str, raw: dict | None,
+                  premium_ok: bool = False) -> Kit | None:
     """The kit a player brings into a room from their account or browser. Never a reason
     to refuse a join: an invalid one is dropped (the seat wears a default), and one whose
     monogram another seat already wears keeps its name and colour with the monogram made
@@ -501,7 +503,7 @@ def _arriving_kit(room: Room, player_id: str, raw: dict | None) -> Kit | None:
     if raw is None or room.game != "draft":
         return None
     try:
-        k = parse_kit(raw)
+        k = parse_kit(raw, premium_ok)
     except KitError:
         return None
     taken = {kk.monogram for pid, kk in seat_kits(room).items() if pid != player_id}
@@ -510,7 +512,7 @@ def _arriving_kit(room: Room, player_id: str, raw: dict | None) -> Kit | None:
     return k
 
 
-def set_kit(conn, code: str, player_id: str, raw: dict) -> Room:
+def set_kit(conn, code: str, player_id: str, raw: dict, premium_ok: bool = False) -> Room:
     """A seat chooses its kit. Any time until the room's matches start -- through the
     lobby, the draft and the squad review -- and locked after, so a side cannot change
     its name halfway through a tournament it is already on the scoreboard of."""
@@ -524,7 +526,7 @@ def set_kit(conn, code: str, player_id: str, raw: dict) -> Room:
     if any(isinstance(mv, dict) and mv.get("kind") == "start" for mv in room.match_moves):
         raise RoomError("the matches have started -- kits are locked")
     try:
-        k = parse_kit(raw)
+        k = parse_kit(raw, premium_ok)
     except KitError as exc:
         raise RoomError(str(exc)) from exc
     for pid, other in seat_kits(room).items():

@@ -47,6 +47,19 @@ PALETTE: dict[str, tuple[str, str]] = {
     "silver": ("Silver", "#9aa6b8"),
 }
 
+# [A309] Pass colours: chosen only while holding a pass (web/premium.py `has_premium`, asked
+# by the route), and drawn with a metallic sheen (style.css `.kit-premium`). A kit already
+# wearing one keeps it when the pass lapses -- the rule is about CHOOSING, never wearing.
+# Never handed out as a room seat's default, which only ever draws on PALETTE.
+PREMIUM: dict[str, tuple[str, str]] = {
+    "rose": ("Rose gold", "#d98c7a"),
+    "bronze": ("Bronze", "#b07432"),
+    "crimson": ("Crimson", "#a3122e"),
+    "midnight": ("Midnight", "#26357f"),
+    "aurora": ("Aurora", "#22c7a0"),
+    "obsidian": ("Obsidian", "#3b4150"),
+}
+
 # What a solo player's side is called before they have chosen anything -- the name the
 # site has always used, so nothing reads differently to someone who never opens the
 # picker.
@@ -67,10 +80,17 @@ class Kit:
         return asdict(self)
 
 
+def is_premium(colour: str | None) -> bool:
+    return colour in PREMIUM
+
+
 def palette() -> list[dict]:
-    """The palette as the page reads it: every colour with its three derived shades."""
-    return [{"key": key, "label": label, **colours_from(hex_rgb(base))}
-            for key, (label, base) in PALETTE.items()]
+    """The palette as the page reads it: every colour with its three derived shades, the
+    pass colours last and marked, so the page can draw a kit wearing one whoever looks."""
+    return ([{"key": key, "label": label, "premium": False, **colours_from(hex_rgb(base))}
+             for key, (label, base) in PALETTE.items()]
+            + [{"key": key, "label": label, "premium": True, **colours_from(hex_rgb(base))}
+               for key, (label, base) in PREMIUM.items()])
 
 
 def clean_name(raw: str) -> str:
@@ -90,9 +110,10 @@ def clean_name(raw: str) -> str:
     return name
 
 
-def parse_kit(raw) -> Kit:
+def parse_kit(raw, premium_ok: bool = False) -> Kit:
     """A kit from untrusted input, or KitError. The monogram is upper-cased, since a
-    badge is always drawn in capitals and "rcb" and "RCB" are the same monogram."""
+    badge is always drawn in capitals and "rcb" and "RCB" are the same monogram.
+    [A309] A pass colour is accepted only where the caller says this chooser may wear it."""
     if not isinstance(raw, dict):
         raise KitError("a kit is a name, a monogram and a colour")
     name = clean_name(raw.get("name", ""))
@@ -100,7 +121,10 @@ def parse_kit(raw) -> Kit:
     if not _MONOGRAM.match(monogram):
         raise KitError(f"a monogram is 1 to {MONOGRAM_MAX} letters or digits")
     colour = raw.get("colour")
-    if colour not in PALETTE:
+    if colour in PREMIUM:
+        if not premium_ok:
+            raise KitError("that colour comes with a pass")
+    elif colour not in PALETTE:
         raise KitError(f"unknown colour {colour!r}")
     return Kit(name, monogram, colour)
 

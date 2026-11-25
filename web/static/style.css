@@ -2417,6 +2417,31 @@ html{scroll-padding-top:80px}
   box-shadow:0 0 6px rgba(255,106,77,.7)}
 .sb-bar > span{position:absolute;bottom:0;left:0;right:0;text-align:center;
   font:600 9px var(--mono);color:var(--ink-3)}
+/* [A309] an over, opened: who bowled it and who scored what */
+.sb-bars{position:relative}
+.sb-bar[data-over]{cursor:pointer;outline:none}
+.sb-bar[data-over]:hover,.sb-bar[data-over]:focus-visible,.sb-bar.open{background:rgba(255,255,255,.09)}
+.sb-bar.open > span{color:var(--ink)}
+.sb-tip{position:absolute;bottom:calc(100% + 6px);left:0;z-index:5;width:max-content;min-width:180px;
+  max-width:min(280px,100%);padding:10px 12px;border-radius:10px;background:var(--panel-2);
+  border:1px solid var(--line);box-shadow:0 10px 28px rgba(0,0,0,.45);font-size:13px;color:var(--ink-2);
+  opacity:0;pointer-events:none;transform:translateY(4px);transition:opacity .12s,transform .12s}
+.sb-tip.show{opacity:1;transform:none;pointer-events:auto}
+.sb-tip.pinned{border-color:color-mix(in srgb,var(--team) 60%,var(--line))}
+.sb-tip-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+.sb-tip-head > span:first-child{font:700 9.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink-3)}
+.sb-tip-head b{color:var(--ink);font-weight:800}
+.sb-tip-total{margin-left:auto;font:700 12px var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+.sb-tip ul{list-style:none;margin:8px 0 0;padding:8px 0 0;border-top:1px solid var(--line);display:grid;gap:4px}
+.sb-tip li{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:baseline}
+.sb-tip li b{font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-tip li.out b{color:var(--red-2)}
+.sb-tip li.extras b{font-weight:600;color:var(--ink-3)}
+.sb-tip-fig{font-variant-numeric:tabular-nums;text-align:right}
+.sb-tip-fig strong{color:var(--ink)}
+.sb-tip-fig em{font-style:normal;color:var(--ink-3)}
+.sb-tip-bits{font:600 11px var(--mono);color:var(--ink-3);min-width:3em;text-align:right}
 .sb-phases{display:grid;grid-template-columns:6fr 9fr 5fr;gap:4px;margin-top:6px;
   font:600 9px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);text-align:center}
 .sb-phases span{border-top:1px solid var(--line);padding-top:5px}
@@ -2579,7 +2604,7 @@ html{scroll-padding-top:80px}
   background:radial-gradient(circle at 35% 35%,var(--team),color-mix(in srgb,var(--team) 60%,var(--team-deep)))}
 .kit-swatch.sel{border-color:var(--ink);box-shadow:0 0 0 3px var(--team)}
 .kit-swatch:focus-visible{outline:2px solid var(--gold-2);outline-offset:2px}
-/* [A309] Pass colours: a metallic sheen on the badge, and a lock on a swatch the viewer
+/* [A314] Pass colours: a metallic sheen on the badge, and a lock on a swatch the viewer
    cannot choose. Purely a look -- the server decides who may choose one. */
 .kit-badge.kit-premium{background:
   linear-gradient(135deg,rgba(255,255,255,.28) 0%,rgba(255,255,255,0) 38%,
@@ -4550,6 +4575,11 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .hx-card:hover{border-color:var(--gold)}
 .hx-card b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
 .hx-card span{color:var(--ink-2);font-size:13.5px;line-height:1.55}
+.hx-card em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:10px}
+.hx-byline{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin:10px 0 0}
+.hx-lede{font-size:17px!important;color:var(--ink)!important}
 @media (max-width:560px){
   .hx-table{font-size:12.5px}
   .hx-table td,.hx-table th{padding:7px 9px}
@@ -4816,7 +4846,7 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .act.lead.minor{background:linear-gradient(180deg,var(--gold-2),var(--gold));color:#1a1204;
   border-color:transparent}
 
-/* [A306] careers kept on the account, and watching any match */
+/* [A313] careers kept on the account, and watching any match */
 .cr-fr-watch{margin-left:8px;border:1px solid var(--line);background:transparent;color:var(--gold);
   border-radius:6px;font-size:11px;line-height:1;padding:3px 6px;cursor:pointer}
 .cr-fr-watch:hover{background:rgba(245,184,61,.12)}

@@ -1,4 +1,4 @@
-"""Pass cosmetics [A309]: pass colours for a team kit, chosen only with a pass, kept when
+"""Pass cosmetics [A314]: pass colours for a team kit, chosen only with a pass, kept when
 a pass lapses, never handed out as a default, and drawn with a sheen whoever looks."""
 
 from __future__ import annotations

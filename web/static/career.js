@@ -261,7 +261,7 @@ async function crMove(move){
   else if (move !== 'r') crLoading(mega ? 'The auctioneer opens the bidding…' : `Playing ${CR.data.pending.year}…`);
   try {
     const d = await crPost('/api/career/move', {token: CR.data.token, move});
-    if (d.seasons.length > before || !d.pending) crCloudSave(d);   // [A306] once a season, never per click
+    if (d.seasons.length > before || !d.pending) crCloudSave(d);   // [A313] once a season, never per click
     const next = () => crShow(d, d.seasons.length > before ? 'season' : null);
     if (mega && d.auction){ CR.data = d; crHead(d); crTimeline(d); return crAuctionPlay(d.auction, next); }
     next();
@@ -1013,7 +1013,7 @@ function crFeedMilestones(l){
 
 const crOvers = balls => balls % 6 ? `${Math.floor(balls / 6)}.${balls % 6}` : String(balls / 6);
 
-// [A306] A pass holder's season carries every match's over log (`cards_full`), so any match
+// [A313] A pass holder's season carries every match's over log (`cards_full`), so any match
 // with a scorecard can be watched ball by ball, not only the playoffs and key moments.
 function crCardsFull(){
   const sp = (CR.feed && CR.feed.sp) || (CR.data && CR.data.season_play);
@@ -1176,7 +1176,7 @@ async function crAnswer(i){
   try {
     const d = await crPost('/api/career/move', {token: CR.data.token, move: `i${i}`});
     CR.data = d;
-    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A306] the season it finished
+    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A313] the season it finished
     crHead(d, true);
     crTimeline(d, true);
     crFeed(d);
@@ -1214,7 +1214,7 @@ async function crCall(i){
     const move = `m${i}` + (CR.planDirty ? 'p' + CR.plan.join('') : '');
     const d = await crPost('/api/career/move', {token: CR.data.token, move});
     CR.data = d;
-    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A306] the season it finished
+    if (d.season_play && d.season_play.complete) crCloudSave(d);   // [A313] the season it finished
     crHead(d, true);
     crTimeline(d, true);
     crFeed(d);
@@ -1254,7 +1254,7 @@ function crWatch(idx){
   crPlayMatch(sp, sp.watch[idx], line ? line.card : null);
 }
 
-// [A306] Any of a pass holder's matches, from its scorecard (which keeps its over log).
+// [A313] Any of a pass holder's matches, from its scorecard (which keeps its over log).
 function crWatchCard(i){
   const sp = (CR.feed && CR.feed.sp) || (CR.data && CR.data.season_play);
   const m = sp && sp.cards && sp.cards[i];
@@ -1878,7 +1878,7 @@ async function crDrawCard(d){
     ctx.fillText(`${fin.toUpperCase()} FINISH`, W - M, 40);
     ctx.restore();
   }
-  // [A309] A pass holder's card is the Pass edition: a foil sweep across the header and
+  // [A314] A pass holder's card is the Pass edition: a foil sweep across the header and
   // gold corner brackets, inside the earned finish frame and never in place of it -- the
   // finish says what the career won, this only says who printed it.
   if (typeof ME !== 'undefined' && ME && ME.premium) crPassEdition(ctx, W, H, HEAD_H, M, gold, gold2);
@@ -1932,7 +1932,7 @@ async function crKeep(d){
 }
 document.addEventListener('signedin', () => { if (CR.data && CR.data.summary) crKeep(CR.data); });
 
-// --- careers kept on the account [A306] ---------------------------------------------------
+// --- careers kept on the account [A313] ---------------------------------------------------
 // A pass holder may keep up to five careers on their account and open any of them on any
 // device. The career this browser holds remembers which slot it lives in (`slot` in its
 // store); the page saves it there once a season is played, never per click, because the

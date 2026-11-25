@@ -120,7 +120,7 @@ async function submitLogin(ctrl){
     try {
       ME = await api('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({identifier, password})});
-      // [A309] The login answer carries no pass or admin flag; /me does, so the page knows
+      // [A314] The login answer carries no pass or admin flag; /me does, so the page knows
       // what this account may choose without a reload.
       try { ME = await api('/api/auth/me'); } catch(e){ /* the login stands; /me is a nicety */ }
       renderAuthArea();

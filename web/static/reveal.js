@@ -65,6 +65,7 @@ function startOverStepper(innings, stageText, onDone, priorContext, matchup){
     speed: Number($('#overSpeedSelect').value) || 500,
     paused: false, onDone, stageText, innings, priorContext: priorContext || null,
     lastRuns: null, lastCrease: [], milestonesThrough: 0, skipping: false,
+    tipOver: null, tipPinned: false,
   };
   const ms = document.getElementById('overMilestone');
   if (ms){ ms.className = 'sb-milestone'; ms.innerHTML = ''; }
@@ -209,10 +210,117 @@ function renderOverChips(entries){
     const pips = o.over_wickets ? `<u>${'<s></s>'.repeat(Math.min(o.over_wickets, 3))}</u>` : '';
     const isNew = n === entries.length - 1;
     bars.push(`<div class="sb-bar ${phase}${isNew ? ' new' : ''}${o.over_runs >= 12 ? ' big' : ''}"
-      title="Over ${n + 1}: ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}${o.over_wickets ? ', ' + o.over_wickets + ' wkt' : ''}">
+      data-over="${n}" tabindex="0" role="button"
+      aria-label="Over ${n + 1}: ${o.over_runs} run${o.over_runs === 1 ? '' : 's'}${o.over_wickets ? ', ' + o.over_wickets + ' wicket' + (o.over_wickets === 1 ? '' : 's') : ''}. Show who bowled and who scored">
       ${pips}<i style="height:${h}%"><b>${o.over_runs}</b></i><span>${n + 1}</span></div>`);
   }
-  $('#overChips').innerHTML = bars.join('');
+  const el = $('#overChips');
+  el.innerHTML = bars.join('');
+  wireOverTips(el);
+  // The bars are rebuilt every over, so an open tip is put back on its bar.
+  if (OVER_STEP && OVER_STEP.tipOver != null && entries[OVER_STEP.tipOver]) showOverTip(OVER_STEP.tipOver);
+  else hideOverTip();
+}
+
+// [A309] One over of the Manhattan, opened: who bowled it and what each batter who faced
+// a ball made of it, with the over's extras. Hover (or keyboard focus) shows it; a click
+// or tap pins it open, since a phone has no hover, and a second click on the same bar,
+// Escape or a click elsewhere closes it. Read from the over log the reveal already holds.
+function overTipHtml(o, innings){
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const batting = (innings && innings.batting) || [];
+  const batters = o.batters || [];
+  const rows = batters.map(b => {
+    const card = batting[b.pos] || {};
+    const bits = [];
+    if (b.fours) bits.push(`${b.fours}×4`);
+    if (b.sixes) bits.push(`${b.sixes}×6`);
+    if (b.out) bits.push('out');
+    return `<li class="${b.out ? 'out' : ''}${card.you ? ' you' : ''}">` +
+      `<b>${esc(shortName(card.name || '?'))}${youTag(card.you)}</b>` +
+      `<span class="sb-tip-fig"><strong>${b.runs}</strong> <em>(${b.balls})</em></span>` +
+      `<span class="sb-tip-bits">${bits.join(' ')}</span></li>`;
+  });
+  const extras = o.over_runs - batters.reduce((t, b) => t + b.runs, 0);
+  if (batters.length && extras > 0){
+    rows.push(`<li class="extras"><b>Extras</b><span class="sb-tip-fig"><strong>${extras}</strong></span>` +
+      `<span class="sb-tip-bits"></span></li>`);
+  }
+  return `<div class="sb-tip-head"><span>Over ${o.over + 1}</span>` +
+    `<b>${esc(shortName(o.bowler))}${youTag(!!o.bowler_you)}</b>` +
+    `<span class="sb-tip-total">${plural(o.over_runs, 'run')}` +
+    `${o.over_wickets ? ' · ' + plural(o.over_wickets, 'wkt') : ''}</span></div>` +
+    (rows.length ? `<ul>${rows.join('')}</ul>` : '');
+}
+
+function showOverTip(n){
+  const el = document.getElementById('overChips');
+  const o = OVER_STEP && OVER_STEP.log[n];
+  const bar = el && el.querySelector(`.sb-bar[data-over="${n}"]`);
+  if (!o || !bar){ hideOverTip(); return; }
+  OVER_STEP.tipOver = n;
+  let tip = document.getElementById('overTip');
+  if (!tip){
+    tip = document.createElement('div');
+    tip.id = 'overTip';
+    tip.className = 'sb-tip';
+    tip.setAttribute('role', 'tooltip');
+  }
+  if (tip.parentElement !== el) el.appendChild(tip);
+  tip.innerHTML = overTipHtml(o, OVER_STEP.innings);
+  tip.classList.add('show');
+  tip.classList.toggle('pinned', !!OVER_STEP.tipPinned);
+  el.querySelectorAll('.sb-bar.open').forEach(b => b.classList.remove('open'));
+  bar.classList.add('open');
+  // centred over its bar, kept inside the board
+  const w = tip.offsetWidth, room = el.clientWidth;
+  const mid = bar.offsetLeft + bar.offsetWidth / 2;
+  tip.style.left = Math.max(0, Math.min(room - w, mid - w / 2)) + 'px';
+}
+
+function hideOverTip(){
+  const tip = document.getElementById('overTip');
+  if (tip) tip.classList.remove('show', 'pinned');
+  if (OVER_STEP){ OVER_STEP.tipOver = null; OVER_STEP.tipPinned = false; }
+  const el = document.getElementById('overChips');
+  if (el) el.querySelectorAll('.sb-bar.open').forEach(b => b.classList.remove('open'));
+}
+
+function toggleOverTip(n){
+  if (!OVER_STEP) return;
+  if (OVER_STEP.tipPinned && OVER_STEP.tipOver === n){ hideOverTip(); return; }
+  OVER_STEP.tipPinned = true;
+  showOverTip(n);
+}
+
+// The listeners go on the bars' container, once: the bars themselves are rebuilt each over.
+function wireOverTips(el){
+  if (el.dataset.tips) return;
+  el.dataset.tips = '1';
+  const barOf = e => {
+    const b = e.target.closest ? e.target.closest('.sb-bar[data-over]') : null;
+    return b && el.contains(b) ? Number(b.dataset.over) : null;
+  };
+  const peek = e => {
+    const n = barOf(e);
+    if (n != null && OVER_STEP && !OVER_STEP.tipPinned) showOverTip(n);
+  };
+  el.addEventListener('mouseover', peek);
+  el.addEventListener('focusin', peek);
+  el.addEventListener('mouseleave', () => { if (OVER_STEP && !OVER_STEP.tipPinned) hideOverTip(); });
+  el.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('#overTip')) return;
+    const n = barOf(e);
+    if (n != null) toggleOverTip(n);
+  });
+  el.addEventListener('keydown', e => {
+    const n = barOf(e);
+    if (n != null && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); toggleOverTip(n); }
+  });
+  document.addEventListener('click', e => {
+    if (OVER_STEP && OVER_STEP.tipPinned && !el.contains(e.target)) hideOverTip();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideOverTip(); });
 }
 
 // The batters at the crease, the one on strike marked, and the bowler of the over just

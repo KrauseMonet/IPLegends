@@ -47,7 +47,7 @@ PALETTE: dict[str, tuple[str, str]] = {
     "silver": ("Silver", "#9aa6b8"),
 }
 
-# [A309] Pass colours: chosen only while holding a pass (web/premium.py `has_premium`, asked
+# [A314] Pass colours: chosen only while holding a pass (web/premium.py `has_premium`, asked
 # by the route), and drawn with a metallic sheen (style.css `.kit-premium`). A kit already
 # wearing one keeps it when the pass lapses -- the rule is about CHOOSING, never wearing.
 # Never handed out as a room seat's default, which only ever draws on PALETTE.
@@ -113,7 +113,7 @@ def clean_name(raw: str) -> str:
 def parse_kit(raw, premium_ok: bool = False) -> Kit:
     """A kit from untrusted input, or KitError. The monogram is upper-cased, since a
     badge is always drawn in capitals and "rcb" and "RCB" are the same monogram.
-    [A309] A pass colour is accepted only where the caller says this chooser may wear it."""
+    [A314] A pass colour is accepted only where the caller says this chooser may wear it."""
     if not isinstance(raw, dict):
         raise KitError("a kit is a name, a monogram and a colour")
     name = clean_name(raw.get("name", ""))

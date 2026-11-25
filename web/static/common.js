@@ -446,7 +446,7 @@ let META = null;
 // v2: the shape grew `showcase` and `crests` for the home page. A new key rather than a
 // tolerant reader, so a copy cached before them is never rendered as though complete.
 // v3: `kits` and `kit_default`, the team-kit palette [A151].
-// v4: pass colours in `kits`, each marked `premium` [A309].
+// v4: pass colours in `kits`, each marked `premium` [A314].
 const META_CACHE_KEY = 'iplegends_meta_v4';
 const META_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -883,7 +883,7 @@ function kitBadge(kit, cls = ''){
   return `<span class="kit-badge${pass} ${cls}" style="${kitStyle(kit)}" title="${esc(kit.name)}"
     >${esc(kit.monogram)}</span>`;
 }
-// [A309] May this viewer choose a pass colour? With a pass, or when the kit already wears
+// [A314] May this viewer choose a pass colour? With a pass, or when the kit already wears
 // it (a lapsed pass never strips a kit). The server decides; this only draws the lock.
 function kitColourOpen(c, wearing){
   if (!c.premium) return true;

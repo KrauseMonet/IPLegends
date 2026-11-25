@@ -1,4 +1,4 @@
-"""Cloud career slots and watching any match, for pass holders (A306).
+"""Cloud career slots and watching any match, for pass holders (A313).
 
 The rules are: saving needs a pass and a token this site signed; listing, opening and
 deleting need only the account (a lapsed pass never locks anybody out of careers they

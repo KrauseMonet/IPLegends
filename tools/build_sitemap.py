@@ -3,7 +3,7 @@
     uv run python -m tools.build_sitemap           # write both
     uv run python -m tools.build_sitemap --check   # exit 1 if either is stale
 
-Listed: the home page, the game and puzzle pages, the guides, the history pages
+Listed: the home page, the game and puzzle pages, the guides, the articles, the history pages
 (`tools.build_history`) and the about/legal pages. Left out on purpose: a page that is only
 someone's own state (profile, the Hall of Fame, admin, a room, a season in progress) and the offline card.
 `/api/` is NOT disallowed in robots.txt: a crawler rendering a game page needs it.
@@ -20,13 +20,13 @@ STATIC = ROOT / "web" / "static"
 ORIGIN = "https://fineleg.app"
 
 PAGES = ["/", "/draft", "/auction", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
-         "/common", "/xi", "/trio", "/flashback", "/records", "/seasons", "/teams", "/guides",
+         "/common", "/xi", "/trio", "/flashback", "/records", "/seasons", "/teams", "/guides", "/articles",
          "/about", "/faq", "/contact", "/terms", "/privacy"]
 
 
 def urls() -> list[str]:
     out = list(PAGES)
-    for folder in ("guides", "seasons", "teams"):
+    for folder in ("guides", "articles", "seasons", "teams"):
         out += [f"/{folder}/{p.stem}" for p in sorted((STATIC / folder).glob("*.html"))]
     return out
 

@@ -97,6 +97,6 @@ def test_nothing_that_is_not_a_token_is_ever_sent():
 def test_every_career_request_that_returns_a_career_goes_through_crpost():
     src = (STATIC / "career.js").read_text()
     raw = re.findall(r"api\('/api/career/([a-z]+)'", src)
-    # [A306/A307] the slot list and the dynasty card are not careers, so plain api() is right
+    # [A313/A307] the slot list and the dynasty card are not careers, so plain api() is right
     assert set(raw) <= {"options", "save", "slots", "dynasty"}, raw
     assert "crSave({token: d.token})" not in src

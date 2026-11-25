@@ -1,4 +1,4 @@
-"""Cloud career slots for pass holders [A306].
+"""Cloud career slots for pass holders [A313].
 
 Plain functions over a bare psycopg connection, the shape `web/premium.py` uses;
 `web/career_routes.py` decides who may call them.

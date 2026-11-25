@@ -570,7 +570,7 @@ class SeasonPlayOut(BaseModel):
     table: list[TableRowOut]
     watch: list[dict]             # ResultOut, the solo season's own match shape, for reveal.js
     cards: list[dict] = []        # every match of yours as a scorecard: ResultOut without the over log (A214)
-    cards_full: bool = False      # [A306] a pass holder's cards keep the over log, so any can be watched
+    cards_full: bool = False      # [A313] a pass holder's cards keep the over log, so any can be watched
     your_short: str
     your_name: str
     your_crest: str | None
@@ -917,7 +917,7 @@ def _season_play(detail: C.SeasonDetail,
                          runs_against=t.runs_against, overs_against=_overs(t.balls_against),
                          form=t.form, you=t.you) for i, t in enumerate(detail.table, 1)]
     watch = [_mark_you(r, _result_out(r, yours).model_dump()) for r in detail.watch]
-    # [A306] A pass holder keeps each match's over log, so any of them can be watched ball by
+    # [A313] A pass holder keeps each match's over log, so any of them can be watched ball by
     # ball; everyone else gets the scorecard alone (the over log is most of the size).
     cards = [_mark_you(r, _result_out(r, yours).model_dump()) for r in detail.cards]
     if not full:
@@ -1330,7 +1330,7 @@ def _has_pass(request: Request) -> bool:
 
 
 def _watch_all(request: Request, career: C.Career) -> bool:
-    """[A306] Whether this response may carry every match's over log: only for a pass
+    """[A313] Whether this response may carry every match's over log: only for a pass
     holder, and only asked when a season was actually played, so a move that plays nothing
     never touches the database."""
     if career.detail is None:
@@ -1536,7 +1536,7 @@ def career_hall(request: Request, response: Response) -> list[HallOut]:
     return out
 
 
-# --- cloud career slots [A306] --------------------------------------------------------------
+# --- cloud career slots [A313] --------------------------------------------------------------
 
 
 class SlotSummaryOut(BaseModel):

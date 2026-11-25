@@ -82,6 +82,8 @@
     { "src": "/teams/([a-z-]+)", "dest": "/web/static/teams/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/guides", "dest": "/web/static/guides.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/guides/([a-z-]+)", "dest": "/web/static/guides/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/articles", "dest": "/web/static/articles.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/articles/([a-z-]+)", "dest": "/web/static/articles/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
 
     { "src": "/(.*)", "dest": "api/index.py" }
   ]

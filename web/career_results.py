@@ -54,7 +54,9 @@ def legend(career: C.Career, year: int | None = None) -> dict | None:
             "role": "allrounder" if role == C.FULL_TIME else role,     # a ROLES key for rooms
             "basis": "season" if r.measured else "rating",
             "role_label": C.role_label(role), "name": career.setup.name,
-            "card": _card_doc(c)}
+            "card": _card_doc(c),
+            # [A310] played with pass boosts: enters a room only where pass perks are on
+            **({"boosted": True} if career.setup.boosted else {})}
 
 
 # [A225] The Hall of Fame is for careers worth remembering, not every career you finish: two
@@ -99,6 +101,7 @@ def card(career: C.Career) -> dict:
     """The career card beyond the ranked columns, as the page draws it."""
     s = career.summary
     return {
+        "boosted": career.setup.boosted,                 # [A310]
         "legend": legend(career),
         # [A273] every measured season, carded as a legend, so any of them can be added to
         # the picker later (`add_extra_legend`) without the career's token. ~0.8 kB a season;

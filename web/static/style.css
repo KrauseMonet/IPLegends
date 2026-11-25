@@ -4863,3 +4863,12 @@ span.gp-club{display:inline-grid;place-items:center;min-width:26px;font:700 9px 
 .cr-dyn-line-years{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
 .cr-dyn-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .cr-dyn-actions{display:flex;gap:8px;margin-top:10px}
+
+/* [A310] the pass boost switch on the create screen, and the second spin's line */
+.cr-boost{display:flex;gap:12px;align-items:flex-start;cursor:pointer;padding:12px;border-radius:10px;
+  border:1px solid var(--line);background:rgba(245,184,61,.05)}
+.cr-boost input{margin-top:3px;accent-color:var(--gold)}
+.cr-boost b{display:block;color:var(--ink);font:700 14px var(--sans)}
+.cr-boost em{display:block;font-style:normal;color:var(--ink-3);font-size:12px;line-height:1.45;margin-top:3px}
+.cr-boost.locked{opacity:.55;cursor:not-allowed}
+.cr-boost-spin{text-align:center;color:var(--gold-2)}

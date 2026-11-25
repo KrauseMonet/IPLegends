@@ -115,6 +115,7 @@ function crShowCreate(){
     `<button class="room-choice" data-v="${a.key}" onclick="crAmbition(this)">${esc(a.label)}</button>`).join('');
   crTechnique();
   Promise.resolve(CR.me).then(crSeedRow, crSeedRow);
+  Promise.resolve(CR.me).then(crBoostRow, crBoostRow);
   crSlotsDraw();
 }
 
@@ -184,6 +185,19 @@ function crSeedRow(){
 }
 document.addEventListener('signedin', crSeedRow);
 
+// [A310] The boost switch works for a pass holder; anybody else sees what it would do and
+// where to get it. The server checks the pass again on start.
+function crBoostRow(){
+  const box = document.getElementById('crBoost');
+  if (!box) return;
+  const pass = typeof ME !== 'undefined' && ME && ME.premium;
+  box.disabled = !pass;
+  if (!pass) box.checked = false;
+  $('#crBoostLocked').classList.toggle('hide', !!pass);
+  box.closest('.cr-boost').classList.toggle('locked', !pass);
+}
+document.addEventListener('signedin', crBoostRow);
+
 function crAmbition(btn){
   const on = document.querySelectorAll('#crAmb .room-choice.sel').length;
   if (!btn.classList.contains('sel') && on >= (CR.options.ambitions_max || 3)){
@@ -211,6 +225,7 @@ async function crStart(btn){
       country: crChosen('crPassport').v === '1' ? ((crChosen('crCountry') || {}).v || '') : '',
       bat_hand: (crChosen('crBat') || {}).v || 'R', bowl_arm: (crChosen('crArm') || {}).v || 'R',
       bowl_type: (crChosen('crType') || {}).v || '',
+      ...($('#crBoost') && $('#crBoost').checked ? {boosted: true} : {}),
       ...(seed ? {seed: Number(seed)} : {})});
     CR.seen = 0;
     const into = CR.slots && CR.slots.premium ? Number(($('#crSlotInto') || {}).value || 0) : 0;
@@ -503,6 +518,8 @@ function crSpin(d){
       ${crTemplateCard('You start like', d.start, 'start', 'your Rating at 19')}
       ${crTemplateCard('Your ceiling', d.ceiling, 'ceiling', 'your potential')}
     </div>
+    ${d.other_ceiling ? `<p class="room-note cr-boost-spin">★ Pass boost: a second ceiling spin drew
+      <b>${esc(d.other_ceiling.name)} ${d.other_ceiling.year}</b> (${d.other_ceiling.card}). The better one is kept.</p>` : ''}
     <p class="room-note cr-spin-note">You rise from the first toward the second. How far past it, and for how long, is up to you.</p>
     <div class="foot-actions cr-held" id="crSpinGo" style="justify-content:center">
       <button class="act lead" onclick="crShow(CR.data, null)">See who wants you</button>

@@ -640,6 +640,9 @@ def set_legend(conn, code: str, player_id: str, legend: dict | None) -> Room:
         raise RoomError("legends are chosen before the auction starts")
     if legend is not None and not legend.get("skilled"):       # [A284]
         raise RoomError("only a legend built with skills can be brought into a room")
+    if legend is not None and legend.get("boosted"):           # [A310]
+        raise RoomError("a career played with pass boosts cannot bring its legend into "
+                        "this room")
     legends = dict(room.legends)
     if legend is None:
         legends.pop(player_id, None)

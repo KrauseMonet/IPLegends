@@ -145,6 +145,7 @@ BOWL_REGULAR_BALLS = 150
 START_DISPLAY = (72, 77)
 CEILING_MIN_DISPLAY = 83
 CEILING_REDRAWS = 50
+BOOST_FOCUS_STEPS = 1.0              # [A310] a boosted career's extra step on a met focus
 
 # The share of the way from START to CEILING, by career season. Declared game design (see
 # the module docstring for why it is not measured): rise for five seasons, a peak, then a
@@ -993,6 +994,10 @@ class Setup:
     # [A308] the dynasty club's staff from earlier careers, fixed at the start so a career
     # stays a pure function of its token: (job, name, his temper sign) per job held.
     staff: tuple = ()
+    # [A310] Pass boosts, one switch set by the server for a pass holder who asked: a second
+    # ceiling spin (the better kept), one release survived, and a met focus building one more
+    # step. A boosted career's legend is marked, and enters a room only where pass perks are on.
+    boosted: bool = False
 
     @property
     def nation(self) -> str:
@@ -1087,16 +1092,35 @@ def spin(deck: Deck, seed: int, role: str) -> tuple[Card, Card]:
     """The two spins: a starting season and a ceiling that is better at the role's job.
     A ceiling no better than the start would be a career that can only decline, so the
     ceiling is redrawn until it beats the start (and, failing that, is the best there is)."""
+    start, ceiling, _other = spins(deck, seed, role, False)
+    return start, ceiling
+
+
+def _draw_ceiling(rng: random.Random, start: Card, ceilings: list[Card], role: str) -> Card:
+    for _ in range(CEILING_REDRAWS):
+        ceiling = rng.choice(ceilings)
+        if main_rating(ceiling, role) > main_rating(start, role):
+            return ceiling
+    return max(ceilings, key=lambda c: main_rating(c, role))
+
+
+def spins(deck: Deck, seed: int, role: str,
+          boosted: bool) -> tuple[Card, Card, Card | None]:
+    """(start, ceiling kept, the other ceiling drawn or None). [A310] A boosted career draws
+    a second ceiling on its own stream -- so the first is the very card an unboosted career
+    on this seed gets -- and keeps the better at the role's job (ties: the first)."""
     starts, ceilings = template_pools(deck, role)
     if not starts or not ceilings:
         raise CareerError(f"no real seasons to build a {role} from")
     rng = random.Random(f"{seed}:spin")
     start = rng.choice(starts)
-    for _ in range(CEILING_REDRAWS):
-        ceiling = rng.choice(ceilings)
-        if main_rating(ceiling, role) > main_rating(start, role):
-            return start, ceiling
-    return start, max(ceilings, key=lambda c: main_rating(c, role))
+    first = _draw_ceiling(rng, start, ceilings, role)
+    if not boosted:
+        return start, first, None
+    second = _draw_ceiling(random.Random(f"{seed}:spin2"), start, ceilings, role)
+    if main_rating(second, role) > main_rating(first, role):
+        return start, second, first
+    return start, first, second
 
 
 # [A255] A keeper's or an all-rounder's batting band comes from the CEILING spin, the player
@@ -5049,6 +5073,7 @@ class Career:
     # A mega auction decided in THIS call (A212), for the page to play; None otherwise.
     auction: MegaResult | None = None
     shape: Shape = STANDARD            # hidden (A224)
+    other_ceiling: Card | None = None  # [A310] a boosted career's ceiling spin not kept
     legend: Card | None = None         # where a growing potential heads (A224)
     # [A238] Your role now (a ROLES key), and the one the season pending is played in -- a
     # trial season's differs from it.
@@ -5317,6 +5342,14 @@ def fatigue_after(fatigue: float, added: float) -> float:
     return min(FATIGUE_MAX, max(0.0, fatigue - FATIGUE_DECAY) + added)
 
 
+def boosted_focus(res, power: float, boosted: bool):
+    """[A310] A boosted career's met challenge builds one more step of its lever; a missed
+    one builds what it would have anyway."""
+    if boosted and res.done:
+        return dataclasses.replace(res, built=res.built + BOOST_FOCUS_STEPS * power)
+    return res
+
+
 def release_decision(released: bool, rating: int, prime: bool,
                      standing: int) -> tuple[bool, str | None]:
     """Whether the club lets you go after a season, and why it changed its mind if it did:
@@ -5426,6 +5459,7 @@ class Checkpoint:
     # [A289] The band a club moved you up into ("" none): your card bats there from then on.
     up_band: str = ""
     fatigue: float = 0.0                  # [A295] workload carried into the season
+    reprieved: bool = False               # [A310] a boosted career's one release survived
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -5462,7 +5496,7 @@ class Checkpoint:
                    ceiling_band=d.get("ceiling_band", False), bat_band=d.get("bat_band", ""),
                    keeper_offers=d.get("keeper_offers", 0), focus=d.get("focus", ""),
                    released_by=d.get("released_by"), up_band=d.get("up_band", ""),
-                   fatigue=d.get("fatigue", 0.0))
+                   fatigue=d.get("fatigue", 0.0), reprieved=d.get("reprieved", False))
 
 
 def grow_potential(cp: Checkpoint, grade: int, growing: bool, start: Card, ceiling: Card,
@@ -5739,7 +5773,7 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     the moves made since it. `career.checkpoint` is always where the loop stood when it
     stopped, ready to be resumed from."""
     setup.check()
-    start, ceiling = spin(deck, seed, setup.role)
+    start, ceiling, other_ceiling = spins(deck, seed, setup.role, setup.boosted)
     cp = copy.deepcopy(resume) if resume is not None else Checkpoint()
     academy = dynasty.staff_member(setup.staff, "academy")
     if resume is None and academy is not None:
@@ -5751,7 +5785,8 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
     shape = draw_shape(seed) if cp.shaped else STANDARD
     legend = potential_legend(deck, setup.role, ceiling)
     career = Career(setup=setup, seed=seed, start=start, ceiling=ceiling,
-                    seasons=cp.seasons, shape=shape, legend=legend)
+                    seasons=cp.seasons, shape=shape, legend=legend,
+                    other_ceiling=other_ceiling)
     career.role_now = career.season_role = cp.roles[-1] if cp.roles else setup.role
     queue = list(moves)
 
@@ -6523,9 +6558,10 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
         # [A285] How the focus's challenge went, and what the work built for next season.
         if focus_key:
             res = career_focus.judge(focus_key, played.focus_log, focus_switched)
+            fo = career_focus.FOCUS_BY_KEY[focus_key]
+            res = boosted_focus(res, fo.power, setup.boosted)
             played.focus = dataclasses.asdict(res)
             built = res.built
-            fo = career_focus.FOCUS_BY_KEY[focus_key]
             lever = fo.lever
             if lever[0] == "drill":
                 cp.drills[lever[1]] = min(DRILL_MAX * fo.reach,
@@ -6595,6 +6631,13 @@ def play_career(deck: Deck, model: Model, seed: int, setup: Setup, moves: list[s
             released = False                   # a contract year remains: you stay, benched
         released, why = release_decision(released, played.rating, not shape.declining(clock),
                                          cp.standing)
+        if released and setup.boosted and not cp.reprieved:
+            # [A310] once a career, a release becomes a warning season: you stay, on notice
+            released, why, cp.reprieved = False, "reprieve", True
+            cp.squad = True
+            played.notes.append(f"{offer.franchise} were ready to let you go, but give you one "
+                                "more season to prove yourself. It is your last chance.")
+            played.tones.append("down")
         if why == "star":
             played.notes.append("Two poor seasons, but at your level somebody always signs you.")
             played.tones.append("")

@@ -65,7 +65,7 @@ def make_token(seed: int, setup: C.Setup, career: C.Career, partial: list[str]) 
                                  list(setup.ambitions), setup.country,
                                  setup.bat_hand, setup.bowl_arm, setup.bowl_type,
                                  setup.dynasty, setup.dynasty_bonus,
-                                 [list(x) for x in setup.staff]],
+                                 [list(x) for x in setup.staff], setup.boosted],
                        "cp": career.checkpoint.to_dict(), "partial": partial},
                       separators=(",", ":"))
     payload = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
@@ -92,11 +92,11 @@ def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]
             raise ValueError("old token")
         # Four fields before A228 (no identity, no ambitions), eight before A229 (no country),
         # nine before A287 (no batting hand, bowling arm or bowling type), twelve before
-        # A307 (no dynasty), fourteen before A308 (no staff).
+        # A307 (no dynasty), fourteen before A308 (no staff), fifteen before A310 (no boosts).
         name, role, debut, overseas, *rest = d["setup"]
-        defaults = [None, "", "", [], "", "R", "R", "", "", 0, []]
+        defaults = [None, "", "", [], "", "R", "R", "", "", 0, [], False]
         (number, home, celebration, ambitions, country, bat_hand, bowl_arm, bowl_type,
-         dynasty, dynasty_bonus, staff) = (rest + defaults[len(rest):])[:11]
+         dynasty, dynasty_bonus, staff, boosted) = (rest + defaults[len(rest):])[:12]
         return (int(d["seed"]), C.Setup(name, role, int(debut), bool(overseas),
                                          None if number is None else int(number), str(home or ""),
                                          str(celebration or ""), tuple(str(a) for a in ambitions or ()),
@@ -104,7 +104,8 @@ def decode_payload(payload: str) -> tuple[int, C.Setup, C.Checkpoint, list[str]]
                                          str(bowl_arm or "R"), str(bowl_type or ""),
                                          str(dynasty or ""), int(dynasty_bonus or 0),
                                          tuple((str(j), str(n), int(t))
-                                               for j, n, t in staff or ())),
+                                               for j, n, t in staff or ()),
+                                         bool(boosted)),
                 C.Checkpoint.from_dict(d["cp"]), [str(m) for m in d["partial"]])
     except (ValueError, KeyError, TypeError):
         raise HTTPException(400, "That career could not be read.") from None
@@ -586,6 +587,8 @@ class AmbitionOut(BaseModel):
 
 
 class CareerOut(BaseModel):
+    boosted: bool = False          # [A310] played with pass boosts
+    other_ceiling: TemplateOut | None = None   # [A310] the second ceiling spin, not kept
     dynasty: str = ""              # [A307] the dynasty club this career is played for, if any
     staff: list[dict] = []         # [A308] the club's staff from earlier careers: {job, name}
     token: str
@@ -1067,6 +1070,9 @@ def _out(seed: int, career: C.Career, partial: list[str], full: bool = False) ->
         role_now_label=C.role_label(career.role_now or st.role),
         season_role=career.season_role or career.role_now or st.role, role_path=role_path(career),
         start=_template(career.start), ceiling=_template(career.ceiling),
+        boosted=career.setup.boosted,
+        other_ceiling=(_template(career.other_ceiling)
+                       if career.other_ceiling is not None else None),
         seasons=_mark_new([_season(r, career.ceiling.display, v) for r in career.seasons]),
         pending=(_staff_said(_pending(career.pending, career.season_role or st.role,
                                       career.checkpoint)
@@ -1188,6 +1194,7 @@ class StartIn(BaseModel):
     bat_hand: str = "R"                                        # A287, cosmetic only
     bowl_arm: str = "R"
     bowl_type: str = ""
+    boosted: bool = False                                      # A310, a pass holder's ask
 
 
 def seed_allowed(request: Request) -> bool:
@@ -1219,6 +1226,10 @@ def career_start(body: StartIn, request: Request) -> CareerOut:
     club, bonus, staff = _dynasty_for_start(request)
     if club:
         setup = dataclasses.replace(setup, dynasty=club, dynasty_bonus=bonus, staff=staff)
+    if body.boosted:
+        if not _has_pass(request):
+            raise HTTPException(403, "Pass boosts come with a pass.")
+        setup = dataclasses.replace(setup, boosted=True)
     deck, model = _state()
     career = C.play_career(deck, model, seed, setup, [], _facts())
     return _out(seed, career, [])
@@ -1306,6 +1317,16 @@ def _retire_moves(deck, model, seed, setup, checkpoint, partial) -> list[str]:
     if now.pending is None or now.pending.kind not in PRESEASON or now.pending.k == 0:
         raise HTTPException(409, "you can only retire before a season starts")
     return ["r"]
+
+
+def _has_pass(request: Request) -> bool:
+    """[A310] Is this request a signed-in pass holder's? Signed out never asks the database."""
+    token = request.cookies.get(auth.COOKIE_NAME)
+    account_id = auth.verify_session_cookie(token) if token is not None else None
+    if account_id is None:
+        return False
+    with db.connection() as conn:
+        return premium_lib.has_premium(conn, account_id, _today())
 
 
 def _watch_all(request: Request, career: C.Career) -> bool:

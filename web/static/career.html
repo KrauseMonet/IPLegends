@@ -23,7 +23,7 @@
 <link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
-<link rel="stylesheet" href="/static/style.css?v=a95fd5de12">
+<link rel="stylesheet" href="/static/style.css?v=7ba44d66fe">
 <link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
 </head>
 <body>
@@ -147,6 +147,20 @@
           <div class="cb-chips" id="crCel"></div>
           <div class="cb-sub">Ambitions <span id="crAmbCount">0/3</span></div>
           <div class="cb-chips cb-ambs" id="crAmb"></div>
+        </section>
+
+        <!-- [A310] pass boosts: one switch; a teaser for anyone without a pass -->
+        <section class="cb-step" id="crBoostRow">
+          <h3><i>★</i> Pass boosts</h3>
+          <label class="cr-boost">
+            <input type="checkbox" id="crBoost">
+            <span><b>Play this career boosted</b>
+              <em>A second ceiling spin (the better is kept), one release survived, and an extra
+              step each time you meet your focus. A boosted career's legend joins a friends'
+              room only where the host allows pass perks.</em></span>
+          </label>
+          <p class="room-note hide" id="crBoostLocked">Pass boosts come with a pass.
+            <a href="/premium">See passes</a></p>
         </section>
 
         <!-- [A235] admins only: a chosen seed fixes the two spins and the career's shape -->
@@ -308,6 +322,6 @@
 <script src="/static/reveal.js?v=3f94e6f94a"></script>
 <script src="/static/analysis.js?v=8700575431"></script>
 <script src="/static/auction_sound.js?v=afde8f3c8a"></script>
-<script src="/static/career.js?v=d4de9bf156"></script>
+<script src="/static/career.js?v=a8e04bb530"></script>
 </body>
 </html>

@@ -91,8 +91,8 @@ def test_a_legend_joins_his_players_squad_free_before_the_bidding(deck, clock, l
     mine, theirs = r.auction.teams[r.team_of[host]], r.auction.teams[r.team_of[guest]]
     assert [c.name for c in mine.squad] == ["Legend Kid"] and mine.paid == [0]
     assert mine.purse == au.PURSE and mine.open_places == au.SQUAD_SIZE - 1
-    assert mine.legend is mine.squad[0] and ra.is_legend(mine.squad[0])
-    assert theirs.squad == [] and theirs.legend is None
+    assert mine.legends == [mine.squad[0]] and ra.is_legend(mine.squad[0])
+    assert theirs.squad == [] and theirs.legends == []
     # a person id of his own, never the career's shared one
     assert mine.squad[0].person_id == ra.LEGEND_PREFIX + host
 
@@ -104,7 +104,7 @@ def test_a_room_with_a_legend_completes_with_legal_twelves(deck, clock, legend):
     assert room.status == "complete"
     r = ra.replay(room, deck)
     team = r.auction.teams[r.team_of[host]]
-    assert len(team.squad) == au.SQUAD_SIZE and team.legend in team.squad
+    assert len(team.squad) == au.SQUAD_SIZE and team.legends[0] in team.squad
     for pid, player, order, impact in rooms.room_sides(room, deck):
         t = next(x for x in r.auction.teams if x.short == player.franchise)
         assert order_errors(order, impact, t.squad) == []
@@ -116,7 +116,7 @@ def test_two_legends_in_one_room_stay_two_people(deck, clock, legend):
     rooms.set_legend(conn, code, guest, {**legend, "name": "Other Kid"})
     rooms.start_room(conn, code, host, deck)
     r = ra.replay(load(conn, code), deck)
-    ids = {r.auction.teams[r.team_of[p]].legend.person_id for p in (host, guest)}
+    ids = {r.auction.teams[r.team_of[p]].legends[0].person_id for p in (host, guest)}
     assert len(ids) == 2
 
 
@@ -156,7 +156,7 @@ def test_a_legend_is_never_traded(deck, clock, legend):
     code, host, guest = _legend_room(conn, deck, legend)
     r = ra.replay(load(conn, code), deck)
     a, b = r.team_of[host], r.team_of[guest]
-    legend_card = r.auction.teams[a].legend
+    legend_card = r.auction.teams[a].legends[0]
     someone = dataclasses.replace(legend_card, person_id="someone-else", name="Someone")
     assert any("legend" in e for e in r.offer_errors(a, b, legend_card, someone))
     assert any("legend" in e for e in r.offer_errors(b, a, someone, legend_card))
@@ -167,7 +167,7 @@ def test_a_legends_name_carries_no_markup(deck, clock, legend):
     conn = FakeConn()
     code, host, _ = _legend_room(conn, deck, {**legend, "name": "<img src=x onerror=1>Kid"})
     r = ra.replay(load(conn, code), deck)
-    name = r.auction.teams[r.team_of[host]].legend.name
+    name = r.auction.teams[r.team_of[host]].legends[0].name
     assert "<" not in name and ">" not in name and name.endswith("Kid")
     with pytest.raises(C.CareerError):
         C.Setup("<b>x</b>", "opener", 2012, False).check()
@@ -186,8 +186,8 @@ def test_the_legend_check_counts_him_among_the_overseas_and_the_places(deck, leg
     six, which is the cap, so it cannot bind -- but it holds if either constant moves."""
     legend_card = ra.legend_cards(type("R", (), {
         "legends": {"p": _overseas_legend(legend)},
-        "players": {"p": rooms.RoomPlayer("p", "Asha", False)}})())["p"]
-    team = au.Team(0, "MI", "Mumbai Indians", human=True, legend=legend_card)
+        "players": {"p": rooms.RoomPlayer("p", "Asha", False)}})())["p"][0]
+    team = au.Team(0, "MI", "Mumbai Indians", human=True, legends=[legend_card])
     overseas = []
     for cs in deck.cards_by_fs.values():
         for c in cs:
@@ -195,7 +195,7 @@ def test_the_legend_check_counts_him_among_the_overseas_and_the_places(deck, leg
                 overseas.append(c)
     assert not any("overseas" in e for e in ra.legend_errors(team, overseas[:au.SQUAD_OVERSEAS_CAP - 1]))
     assert any("overseas" in e for e in ra.legend_errors(team, overseas[:au.SQUAD_OVERSEAS_CAP]))
-    assert ra.legend_errors(dataclasses.replace(team, legend=None), overseas[:au.SQUAD_OVERSEAS_CAP]) == []
+    assert ra.legend_errors(dataclasses.replace(team, legends=[]), overseas[:au.SQUAD_OVERSEAS_CAP]) == []
 
 
 def test_the_retention_timeout_leaves_room_for_the_legend(deck, clock, legend):
@@ -213,7 +213,7 @@ def test_the_retention_timeout_leaves_room_for_the_legend(deck, clock, legend):
     room = run_to_the_end(conn, code, deck, clock)
     rr = ra.replay(room, deck)
     t = rr.auction.teams[rr.team_of[host]]
-    assert room.status == "complete" and t.legend in t.squad and len(t.squad) == au.SQUAD_SIZE
+    assert room.status == "complete" and t.legends[0] in t.squad and len(t.squad) == au.SQUAD_SIZE
     assert t.overseas <= au.SQUAD_OVERSEAS_CAP
 
 

@@ -23,6 +23,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from statistics import median
 
+from tools import almanack_viz as V
 from tools import build_history as H
 from tools.build_history import esc, para, plural, section, table
 
@@ -149,6 +150,7 @@ class Auctions:
         if cur != "inr_lakh":
             lead.append("Auctions to 2013 were conducted in US dollars, and the prices here are as they were bid.")
         body = section("The sale", para(*lead))
+        body += self._scatter(year)
 
         spend: dict[str, list[Sale]] = defaultdict(list)
         for s in sales:
@@ -169,9 +171,7 @@ class Auctions:
                           '(<a href="/guides/ratings">how it is worked out</a>). A dash means no match that season.</p>')
 
         mid = median(s.amount for s in sales)
-        cheap = [s for s in sales if s.amount <= mid and (self.season(s) or {}).get("matches", 0) >= VALUE_MATCHES
-                 and self.card(s)]
-        best = sorted(cheap, key=lambda s: (-self.card(s), s.amount, s.name))[:BEST_VALUE]
+        best = self._value_buys(year)
         if best:
             rows = [[self.who(s), self.team(s), money(s.price, s.currency)] + self.did(s) for s in best]
             body += section("Best value", para(
@@ -192,6 +192,33 @@ class Auctions:
                      f"Every player sold at the IPL {year} auction: prices, franchise spending, and what the dearest "
                      "buys and the best-value buys did that season.", "ALMANACK · AUCTION", f"The {year} auction", body)
 
+    def _value_buys(self, year: int) -> list[Sale]:
+        sales = self.by_year[year]
+        mid = median(s.amount for s in sales)
+        cheap = [s for s in sales if s.amount <= mid and (self.season(s) or {}).get("matches", 0) >= VALUE_MATCHES
+                 and self.card(s)]
+        return sorted(cheap, key=lambda s: (-self.card(s), s.amount, s.name))[:BEST_VALUE]
+
+    def _scatter(self, year: int) -> str:
+        """[A318] Every buy who played that season, price against card. The dearest three and
+        the best-value three are marked and named, from the same lists the tables below use."""
+        sales = self.by_year[year]
+        dear = {id(s) for s in sales[:3]}
+        value = {id(s) for s in self._value_buys(year)[:3]}
+        buys = []
+        for s in sales:
+            card = self.card(s)
+            if not card:
+                continue
+            mark = "dear" if id(s) in dear else ("value" if id(s) in value else "")
+            name = self.a.name(s.person) if s.person in self.a.careers else s.name
+            buys.append(V.Buy(s.amount, card, self.a.key(self.fs(s)),
+                              f"{name} · {s.franchise} · {money(s.price, s.currency)} · card {card}", mark,
+                              name.split(" ")[-1] if mark else ""))
+        unit = "usd" if sales[0].currency != "inr_lakh" else "inr_lakh"
+        pic = V.scatter(buys, lambda v: money(v, unit))
+        return section("Price against the season that followed", pic) if pic else ""
+
     def index_page(self) -> str:
         rows = []
         for y in sorted(self.by_year):
@@ -200,7 +227,15 @@ class Auctions:
             rows.append([f'<a href="/almanack/auctions/{y}">{y}</a>', str(len(ss)),
                          money(sum(s.amount for s in ss), cur if cur != "usd_thousand" else "usd"),
                          f"{self.who(ss[0])} ({money(ss[0].price, ss[0].currency)})"])
-        body = section("Every auction", para(
+        wall = []
+        for y in sorted(self.by_year, reverse=True):
+            top = self.by_year[y][0]
+            fs = self.fs(top)
+            name = self.a.name(top.person) if top.person in self.a.careers else top.name
+            wall.append(V.RecordCard(f"{y} · dearest buy", money(top.price, top.currency), name, top.franchise,
+                                     self.a.key(fs), f"/almanack/auctions/{y}", self.a.crest(fs)))
+        body = section("The dearest buy of every auction", V.record_wall(wall))
+        body += section("Every auction", para(
             f"Every player sold at an IPL auction from {min(self.by_year)} to {max(self.by_year)}: "
             f"{len(self.sales):,} sales, each joined to what the player then did for the franchise that bought them.",
             "The early auctions were bid in US dollars and the later ones in rupees; each is shown in its own "

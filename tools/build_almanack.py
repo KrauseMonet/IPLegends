@@ -31,6 +31,7 @@ No sentence on these pages gives a real player a pronoun: the name, or a noun, d
 from __future__ import annotations
 
 import hashlib
+import json
 import pathlib
 import sys
 import unicodedata
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 
 from tools import almanack_auctions as AU
 from tools import almanack_records as R2
+from tools import almanack_viz as V
 from tools import build_history as H
 from tools.build_history import esc, overs, para, plural, rate, section, slug, table
 
@@ -48,6 +50,7 @@ PLAYERS_INDEX = STATIC / "almanack" / "players.html"
 PLAYER_DIR = STATIC / "almanack" / "players"
 GROUND_DIR = STATIC / "almanack" / "grounds"
 AUCTION_DIR = STATIC / "almanack" / "auctions"
+REPLAY = STATIC / "almanack" / "replay.html"
 
 INDEX_MATCHES = 20      # a player page is indexed from this many matches (Phase 0: 343 players)
 H2H_MIN_BALLS = 12      # a head-to-head row on a PLAYER page needs this many balls between the two
@@ -260,6 +263,32 @@ class Almanack:
     def name(self, person: str) -> str:
         return self.rec.person(person)
 
+    # [A318] a franchise-season's crest key and image, for colouring a chart or a card
+    def key(self, fs: int | None) -> str | None:
+        from web.crests import crest_key
+        if fs is None:
+            return None
+        _f, year, name = self.rec.arch.fs[fs]
+        return crest_key(name, year)
+
+    def crest(self, fs: int | None) -> str | None:
+        from web.crests import crest_url
+        if fs is None:
+            return None
+        _f, year, name = self.rec.arch.fs[fs]
+        return crest_url(name, year)
+
+    def main_fs(self, c: "Career") -> int | None:
+        """The club a player is best known for: the franchise of most matches (ties to the
+        later), and of it the latest season, so the crest is the one most recently worn."""
+        if not c.seasons:
+            return None
+        by: dict[str, list] = defaultdict(list)
+        for s in c.seasons:
+            by[self.rec.franchise(s["fs"])].append(s)
+        club = max(by.values(), key=lambda ss: (sum(s["matches"] for s in ss), max(s["year"] for s in ss)))
+        return max(club, key=lambda s: s["year"])["fs"]
+
     def link(self, person: str) -> str:
         if person in self.careers:
             return f'<a href="{player_path(self.name(person))}">{esc(self.name(person))}</a>'
@@ -376,6 +405,49 @@ def glance(a: Almanack, c: Career) -> str:
     return f'    <div class="al-tiles">{inner}</div>\n'
 
 
+def hero(a: Almanack, c: Career) -> str:
+    """[A318] The page's header card in the colours of the club the player is best known
+    for: the crest large, who the player is in a few chips, the clubs as a row of crests,
+    and the tiles. Every figure here is also in the career paragraph or a table below."""
+    fs = a.main_fs(c)
+    meta = a.p.meta.get(c.person, {})
+    years = sorted({s["year"] for s in c.seasons})
+    chips = [ROLE_WORDS.get(a.p.role.get(c.person, ""), "player").capitalize()]
+    if meta.get("nationality"):
+        chips.append(meta["nationality"])
+    chips.append(str(years[0]) if len(years) == 1 else f"{years[0]}–{years[-1]}")
+    chips.append(plural(len(years), "season"))
+    last: dict[str, int] = {}
+    for s in c.seasons:
+        last[a.rec.franchise(s["fs"])] = s["fs"]
+    clubs = "".join(f'<a href="/teams/{slug(f)}" title="{esc(f)}"><img src="{a.crest(x)}" alt="{esc(f)}" '
+                    f'width="30" height="30" loading="lazy"></a>' for f, x in last.items() if a.crest(x))
+    crest = a.crest(fs)
+    big = f'<img class="al-hero-crest" src="{crest}" alt="" width="150" height="150">' if crest else ""
+    return (f'    <div class="al-hero {V.crest_cls(a.key(fs))}">{big}<div class="al-hero-id">'
+            + "".join(f'<span class="al-chip">{esc(x)}</span>' for x in chips)
+            + (f'<span class="al-clubs">{clubs}</span>' if clubs else "") + "</div>\n"
+            + glance(a, c) + "    </div>\n")
+
+
+def career_points(a: Almanack, c: Career) -> list:
+    out = []
+    for s in c.seasons:
+        card = a.p.cards.get((c.person, s["fs"]))
+        out.append(V.SeasonPoint(s["year"], a.key(s["fs"]), a.rec.team(s["fs"]), s["bat"]["runs"],
+                                 s["bowl"]["wickets"], card.display if card is not None and card.display else None))
+    return out
+
+
+def career_chart(a: Almanack, c: Career) -> str:
+    """Runs or wickets, whichever the player is known for, and the other behind a switch
+    when it amounts to something (A26's thresholds are per season; a career's are these)."""
+    bat, bowl = c.bat["runs"] >= 200, c.bowl["wickets"] >= 10
+    metrics = (["wickets"] if bowl else []) + (["runs"] if bat else []) if bowls_first(a, c) \
+        else (["runs"] if bat else []) + (["wickets"] if bowl else [])
+    return V.career_chart(career_points(a, c), metrics or ["runs"])
+
+
 def seasons_table(a: Almanack, c: Career) -> str:
     from game import skills as skill_book
     rows = []
@@ -398,7 +470,7 @@ def seasons_table(a: Almanack, c: Career) -> str:
             'see <a href="/guides/ratings">how the ratings work</a>. Skills show only where the card '
             'is high enough to open them. A match abandoned without a ball bowled is not in the archive, '
             'so a match count can sit one or two below the official one.</p>')
-    return section("Season by season", body + note)
+    return section("Season by season", career_chart(a, c) + body + note)
 
 
 def batting_table(c: Career) -> str:
@@ -462,7 +534,12 @@ def against_the_field(a: Almanack, c: Career) -> str:
                          rate(100 * s.par_runs, s.balls, 1), f"<b>{_signed(s.above_par())}</b>",
                          rate(s.balls, s.outs, 1), rate(s.balls, s.par_outs, 1)])
         if rows:
-            out.append("<h3>Batting</h3>" + table(["", "Runs", "Balls", "SR", "League SR", "Runs above par /100",
+            bars = [(PHASE_LABEL[ph].split(" (")[0], bp[ph].above_par()) for ph in PHASES
+                    if bp.get(ph) and bp[ph].balls >= MIN_SPLIT_BALLS]
+            bars += [(f"Against {st}", a.p.bat_style[c.person][st].above_par()) for st in STYLES
+                     if a.p.bat_style.get(c.person, {}).get(st) and a.p.bat_style[c.person][st].balls >= MIN_SPLIT_BALLS]
+            out.append("<h3>Batting</h3>" + V.par_bars(bars, "Runs above par per 100 balls") +
+                       table(["", "Runs", "Balls", "SR", "League SR", "Runs above par /100",
                                                     "Balls per dismissal", "League"], rows))
     wp = a.p.bowl_phase.get(c.person, {})
     if sum(s.balls for s in wp.values()) >= MIN_SPLIT_BALLS:
@@ -475,7 +552,10 @@ def against_the_field(a: Almanack, c: Career) -> str:
             rows.append([PHASE_LABEL[ph], overs(s.balls), rate(6 * s.runs, s.balls, 2), rate(6 * s.par_runs, s.balls, 2),
                          f"<b>{_signed(saved)}</b>", str(s.outs), rate(s.balls, s.outs, 1), rate(s.balls, s.par_outs, 1)])
         if rows:
-            out.append("<h3>Bowling</h3>" + table(["", "Overs", "Econ", "League econ", "Runs saved /100",
+            bars = [(PHASE_LABEL[ph].split(" (")[0], 100 * (wp[ph].par_runs - wp[ph].runs) / wp[ph].balls)
+                    for ph in PHASES if wp.get(ph) and wp[ph].balls >= MIN_SPLIT_BALLS]
+            out.append("<h3>Bowling</h3>" + V.par_bars(bars, "Runs saved per 100 balls") +
+                       table(["", "Overs", "Econ", "League econ", "Runs saved /100",
                                                     "Wkts", "Balls per wicket", "League"], rows))
     if not out:
         return ""
@@ -502,14 +582,48 @@ def dismissals(a: Almanack, c: Career) -> str:
     out = a.p.out_kinds.get(c.person)
     if out and sum(out.values()) >= 5:
         n = sum(out.values())
-        rows = [[KIND_WORDS.get(k, k.capitalize()), str(v), f"{100 * v / n:.0f}%"] for k, v in out.most_common()]
-        parts.append("<h3>How the dismissals came</h3>" + table(["", "Times", "Share"], rows))
+        items = [(KIND_WORDS.get(k, k.capitalize()), v) for k, v in out.most_common()]
+        parts.append("<h3>How the dismissals came</h3>" + V.donut(items, str(n), "dismissals"))
     wk = a.p.wicket_kinds.get(c.person)
     if wk and sum(wk.values()) >= 5:
         n = sum(wk.values())
-        rows = [[KIND_WORDS.get(k, k.capitalize()), str(v), f"{100 * v / n:.0f}%"] for k, v in wk.most_common()]
-        parts.append("<h3>How the wickets fell</h3>" + table(["", "Wickets", "Share"], rows))
-    return section("Dismissals", "".join(parts)) if parts else ""
+        items = [(KIND_WORDS.get(k, k.capitalize()), v) for k, v in wk.most_common()]
+        parts.append("<h3>How the wickets fell</h3>" + V.donut(items, str(n), "wickets"))
+    return section("Dismissals", '<div class="al-donuts">' + "".join(parts) + "</div>") if parts else ""
+
+
+RIVAL_MIN_BALLS = 24    # a "favourite" or "toughest" pairing needs this many balls between the two
+RIVAL_MIN_OUTS = 2      # a nemesis or a bunny needs this many dismissals
+
+
+def rival_cards(a: Almanack, c: Career) -> str:
+    """[A318] Four pairings pulled out of the whole head-to-head record (pairs of six balls
+    or more, A316): the bowler who dismissed this batter most and the one scored off fastest;
+    the batter this bowler dismissed most and the one who scored fastest off this bowler."""
+    rows = a.p.h2h
+    cards = []
+    mine = [r for r in rows if r[0] == c.person]
+    nem = max((r for r in mine if r[4] >= RIVAL_MIN_OUTS), key=lambda r: (r[4], -r[2], a.name(r[1])), default=None)
+    if nem:
+        cards.append(V.RivalCard("Nemesis", a.link(nem[1]), f"Out {H.times(nem[4])} in {nem[2]} balls, "
+                                 f"{plural(nem[3], 'run')} scored", "bad"))
+    fav = max((r for r in mine if r[2] >= RIVAL_MIN_BALLS), key=lambda r: (r[3] / r[2], r[2]), default=None)
+    if fav and fav[3] / fav[2] >= 1.3:
+        cards.append(V.RivalCard("Favourite bowler to face", a.link(fav[1]),
+                                 f"{fav[3]} off {fav[2]} balls, strike rate {100 * fav[3] / fav[2]:.0f}", "good"))
+    theirs = [r for r in rows if r[1] == c.person]
+    bun = max((r for r in theirs if r[4] >= RIVAL_MIN_OUTS), key=lambda r: (r[4], -r[2], a.name(r[0])), default=None)
+    if bun:
+        cards.append(V.RivalCard("Bunny", a.link(bun[0]), f"Dismissed {H.times(bun[4])} in {bun[2]} balls", "good"))
+    tough = max((r for r in theirs if r[2] >= RIVAL_MIN_BALLS), key=lambda r: (r[3] / r[2], r[2]), default=None)
+    if tough and tough[3] / tough[2] >= 1.3:
+        cards.append(V.RivalCard("Toughest batter to bowl at", a.link(tough[0]),
+                                 f"{tough[3]} off {tough[2]} balls, strike rate {100 * tough[3] / tough[2]:.0f}", "bad"))
+    if not cards:
+        return ""
+    return section("Rivals", V.rivals(cards) + '<p class="hx-note">Pairs that met for at least six balls; '
+                   f"a favourite or toughest pairing needs {RIVAL_MIN_BALLS} balls and a strike rate of 130 or more, "
+                   f"and a nemesis or a bunny {RIVAL_MIN_OUTS} dismissals credited to the bowler.</p>")
 
 
 def batting_positions(a: Almanack, c: Career) -> str:
@@ -537,18 +651,22 @@ def best_of(a: Almanack, c: Career) -> str:
         for b in inns:
             m = rec.arch.matches[b.match_id]
             rows.append([f"<b>{b.runs}{'' if b.out else '*'}</b> ({b.balls})", rec.team_link(rec.opponent(b.match_id, b.fs)),
-                         f'<a href="/seasons/{m.year}">{H.day(m.day)}</a>'])
+                         f'<a href="/seasons/{m.year}">{H.day(m.day)}</a>', _watch(b.match_id)])
         # Figures first and nothing in the mono number face, so on a phone the score is what shows.
-        parts.append("<h3>Best innings</h3>" + table(["Runs (balls)", "Against", "Date"], rows, num_from=3))
+        parts.append("<h3>Best innings</h3>" + table(["Runs (balls)", "Against", "Date", ""], rows, num_from=4))
     spells = sorted((b for b in c.spells if b.wickets), key=lambda b: (-b.wickets, b.runs))[:BEST_ROWS]
     if spells and spells[0].wickets >= 2:
         rows = []
         for b in spells:
             m = rec.arch.matches[b.match_id]
             rows.append([f"<b>{b.wickets}/{b.runs}</b> ({overs(b.balls)} ov)", rec.team_link(rec.opponent(b.match_id, b.fs)),
-                         f'<a href="/seasons/{m.year}">{H.day(m.day)}</a>'])
-        parts.append("<h3>Best bowling</h3>" + table(["Figures", "Against", "Date"], rows, num_from=3))
+                         f'<a href="/seasons/{m.year}">{H.day(m.day)}</a>', _watch(b.match_id)])
+        parts.append("<h3>Best bowling</h3>" + table(["Figures", "Against", "Date", ""], rows, num_from=4))
     return section("Best days", "".join(parts)) if parts else ""
+
+
+def _watch(match_id: str) -> str:
+    return f'<a class="al-watch" href="/almanack/replay?m={match_id}" title="Watch this match again">▶ Watch</a>'
 
 
 def head_to_head(a: Almanack, c: Career, faced: list, bowled: list) -> str:
@@ -571,8 +689,11 @@ ROBOTS = '<meta name="robots" content="noindex,follow">\n'
 
 def page(path: str, title: str, description: str, over: str, heading: str, body: str,
          index: bool = True) -> str:
+    if 'src="/static/almanack.js"' not in body:
+        body += '    <script src="/static/almanack.js"></script>\n'
     text = H.PAGE.format(title=esc(title), description=esc(description), origin=H.ORIGIN, path=path,
                          over=esc(over), heading=esc(heading), body=body)
+    text = text.replace('<article class="prose-page hx">', '<article class="prose-page hx al-page">', 1)
     if not index:
         text = text.replace('<meta name="description"', ROBOTS + '<meta name="description"', 1)
     return H.finish_page(text)
@@ -580,9 +701,9 @@ def page(path: str, title: str, description: str, over: str, heading: str, body:
 
 def player_page(a: Almanack, c: Career, faced: list, bowled: list) -> str:
     auction = a.auctions.player_section(c.person) if a.auctions is not None else ""
-    body = (glance(a, c) + section("The career", lede(a, c)) + seasons_table(a, c) + auction + batting_table(c)
+    body = (hero(a, c) + section("The career", lede(a, c)) + seasons_table(a, c) + auction + batting_table(c)
             + bowling_table(c) + against_the_field(a, c) + best_of(a, c) + batting_positions(a, c)
-            + dismissals(a, c) + head_to_head(a, c, faced, bowled)
+            + dismissals(a, c) + rival_cards(a, c) + head_to_head(a, c, faced, bowled)
             + '    <p class="hx-pager actions"><a class="go ghost" href="/almanack/players">All players</a>'
               '<a class="go ghost" href="/almanack">The Almanack</a></p>\n')
     years = sorted({s["year"] for s in c.seasons})
@@ -595,12 +716,85 @@ def player_page(a: Almanack, c: Career, faced: list, bowled: list) -> str:
 # --------------------------------------------------------------------------- the front page and index
 
 def all_time(a: Almanack) -> str:
-    bat = [[f"{i}. {a.link(c.person)}", f"<b>{c.bat['runs']:,}</b>", str(c.matches), _sr(c.bat),
-            rate(c.bat['runs'], c.bat['outs'], 2)] for i, c in enumerate(a.by_runs[:TOP_ALL_TIME], 1)]
-    bowl = [[f"{i}. {a.link(c.person)}", f"<b>{c.bowl['wickets']}</b>", str(c.matches), _econ(c.bowl),
-             rate(c.bowl['runs'], c.bowl['wickets'], 2)] for i, c in enumerate(a.by_wkts[:TOP_ALL_TIME], 1)]
-    return (section("Most runs", table(["Player", "Runs", "M", "SR", "Avg"], bat))
-            + section("Most wickets", table(["Player", "Wkts", "M", "Econ", "Avg"], bowl)))
+    """The two all-time lists as leaderboards: each a bar against the leader's figure, in
+    the colours of the club the player is best known for."""
+    def row(c, value, shown, detail):
+        fs = a.main_fs(c)
+        return V.BoardRow(a.link(c.person), value, shown, detail, a.key(fs), a.crest(fs))
+    bat = [row(c, c.bat["runs"], f"{c.bat['runs']:,}",
+               f"{c.matches} matches · SR {_sr(c.bat)} · avg {rate(c.bat['runs'], c.bat['outs'], 2)}")
+           for c in a.by_runs[:TOP_ALL_TIME]]
+    bowl = [row(c, c.bowl["wickets"], str(c.bowl["wickets"]),
+                f"{c.matches} matches · econ {_econ(c.bowl)} · avg {rate(c.bowl['runs'], c.bowl['wickets'], 2)}")
+            for c in a.by_wkts[:TOP_ALL_TIME]]
+    return section("The leaderboards", '<div class="al-boards"><div><h3>Most runs</h3>'
+                   + V.board(bat, "Most runs") + '</div><div><h3>Most wickets</h3>' + V.board(bowl, "Most wickets")
+                   + "</div></div>")
+
+
+def record_cards(a: Almanack) -> list:
+    """[A318] The headline records, each worked out here, never typed in."""
+    rec = a.rec
+    cards = []
+
+    def career_card(label, c, value, detail):
+        fs = a.main_fs(c)
+        cards.append(V.RecordCard(label, value, c.name, detail, a.key(fs), player_path(c.name), a.crest(fs)))
+
+    def match_card(label, person, fs, value, detail):
+        cards.append(V.RecordCard(label, value, a.name(person), detail, a.key(fs),
+                                  player_path(a.name(person)) if person in a.careers else None, a.crest(fs)))
+
+    top = a.by_runs[0]
+    career_card("Most runs", top, f"{top.bat['runs']:,}", f"in {top.matches} matches")
+    top = a.by_wkts[0]
+    career_card("Most wickets", top, str(top.bowl["wickets"]), f"in {top.matches} matches")
+    b = max(rec.arch.bats, key=lambda b: (b.runs, -b.balls))
+    m = rec.arch.matches[b.match_id]
+    match_card("Highest score", b.person, b.fs, f"{b.runs}{'' if b.out else '*'}",
+               f"off {b.balls} balls v {rec.team(rec.opponent(b.match_id, b.fs))}, {m.year}")
+    w = max(rec.arch.bowls, key=lambda b: (b.wickets, -b.runs))
+    m = rec.arch.matches[w.match_id]
+    match_card("Best bowling", w.person, w.fs, f"{w.wickets}/{w.runs}",
+               f"v {rec.team(rec.opponent(w.match_id, w.fs))}, {m.year}")
+    acc: dict[tuple, list] = {}
+    for x in rec.arch.bats:
+        r = acc.setdefault((x.person, rec.arch.matches[x.match_id].year, x.fs), [0, 0])
+        r[0] += x.runs
+        r[1] += x.balls
+    (p, y, fs), (runs, balls) = max(acc.items(), key=lambda kv: (kv[1][0], -kv[1][1]))
+    match_card("Most runs in a season", p, fs, f"{runs:,}", f"off {balls} balls in {y}")
+    acc = {}
+    for x in rec.arch.bowls:
+        r = acc.setdefault((x.person, rec.arch.matches[x.match_id].year, x.fs), [0, 0])
+        r[0] += x.wickets
+        r[1] += x.runs
+    (p, y, fs), (wk, runs) = max(acc.items(), key=lambda kv: (kv[1][0], -kv[1][1]))
+    match_card("Most wickets in a season", p, fs, str(wk), f"for {runs} runs in {y}")
+    six = max(a.careers.values(), key=lambda c: c.bat["sixes"])
+    career_card("Most sixes", six, f"{six.bat['sixes']:,}", f"in {six.bat['inns']} innings")
+    pom = a.by_pom[0]
+    career_card("Player of the Match", pom, str(a.p.pom[pom.person]), "awards, the most of anyone")
+    return cards
+
+
+def finder_data(a: Almanack) -> str:
+    """Every player for the search box, and the stats of each indexed one for the player of
+    the day: [name, path, crest url, runs, wickets, matches, span, best card, role], as JSON
+    in the page so neither needs a request."""
+    rows = []
+    for c in sorted(a.careers.values(), key=lambda c: c.name):
+        if c.matches < INDEX_MATCHES:
+            rows.append([c.name, player_path(c.name)])
+            continue
+        fs = a.main_fs(c)
+        years = sorted({s["year"] for s in c.seasons})
+        best = max((a.p.cards[(c.person, s["fs"])].display for s in c.seasons
+                    if (c.person, s["fs"]) in a.p.cards and a.p.cards[(c.person, s["fs"])].display), default=0)
+        rows.append([c.name, player_path(c.name), a.crest(fs) or "", c.bat["runs"], c.bowl["wickets"], c.matches,
+                     f"{years[0]}–{years[-1]}", best, ROLE_WORDS.get(a.p.role.get(c.person, ""), "player"),
+                     a.rec.team(fs)])
+    return json.dumps(rows, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
 
 
 def facts(a: Almanack) -> list[str]:
@@ -637,28 +831,47 @@ def facts(a: Almanack) -> list[str]:
 
 
 def almanack_page(a: Almanack) -> str:
-    cards = [("/almanack/players", "Players", f"All {len(a.careers):,} who played in the IPL, each with a full career page."),
-             ("/seasons", "Seasons", f"Every season from {a.rec.years[0]} to {a.rec.years[-1]}: the champion, the table and the leaders."),
-             ("/teams", "Franchises", f"All {len(a.rec.franchises)} franchises, every name each played under, and its record."),
-             ("/almanack/records", "Records", "Highest scores, fastest fifties, best figures, hat-tricks, partnerships and the biggest chases."),
-             ("/almanack/head-to-head", "Head to head", "Every batter against every bowler, and the longest rivalries in the IPL."),
-             ("/almanack/auctions", "Auctions", "Every IPL auction since 2008: what each buy cost and what the player then did."),
-             ("/almanack/grounds", "Grounds", "Every ground: average scores, chasing records, pace and spin, and who did best there."),
-             ("/records", "Rated seasons", "The highest-rated seasons on this game's 72-99 card, and the leaders across every season."),
-             ("/articles", "Articles", "Long reads from the ball-by-ball record: the best seasons, the death overs, chasing."),
-             ("/guides/ratings", "How we rate", "What the 72-99 card means and how each season is measured.")]
-    grid = "".join(f'<a class="hx-card" href="{u}"><b>{esc(t)}</b><span>{esc(d)}</span></a>' for u, t, d in cards)
+    n_players, n_matches = len(a.careers), len(a.rec.arch.matches)
+    cards = [("/almanack/players", "Players", f"{n_players:,}", "Every player who played in the IPL, each with a full career page."),
+             ("/almanack/replay", "Match replays", f"{n_matches:,}", "Watch any real IPL match again, over by over, and replay it with a player swapped."),
+             ("/almanack/records", "Records", "175*", "Highest scores, fastest fifties, best figures, hat-tricks, partnerships and the biggest chases."),
+             ("/almanack/head-to-head", "Head to head", "1 v 1", "Every batter against every bowler, and the longest rivalries in the IPL."),
+             ("/almanack/auctions", "Auctions", f"{len(a.auctions.by_year) if a.auctions else 19}", "Every IPL auction since 2008: what each buy cost and what the player then did."),
+             ("/almanack/grounds", "Grounds", f"{len(a.records.grounds) if a.records else 36}", "Every ground: average scores, chasing records, pace and spin, and who did best there."),
+             ("/seasons", "Seasons", f"{len(a.rec.years)}", f"Every season from {a.rec.years[0]} to {a.rec.years[-1]}: the champion, the table and the leaders."),
+             ("/teams", "Franchises", f"{len(a.rec.franchises)}", "Every franchise, every name each played under, and its record."),
+             ("/records", "Rated seasons", "99", "The highest-rated seasons on this game's 72-99 card, and the leaders across every season."),
+             ("/articles", "Articles", "6", "Long reads from the ball-by-ball record: the best seasons, the death overs, chasing."),
+             ("/guides/ratings", "How we rate", "72-99", "What the 72-99 card means and how each season is measured.")]
+    grid = "".join(f'<a class="hx-card al-hub" href="{u}"><i>{esc(n)}</i><b>{esc(t)}</b><span>{esc(d)}</span></a>'
+                   for u, t, n, d in cards)
     intro = para(f"The Almanack is the IPL's record from every ball bowled since {a.rec.years[0]}: "
-                 f"{len(a.rec.arch.matches):,} matches and {len(a.careers):,} players. Every figure on these pages "
+                 f"{n_matches:,} matches and {n_players:,} players. Every figure on these pages "
                  "is worked out from the ball-by-ball archive the game itself is built on.",
                  "Each player's page measures phase and pace-or-spin figures against the league in the same "
                  "seasons, so a strike rate from 2009 and one from 2025 can be read side by side.")
-    fact_list = "<ul>" + "".join(f"<li>{f}</li>" for f in facts(a)) + "</ul>"
-    body = (section("The record, ball by ball", intro + f'<div class="hx-cards">{grid}</div>')
-            + section("Did you know", fact_list) + all_time(a))
+    finder = ('<div class="al-find"><input id="alFind" class="room-input" list="alFindList" autocomplete="off" '
+              'placeholder="Find any player, from Aaron Finch to Zaheer Khan" aria-label="Find a player">'
+              '<datalist id="alFindList"></datalist><button class="go" type="button" onclick="alGo()">Go</button></div>'
+              f'<script type="application/json" id="alPlayers">{finder_data(a)}</script>')
+    top = a.by_runs[0]
+    fs = a.main_fs(top)
+    spot = (f'<div id="alSpot" class="al-spot {V.crest_cls(a.key(fs))}"><em>Player of the day</em>'
+            f'<a class="al-spot-name" href="{player_path(top.name)}">{esc(top.name)}</a>'
+            f'<span class="al-spot-meta">{esc(a.rec.team(fs))}</span>'
+            f'<div class="al-spot-tiles"><span><b>{top.matches}</b>matches</span><span><b>{top.bat["runs"]:,}</b>runs</span>'
+            f'<span><b>{top.bowl["wickets"]}</b>wickets</span></div>'
+            + (f'<img src="{a.crest(fs)}" alt="" width="120" height="120">' if a.crest(fs) else "") + "</div>")
+    fact_list = '<ul class="al-facts">' + "".join(f"<li>{f}</li>" for f in facts(a)) + "</ul>"
+    body = ('    <div class="al-top">' + '<div class="al-top-main">' + para(
+                f"<strong>{n_matches:,} matches. {n_players:,} players. Every ball since {a.rec.years[0]}.</strong>")
+            + finder + "</div>" + spot + "</div>\n"
+            + section("The records that stand", V.record_wall(record_cards(a)))
+            + section("Explore", intro + f'<div class="hx-cards al-hubs">{grid}</div>')
+            + all_time(a) + section("Did you know", fact_list))
     return page("/almanack", "The Almanack: every IPL player, season and record",
                 "The IPL's record from every ball since 2008: every player's career by season, by phase and "
-                "against pace and spin, every season and franchise, records and articles.",
+                "against pace and spin, every season and franchise, records, match replays and articles.",
                 "THE ALMANACK", "The Almanack", body)
 
 
@@ -675,9 +888,83 @@ def players_index(a: Almanack) -> str:
                    para(f"All {len(a.careers):,} players who played in the IPL, ordered by runs plus twenty "
                         "for each wicket, so batters and bowlers stand on one list.")
                    + filt + table(["Player", "Seasons", "M", "Runs", "Wkts"], rows, num_from=2, cls="al-index"))
-    body += '<script src="/static/almanack.js"></script>\n'
     return page("/almanack/players", "Every IPL player", "Every player who played in the IPL since 2008, "
                 "with a career page for each.", "ALMANACK", "Every player", body)
+
+
+# --------------------------------------------------------------------------- match replays [A319]
+
+def replay_url(match_id: str) -> str:
+    return f"/almanack/replay?m={match_id}"
+
+
+def replay_page(a: Almanack) -> str:
+    """The replay page: a season's matches to pick from, a match to watch ball by ball on the
+    game's own scoreboard, and the what-if. The page is an app (`web/static/replay.js` over
+    `/api/almanack/*`), so what a reader without the script gets is written here: what the
+    page does, and every final as a link."""
+    rec = a.rec
+    years = "".join(f'<button type="button" class="al-yr-btn" data-year="{y}">{y}</button>' for y in rec.years)
+    finals = []
+    for y in rec.years:
+        m = rec.final(y)
+        if m.winner is None:
+            continue
+        loser = rec.runner_up(m)
+        finals.append(f'<li><a href="{replay_url(m.match_id)}">{y}: {esc(rec.team(m.winner))} beat '
+                      f'{esc(rec.team(loser))} {esc(rec.margin(m))}</a></li>')
+    intro = para(f"Every one of the {len(rec.arch.matches):,} IPL matches in the archive, played again over by over "
+                 "on the same scoreboard the game uses: the score, who is at the crease, each over's runs and "
+                 "wickets, and every fifty, hundred and five-for as it came.",
+                 "Then ask what if. Take any player out of either side and bring in any player-season from "
+                 "nineteen years of the IPL, and the match engine plays it again. It also plays each match a "
+                 "hundred times to say how often each side wins, so a result can be read as the expected one "
+                 "or an upset.")
+    shell = (f'<div class="al-rp" id="rp"><div class="al-rp-years" id="rpYears" role="group" aria-label="Season">{years}</div>'
+             '<div id="rpList" class="al-rp-list" aria-live="polite"></div>'
+             '<div id="rpMatch" class="al-rp-match hide"></div></div>')
+    reveal = ('''
+  <section id="reveal" class="hide al-rp-reveal">
+    <div id="overStepper" class="hide">
+<!-- shell:scoreboard -->
+<!-- /shell:scoreboard -->
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto" autocomplete="off"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip innings</button>
+        <button class="act" onclick="rpSkipMatch()">Skip to result</button>
+      </div>
+    </div>
+  </section>
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+        <div id="scSuperOver"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+''')
+    body = (section("Watch it again", intro) + "    " + shell + "\n" + reveal
+            + section("Every final", '<ul class="al-finals">' + "".join(finals) + "</ul>")
+            + '    <p class="hx-pager actions"><a class="go ghost" href="/almanack">The Almanack</a></p>\n'
+            + '    <script src="/static/reveal.js"></script>\n    <script src="/static/replay.js"></script>\n')
+    return page("/almanack/replay", "IPL match replays: every match, over by over",
+                "Watch any IPL match since 2008 again, over by over, then swap any player in or out and let the "
+                "match engine play it again.", "ALMANACK · MATCH REPLAYS", "Match replays", body)
 
 
 # --------------------------------------------------------------------------- build
@@ -700,7 +987,7 @@ def h2h_by_player(a: Almanack) -> tuple[dict, dict]:
 
 def build(a: Almanack) -> dict[pathlib.Path, str]:
     faced, bowled = h2h_by_player(a)
-    out = {ALMANACK: almanack_page(a), PLAYERS_INDEX: players_index(a)}
+    out = {ALMANACK: almanack_page(a), PLAYERS_INDEX: players_index(a), REPLAY: replay_page(a)}
     if a.records is not None:
         R = a.records
         doc = R.h2h_document()
@@ -736,7 +1023,7 @@ def main(check: bool = False) -> int:
         a = load_all(conn)
     pages = build(a)
     existing = (set(PLAYER_DIR.glob("*.html")) | set(GROUND_DIR.glob("*.html")) | set(AUCTION_DIR.glob("*.html"))
-                | {p for p in (ALMANACK, PLAYERS_INDEX) if p.exists()})
+                | {p for p in (ALMANACK, PLAYERS_INDEX, REPLAY) if p.exists()})
     stale = sorted(str(p.relative_to(STATIC)) for p, t in pages.items() if not p.exists() or p.read_text() != t)
     extra = sorted(str(p.relative_to(STATIC)) for p in existing - set(pages))
     if check:

@@ -35,3 +35,5 @@ __pycache__/
 !/data/career_skill_cuts.json.gz
 # [A297] the 2027 mini auction preset: retained squads, purses and our list
 !/data/mini2027.json.gz
+# [A319] every real match, ball by ball, for replays and what-ifs
+!/data/real_matches.json.gz

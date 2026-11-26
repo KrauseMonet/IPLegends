@@ -48,7 +48,7 @@ from web import auth
 from web import career_results
 from web import bingo_routes
 from web import career_routes, ground_routes, puzzle_routes, trio_routes
-from web import premium as premium_lib, premium_routes
+from web import premium as premium_lib, premium_routes, replay_routes
 from web import guess_routes
 from web import xi_routes
 from web import client_failures
@@ -185,6 +185,7 @@ app.include_router(xi_routes.router)
 app.include_router(trio_routes.router)
 app.include_router(career_routes.router)
 app.include_router(premium_routes.router)
+app.include_router(replay_routes.router)
 
 STATIC = pathlib.Path(__file__).parent / "static"
 class _CachedStatic(StaticFiles):
@@ -488,7 +489,7 @@ def almanack_player_page(slug: str) -> FileResponse:
 # [A316] the record book, head to head and the grounds.
 @app.get("/almanack/{name}", include_in_schema=False)
 def almanack_section_page(name: str) -> FileResponse:
-    if name not in ("records", "grounds", "head-to-head", "auctions"):
+    if name not in ("records", "grounds", "head-to-head", "auctions", "replay"):
         raise HTTPException(404, "no such page")
     return _subpage("almanack", name)
 

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google-adsense-account" content="ca-pub-2624074910535553">
+<title>IPL match replays: every match, over by over · Fine Leg XI</title>
+<meta name="description" content="Watch any IPL match since 2008 again, over by over, then swap any player in or out and let the match engine play it again.">
+<link rel="canonical" href="https://fineleg.app/almanack/replay">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=658f8f5eb0">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png?v=6734ff71dc">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/favicon-180.png?v=7cf719835b">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fine Leg XI">
+<meta property="og:title" content="Fine Leg XI">
+<meta property="og:description" content="Watch any IPL match since 2008 again, over by over, then swap any player in or out and let the match engine play it again.">
+<meta property="og:image" content="https://fineleg.app/static/og-image.png">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://fineleg.app/static/og-image.png">
+<link rel="preload" href="/static/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/Anton.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/fonts.css?v=3bb466c442">
+<link rel="stylesheet" href="/static/style.css?v=df3f381ef3">
+<link rel="stylesheet" href="/static/crests.css?v=6a24e5db16">
+</head>
+<body>
+<!-- shell:nav -->
+<nav class="topnav" aria-label="Main">
+  <div class="topnav-in">
+    <a class="brand" href="/" data-home>
+      <img src="/static/logo-emblem.webp?v=6a1d0cc41c" alt="" width="34" height="36">
+      <span>Fine Leg <b>XI</b></span>
+    </a>
+    <div class="topnav-links">
+      <a href="/draft" data-match="/draft /season">Draft</a>
+      <a href="/auction" data-match="/auction">Auction</a>
+      <a href="/career" data-match="/career">Career</a>
+      <a href="/almanack" data-match="/almanack /seasons /teams /articles /records">Almanack</a>
+      <a href="/rooms" data-match="/rooms">Rooms</a>
+      <a href="/puzzles" data-match="/puzzles /daily /bingo /guess /common /xi /trio /flashback">Puzzles</a>
+    </div>
+    <div class="topnav-r">
+      <button class="install-pill hide" data-install onclick="installApp(this)"
+        title="Add Fine Leg XI to your home screen.">Install app</button>
+      <div id="authArea"></div>
+    </div>
+  </div>
+</nav>
+<!-- /shell:nav -->
+<div class="sheet">
+  <article class="prose-page hx al-page">
+    <div class="report">
+      <div class="over-line">ALMANACK · MATCH REPLAYS</div>
+      <h1 class="call">Match replays</h1>
+    </div>
+    <section class="hx-sec">
+      <h2>Watch it again</h2>
+      <p>Every one of the 1,243 IPL matches in the archive, played again over by over on the same scoreboard the game uses: the score, who is at the crease, each over's runs and wickets, and every fifty, hundred and five-for as it came. Then ask what if. Take any player out of either side and bring in any player-season from nineteen years of the IPL, and the match engine plays it again. It also plays each match a hundred times to say how often each side wins, so a result can be read as the expected one or an upset.</p>
+    </section>
+    <div class="al-rp" id="rp"><div class="al-rp-years" id="rpYears" role="group" aria-label="Season"><button type="button" class="al-yr-btn" data-year="2008">2008</button><button type="button" class="al-yr-btn" data-year="2009">2009</button><button type="button" class="al-yr-btn" data-year="2010">2010</button><button type="button" class="al-yr-btn" data-year="2011">2011</button><button type="button" class="al-yr-btn" data-year="2012">2012</button><button type="button" class="al-yr-btn" data-year="2013">2013</button><button type="button" class="al-yr-btn" data-year="2014">2014</button><button type="button" class="al-yr-btn" data-year="2015">2015</button><button type="button" class="al-yr-btn" data-year="2016">2016</button><button type="button" class="al-yr-btn" data-year="2017">2017</button><button type="button" class="al-yr-btn" data-year="2018">2018</button><button type="button" class="al-yr-btn" data-year="2019">2019</button><button type="button" class="al-yr-btn" data-year="2020">2020</button><button type="button" class="al-yr-btn" data-year="2021">2021</button><button type="button" class="al-yr-btn" data-year="2022">2022</button><button type="button" class="al-yr-btn" data-year="2023">2023</button><button type="button" class="al-yr-btn" data-year="2024">2024</button><button type="button" class="al-yr-btn" data-year="2025">2025</button><button type="button" class="al-yr-btn" data-year="2026">2026</button></div><div id="rpList" class="al-rp-list" aria-live="polite"></div><div id="rpMatch" class="al-rp-match hide"></div></div>
+
+  <section id="reveal" class="hide al-rp-reveal">
+    <div id="overStepper" class="hide">
+<!-- shell:scoreboard -->
+      <!-- The live scoreboard [A151]: written into season, room and daily by tools.shell,
+           so the three reveals are one piece of markup. reveal.js fills every id here;
+           the controls under it stay on each page, since each page skips differently. -->
+      <div class="sb" id="scoreboard">
+        <!-- a fifty, a hundred, a hat-trick, a five-for: shown over the board for a beat,
+             then gone on its own (a CSS animation, so no timer for a skip to forget). -->
+        <div class="sb-milestone" id="overMilestone" aria-live="polite"></div>
+        <div class="sb-stage" id="overStage"></div>
+        <div class="sb-main">
+          <div class="sb-team sb-bat" id="sbBat"></div>
+          <div class="sb-centre">
+            <div class="sb-score"><span id="overScoreLine">0/0</span></div>
+            <div class="sb-overs" id="sbOvers"></div>
+          </div>
+          <div class="sb-team sb-bowl" id="sbBowl"></div>
+        </div>
+        <div class="sb-target" id="overTargetLine"></div>
+        <div class="sb-gauge"><i id="overOversBar" style="width:0%"></i></div>
+        <!-- who is in: the two batters (the one on strike marked) and the over's bowler,
+             as a broadcast shows them between overs. Empty until the first over is done. -->
+        <div class="sb-crease" id="overCrease"></div>
+        <div class="sb-last" id="overLastLine"></div>
+        <div class="sb-bars" id="overChips" aria-label="Runs in each over"></div>
+        <div class="sb-phases"><span>Powerplay</span><span>Middle overs</span><span>Death</span></div>
+        <!-- the innings already known, kept on screen for the whole chase so a target is
+             never something to remember -- hidden when this IS the first innings. -->
+        <div class="sb-prior hide" id="overPrior">
+          <span class="sb-prior-label">First innings</span>
+          <b id="overPriorScore"></b>
+          <span id="overPriorBest"></span>
+        </div>
+      </div>
+<!-- /shell:scoreboard -->
+      <div class="actions" style="justify-content:center;margin-top:20px">
+        <button class="act lead" id="overPauseBtn" onclick="toggleOverPause()">Pause</button>
+        <select id="overSpeedSelect" class="room-input" style="width:auto" autocomplete="off"
+          onchange="setOverSpeed(this.value)">
+          <option value="1200">Slow</option>
+          <option value="500" selected>Normal</option>
+          <option value="150">Fast</option>
+        </select>
+        <button class="act" onclick="skipOverStepper()">Skip innings</button>
+        <button class="act" onclick="rpSkipMatch()">Skip to result</button>
+      </div>
+    </div>
+  </section>
+  <div id="scorecardOverlay" class="card-overlay hide" onclick="hideScorecard(event)">
+    <div class="scorecard-shell">
+      <div class="scorecard-frame">
+        <div class="report">
+          <div class="over-line" id="scStage"></div>
+          <div class="call" id="scHeadline"></div>
+          <div class="margin" id="scMargin"></div>
+        </div>
+        <div class="cards2" id="scInnings"></div>
+        <div id="scSuperOver"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="hideScorecard()">Close</button>
+      </div>
+    </div>
+  </div>
+    <section class="hx-sec">
+      <h2>Every final</h2>
+      <ul class="al-finals"><li><a href="/almanack/replay?m=336040">2008: Rajasthan Royals beat Chennai Super Kings by 3 wickets</a></li><li><a href="/almanack/replay?m=392239">2009: Deccan Chargers beat Royal Challengers Bangalore by 6 runs</a></li><li><a href="/almanack/replay?m=419165">2010: Chennai Super Kings beat Mumbai Indians by 22 runs</a></li><li><a href="/almanack/replay?m=501271">2011: Chennai Super Kings beat Royal Challengers Bangalore by 58 runs</a></li><li><a href="/almanack/replay?m=548381">2012: Kolkata Knight Riders beat Chennai Super Kings by 5 wickets</a></li><li><a href="/almanack/replay?m=598073">2013: Mumbai Indians beat Chennai Super Kings by 23 runs</a></li><li><a href="/almanack/replay?m=734049">2014: Kolkata Knight Riders beat Kings XI Punjab by 3 wickets</a></li><li><a href="/almanack/replay?m=829823">2015: Mumbai Indians beat Chennai Super Kings by 41 runs</a></li><li><a href="/almanack/replay?m=981019">2016: Sunrisers Hyderabad beat Royal Challengers Bangalore by 8 runs</a></li><li><a href="/almanack/replay?m=1082650">2017: Mumbai Indians beat Rising Pune Supergiant by 1 run</a></li><li><a href="/almanack/replay?m=1136620">2018: Chennai Super Kings beat Sunrisers Hyderabad by 8 wickets</a></li><li><a href="/almanack/replay?m=1181768">2019: Mumbai Indians beat Chennai Super Kings by 1 run</a></li><li><a href="/almanack/replay?m=1237181">2020: Mumbai Indians beat Delhi Capitals by 5 wickets</a></li><li><a href="/almanack/replay?m=1254117">2021: Chennai Super Kings beat Kolkata Knight Riders by 27 runs</a></li><li><a href="/almanack/replay?m=1312200">2022: Gujarat Titans beat Rajasthan Royals by 7 wickets</a></li><li><a href="/almanack/replay?m=1370353">2023: Chennai Super Kings beat Gujarat Titans by 5 wickets (DLS method)</a></li><li><a href="/almanack/replay?m=1426312">2024: Kolkata Knight Riders beat Sunrisers Hyderabad by 8 wickets</a></li><li><a href="/almanack/replay?m=1473511">2025: Royal Challengers Bengaluru beat Punjab Kings by 6 runs</a></li><li><a href="/almanack/replay?m=1535465">2026: Royal Challengers Bengaluru beat Gujarat Titans by 5 wickets</a></li></ul>
+    </section>
+    <p class="hx-pager actions"><a class="go ghost" href="/almanack">The Almanack</a></p>
+    <script src="/static/reveal.js?v=73f681ffab"></script>
+    <script src="/static/replay.js?v=1142e45e23"></script>
+    <script src="/static/almanack.js?v=feb80e8599"></script>
+
+  </article>
+
+  <!-- shell:auth -->
+  <div id="authOverlay" class="card-overlay hide" onclick="closeAuthModal(event)">
+    <div class="scorecard-shell auth-frame">
+      <div class="scorecard-frame">
+        <div class="room-choices" id="authTabs" style="margin-bottom:20px">
+          <button class="room-choice sel" data-tab="login" onclick="pickAuthTab('login')">Sign in</button>
+          <button class="room-choice" data-tab="register" onclick="pickAuthTab('register')">Register</button>
+        </div>
+        <div id="authLoginPanel">
+          <label class="room-label">Username or email</label>
+          <input id="authLoginIdentifier" class="room-input" placeholder="Username or email">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authLoginPassword" type="password" class="room-input" placeholder="Password">
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitLogin(this)">Sign in</button>
+          </div>
+        </div>
+        <div id="authRegisterPanel" class="hide">
+          <label class="room-label">Username</label>
+          <input id="authRegisterUsername" class="room-input" placeholder="3-24 characters" maxlength="24">
+          <label class="room-label" style="margin-top:14px">Email</label>
+          <input id="authRegisterEmail" class="room-input" placeholder="you@example.com">
+          <label class="room-label" style="margin-top:14px">Password</label>
+          <input id="authRegisterPassword" type="password" class="room-input" placeholder="At least 8 characters">
+          <p class="room-note">No email verification or password reset yet -- pick a password you'll remember.</p>
+          <div class="actions" style="margin-top:18px">
+            <button class="act lead" onclick="submitRegister(this)">Create account</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError"></div>
+      </div>
+      <div class="scorecard-close">
+        <button class="act" onclick="closeAuthModal()">Close</button>
+      </div>
+    </div>
+  </div>
+<!-- /shell:auth -->
+
+  <!-- shell:footer -->
+<footer class="imprint">
+  <div class="imprint-links">
+    <a href="/seasons">Seasons</a><a href="/teams">Teams</a><a href="/records">Records</a>
+    <a href="/articles">Articles</a><a href="/guides">Guides</a><a href="/puzzles">Puzzles</a><a href="/about">About</a>
+    <a href="/faq">FAQ</a><a href="/contact">Contact</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a>
+  </div>
+  <div id="footStats"></div>
+  <p class="imprint-fine">An unofficial fan project, not affiliated with or endorsed by the
+    BCCI, the IPL or any franchise. Team names and logos belong to their owners and appear
+    only to identify the teams. Ball-by-ball data from
+    <a href="https://cricsheet.org/" rel="noopener">Cricsheet</a> (ODbL).</p>
+</footer>
+<!-- /shell:footer -->
+</div>
+
+<script src="/static/common.js?v=3347d98ea8"></script>
+<script src="/static/auth.js?v=de6050c2cc"></script>
+<script src="/static/info.js?v=29305b2217"></script>
+</body>
+</html>

@@ -21,12 +21,14 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from tools import build_history as H
+from tools import almanack_viz as V
 from tools.build_history import esc, overs, para, plural, rate, section, slug, table
 
 VENUES = H.ROOT / "etl" / "overrides" / "venues.csv"
 TOP = 10
 H2H_FILE = H.STATIC / "almanack" / "h2h.json"
 H2H_LIST_MIN = 6           # pairs in the searchable head-to-head file need this many balls
+GROUND_CARDS = 12           # grounds shown as cards; every one is in the table below
 RIVALRY_MIN_BALLS = 60     # a "great rivalry" needs this many balls between the two
 SPELL_BALLS = 24           # an economical spell is a full four overs
 SEASON_SR_MIN_BALLS = 200  # a season strike rate needs this many balls faced
@@ -343,6 +345,42 @@ class Records:
         out += f"<h3>Super overs ({len(ties)})</h3>" + table(["Date", "Team", "Team", "Won the super over"], rows, num_from=4)
         return section("Teams and results", out)
 
+    def headline_cards(self) -> list:
+        """[A318] The first row of each list below, as cards in the colours of the side it was
+        done for: the same sort as the list, so a card can never disagree with its table."""
+        a, rec = self.a, self.rec
+        out = []
+
+        def card(label, value, person, fs, detail):
+            out.append(V.RecordCard(label, value, a.name(person), detail, a.key(fs), A_path(a, person) or None,
+                                    a.crest(fs)))
+
+        b = sorted(rec.arch.bats, key=lambda b: (-b.runs, b.balls, a.name(b.person)))[0]
+        card("Highest score", f"{b.runs}{'' if b.out else '*'}", b.person, b.fs,
+             f"off {b.balls} balls, {rec.arch.matches[b.match_id].year}")
+        for label, bucket in (("Fastest fifty", self.ps.fifties), ("Fastest hundred", self.ps.hundreds)):
+            balls, _r, p, mid, fs = sorted(bucket, key=lambda r: (r[0], a.name(r[2]), r[3]))[0]
+            card(label, f"{balls} balls", p, fs, f"v {rec.team(rec.opponent(mid, fs))}, {rec.arch.matches[mid].year}")
+        w = sorted((b for b in rec.arch.bowls if b.wickets), key=lambda b: (-b.wickets, b.runs, a.name(b.person)))[0]
+        card("Best figures", f"{w.wickets}/{w.runs}", w.person, w.fs,
+             f"v {rec.team(rec.opponent(w.match_id, w.fs))}, {rec.arch.matches[w.match_id].year}")
+        pt = sorted(self.ps.partnerships, key=lambda p: (-p.runs, p.balls))[0]
+        out.append(V.RecordCard("Highest partnership", str(pt.runs), f"{a.name(pt.a)} & {a.name(pt.b)}",
+                                f"off {pt.balls} balls, {rec.arch.matches[pt.match_id].year}", a.key(pt.fs), None,
+                                a.crest(pt.fs)))
+        full = [i for i in self.ps.innings if self.full_length(i)]
+        hi = sorted(full, key=lambda i: (-i.runs, i.balls))[0]
+        out.append(V.RecordCard("Highest total", score_text(hi).split(" (")[0], rec.team(hi.fs),
+                                f"v {rec.team(rec.opponent(hi.match_id, hi.fs))}, {rec.arch.matches[hi.match_id].year}",
+                                a.key(hi.fs), f"/teams/{slug(rec.franchise(hi.fs))}", a.crest(hi.fs)))
+        lo = sorted((i for i in full if i.wickets == 10 or i.balls == 120), key=lambda i: (i.runs, -i.balls))[0]
+        out.append(V.RecordCard("Lowest total", score_text(lo).split(" (")[0], rec.team(lo.fs),
+                                f"v {rec.team(rec.opponent(lo.match_id, lo.fs))}, {rec.arch.matches[lo.match_id].year}",
+                                a.key(lo.fs), f"/teams/{slug(rec.franchise(lo.fs))}", a.crest(lo.fs)))
+        out.append(V.RecordCard("Hat-tricks", str(len(self.ps.hat_tricks)), "in the IPL",
+                                f"since {rec.years[0]}", None, None))
+        return out
+
     def records_page(self) -> str:
         intro = para("The IPL's record book from every ball since 2008: the highest scores and the fastest fifties, "
                      "the best spells, the biggest partnerships, the highest totals and chases, and every hat-trick "
@@ -350,8 +388,9 @@ class Records:
                      "Every figure is worked out from the ball-by-ball archive, in ball order, so a fastest fifty is "
                      "the ball the fiftieth run came off, not an estimate from a scorecard. Matches cut short by rain "
                      "are left out of the team totals.")
-        body = (section("The record book", intro) + self.batting_records() + self.bowling_records()
-                + self.partnership_records() + self.team_records() + _back())
+        body = (section("The record book", intro) + section("The headline records", V.record_wall(self.headline_cards()))
+                + '<div class="al-tabbed">' + self.batting_records() + self.bowling_records()
+                + self.partnership_records() + self.team_records() + "</div>" + _back())
         return _page(self.a, "/almanack/records", "IPL records: every ball since 2008",
                      "The IPL record book: highest scores, fastest fifties and hundreds, best figures, hat-tricks, "
                      "partnerships, highest totals and chases, and every super over.", "ALMANACK", "Records", body)
@@ -452,11 +491,16 @@ class Records:
                          f"{sum(i.runs for i in firsts) / len(firsts):.0f}" if firsts else "-",
                          f"{100 * chased / len(decided):.0f}%" if decided else "-",
                          f"{100 * sty['spin'][0] / tot:.0f}%" if tot and "spin" in sty else "-"])
+        cards = []
+        for g in sorted(self.grounds.values(), key=lambda g: (-len(g.matches), g.name))[:GROUND_CARDS]:
+            cards.append(self._ground_card(g))
         body = section("Every ground", para(
             f"All {len(self.grounds)} grounds that have staged an IPL match, in India, South Africa and the "
             "United Arab Emirates.",
             "The average first innings counts only innings scheduled for twenty overs; the chasing figure is the "
             "share of matches decided outright that the side batting second won.")
+            + f'<div class="al-grounds">{"".join(cards)}</div>'
+            + "<h3>All the grounds</h3>"
             + table(["Ground", "City", "Matches", "Avg 1st inns", "Won chasing", "Spin share"], rows, num_from=2)
             + '<p class="hx-note">A ground is one place under every name it has had: the archive writes Delhi\'s '
               "ground as both Feroz Shah Kotla and Arun Jaitley Stadium, and Pune's as both Subrata Roy Sahara Stadium "
@@ -464,6 +508,37 @@ class Records:
         return _page(self.a, "/almanack/grounds", "Every IPL ground", "Every ground that has staged an IPL match, "
                      "with its average first-innings score, chasing record and how much spin it sees.",
                      "ALMANACK", "Grounds", body)
+
+    def _ground_card(self, g: Ground) -> str:
+        """[A318] A ground as a card in its home club's colours, with its three telling
+        figures as bars: the first innings against a 130-210 range, chases won, spin's share."""
+        from web.crests import franchise_crest
+        home = Counter()
+        for m in g.matches:
+            home[self.rec.franchise(m.a)] += 1
+            home[self.rec.franchise(m.b)] += 1
+        club = home.most_common(1)[0][0] if home else None
+        crest = franchise_crest(club) if club else None
+        key = crest.rsplit("/", 1)[1].split("-", 1)[0] if crest else None
+        firsts = [self.innings_by_match[m.match_id][0] for m in g.matches
+                  if self.innings_by_match.get(m.match_id) and self.full_length(self.innings_by_match[m.match_id][0])]
+        decided = [m for m in g.matches if m.winner is not None and m.result_type in ("runs", "wickets")]
+        sty = self._ground_styles(g)
+        tot = sum(v[0] for v in sty.values())
+        meters = ""
+        if firsts:
+            avg = sum(i.runs for i in firsts) / len(firsts)
+            meters += V.meter("Avg first innings", f"{avg:.0f}", (avg - 130) / 80)
+        if decided:
+            ch = sum(1 for m in decided if m.result_type == "wickets") / len(decided)
+            meters += V.meter("Won chasing", f"{100 * ch:.0f}%", ch)
+        if tot and "spin" in sty:
+            sp = sty["spin"][0] / tot
+            meters += V.meter("Spin share", f"{100 * sp:.0f}%", sp)
+        img = f'<img src="{crest}" alt="" width="44" height="44" loading="lazy">' if crest else ""
+        return (f'<a class="al-ground {V.crest_cls(key)}" href="/almanack/grounds/{g.slug}">{img}'
+                f'<b>{esc(g.name)}</b><span>{esc(g.city)} · {plural(len(g.matches), "match", "matches")}</span>'
+                f"{meters}</a>")
 
     # ---------------------------------------------------------------- head to head
     def h2h_document(self) -> str:

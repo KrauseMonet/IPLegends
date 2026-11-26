@@ -201,4 +201,4 @@ def test_the_new_pages_are_routed_in_the_app_and_on_vercel():
         assert c.get(path).status_code == 200, path
     assert c.get("/almanack/secrets").status_code == 404
     srcs = {r["src"] for r in json.loads((ROOT / "vercel.json").read_text())["routes"]}
-    assert "/almanack/(records|grounds|head-to-head|auctions)" in srcs and "/almanack/grounds/([a-z0-9-]+)" in srcs
+    assert "/almanack/(records|grounds|head-to-head|auctions|replay)" in srcs and "/almanack/grounds/([a-z0-9-]+)" in srcs

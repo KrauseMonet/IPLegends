@@ -32,6 +32,22 @@ That decision needs a deliberate sign-off, not an accident.
 
 Attribution must appear in the shipped UI regardless.
 
+## Auction prices [A317]
+
+The archive holds no prices, so the Almanack's auction pages take every sale -- player, buying
+franchise, base price, price paid -- from Wikipedia's season pages ("List of YYYY Indian Premier
+League personnel changes"), read on 25 November 2026. Only facts are taken (who was sold, to whom,
+for what); no Wikipedia text is reproduced, and each auction page names Wikipedia as its source.
+Wikipedia's text is CC BY-SA 4.0; facts themselves are not copyrightable, and the attribution is
+given anyway.
+
+For 2021 to 2026 every sale was then checked by hand against the IPL's own sold lists on
+iplt20.com, read in a browser like any visitor would (the site's data API was not used). That
+check corrected six prices and added two sales Wikipedia's tables had missed; each correction is a
+row in `etl/overrides/auction_history.csv` with the source named in its `note`. **The IPL site's
+terms of use were not reviewed before reading it**; the figures taken from it are eight
+individually cited facts, not a copy of its lists.
+
 ## Not used
 
 This project does **not** scrape or ingest data from ESPNcricinfo, Transfermarkt,

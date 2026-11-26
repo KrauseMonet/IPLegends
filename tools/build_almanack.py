@@ -37,6 +37,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
+from tools import almanack_auctions as AU
 from tools import almanack_records as R2
 from tools import build_history as H
 from tools.build_history import esc, overs, para, plural, rate, section, slug, table
@@ -46,6 +47,7 @@ ALMANACK = STATIC / "almanack.html"
 PLAYERS_INDEX = STATIC / "almanack" / "players.html"
 PLAYER_DIR = STATIC / "almanack" / "players"
 GROUND_DIR = STATIC / "almanack" / "grounds"
+AUCTION_DIR = STATIC / "almanack" / "auctions"
 
 INDEX_MATCHES = 20      # a player page is indexed from this many matches (Phase 0: 343 players)
 H2H_MIN_BALLS = 12      # a head-to-head row on a PLAYER page needs this many balls between the two
@@ -233,6 +235,7 @@ class Career:
 
 class Almanack:
     records = None   # the phase-two pages (tools.almanack_records), attached by load_all
+    auctions = None  # the phase-three pages (tools.almanack_auctions), attached by load_all
 
     def __init__(self, rec: H.Record, people: People):
         self.rec, self.p = rec, people
@@ -576,7 +579,8 @@ def page(path: str, title: str, description: str, over: str, heading: str, body:
 
 
 def player_page(a: Almanack, c: Career, faced: list, bowled: list) -> str:
-    body = (glance(a, c) + section("The career", lede(a, c)) + seasons_table(a, c) + batting_table(c)
+    auction = a.auctions.player_section(c.person) if a.auctions is not None else ""
+    body = (glance(a, c) + section("The career", lede(a, c)) + seasons_table(a, c) + auction + batting_table(c)
             + bowling_table(c) + against_the_field(a, c) + best_of(a, c) + batting_positions(a, c)
             + dismissals(a, c) + head_to_head(a, c, faced, bowled)
             + '    <p class="hx-pager actions"><a class="go ghost" href="/almanack/players">All players</a>'
@@ -638,6 +642,7 @@ def almanack_page(a: Almanack) -> str:
              ("/teams", "Franchises", f"All {len(a.rec.franchises)} franchises, every name each played under, and its record."),
              ("/almanack/records", "Records", "Highest scores, fastest fifties, best figures, hat-tricks, partnerships and the biggest chases."),
              ("/almanack/head-to-head", "Head to head", "Every batter against every bowler, and the longest rivalries in the IPL."),
+             ("/almanack/auctions", "Auctions", "Every IPL auction since 2008: what each buy cost and what the player then did."),
              ("/almanack/grounds", "Grounds", "Every ground: average scores, chasing records, pace and spin, and who did best there."),
              ("/records", "Rated seasons", "The highest-rated seasons on this game's 72-99 card, and the leaders across every season."),
              ("/articles", "Articles", "Long reads from the ball-by-ball record: the best seasons, the death overs, chasing."),
@@ -706,6 +711,10 @@ def build(a: Almanack) -> dict[pathlib.Path, str]:
         out[STATIC / "almanack" / "head-to-head.html"] = R.h2h_page()
         for g in R.grounds.values():
             out[GROUND_DIR / f"{g.slug}.html"] = R.ground_page(g)
+    if a.auctions is not None:
+        out[STATIC / "almanack" / "auctions.html"] = a.auctions.index_page()
+        for y in a.auctions.by_year:
+            out[AUCTION_DIR / f"{y}.html"] = a.auctions.year_page(y)
     for c in a.careers.values():
         out[PLAYER_DIR / f"{player_slug(c.name)}.html"] = player_page(a, c, faced.get(c.person, []), bowled.get(c.person, []))
     return out
@@ -716,6 +725,7 @@ def load_all(conn) -> Almanack:
     people = load_people(conn)
     attach_cards(people)
     a = Almanack(rec, people)
+    a.auctions = AU.Auctions(a, AU.read_sales())
     a.records = R2.Records(a, R2.ordered_pass(conn), R2.spells(conn), R2.read_venues(), R2.toss_winners(conn),
                            R2.ground_styles(conn), people.h2h)
     return a
@@ -725,7 +735,7 @@ def main(check: bool = False) -> int:
     with H._connect() as conn:
         a = load_all(conn)
     pages = build(a)
-    existing = (set(PLAYER_DIR.glob("*.html")) | set(GROUND_DIR.glob("*.html"))
+    existing = (set(PLAYER_DIR.glob("*.html")) | set(GROUND_DIR.glob("*.html")) | set(AUCTION_DIR.glob("*.html"))
                 | {p for p in (ALMANACK, PLAYERS_INDEX) if p.exists()})
     stale = sorted(str(p.relative_to(STATIC)) for p, t in pages.items() if not p.exists() or p.read_text() != t)
     extra = sorted(str(p.relative_to(STATIC)) for p in existing - set(pages))
@@ -741,6 +751,7 @@ def main(check: bool = False) -> int:
         return 1 if stale or extra else 0
     PLAYER_DIR.mkdir(parents=True, exist_ok=True)
     GROUND_DIR.mkdir(parents=True, exist_ok=True)
+    AUCTION_DIR.mkdir(parents=True, exist_ok=True)
     for p, t in pages.items():
         if not p.exists() or p.read_text() != t:
             p.write_text(t)

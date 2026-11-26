@@ -150,6 +150,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "mwparserfromhell" },
     { name = "pillow" },
     { name = "pytest" },
 ]
@@ -167,8 +168,25 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "mwparserfromhell", specifier = ">=0.7.2" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
+name = "mwparserfromhell"
+version = "0.7.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/e1/4e4b53fd838b82061243222d6123ddaf6176278b1ad7058382a1312cb7ae/mwparserfromhell-0.7.2.tar.gz", hash = "sha256:f4193072e9ea93b9e88f772f60a02125c0602d32890d0bbdcb275ed58c8b3763", size = 196317, upload-time = "2025-07-01T05:27:09.697Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/1f/04f0fedc193ed892c0b32958e2685fc894aaf9d2c31d639c19551ab9e320/mwparserfromhell-0.7.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:def35318e734e684cf28d20bf81d586514463bb01c6946bd8a5ec3a2ffc28660", size = 154159, upload-time = "2025-07-01T05:26:26.073Z" },
+    { url = "https://files.pythonhosted.org/packages/56/5d/f7953a57d79c3a9666af6b183a0e7e27f5009f78d55dfa384c83b2f3a746/mwparserfromhell-0.7.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ba3dabf3145a45f4cf8419735018e4e84101b72df0aa045eca7ca5529f3d0f5f", size = 154510, upload-time = "2025-07-01T05:26:27.57Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/06/fd40cee61e4bb4b70aaf5422b2593223cb54e49284872c116ea9150f7280/mwparserfromhell-0.7.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d51c59fa0c994d5df78fa72cb57107f6e8bac919cdcfd6b0e3c23203e0272038", size = 256502, upload-time = "2025-07-01T05:26:28.694Z" },
+    { url = "https://files.pythonhosted.org/packages/65/6e/3e9d4e01493437259940abbf47cd18f9f2f82a5fb5481a0b1778edbec68e/mwparserfromhell-0.7.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b31789c4d255c027d3075b935a5020efde547dbfbc57ea20abb16d842c52411a", size = 251741, upload-time = "2025-07-01T05:26:30.31Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/ff/1fd2b852c72150fd6d7c30c58cfaa024c3c9df2202d4fcf2f142265041a4/mwparserfromhell-0.7.2-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:beaf750c25d0d2fc0de8f6b301e96c6723630a9f6b2ba02ce65d642021bfbf28", size = 253105, upload-time = "2025-07-01T05:26:31.832Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/f3/b4be5b6fc60f9027449b83eb6419464b806410225b7f035a045e8e4c4bca/mwparserfromhell-0.7.2-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:cd8549a2250959a3a2570e24783bfe682d170b02d06ad7727f29e29f4e672f65", size = 249377, upload-time = "2025-07-01T05:26:33.459Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/74/4b74bee73e3596d161626670b430f1f352a3903ec2692842690bc26c27ba/mwparserfromhell-0.7.2-cp311-cp311-win32.whl", hash = "sha256:7713a695a64ca71e627ccc7b2a393a8aadf9b94f83600b4874ee80fbe834fbfd", size = 153728, upload-time = "2025-07-01T05:26:35.159Z" },
+    { url = "https://files.pythonhosted.org/packages/20/52/b037055009df635f7e270bc2dec4ba0593af9e88919df95abae158dae600/mwparserfromhell-0.7.2-cp311-cp311-win_amd64.whl", hash = "sha256:b9715e7d62adf80e7df80526b6eda873eca55826d16d1c6e197fe0ca506d31fc", size = 156023, upload-time = "2025-07-01T05:26:36.635Z" },
 ]
 
 [[package]]

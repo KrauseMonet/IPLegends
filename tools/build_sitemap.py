@@ -21,7 +21,7 @@ ORIGIN = "https://fineleg.app"
 
 PAGES = ["/", "/draft", "/auction", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
          "/common", "/xi", "/trio", "/flashback", "/records", "/almanack", "/almanack/players", "/almanack/records", "/almanack/grounds",
-         "/almanack/head-to-head", "/seasons", "/teams", "/guides", "/articles",
+         "/almanack/head-to-head", "/almanack/auctions", "/seasons", "/teams", "/guides", "/articles",
          "/about", "/faq", "/contact", "/terms", "/privacy"]
 
 
@@ -30,7 +30,7 @@ def urls() -> list[str]:
     for folder in ("guides", "articles", "seasons", "teams"):
         out += [f"/{folder}/{p.stem}" for p in sorted((STATIC / folder).glob("*.html"))]
     # [A315] only the player pages that are indexed: a noindex page has no place in a sitemap.
-    for folder in ("players", "grounds"):
+    for folder in ("players", "grounds", "auctions"):
         for p in sorted((STATIC / "almanack" / folder).glob("*.html")):
             if 'name="robots" content="noindex' not in p.read_text():
                 out.append(f"/almanack/{folder}/{p.stem}")

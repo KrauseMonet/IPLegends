@@ -39,6 +39,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from tools import almanack_auctions as AU
+from tools import almanack_compare as CMP
 from tools import almanack_records as R2
 from tools import almanack_viz as V
 from tools import build_history as H
@@ -51,6 +52,8 @@ PLAYER_DIR = STATIC / "almanack" / "players"
 GROUND_DIR = STATIC / "almanack" / "grounds"
 AUCTION_DIR = STATIC / "almanack" / "auctions"
 REPLAY = STATIC / "almanack" / "replay.html"
+COMPARE = STATIC / "almanack" / "compare.html"
+COMPARE_JSON = STATIC / "almanack" / "compare.json"
 
 INDEX_MATCHES = 20      # a player page is indexed from this many matches (Phase 0: 343 players)
 H2H_MIN_BALLS = 12      # a head-to-head row on a PLAYER page needs this many balls between the two
@@ -426,7 +429,8 @@ def hero(a: Almanack, c: Career) -> str:
     big = f'<img class="al-hero-crest" src="{crest}" alt="" width="150" height="150">' if crest else ""
     return (f'    <div class="al-hero {V.crest_cls(a.key(fs))}">{big}<div class="al-hero-id">'
             + "".join(f'<span class="al-chip">{esc(x)}</span>' for x in chips)
-            + (f'<span class="al-clubs">{clubs}</span>' if clubs else "") + "</div>\n"
+            + (f'<span class="al-clubs">{clubs}</span>' if clubs else "")
+            + f'<a class="al-chip al-cmp-link" href="/almanack/compare?a={player_slug(c.name)}">Compare ⇄</a>' + "</div>\n"
             + glance(a, c) + "    </div>\n")
 
 
@@ -833,6 +837,7 @@ def facts(a: Almanack) -> list[str]:
 def almanack_page(a: Almanack) -> str:
     n_players, n_matches = len(a.careers), len(a.rec.arch.matches)
     cards = [("/almanack/players", "Players", f"{n_players:,}", "Every player who played in the IPL, each with a full career page."),
+             ("/almanack/compare", "Compare", "v", "Any two players side by side, figure by figure, phase by phase and season by season."),
              ("/almanack/replay", "Match replays", f"{n_matches:,}", "Watch any real IPL match again, over by over, and replay it with a player swapped."),
              ("/almanack/records", "Records", "175*", "Highest scores, fastest fifties, best figures, hat-tricks, partnerships and the biggest chases."),
              ("/almanack/head-to-head", "Head to head", "1 v 1", "Every batter against every bowler, and the longest rivalries in the IPL."),
@@ -998,6 +1003,13 @@ def build(a: Almanack) -> dict[pathlib.Path, str]:
         out[STATIC / "almanack" / "head-to-head.html"] = R.h2h_page()
         for g in R.grounds.values():
             out[GROUND_DIR / f"{g.slug}.html"] = R.ground_page(g)
+    cdoc = CMP.document(a)
+    out[COMPARE_JSON] = cdoc
+    h2h_url = a.records.h2h_url if a.records is not None else ""
+    out[COMPARE] = page("/almanack/compare", "Compare two IPL players",
+                        "Any two IPL players side by side: runs, wickets, strike rate, economy, every phase against "
+                        "league par, both careers season by season, and the balls between them.",
+                        "ALMANACK · COMPARE", "Compare", CMP.page_body(a, cdoc, CMP.url(cdoc), h2h_url))
     if a.auctions is not None:
         out[STATIC / "almanack" / "auctions.html"] = a.auctions.index_page()
         for y in a.auctions.by_year:
@@ -1023,7 +1035,7 @@ def main(check: bool = False) -> int:
         a = load_all(conn)
     pages = build(a)
     existing = (set(PLAYER_DIR.glob("*.html")) | set(GROUND_DIR.glob("*.html")) | set(AUCTION_DIR.glob("*.html"))
-                | {p for p in (ALMANACK, PLAYERS_INDEX, REPLAY) if p.exists()})
+                | {p for p in (ALMANACK, PLAYERS_INDEX, REPLAY, COMPARE) if p.exists()})
     stale = sorted(str(p.relative_to(STATIC)) for p, t in pages.items() if not p.exists() or p.read_text() != t)
     extra = sorted(str(p.relative_to(STATIC)) for p in existing - set(pages))
     if check:

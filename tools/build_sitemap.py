@@ -21,7 +21,7 @@ ORIGIN = "https://fineleg.app"
 
 PAGES = ["/", "/draft", "/auction", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
          "/common", "/xi", "/trio", "/flashback", "/records", "/almanack", "/almanack/players", "/almanack/records", "/almanack/grounds",
-         "/almanack/head-to-head", "/almanack/auctions", "/almanack/replay", "/seasons", "/teams", "/guides", "/articles",
+         "/almanack/head-to-head", "/almanack/auctions", "/almanack/replay", "/almanack/compare", "/seasons", "/teams", "/guides", "/articles",
          "/about", "/faq", "/contact", "/terms", "/privacy"]
 
 

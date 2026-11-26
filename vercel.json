@@ -83,7 +83,7 @@
     { "src": "/almanack", "dest": "/web/static/almanack.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/almanack/players", "dest": "/web/static/almanack/players.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/almanack/auctions/(20[0-9][0-9])", "dest": "/web/static/almanack/auctions/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
-    { "src": "/almanack/(records|grounds|head-to-head|auctions|replay|compare)", "dest": "/web/static/almanack/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
+    { "src": "/almanack/(records|grounds|head-to-head|auctions|replay|compare|explorer)", "dest": "/web/static/almanack/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/almanack/grounds/([a-z0-9-]+)", "dest": "/web/static/almanack/grounds/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/almanack/players/([a-z0-9-]+)", "dest": "/web/static/almanack/players/$1.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },
     { "src": "/guides", "dest": "/web/static/guides.html", "headers": { "cache-control": "public, max-age=0, must-revalidate" } },

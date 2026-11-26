@@ -5338,3 +5338,37 @@ a.al-rec:hover{transform:translateY(-3px);box-shadow:0 14px 34px -14px color-mix
 @media (prefers-reduced-motion:reduce){.al-cmp-bar i,.al-cmp-pt i{transition:none}}
 .al-chip.al-cmp-link{text-decoration:none!important;background:rgba(0,0,0,.3);color:var(--team-ink);border-color:color-mix(in srgb,var(--team) 60%,transparent)}
 .al-chip.al-cmp-link:hover{background:var(--team);color:#0b1020}
+
+/* --- [A322] the stats explorer ------------------------------------------------------------ */
+.ex-box{border:1px solid var(--line-strong);border-radius:18px;padding:16px;margin-top:6px;
+  background:radial-gradient(120% 120% at 100% 0%,rgba(245,184,61,.10),transparent 55%),linear-gradient(160deg,var(--panel-2),var(--panel))}
+.ex-form{display:grid;gap:10px}
+.ex-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.ex-f{display:flex;flex-direction:column;gap:4px;flex:1 1 130px;min-width:0}
+.ex-f > span{font:700 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.ex-f select,.ex-f input{width:100%;padding:9px 10px;font-size:14px}
+.ex-mode{flex:0 0 auto;margin:0}
+.ex-chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px}
+.ex-chip{border:1px solid var(--line-strong);background:rgba(0,0,0,.2);color:var(--ink-2);font:600 12.5px var(--sans);
+  padding:6px 12px;border-radius:999px;cursor:pointer}
+.ex-chip:hover{color:#fff;border-color:var(--gold)}
+.ex-count{font-size:13px!important;color:var(--ink-3)!important;margin:12px 0 8px!important}
+.ex-count b{color:var(--ink);font-family:var(--mono)}
+.ex-table th.ex-th{cursor:pointer;user-select:none}
+.ex-table th.ex-th:hover{color:var(--ink)}
+.ex-table th.on{color:var(--gold)}
+.ex-table td.on{color:#fff;font-weight:700}
+.ex-rank{color:var(--ink-3);font-family:var(--mono);width:28px}
+.ex-name{min-width:170px}
+.ex-name a{color:var(--ink)!important;font-weight:650}
+.ex-bar{display:block;height:4px;border-radius:2px;background:rgba(255,255,255,.06);margin-top:5px;overflow:hidden}
+.ex-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-2));border-radius:2px}
+.ex-open{margin:8px 0 22px!important}
+.ex-open .act{width:auto}
+@media (max-width:700px){.ex-f{flex:1 1 44%}.ex-box{padding:12px}}
+.ex-key{display:none}
+@media (max-width:700px){
+  .ex-key{display:block;float:right;margin-left:8px;font:400 20px var(--display);color:var(--gold);text-align:right;line-height:1}
+  .ex-key small{display:block;font:700 9px var(--mono);letter-spacing:.1em;color:var(--ink-3);text-transform:uppercase}
+  .ex-name{min-width:200px}
+}

@@ -489,7 +489,7 @@ def almanack_player_page(slug: str) -> FileResponse:
 # [A316] the record book, head to head and the grounds.
 @app.get("/almanack/{name}", include_in_schema=False)
 def almanack_section_page(name: str) -> FileResponse:
-    if name not in ("records", "grounds", "head-to-head", "auctions", "replay", "compare"):
+    if name not in ("records", "grounds", "head-to-head", "auctions", "replay", "compare", "explorer"):
         raise HTTPException(404, "no such page")
     return _subpage("almanack", name)
 

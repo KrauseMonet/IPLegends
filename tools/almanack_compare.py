@@ -205,4 +205,4 @@ def page_body(a, doc_text: str, data_url: str, h2h_url: str) -> str:
             + section("Famous comparisons", f'<ul class="al-cmp-famous">{famous}</ul>')
             + '    <p class="hx-pager actions"><a class="go ghost" href="/almanack/players">All players</a>'
               '<a class="go ghost" href="/almanack">The Almanack</a></p>\n'
-            + '    <script src="/static/compare.js"></script>\n')
+            + '    <script src="/static/compare.js"></script>\n    <script src="/static/statcard.js"></script>\n')

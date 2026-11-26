@@ -120,7 +120,8 @@ function cmpDraw(){
     ${cmpPar(x, y)}
     ${cmpChart(x, y)}
     <div id="cmpMet"></div>
-    <div class="actions al-cmp-actions"><button class="act" onclick="cmpSwap()">⇄ Swap sides</button>
+    <div class="actions al-cmp-actions"><button class="act lead" onclick="scCompareCard()">Share card ⤴</button>
+      <button class="act" onclick="cmpSwap()">⇄ Swap sides</button>
       <button class="act" onclick="cmpCopy()">Copy the link</button></div>`;
   document.querySelectorAll('.al-cmp-metric button').forEach(b => b.addEventListener('click', () => {
     CMP.metric = b.dataset.m; cmpDraw();

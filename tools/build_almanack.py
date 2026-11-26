@@ -241,6 +241,7 @@ class Career:
 
 class Almanack:
     records = None   # the phase-two pages (tools.almanack_records), attached by load_all
+    compare_url = ""  # [A321] the compare file's hashed URL, set by build before the player pages
     auctions = None  # the phase-three pages (tools.almanack_auctions), attached by load_all
 
     def __init__(self, rec: H.Record, people: People):
@@ -430,7 +431,10 @@ def hero(a: Almanack, c: Career) -> str:
     return (f'    <div class="al-hero {V.crest_cls(a.key(fs))}">{big}<div class="al-hero-id">'
             + "".join(f'<span class="al-chip">{esc(x)}</span>' for x in chips)
             + (f'<span class="al-clubs">{clubs}</span>' if clubs else "")
-            + f'<a class="al-chip al-cmp-link" href="/almanack/compare?a={player_slug(c.name)}">Compare ⇄</a>' + "</div>\n"
+            + f'<a class="al-chip al-cmp-link" href="/almanack/compare?a={player_slug(c.name)}">Compare ⇄</a>'
+            + (f'<button type="button" class="al-chip al-cmp-link" data-src="{a.compare_url}" '
+               f'data-slug="{player_slug(c.name)}" onclick="scPlayerCard(this)">Share card ⤴</button>'
+               if a.compare_url else "") + "</div>\n"
             + glance(a, c) + "    </div>\n")
 
 
@@ -708,6 +712,7 @@ def player_page(a: Almanack, c: Career, faced: list, bowled: list) -> str:
     body = (hero(a, c) + section("The career", lede(a, c)) + seasons_table(a, c) + auction + batting_table(c)
             + bowling_table(c) + against_the_field(a, c) + best_of(a, c) + batting_positions(a, c)
             + dismissals(a, c) + rival_cards(a, c) + head_to_head(a, c, faced, bowled)
+            + '    <script src="/static/statcard.js"></script>\n'
             + '    <p class="hx-pager actions"><a class="go ghost" href="/almanack/players">All players</a>'
               '<a class="go ghost" href="/almanack">The Almanack</a></p>\n')
     years = sorted({s["year"] for s in c.seasons})
@@ -1004,6 +1009,7 @@ def build(a: Almanack) -> dict[pathlib.Path, str]:
         for g in R.grounds.values():
             out[GROUND_DIR / f"{g.slug}.html"] = R.ground_page(g)
     cdoc = CMP.document(a)
+    a.compare_url = CMP.url(cdoc)
     out[COMPARE_JSON] = cdoc
     h2h_url = a.records.h2h_url if a.records is not None else ""
     out[COMPARE] = page("/almanack/compare", "Compare two IPL players",

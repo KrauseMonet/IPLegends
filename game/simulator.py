@@ -70,6 +70,7 @@ from dataclasses import dataclass, field
 
 from etl.impact import Cell, Costs, Grid
 from etl.intent import at as intent_at
+from etl.intent import expected_remaining
 from etl.intent import pressure as intent_pressure
 from etl.intent import table as intent_table
 from etl.settling import faced_bucket
@@ -816,10 +817,52 @@ class Innings:
     chased: bool = False
     # [A247] The over (0-based) a breakdown's bowler pulled up before, if he did.
     breakdown_at: int | None = None
+    # [A323] The Impact Player brought on mid-innings to rescue a collapse, if he was.
+    rescue: "RescueAt | None" = None
 
     @property
     def overs(self) -> str:
         return f"{self.balls // BALLS_PER_OVER}.{self.balls % BALLS_PER_OVER}"
+
+
+# [A323] The first-innings Impact rescue. Since 2023 a side batting first has, in 39 of
+# 293 first innings (13%), sent on its Impact Player as a batter during the innings: at a
+# fall of wicket, a top-order batter ALREADY OUT goes off and a fresh batter comes in next.
+# No bowler is lost (none of the 39 taken off had bowled); what the side gives up is an
+# Impact bowler for the second innings. The engine's own projected total (runs so far plus
+# `expected_remaining`) at those 39 swaps had a median of 150 (p25 135, p75 162) -- but a
+# real side does not swap every time it dips under a line, and the engine does. So the
+# line is FITTED, the one fitted number here (like A239's CHANGE_ECONOMY): over 24 leagues
+# of historical sides, 135 rescues 14.4% of the first innings in which a side could
+# (archive 13.3%), 14% of them at two or three down (archive 15%); 150 rescued 27%.
+# The earliest real rescue came at two down, the latest in the 18th over.
+RESCUE_BELOW = 135
+RESCUE_MIN_WICKETS = 2
+RESCUE_LAST_OVER = 17          # 0-based: a wicket in the 18th over at the latest
+
+
+@dataclass(frozen=True)
+class Rescue:
+    """[A323] Who a side can send on, and on what terms. `game.season.rescue_for` decides
+    whether a side may rescue at all (its Impact Player bats, and its eleven keeps five
+    bowling options without the man taken off); the innings decides WHEN."""
+
+    player: Player
+    swappable: frozenset[str]      # dismissed men who may go off: never a bowler or keeper
+    outbats: frozenset[str]        # only worth it if he bats better than the man due in
+
+
+@dataclass(frozen=True)
+class RescueAt:
+    """[A323] What happened: who went off, who came on, and when."""
+
+    out_id: str
+    out_name: str
+    in_id: str
+    in_name: str
+    over: int
+    wickets: int
+    runs: int
 
 
 @dataclass(frozen=True)
@@ -1002,7 +1045,8 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                  state_over: int | None = None,
                  plan: dict[str, str] | None = None,
                  breakdown: "Breakdown | None" = None,
-                 conditions: float = 0.0) -> Innings:
+                 conditions: float = 0.0,
+                 rescue: "Rescue | None" = None) -> Innings:
     """One innings. The three keyword-only parameters exist for the super over and
     nothing else; every one of them defaults to an ordinary twenty-over innings, so a
     caller that does not name them gets exactly the behaviour this function has always
@@ -1171,6 +1215,17 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
                 )
                 if innings.wickets >= max_wickets or next_in >= len(cards):
                     return innings
+                if (rescue is not None and innings.rescue is None
+                        and _rescues(model, rescue, innings, cards, next_in, over)):
+                    out = next(c for c in cards[:next_in]
+                               if c.out and c.player.person_id in rescue.swappable)
+                    cards.insert(next_in, BatterCard(rescue.player))
+                    innings.rescue = RescueAt(
+                        out.player.person_id, out.player.name, rescue.player.person_id,
+                        rescue.player.name, over, innings.wickets, innings.runs)
+                    innings.commentary.append(
+                        f"  {innings.overs:>5}  Impact Player {rescue.player.name} on for "
+                        f"{out.player.name}")
                 striker = cards[next_in]
                 next_in += 1
             else:
@@ -1231,6 +1286,22 @@ def play_innings(model: Model, batting: list[Player], bowling: list[Player],
         striker, non_striker = non_striker, striker
 
     return innings
+
+
+def _rescues(model: Model, rescue: Rescue, innings: Innings, cards: list[BatterCard],
+             next_in: int, over: int) -> bool:
+    """[A323] Whether this fall of wicket is the moment: early enough, deep enough into the
+    collapse, a projected total under `RESCUE_BELOW`, a man already out who may go off, and
+    the Impact Player a better bat than the one due in. Reads only; draws nothing, so an
+    innings that never rescues is exactly the innings it always was."""
+    if innings.wickets < RESCUE_MIN_WICKETS or over > RESCUE_LAST_OVER:
+        return False
+    if cards[next_in].player.person_id not in rescue.outbats:
+        return False
+    if not any(c.out and c.player.person_id in rescue.swappable for c in cards[:next_in]):
+        return False
+    legal = innings.balls
+    return innings.runs + expected_remaining(model, legal, innings.wickets) < RESCUE_BELOW
 
 
 def _over_batters(came_in: list[BatterCard],

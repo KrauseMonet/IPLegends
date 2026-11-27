@@ -1253,7 +1253,7 @@ try { Object.assign(FILL_VIEW, JSON.parse(localStorage.getItem(FILL_KEY) || '{}'
 const ROLE_CHIPS = [['all', 'All'], ['batter', 'Batters'], ['keeper', 'Keepers'],
                     ['allrounder', 'All-rounders'], ['bowler', 'Bowlers']];
 const BAND_CHIPS = [['any', 'Any'], ['top', 'Top 1–3'], ['middle', 'Middle 3–5'],
-                    ['finisher', 'Finisher 5–7'], ['tail', 'Lower 8–11']];
+                    ['finisher', 'Finisher 5–8'], ['tail', 'Lower 8–11']];
 const ORIGIN_CHIPS = [['any', 'Any'], ['domestic', 'Domestic'], ['overseas', 'Overseas']];
 const FILL_SORTS = [['rating', 'Best rating'], ['position', 'By batting position'],
                     ['role', 'By role'], ['name', 'Name A–Z'], ['season', 'Newest season']];
@@ -1263,7 +1263,7 @@ const fillSorts = () => A && A.ratings_hidden
 const ROLE_NAME = {batter: 'Batters', keeper: 'Wicketkeepers', allrounder: 'All-rounders',
                    bowler: 'Bowlers', unrated: 'Others'};
 const BAND_NAME = {top: 'Top order · bats 1–3', middle: 'Middle order · bats 3–5',
-                   finisher: 'Finishers · bat 5–7', tail: 'Lower order · bats 8–11'};
+                   finisher: 'Finishers · bat 5–8', tail: 'Lower order · bats 8–11'};
 
 function roleMatch(c, role){
   if (role === 'all') return true;

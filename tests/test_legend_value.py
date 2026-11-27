@@ -30,7 +30,7 @@ def test_an_average_card_is_worth_nothing():
 
 def test_batting_is_worth_more_higher_up_the_order():
     top = card(bat_scoring=0.2)
-    finisher = card(bat_scoring=0.2, positions=frozenset({5, 6, 7}))
+    finisher = card(bat_scoring=0.2, positions=frozenset({5, 6, 7, 8}))
     assert C.legend_value(top) == pytest.approx(0.2 * (21.6 + 22.1 + 20.3) / 3)   # A269's table at 1.0
     assert C.legend_value(top) > C.legend_value(finisher) > 0
 

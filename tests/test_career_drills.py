@@ -39,7 +39,7 @@ def _card(**kw):
 # --- the offsets: centred where they land, sized in real spreads -----------------------------
 
 @pytest.mark.parametrize("band,positions", [("top", {1, 2, 3}), ("middle", {3, 4, 5}),
-                                            ("finisher", {5, 6, 7})])
+                                            ("finisher", {5, 6, 7, 8})])
 def test_a_spin_drill_is_better_against_spin_worse_against_pace_and_nets_to_nothing(band, positions):
     card = _card(positions=frozenset(positions))
     off = C.drill_offsets(card, {"spin": 2.0})["style_bat"]
@@ -52,7 +52,7 @@ def test_a_spin_drill_is_better_against_spin_worse_against_pace_and_nets_to_noth
 
 
 def test_learning_to_bat_time_is_slower_new_faster_set_and_nets_to_nothing():
-    card = _card(positions=frozenset({5, 6, 7}))
+    card = _card(positions=frozenset({5, 6, 7, 8}))
     new, set_ = C.drill_offsets(card, {"burn": 1.0})["burn"]
     q = 0.616
     assert set_ - new == pytest.approx(0.036)

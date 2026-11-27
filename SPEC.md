@@ -189,7 +189,8 @@ followed by a separate arranging phase.
 
 **Eligibility, as of A76, is a single career-based ROLE, not a per-exact-position set.**
 A72/A73's mechanism (below, kept for the history) is retired. Every player is exactly one
-of `top` (slots 1-3), `middle` (3-5), `finisher` (5-7), or `tail` (8-11), decided by
+of `top` (slots 1-3), `middle` (3-5), `finisher` (5-8 since A323, which shares 8 with the
+tail; 5-7 before), or `tail` (8-11), decided by
 `etl.batting_roles.batting_role` against a four-tier cascade: that SEASON's own position
 evidence if it clears `MIN_INNINGS_FOR_ROLE = 5`; else the player's CAREER evidence if
 that clears it; else, if `squad_members.role != 'bowler'`, whatever thin evidence exists
@@ -1996,6 +1997,30 @@ real repair is ratings on both sides, which is what the game supplies.
 because at league average the tilt is the identity: `tests/test_simulator.py` is the other
 half and covers what no aggregate can — that the tilt hits the mean it was asked for, that a
 better batter both scores more and is dismissed less, and that the XI rules hold.
+
+
+### 10.6 The first-innings Impact rescue [A323]
+
+A side batting first may send its Impact Player on DURING the innings to rescue a collapse,
+as real sides have since 2023 (39 of 293 first innings, 13%). At a fall of wicket a batter
+already out goes off and the Impact Player bats next; no bowler is lost, since the man off
+never bowled. What the side gives up is an Impact bowler for the second innings, so no
+break-time decision follows (A78).
+
+- **May** (`game.season.rescue_for`): the Impact Player is a batter, keeper or all-rounder,
+  and the eleven keeps five bowling options with him on (the eleven's own plus his, A50's
+  floor -- real sides did it with five). The keeper and anyone who bowls never go off. The
+  human's own side in a solo season never rescues: its Impact Player stays the human's
+  choice at the break. Everywhere else -- computer sides, rooms, the daily, careers -- it
+  is automatic.
+- **When** (`game.simulator._rescues`): from the second wicket, no later than the 18th
+  over, when the engine's projected total (runs + `expected_remaining`) is under
+  `RESCUE_BELOW` = 135, and he bats better than the man due in. 135 is FITTED: it gives
+  14.4% of the first innings in which a side could (archive 13.3%), 14% of them at two or
+  three down (archive 15%); the real median projection at a rescue was 150, but a real
+  side does not swap every time it dips under a line and the engine does.
+- Draws nothing, so an innings that never rescues is the innings it always was. The daily
+  keeps no rescue before `web.daily.RESCUE_FROM`.
 
 ## 11. The session model
 

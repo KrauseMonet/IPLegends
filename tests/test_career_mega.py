@@ -33,7 +33,8 @@ pytestmark = [pytest.mark.skipif(DOC is None, reason="no deck snapshot"),
 # two key moments in 2010
 # [A276] seed 33, re-found after A276 (bowlers rotated by phase and style): two key
 # moments in 2010
-UNSOLD = (33, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
+# [A323] seed 2, re-found after the Impact rescue moved the matches: two key moments in 2010
+UNSOLD = (2, C.Setup("X", "middle", 2010, False), ["o0", "e0", "m1", "m1"])
 
 
 @pytest.fixture(scope="module")

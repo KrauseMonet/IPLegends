@@ -699,7 +699,7 @@ def test_a_2027_band_is_last_season_then_other_leagues_then_the_record():
     p = M.build_preset(_deck(cards), [], listed, [], [], au.base_price, positions)
     by = {c.person_id: c.positions for c, _, _ in p.lots}
     assert by["p26"] == tail                                 # 2026 decides, whatever else says
-    assert by["old"] == frozenset({5, 6, 7})                 # other leagues over an old season
+    assert by["old"] == frozenset({5, 6, 7, 8})                 # other leagues over an old season
     assert by["thin"] == tail                                # three innings: not enough
     assert by["new:newlad"] == frozenset({3, 4, 5})          # a newcomer, from other leagues
 
@@ -710,7 +710,7 @@ def test_a_thin_2026_season_decides_when_most_of_it_is_one_band():
     tail, top = frozenset({8, 9, 10, 11}), frozenset({1, 2, 3})
     assert M.THIN_MIN_INNINGS == 3
     assert M.thin_season_positions({2: 1, 8: 1, 9: 2}) == tail     # Narine 2026: 3 of 4
-    assert M.thin_season_positions({6: 3}) == frozenset({5, 6, 7})
+    assert M.thin_season_positions({6: 3}) == frozenset({5, 6, 7, 8})
     assert M.thin_season_positions({6: 2}) is None                  # two innings: not enough
     assert M.thin_season_positions({8: 2, 6: 1, 4: 1}) is None      # exactly half: no majority
     assert M.thin_season_positions({8: 5}) is None                  # five: the card's own season

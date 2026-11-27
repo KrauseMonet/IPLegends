@@ -125,8 +125,12 @@ def test_repositions_are_still_allowed():
 # [A244] Three of them (51, 198, 211) did move once, for a reason that is not a rating:
 # keepers by trade became keeper-eligible, which removes some keeper dead ends. Re-found
 # by the same search; stranding is rarer now (7 cases in 800 days, against 5 in 265).
-STRANDING_CASES = ((144, pick_random), (264, pick_random), (434, pick_random),
-                   (490, pick_random), (684, pick_random))
+#
+# [A323] All five moved again when the finisher band widened to 5-8 (more places a card
+# can fill, fewer dead ends). Re-found by the same search: 10 strand in 2,000 days, and
+# one of them (1288) strands even with the fallback, so it is not pinned.
+STRANDING_CASES = ((257, pick_random), (405, pick_random), (695, pick_random),
+                   (881, pick_random), (1503, pick_random))
 
 
 @pytest.mark.parametrize("offset,policy", STRANDING_CASES)

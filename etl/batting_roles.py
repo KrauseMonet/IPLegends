@@ -2,7 +2,10 @@
 
 Supersedes A72/A73's per-exact-position eligibility (`MIN_INNINGS_AT_POSITION`,
 `LOWER_ORDER_BAND`, `Card.career_positions`'s widening rule) with a coarser, single
-role per player: `top` (1-3), `middle` (3-5), `finisher` (5-7), or `tail` (8-11).
+role per player: `top` (1-3), `middle` (3-5), `finisher` (5-8 since A323; 5-7 before),
+or `tail` (8-11). Which places each role may FILL is `etl.feasibility.BATTING_ROLE_SLOTS`;
+this module decides only which role a player IS, and A323 left that unchanged: position
+8 is still tail evidence below, though a finisher may now be placed there.
 Deliberately a DIFFERENT classification from SPEC 6.4's five rating-cohort bands in
 `etl/positions.py` (opener/top_order/middle/finisher/tail, no overlap, per franchise-
 season, used for rating cohort offsets) -- that one answers "how do we normalise this

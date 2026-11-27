@@ -27,8 +27,8 @@ SLUMP = (23, 52)   # (45, 29) until A276 (of four candidates the one that fails 
 # seed -> the incident it brings, for an opener and a fast bowler (found by search)
 # hamstring 9 -> 14 re-found after A259: the season must stop at the hamstring before any key
 # moment, since test_an_incident_a_career_has_used_up_does_not_come_again plays it with no answers
-OPENER = {"press": 2, "slump": 13, "row": 11, "hamstring": 14, "wedding": 12, "collapse": 20}   # slump 3 -> 13, row 0 -> 11 after A276; hamstring 14 -> 34 after A265, 34 -> 9 after A267; row 7 -> 0, hamstring 9 -> 14 after A268
-PACE = {"press": 2, "side_strain": 3, "hamstring": 1, "back": 54, "death": 18, "wedding": 25}   # press 60 -> 2, back 9 -> 54, death 35 -> 18 after A276; A239, A251; press re-found after A259; press 73 -> 21, back 9 -> 68 after A265; press 21 -> 40, back 68 -> 9, death 19 -> 18 after A266; back 9 -> 68, death 18 -> 35 after A267; press 40 -> 42, back 68 -> 51 after A268  # A270: press 42 -> 60, back 51 -> 9
+OPENER = {"press": 2, "slump": 3, "row": 11, "hamstring": 14, "wedding": 12, "collapse": 20}   # slump 3 -> 13, row 0 -> 11 after A276; slump 13 -> 3 after A323; hamstring 14 -> 34 after A265, 34 -> 9 after A267; row 7 -> 0, hamstring 9 -> 14 after A268
+PACE = {"press": 21, "side_strain": 3, "hamstring": 1, "back": 54, "death": 18, "wedding": 25}   # press 2 -> 21 after A323; press 60 -> 2, back 9 -> 54, death 35 -> 18 after A276; A239, A251; press re-found after A259; press 73 -> 21, back 9 -> 68 after A265; press 21 -> 40, back 68 -> 9, death 19 -> 18 after A266; back 9 -> 68, death 18 -> 35 after A267; press 40 -> 42, back 68 -> 51 after A268  # A270: press 42 -> 60, back 51 -> 9
 
 
 @pytest.fixture(scope="module")

@@ -32,6 +32,7 @@ from functools import lru_cache
 from typing import Callable
 
 from etl.feasibility import (
+    BATTING_ROLE_SLOTS,
     BOWLERS_IN_TWELVE, IMPACT_SLOT, OVERSEAS_CAP, TWELVE_SIZE, XI_SIZE, Card, Deck,
     reads_as_keeper,
 )
@@ -156,12 +157,12 @@ def _pid(person_id: str) -> int:
 
 # --- the legality algebra ---------------------------------------------------------------
 
-# A76 gives every card exactly one of four bands; the Impact slot takes anybody.
-_BAND_OF_MIN = {1: 0, 3: 1, 5: 2, 8: 3}
-_BAND_SLOTS = (
-    frozenset({1, 2, 3, IMPACT_SLOT}), frozenset({3, 4, 5, IMPACT_SLOT}),
-    frozenset({5, 6, 7, IMPACT_SLOT}), frozenset({8, 9, 10, 11, IMPACT_SLOT}),
-)
+# A76 gives every card exactly one of four bands; the Impact slot takes anybody. Read from
+# the one table rather than copied (A323 widened the finisher's to 5-8, sharing 8 with the
+# tail, and a copy here would have silently kept 5-7).
+_BAND_NAMES = ("top", "middle", "finisher", "tail")
+_BAND_OF_MIN = {min(BATTING_ROLE_SLOTS[n]): i for i, n in enumerate(_BAND_NAMES)}
+_BAND_SLOTS = tuple(BATTING_ROLE_SLOTS[n] | {IMPACT_SLOT} for n in _BAND_NAMES)
 _BAND_CAP = tuple(len(s) for s in _BAND_SLOTS)
 
 # Hall's theorem: real cards can be given distinct slots iff, for every set of bands, the

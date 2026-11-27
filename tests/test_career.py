@@ -1413,12 +1413,12 @@ def test_the_form_book_reads_a_bowler_from_the_other_innings_and_skips_who_was_n
 
 
 # 2019 (found by search; "kept" and SIXTH re-found for A214's youngster start)
-MOB_FS = {"dropped": 26, "kept": 50}   # A270: dropped 123 -> 26, kept 26 -> 50; A268: dropped 26 -> 123, kept 77 -> 26; A267: dropped 140 -> 26, kept 140 -> 77; A266: dropped 77 -> 140, kept 161 -> 140; both re-found after A251's home number (101, 123),
+MOB_FS = {"dropped": 50, "kept": 50}   # A323: dropped (26, 105) -> (50, 0), kept seed 14 -> 1; A270: dropped 123 -> 26, kept 26 -> 50; A268: dropped 26 -> 123, kept 77 -> 26; A267: dropped 140 -> 26, kept 140 -> 77; A266: dropped 77 -> 140, kept 161 -> 140; both re-found after A251's home number (101, 123),
                                           # after A259 (77, 50), after A261 (77, 140), and after A265 (77, 161)
-MOB_SEED = {"dropped": 105, "kept": 14}   # A276: dropped 0 -> 105, kept 0 -> 14; A270: dropped 31 -> 0; A268: dropped 0 -> 31; A267: kept 1 -> 0; A266: kept 1 -> 1 (squad moved); re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
+MOB_SEED = {"dropped": 0, "kept": 1}   # A276: dropped 0 -> 105, kept 0 -> 14; A270: dropped 31 -> 0; A268: dropped 0 -> 31; A267: kept 1 -> 0; A266: kept 1 -> 1 (squad moved); re-found after A261 (dropped 0 -> 105) and A265 (105 -> 0, kept 0 -> 1): seeds whose
                                           # squad season reaches poor form AND whose regular
                                           # season holds a block beside the drop are rare
-SIXTH = (50, 6)    # (50, 0) until A276, (26, 1) until A268, (50, 2) until A267, (161, 1) until A266; re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
+SIXTH = (161, 2)    # (50, 6) until A323, (50, 0) until A276, (26, 1) until A268, (50, 2) until A267, (161, 1) until A266; re-found after A251, after A259 (seed 1 -> 2), after A261, and after A265 ((140, 5) -> (161, 1))
                    # ((50, 2) -> (140, 5)): see
                    # test_a_make_or_break_is_failed_only_in_the_worst_sixth
 

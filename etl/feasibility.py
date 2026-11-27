@@ -38,10 +38,19 @@ from etl.batting_roles import batting_role
 # which of these four a player is; this is just the fixed slot range each one grants.
 # Deliberately overlapping at 3 (top/middle) and 5 (middle/finisher), matching ordinary
 # cricket usage where those two positions are genuinely claimed by either neighbour.
+#
+# [A323] The finisher band reaches 8 as well, and 8 is shared with the tail. Measured on
+# batters whose most common place is 6 or 7: in 2023+ they batted at 8 in 7.1% of their
+# innings (2.1% before the Impact Player rule), and 5-8 covers 93.7% of their innings
+# against 5-7's 86.6%. 6-8 was tried and covers LESS (79.5%), because they still bat at 5
+# twice as often as at 8 -- so 5 stays. Only what a finisher may FILL changed: who IS a
+# finisher (`etl.batting_roles`) is unchanged, 8 still counting as tail evidence there,
+# since two-thirds of innings at 8 are still bowlers' and treating 8 as a boundary would
+# read Rashid Khan and Ashwin as finishers.
 BATTING_ROLE_SLOTS = {
     "top": frozenset({1, 2, 3}),
     "middle": frozenset({3, 4, 5}),
-    "finisher": frozenset({5, 6, 7}),
+    "finisher": frozenset({5, 6, 7, 8}),
     "tail": frozenset({8, 9, 10, 11}),
 }
 

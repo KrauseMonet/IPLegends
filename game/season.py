@@ -13,12 +13,14 @@ this archive can vouch for: every one of those elevens really took the field.
 from __future__ import annotations
 
 import random
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from etl.feasibility import BOWLERS_IN_TWELVE, Card, Deck
 from game.analysis import batting_rank, bowling_rank
-from game.simulator import (BALLS_PER_OVER, Innings, OVERS, Model, match_conditions,
-                            play_innings)
+from game.simulator import (BALLS_PER_OVER, Innings, OVERS, Model, Rescue,
+                            match_conditions, play_innings)
 
 TEAMS = 10                 # you and nine historical sides
 MATCHES_EACH = 14          # the IPL's own league length
@@ -241,6 +243,57 @@ def decide_impact(side: "Side", opponent: "Side", discipline: str,
         return target
     score = gain + IMPACT_SITUATIONAL_K * situational
     return target if score >= IMPACT_SIT_OUT_BAR else None
+
+
+# [A323] A switch for the daily alone: a day scored before the rescue existed replays
+# without it, so its stored result is the match it shows (A203's reason).
+_RESCUE_OFF: ContextVar[bool] = ContextVar("rescue_off", default=False)
+
+
+@contextmanager
+def no_rescue(on: bool = True):
+    token = _RESCUE_OFF.set(on)
+    try:
+        yield
+    finally:
+        _RESCUE_OFF.reset(token)
+
+
+RESCUE_ROLES = ("batter", "keeper", "allrounder")
+
+
+def rescue_for(side: "Side", model: Model) -> Rescue | None:
+    """[A323] Whether `side`, batting first, may send its Impact Player on mid-innings to
+    rescue a collapse -- and on what terms; the innings decides when (`simulator._rescues`).
+
+    Only a batting Impact Player (a bowler is not what a collapse needs), and only if the
+    eleven still has five bowling options once he is on: the man he replaces is a dismissed
+    batter who does not bowl, so the count is the eleven's own plus his. That is the legal
+    floor (A50), not the six first asked for: real sides did it with five (half of the 39
+    real rescues were followed by five bowlers or fewer). The keeper is never taken off.
+    """
+    from game.__main__ import to_player
+
+    imp = side.impact
+    if imp is None or _RESCUE_OFF.get() or imp.role not in RESCUE_ROLES:
+        return None
+    if sum(c.has_bowl for c in side.xi) + imp.has_bowl < BOWLERS_IN_TWELVE:
+        return None
+    swappable = frozenset(c.person_id for c in side.xi
+                          if not c.has_bowl and c.role != "keeper")
+    outbats = frozenset(c.person_id for c in side.xi
+                        if _bat_rating(imp) > _bat_rating(c))
+    if not swappable or not outbats:
+        return None
+    return Rescue(to_player(imp, model, is_impact=True), swappable, outbats)
+
+
+def after_rescue(side: "Side", first: Innings) -> list[Card] | None:
+    """[A323] The eleven that takes the field in the second innings once a rescue has
+    happened -- the Impact Player in place of the man he replaced -- or None if not."""
+    if first.rescue is None or side.impact is None:
+        return None
+    return [side.impact if c.person_id == first.rescue.out_id else c for c in side.xi]
 
 
 def _insert_batting_impact(xi: list[Card], target: Card, impact: Card,
@@ -828,16 +881,19 @@ def play(model: Model, home: Side, away: Side, rng: random.Random,
     first = play_innings(model, lineup(home.xi, model, None),
                           attack(away_bowling_1, model, away_bowl_impact_1), rng,
                           plan=away.bowling_plan, breakdown=_breakdown(away, model),
-                          conditions=cond)
+                          conditions=cond, rescue=rescue_for(home, model))
+    rescued = after_rescue(home, first)           # [A323] his substitution is spent
 
-    home_target = None if home.impact is None else decide_impact(home, away, "bowl", first)
+    home_target = (None if home.impact is None or rescued is not None
+                   else decide_impact(home, away, "bowl", first))
     away_target = (None if away.impact is None or away_forced
                     else decide_impact(away, home, "bat", first))
 
     away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
-    home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
-    home_bowl_impact = home.impact if home_target is not None else None
+    home_bowling = (rescued if rescued is not None
+                    else _apply_bowling_impact(home.xi, home_target, home.impact))
+    home_bowl_impact = home.impact if home_target is not None or rescued is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
                           rng, target=first.runs, plan=home.bowling_plan,
@@ -995,9 +1051,13 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
                        if away_forced else away.xi)
     away_bowl_impact_1 = away.impact if away_forced else None
     cond = match_conditions(rng)                  # [A267] one draw, both innings
+    # [A323] The opponent may rescue a collapse when it bats first. The human's own side
+    # does not: its Impact Player stays the human's choice, made at the break.
     first = play_innings(model, lineup(home.xi, model, None),
                           attack(away_bowling_1, model, away_bowl_impact_1), rng,
-                          conditions=cond)
+                          conditions=cond,
+                          rescue=None if human_bats_first else rescue_for(home, model))
+    rescued = None if human_bats_first else after_rescue(home, first)
 
     # At the break: the discipline the human is asked about is always their SECOND
     # innings -- "bowl" if they batted first, "bat" if they bowled first. The opponent's
@@ -1005,7 +1065,7 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
     discipline = "bowl" if human_bats_first else "bat"
     opp_discipline = "bat" if human_bats_first else "bowl"
 
-    if opponent.impact is None or (not human_is_away and away_forced):
+    if opponent.impact is None or (not human_is_away and away_forced) or rescued is not None:
         opp_target = None
     else:
         opp_target = decide_impact(opponent, human, opp_discipline, first)
@@ -1031,8 +1091,9 @@ def _play_human_match(model: Model, human: Side, opponent: Side, rng: random.Ran
 
     away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
-    home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
-    home_bowl_impact = home.impact if home_target is not None else None
+    home_bowling = (rescued if rescued is not None
+                    else _apply_bowling_impact(home.xi, home_target, home.impact))
+    home_bowl_impact = home.impact if home_target is not None or rescued is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
                           rng, target=first.runs, conditions=cond)
@@ -1118,20 +1179,22 @@ def play_open(model: Model, side_a: Side, side_b: Side, rng: random.Random,
     cond = match_conditions(rng)                  # [A267] one draw, both innings
     first = play_innings(model, lineup(home.xi, model, None),
                           attack(away_bowling_1, model, away_bowl_impact_1), rng,
-                          conditions=cond)
+                          conditions=cond, rescue=rescue_for(home, model))
+    rescued = after_rescue(home, first)           # [A323] his substitution is spent
 
     def _decide(side: Side, opponent: Side, discipline: str, forced: bool) -> Card | None:
         if side.impact is None or forced:
             return None
         return decide_impact(side, opponent, discipline, first)
 
-    home_target = _decide(home, away, "bowl", forced=False)
+    home_target = _decide(home, away, "bowl", forced=rescued is not None)
     away_target = _decide(away, home, "bat", forced=away_forced)
 
     away_batting = _apply_batting_impact(away.xi, away_target, away.impact, away.pinned)
     away_bat_impact = away.impact if away_target is not None else None
-    home_bowling = _apply_bowling_impact(home.xi, home_target, home.impact)
-    home_bowl_impact = home.impact if home_target is not None else None
+    home_bowling = (rescued if rescued is not None
+                    else _apply_bowling_impact(home.xi, home_target, home.impact))
+    home_bowl_impact = home.impact if home_target is not None or rescued is not None else None
     second = play_innings(model, lineup(away_batting, model, away_bat_impact),
                           attack(home_bowling, model, home_bowl_impact),
                           rng, target=first.runs, conditions=cond)

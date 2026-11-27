@@ -162,13 +162,16 @@ def test_a_career_is_finished_once_its_epilogue_is_chosen_however_it_ended():
     assert D.finished(NS(seasons=nineteen[:-1] + [NS(year=2025)], ended=None, epilogue=""))
 
 
+LONG_SEED = 1007   # 1000 until A323 (released early once the rescue moved the matches): an opener debuting 2014 who plays to 2026
+
+
 @pytest.mark.skipif(DOC is None, reason="no deck snapshot")
 @pytest.mark.usefixtures("no_incidents")
 def test_a_real_career_that_plays_on_to_2026_counts_as_finished():
     """The shape the first version missed: most careers end by running out of seasons, with
-    no `ended`. Seed 1000, an opener debuting 2014, plays on to 2026 (measured)."""
+    no `ended`. An opener debuting 2014 that plays on to 2026 (measured)."""
     deck, model = deck_from(DOC), model_from(DOC)
-    c, _ = C.auto_career(deck, model, 1000, C.Setup("Long", "opener", 2014), "random")
+    c, _ = C.auto_career(deck, model, LONG_SEED, C.Setup("Long", "opener", 2014), "random")
     cp = c.checkpoint
     assert cp.ended is None and cp.seasons[-1].year == 2026 and cp.epilogue
     assert D.finished(cp)

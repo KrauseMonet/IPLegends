@@ -44,7 +44,7 @@ import re
 import statistics
 from dataclasses import dataclass, field
 
-from etl.feasibility import Card, Deck, team_rating
+from etl.feasibility import BATTING_ROLE_SLOTS, Card, Deck, team_rating
 from etl.franchise_map import canonical
 from game.analysis import SeasonAnalysis, batting_rank, bowling_rank, season_analysis
 from game.auction import value_curve
@@ -64,9 +64,11 @@ LAST_DEBUT = 2017                    # so every career can run at least ten seas
 LAST_YEAR = 2026
 MAX_SEASONS = 19                     # a 2008 debut can run to 2026, as Kohli and Rohit did (A198)
 
-TOP_SLOTS = frozenset({1, 2, 3})        # A76's batting roles, as `Card.positions` holds them
-MIDDLE_SLOTS = frozenset({3, 4, 5})
-FINISHER_SLOTS = frozenset({5, 6, 7})
+# A76's batting roles, as `Card.positions` holds them -- read from the one table, never
+# copied, so a band change reaches careers too (A323 widened the finisher's to 5-8).
+TOP_SLOTS = BATTING_ROLE_SLOTS["top"]
+MIDDLE_SLOTS = BATTING_ROLE_SLOTS["middle"]
+FINISHER_SLOTS = BATTING_ROLE_SLOTS["finisher"]
 # [A251] Your player's batting number is his own: he bats there at every club, and the
 # side's order is arranged around him. Before this he took whatever place the side's sort
 # left him, so one band could bat anywhere from 3 to 7 as squads changed. A keeper or

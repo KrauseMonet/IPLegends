@@ -58,6 +58,32 @@ KEEPER_TRADE_FROM = datetime.date(2026, 11, 3)
 
 _IPL_KEEPER_DECKS: dict[int, Deck] = {}
 
+# [A323] The first day on which a finisher may bat at 8 (BATTING_ROLE_SLOTS["finisher"]
+# went from 5-7 to 5-8), and on which a side batting first may rescue a collapse with its
+# Impact Player. A day before it keeps both old rules: a wider band changes which cards the
+# forward check offers, and a rescue changes the match, so either would replay a stored day
+# to something other than what was scored. Set to the day after the change ships; move it
+# if it ships later.
+BANDS_FROM = datetime.date(2026, 11, 28)
+RESCUE_FROM = BANDS_FROM
+OLD_FINISHER_SLOTS = frozenset({5, 6, 7})
+_OLD_BAND_DECKS: dict[int, Deck] = {}
+
+
+def old_band_deck(full: Deck) -> Deck:
+    """`full` with every finisher's places as they were before A323: 5-7, not 5-8."""
+    from etl.feasibility import BATTING_ROLE_SLOTS
+    wide = BATTING_ROLE_SLOTS["finisher"]
+    deck = _OLD_BAND_DECKS.get(id(full))
+    if deck is None or deck.fs_ids != full.fs_ids:
+        deck = Deck(
+            cards_by_fs={fs: [replace(c, positions=OLD_FINISHER_SLOTS)
+                              if frozenset(c.positions) == wide else c for c in cards]
+                         for fs, cards in full.cards_by_fs.items()},
+            fs_ids=list(full.fs_ids))
+        _OLD_BAND_DECKS[id(full)] = deck
+    return deck
+
 
 def ipl_keeper_deck(full: Deck) -> Deck:
     """`full` with each card's keeper eligibility as it was before A244 (`keeper_ipl`).
@@ -309,6 +335,8 @@ def replay_day(full: Deck, challenge_date, player: int | str, deck_fs_ids,
     if challenge_date < KEEPER_TRADE_FROM:
         full = ipl_keeper_deck(full)
     full = nationality_deck(full, challenge_date)
+    if challenge_date < BANDS_FROM:
+        full = old_band_deck(full)
     return sess.replay(
         deck_for_day(full, deck_fs_ids),
         player_seed(challenge_date, player),
@@ -526,6 +554,7 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
     exactly the same innings rather than reading a stored copy that could drift from the
     scoring beside it -- which is why a day keeps the engine it was scored with (A203)."""
     from game.__main__ import five_man_attack, old_batting_order, old_bowling_order
+    from game.season import no_rescue
     from game.simulator import no_conditions, phase_blind_rotation
 
     # [A262] Before `side_for_fs` reads it: an opposition eleven obeys the overseas cap too.
@@ -542,7 +571,8 @@ def play_and_score(full: Deck, model: Model, day: "Day", player: int | str,
           old_batting_order(day.challenge_date < BATTING_ORDER_FROM),
           five_man_attack(day.challenge_date < SIXTH_BOWLER_FROM),
           no_conditions(day.challenge_date < CONDITIONS_FROM),
-          phase_blind_rotation(day.challenge_date < ROTATION_FROM)):
+          phase_blind_rotation(day.challenge_date < ROTATION_FROM),
+          no_rescue(day.challenge_date < RESCUE_FROM)):
         return _play_and_score(full, model, day, player, state)
 
 

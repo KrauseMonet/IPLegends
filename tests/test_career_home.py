@@ -29,7 +29,7 @@ def model():
 def test_the_home_number_comes_from_the_batting_band():
     assert C.home_number(_plain("x", {1, 2, 3})) == 1
     assert C.home_number(_plain("x", {3, 4, 5})) == 4
-    assert C.home_number(_plain("x", {5, 6, 7})) == 6
+    assert C.home_number(_plain("x", {5, 6, 7, 8})) == 6
     assert C.home_number(_plain("x", {8, 9, 10, 11})) is None     # the tail is not pinned
 
 
@@ -102,7 +102,7 @@ def test_a_tail_ender_is_not_pinned(deck, model):
 # ---- the rise (A251) ----------------------------------------------------------------------
 
 def test_a_batting_number_runs_from_the_foot_of_the_band_to_its_home():
-    top, mid, fin = (_plain("x", b) for b in ({1, 2, 3}, {3, 4, 5}, {5, 6, 7}))
+    top, mid, fin = (_plain("x", b) for b in ({1, 2, 3}, {3, 4, 5}, {5, 6, 7, 8}))
     assert [C.batting_number(top, p) for p in range(4)] == [3, 2, 1, 1]
     assert [C.batting_number(mid, p) for p in range(3)] == [5, 4, 4]
     assert [C.batting_number(fin, p) for p in range(3)] == [7, 6, 6]

@@ -162,7 +162,7 @@ def test_a_death_bowler_with_overs_in_hand_stops_at_two_death_overs():
     assert S.choose_bowler(attack, attack[0], 17, {"p4": "death"}) is p4
 
 
-PLAYOFF_SEED = 3     # a 2014 season in which your side reaches the playoffs (asserted below)
+PLAYOFF_SEED = 1     # (3 until A323) a 2014 season in which your side reaches the playoffs (asserted below)
 
 
 def test_the_ceiling_holds_in_the_playoffs_too(monkeypatch):

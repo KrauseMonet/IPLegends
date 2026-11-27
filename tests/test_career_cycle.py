@@ -22,7 +22,8 @@ FOLDED = (1, C.Setup("X", "opener", 2012), "loyal")
 # ...and a fast bowler released after 2018 -- a deal signed at the 2018 mega auction, so
 # contract years remained -- who goes into the 2019 mini auction. [A289] Re-found (was seed 1,
 # released after 2025) once the trade window gave the careless player more to answer.
-RELEASED = (5, C.Setup("X", "pace", 2015), "random")
+# [A323] Re-found again (seed 5 -> 1) once the Impact rescue moved the matches.
+RELEASED = (1, C.Setup("X", "pace", 2015), "random")
 LOST_AT = 1                 # ...whose second season is neither a star's nor one ending in a release
 
 
@@ -156,7 +157,7 @@ def test_a_club_short_in_your_band_bids_more(deck):
 
 def test_band_need_counts_regulars_against_the_stated_shortage(deck):
     short = {"top": 4, "middle": 5, "finisher": 2, "pace": 2, "spin": 1}
-    slots = {"top": {1, 2, 3}, "middle": {3, 4, 5}, "finisher": {5, 6, 7}}
+    slots = {"top": {1, 2, 3}, "middle": {3, 4, 5}, "finisher": {5, 6, 7, 8}}
     opener = C.Card(fs_id=0, person_id=C.YOU_ID, name="you", role="batter",
                     positions=frozenset({1, 2, 3}), bat=0.0, display=75)
     quick = C.Card(fs_id=0, person_id=C.YOU_ID, name="you", role="bowler", bowl=0.0,

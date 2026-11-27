@@ -1,11 +1,11 @@
 source,name,person_id,how,ipl_last,country,overseas,role,capped,base_2026_lakh,cricsheet_id,evidence,balance,include,person_id_checked,role_checked
-released,Mitchell Starc,3fb19989,deck,2026 Delhi Capitals,,yes,Bowler,yes,,3fb19989,last card 86,,,,
+released,Mitchell Starc,3fb19989,deck,2026 Delhi Capitals,,yes,Bowler,yes,,3fb19989,last card 86,,n,,
 released,Matheesha Pathirana,64839cb3,deck,2026 Kolkata Knight Riders,,yes,Bowler,yes,,64839cb3,last card 83,,,,
 released,Allah Ghazanfar,9ca68676,deck,2026 Mumbai Indians,,yes,Bowler,no,,9ca68676,last card 81,,,,
 released,Ravi Singh,548516a6,deck,2026 Rajasthan Royals,,no,Batter,no,,548516a6,last card 79,,,,
 released,Blessing Muzarabani,449f4e3c,deck,2026 Kolkata Knight Riders,,yes,Bowler,yes,,449f4e3c,last card 79,,,,
 released,Deepak Chahar,23eeb873,deck,2026 Mumbai Indians,,no,Bowler,yes,,23eeb873,last card 78,,,,
-released,Travis Head,12b610c2,deck,2026 Sunrisers Hyderabad,,yes,Batter,yes,,12b610c2,last card 78,,,,
+released,Travis Head,12b610c2,deck,2026 Sunrisers Hyderabad,,yes,Batter,yes,,12b610c2,last card 78,,n,,
 released,Danish Malewar,9e6032fa,deck,2026 Mumbai Indians,,no,Batter,no,,9e6032fa,last card 78,,,,
 released,David Payne,6c79c098,deck,2026 Sunrisers Hyderabad,,yes,Bowler,yes,,6c79c098,last card 78,,,,
 released,Dilshan Madushanka,de7d833e,deck,2026 Sunrisers Hyderabad,,yes,Bowler,yes,,de7d833e,last card 78,,,,
@@ -368,3 +368,4 @@ newcomer,Ashwin Hebbar,,smat,,India,no,Batter,no,,,"SMAT 2025-26 for Andhra: top
 newcomer,Pulkit Narang,,smat,,India,no,Bowler,no,,,"SMAT 2025-26 for Services: led the attack once, 3 wkts at 4.75 an over; Player of the Match once",,,,
 newcomer,Pragnay Reddy,,smat,,India,no,Wicketkeeper,no,,,"SMAT 2025-26 for Hyderabad: top-scored once, 43 runs off 31; Player of the Match once",,,,
 newcomer,Aryan Juyal,,smat,,India,no,Wicketkeeper,no,,,"SMAT 2025-26 for Uttar Pradesh: top-scored once, 51 runs off 40; Player of the Match once",,,,
+newcomer,Ben Stokes,e087956b,hand,2023 Chennai Super Kings,England,yes,All-Rounder,yes,,e087956b,,,y,,

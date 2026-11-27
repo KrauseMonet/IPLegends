@@ -15,7 +15,9 @@ and never by a number that ranks him.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+import statistics
+from dataclasses import dataclass, field
 
 from etl.feasibility import Card
 from game import auction as au
@@ -23,6 +25,13 @@ from game import auction as au
 BANDS = ("top", "middle", "finisher", "tail")
 BAND_LABEL = {"top": "Top order", "middle": "Middle order", "finisher": "Finisher", "tail": "Lower order"}
 BAND_SHORT = {"top": "Top", "middle": "Middle", "finisher": "Finisher", "tail": "Lower"}
+STYLES = ("pace", "spin")
+# What a team card shows and what a released player is matched against [A326]: three batting
+# bands and keepers by the mock auction's own targets (`targets`), and pace and spin bowlers
+# against the LEAGUE: a team is short of a style when it holds fewer specialist bowlers of it
+# than the median retained squad (`style_wants`). The engine's own bowling target counts any
+# bowling option, part-timers included, and so says almost nobody is short of bowling.
+NEEDS = ("top", "middle", "finisher", "keeper", "pace", "spin")
 
 
 def band_of(card: Card) -> str | None:
@@ -63,7 +72,12 @@ class TeamView:
     bowlers: int
     pace: int
     spin: int
-    gaps: list[Gap]
+    gaps: list[Gap]                      # the mock auction's own targets, every one
+    meters: list[Gap] = field(default_factory=list)   # NEEDS, in order, short or not
+
+    @property
+    def short_of(self) -> set[str]:
+        return {m.what for m in self.meters if m.have < m.want}
 
     @property
     def size(self) -> int:
@@ -105,19 +119,48 @@ def team_view(preset, short: str, name: str) -> TeamView:
         places=size - len(squad), must_buy=max(0, au.MINI_SQUAD_MIN - len(squad)),
         overseas=overseas, overseas_places=preset.overseas_cap[short] - overseas,
         bands=bands, keepers=keepers, bowlers=bowlers,
-        pace=sum(c.has_bowl and c.bowling_style == "pace" for c in squad),
-        spin=sum(c.has_bowl and c.bowling_style == "spin" for c in squad),
+        pace=sum(is_specialist(c, "pace") for c in squad),
+        spin=sum(is_specialist(c, "spin") for c in squad),
         gaps=gaps)
 
 
+def is_specialist(card: Card, style: str) -> bool:
+    """A bowler or all-rounder of this style -- not a batter who bowls the odd over."""
+    return card.role in ("bowler", "allrounder") and card.bowling_style == style
+
+
+def style_wants(views: list[TeamView]) -> dict[str, int]:
+    """The league's median retained count of each style, rounded up: fewer is short."""
+    return {s: math.ceil(statistics.median(getattr(v, s) for v in views)) for s in STYLES}
+
+
 def teams(preset) -> list[TeamView]:
-    """All ten, most money left first (ties: fewer players retained first, then name)."""
+    """All ten, most money left first (ties: fewer players retained first, then name), each
+    with its six NEEDS meters filled in."""
     out = [team_view(preset, s, n) for s, n in au.FRANCHISES if s in preset.purse]
+    wants = style_wants(out)
+    for v in out:
+        want = targets(v.size + v.places)
+        have = dict(v.bands, keeper=v.keepers, pace=v.pace, spin=v.spin)
+        v.meters = [Gap(k, have[k], wants[k] if k in STYLES else want[k]) for k in NEEDS]
     return sorted(out, key=lambda t: (-t.purse, t.size, t.short))
 
 
-def lots(preset) -> list[tuple[Card, bool]]:
-    """Every player on the list with whether he is capped, ALPHABETICAL. The preset's own
-    order is the auction's set order, which is cut strongest first -- a ranking by rating,
-    which the hub must not show (A298)."""
-    return sorted(((c, capped) for c, _base, capped in preset.lots), key=lambda x: (x[0].name, x[0].person_id))
+def fills(card: Card) -> set[str]:
+    """Which NEEDS a player could fill: his batting band if he bats in the top seven, the
+    gloves if he keeps, his bowling style if he is a bowler or all-rounder."""
+    out = set()
+    b = band_of(card)
+    if b in ("top", "middle", "finisher") and card.role in ("batter", "keeper", "allrounder"):
+        out.add(b)
+    if card.keeper_eligible:
+        out.add("keeper")
+    for s in STYLES:
+        if is_specialist(card, s):
+            out.add(s)
+    return out
+
+
+def released(preset) -> list[Card]:
+    """Players released after playing IPL 2026 (status 'played' on the list, A298)."""
+    return [c for c, _b, _cap in preset.lots if preset.status.get(c.person_id) == "played"]

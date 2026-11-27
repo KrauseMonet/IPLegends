@@ -2737,26 +2737,30 @@ auction rooms share every builder.
   a run of three unsold lots (three times at most), a new longest fight after the first ten
   lots, and the accelerated round. About eight an auction.
 
-### 15.15 The IPL 2027 auction hub [A324]
+### 15.15 The IPL 2027 auction hub [A324, A326]
 
 `/ipl-auction-2027`, written as plain HTML by `tools.build_auction_hub` from the mini-auction
 preset (`data/mini2027.json.gz`, A297) and the Almanack's compare file. No database and no
-network, so its `--check` gate runs anywhere; re-run it after `tools.snapshot_mini`.
+network, so its `--check` gate runs anywhere; re-run it after `tools.snapshot_mini`. Shown
+rather than written (A326):
 
-- **Each team:** purse left, open places, overseas places, the places it must fill to reach
-  18, its retained squad by batting band, and what it is short of.
-- **Short of** means below `game.auction.need`'s own targets scaled to the team's squad limit
-  (`game.auction_hub.targets`: at 25, six top order, four middle, six finishers, seven lower
-  order, three keepers, ten bowling options), so the page and the mock auction's computer
-  teams cannot disagree. A test checks every band gap against `need` itself.
-- **The market:** places short summed across the ten teams beside players on the list, by band.
-- **The register:** every listed player, alphabetical, with country, role, band, age (two
-  agreeing sources only), how he comes in, and his 2026 figures or this year's league form.
-- **No ratings** (A298): never the set order (cut strongest first) and no base price until
-  the official register gives real ones, since an invented base follows the card.
+- **A stat strip:** the date with a countdown in Indian time, money to spend, places,
+  overseas places, released players back in.
+- **Ten team cards of identical shape:** purse left, places, overseas places, must buy,
+  money per place, six need meters (`game.auction_hub.NEEDS`) and the retained squad.
+- **The needs:** top order, middle order, finishers and keepers against `game.auction.need`'s
+  own targets at the team's squad limit (at 25: 6, 4, 6, 3), checked against `need` itself by
+  a test; pace and spin against the league's median retained count of specialist bowlers
+  (bowlers and all-rounders of that style), rounded up -- the engine's own bowling target
+  counts part-timers and finds almost nobody short.
+- **Released, and where they fit:** the players released after IPL 2026, grouped by the need
+  they fill (gloves, then batting band, then bowling style), each with his 2026 line in the
+  discipline he is there for and the three teams most short of what he does -- never his old
+  team, and never a team with no overseas place for an overseas player.
+- **No full list** until the official register (3 December), and **no ratings** (A298).
 
-Still to come: Predict the Auction (opens with the official register, 3 December), the real
-register's import, and live sales on 16 December.
+Still to come: Predict the Auction and the real register's import (3 December), and live
+sales on 16 December.
 
 ## 16. Team kits [A151]
 

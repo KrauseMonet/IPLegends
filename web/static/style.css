@@ -5373,11 +5373,19 @@ a.al-rec:hover{transform:translateY(-3px);box-shadow:0 14px 34px -14px color-mix
   .ex-name{min-width:200px}
 }
 
-/* [A324] The IPL 2027 auction hub (/ipl-auction-2027). Team cards take their club's colours
-   from the crest classes (A145); nothing here shows a rating (A298). */
-.ah-when{font:400 30px/1.1 var(--display);color:#fff;margin:6px 0 4px!important}
-.ah-count{font:700 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-left:10px}
-.ah-cta{margin:18px 0 8px!important}
+/* [A324, A326] The IPL 2027 auction hub (/ipl-auction-2027): shown rather than written. Team
+   cards take their club's colours from the crest classes (A145); nothing here shows a rating (A298). */
+.ah-hero{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:stretch;margin:6px 0 14px}
+.ah-date{display:flex;flex-direction:column;justify-content:center;padding:14px 18px;border-radius:14px;
+  border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);background:color-mix(in srgb,var(--gold) 8%,transparent)}
+.ah-date b{font:400 30px/1.05 var(--display);color:#fff}
+.ah-count{font:700 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-top:6px}
+.ah-count:empty{display:none}
+.ah-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.ah-stat{padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel)}
+.ah-stat b{display:block;font:400 clamp(20px,2.4vw,28px)/1.05 var(--display);color:#fff;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ah-stat span{font:700 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.ah-cta{margin:16px 0 8px!important}
 .ah-cta .go{width:auto;margin-top:0;padding:13px 20px;font-size:13px}
 .ah-teams{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:14px;align-items:start}
 .ah-team{--team:var(--gold);--team-deep:#1a2340;--team-ink:var(--gold);position:relative;overflow:hidden;
@@ -5386,52 +5394,62 @@ a.al-rec:hover{transform:translateY(-3px);box-shadow:0 14px 34px -14px color-mix
     linear-gradient(160deg,var(--team-deep),var(--panel))}
 .ah-crest{position:absolute;right:-8px;top:-8px;width:76px;height:76px;object-fit:contain;opacity:.32;transform:rotate(-8deg)}
 .ah-team header em{font:700 10px var(--mono);letter-spacing:.14em;color:var(--team-ink);font-style:normal}
-.ah-team h3{margin:2px 0 10px!important;font-size:16px;color:var(--ink);max-width:80%}
-.ah-purse b{font:400 34px/1 var(--display);color:#fff;font-variant-numeric:tabular-nums}
+.ah-team h3{margin:2px 0 8px!important;font-size:15px;line-height:1.25;color:var(--ink);max-width:78%;min-height:2.5em}
+.ah-purse b{font:400 32px/1 var(--display);color:#fff;font-variant-numeric:tabular-nums}
 .ah-purse span{margin-left:8px;font:700 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .ah-bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:10px 0 12px}
 .ah-bar i{display:block;height:100%;background:var(--team);border-radius:3px}
-.ah-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:0 0 10px!important}
+.ah-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:0 0 12px!important}
 .ah-facts div{background:color-mix(in srgb,var(--ink) 4%,transparent);border-radius:8px;padding:6px 7px}
-.ah-facts dt{font:700 9px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.ah-facts dt{font:700 8.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
 .ah-facts dd{margin:2px 0 0;font-weight:750;color:var(--ink);font-size:14px;white-space:nowrap}
-.ah-need{font-size:13.5px;color:var(--ink-2);margin:0 0 8px!important}
-.ah-gaps{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
-.ah-gap{font:700 10px var(--mono);letter-spacing:.04em;padding:3px 7px;border-radius:5px;color:var(--ink-2);
-  border:1px solid color-mix(in srgb,var(--team) 50%,transparent)}
-.ah-gap b{color:var(--team-ink)}
+.ah-meters{list-style:none;padding:0!important;margin:0 0 10px!important;display:grid;gap:5px}
+.ah-meters li{display:grid;grid-template-columns:86px 1fr 34px;align-items:center;gap:8px;font-size:12px;color:var(--ink-2)}
+.ah-m{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
+.ah-m i{display:block;height:100%;border-radius:4px;background:var(--mint)}
+.ah-meters li.short .ah-m i{background:var(--hot)}
+.ah-meters li.short span:first-child{color:var(--ink)}
+.ah-meters b{text-align:right;font:700 12px var(--mono);color:var(--ink)}
+.ah-meters b small{color:var(--ink-3);font-weight:400}
+.ah-meters li.short b{color:var(--hot)}
 .ah-squad summary{cursor:pointer;font-weight:750;font-size:13px;color:var(--team-ink);padding:4px 0}
 .ah-squad h4{margin:10px 0 4px;font:700 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .ah-squad h4 small{color:var(--ink-2)}
 .ah-squad ul{list-style:none;padding:0!important;margin:0!important;display:grid;gap:3px}
 .ah-squad li{font-size:13px;color:var(--ink)}
-.ah-role{color:var(--ink-3);font-size:11.5px;margin-left:4px}
 .ah-mk{font:700 9px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-left:6px}
 .ah-mk.os{color:var(--gold)}
-.ah-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
-.ah-filters .room-input{flex:1 1 180px;margin:0;min-width:0}
-.ah-filters select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px}
-.ah-shown{font:700 11px var(--mono);color:var(--ink-3);letter-spacing:.06em}
-.ah-register td{vertical-align:top}
-.ah-note{white-space:normal!important;min-width:260px;font-size:12.5px;color:var(--ink-3)!important}
-.ah-st{font:700 10px var(--mono);letter-spacing:.04em;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--ink-2)}
-.ah-st.st-played{color:var(--mint);border-color:color-mix(in srgb,var(--mint) 45%,transparent)}
-.ah-st.st-new{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.ah-chip{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;
+  background:color-mix(in srgb,var(--ink) 6%,transparent);text-decoration:none!important;font:700 9px var(--mono);color:var(--ink-2)}
+.ah-chip img{width:20px;height:20px;object-fit:contain}
+.ah-chip{position:relative}
+.ah-chip sup{position:absolute;right:-5px;top:-5px;min-width:15px;height:15px;border-radius:8px;padding:0 3px;
+  background:var(--hot);color:#fff;font:700 9px/15px var(--mono);text-align:center}
+.ah-group-need{gap:8px}
+.ah-group{margin-top:22px}
+.ah-group-h{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:10px}
+.ah-group-h h3{margin:0!important}
+.ah-group-need{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.ah-group-need>span,.ah-rel-fit>span{font:700 9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--hot);margin-right:4px}
+.ah-group-need em,.ah-rel-fit em{font-size:12px;color:var(--ink-3)}
+.ah-rels{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.ah-rel{padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);display:grid;gap:6px}
+.ah-rel-top{font-weight:750;color:var(--ink);font-size:14px;display:flex;flex-wrap:wrap;align-items:center;gap:2px 0}
+.ah-rel-top .auc-band{margin-left:8px;align-self:center}
+.ah-rel-ex{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-3)}
+.ah-rel-ex .ah-chip{width:20px;height:20px}
+.ah-rel-ex .ah-chip img{width:16px;height:16px}
+.ah-rel-ex span{margin-left:auto;color:var(--ink-2);font-family:var(--mono);font-size:11px}
+.ah-rel-fit{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.ah-rel-fit>span{color:var(--mint)}
+@media (max-width:760px){
+  .ah-hero{grid-template-columns:1fr}
+  .ah-stats{grid-template-columns:repeat(2,1fr)}
+}
 @media (max-width:560px){
   .ah-teams{grid-template-columns:1fr}
-  .ah-when{font-size:24px}
-  .ah-count{display:block;margin:6px 0 0}
-  .ah-filters select{flex:1 1 45%}
-  /* the register reads as a list of players on a phone, not a seven-column table */
-  .ah-register,.ah-register tbody{display:block}
-  .ah-register thead{display:none}
-  .ah-register tr{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;padding:10px 12px;border-bottom:1px solid var(--line)}
-  .ah-register tr[hidden]{display:none}
-  .ah-register td{padding:0!important;border:0!important;white-space:normal}
-  .ah-register td:first-child{flex:1 0 100%;font-weight:750;color:var(--ink)}
-  .ah-register td:empty{display:none}
-  .ah-register .ah-age::before{content:"Age "}
-  .ah-register .ah-note{flex:1 0 100%;min-width:0}
+  .ah-date b{font-size:24px}
+  .ah-stat b{font-size:24px}
 }
 .home-auction-tag{flex:none;font:400 18px/1 var(--display);color:var(--gold);border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);
   border-radius:8px;padding:7px 8px 6px;letter-spacing:.02em}

@@ -514,6 +514,12 @@ def guide_page(slug: str) -> FileResponse:
     return _subpage("guides", slug)
 
 
+# [A324] The IPL 2027 auction hub, written by `tools.build_auction_hub` from the mini preset.
+@app.get("/ipl-auction-2027", include_in_schema=False)
+def auction_hub_page() -> FileResponse:
+    return FileResponse(STATIC / "ipl-auction-2027.html")
+
+
 # Articles: analysis written by hand from the site's own data; every figure in them is
 # `tools.article_figures`' and `tests/test_articles.py` holds the text to it.
 @app.get("/articles", include_in_schema=False)

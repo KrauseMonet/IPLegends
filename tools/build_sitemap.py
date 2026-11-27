@@ -19,7 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web" / "static"
 ORIGIN = "https://fineleg.app"
 
-PAGES = ["/", "/draft", "/auction", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
+PAGES = ["/", "/draft", "/auction", "/ipl-auction-2027", "/career", "/rooms", "/daily", "/puzzles", "/bingo", "/guess",
          "/common", "/xi", "/trio", "/flashback", "/records", "/almanack", "/almanack/players", "/almanack/records", "/almanack/grounds",
          "/almanack/head-to-head", "/almanack/auctions", "/almanack/replay", "/almanack/compare", "/almanack/explorer", "/seasons", "/teams", "/guides", "/articles",
          "/about", "/faq", "/contact", "/terms", "/privacy"]

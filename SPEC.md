@@ -2737,6 +2737,27 @@ auction rooms share every builder.
   a run of three unsold lots (three times at most), a new longest fight after the first ten
   lots, and the accelerated round. About eight an auction.
 
+### 15.15 The IPL 2027 auction hub [A324]
+
+`/ipl-auction-2027`, written as plain HTML by `tools.build_auction_hub` from the mini-auction
+preset (`data/mini2027.json.gz`, A297) and the Almanack's compare file. No database and no
+network, so its `--check` gate runs anywhere; re-run it after `tools.snapshot_mini`.
+
+- **Each team:** purse left, open places, overseas places, the places it must fill to reach
+  18, its retained squad by batting band, and what it is short of.
+- **Short of** means below `game.auction.need`'s own targets scaled to the team's squad limit
+  (`game.auction_hub.targets`: at 25, six top order, four middle, six finishers, seven lower
+  order, three keepers, ten bowling options), so the page and the mock auction's computer
+  teams cannot disagree. A test checks every band gap against `need` itself.
+- **The market:** places short summed across the ten teams beside players on the list, by band.
+- **The register:** every listed player, alphabetical, with country, role, band, age (two
+  agreeing sources only), how he comes in, and his 2026 figures or this year's league form.
+- **No ratings** (A298): never the set order (cut strongest first) and no base price until
+  the official register gives real ones, since an invented base follows the card.
+
+Still to come: Predict the Auction (opens with the official register, 3 December), the real
+register's import, and live sales on 16 December.
+
 ## 16. Team kits [A151]
 
 A drafted twelve is a mix of franchises, so it has no crest. It wears a **kit** instead: a

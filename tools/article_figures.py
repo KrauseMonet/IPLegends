@@ -497,6 +497,8 @@ def compute() -> dict:
         balls = load(conn)
         death(conn, figs, tables)
         spin(conn, figs, tables)
+        from tools import article_auction        # [A327] what each team needs
+        article_auction.compute(conn, figs, f1, f2, pct, n, check_claims)
     best_seasons(cards, figs, tables)
     squads(cards, champs, figs, tables)
     settling(balls, figs)

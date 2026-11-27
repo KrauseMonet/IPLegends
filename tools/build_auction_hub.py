@@ -39,6 +39,7 @@ from web.crests import crest_key, crest_url
 OUT = STATIC / "ipl-auction-2027.html"
 PATH = "/ipl-auction-2027"
 COMPARE = STATIC / "almanack" / "compare.json"
+ANALYSIS = "/articles/what-each-team-needs"   # [A327] what each team needs, a section per team
 SHOWN_BALLS = 10      # balls in a discipline before its 2026 figures are worth a line
 
 ROLE = {"batter": "Batter", "bowler": "Bowler", "allrounder": "All-rounder", "keeper": "Wicketkeeper"}
@@ -195,13 +196,15 @@ def team_card(t: hub.TeamView, who: Who, top_purse: int) -> str:
         '<dl class="ah-facts">' + "".join(f'<div><dt>{k}</dt><dd>{v}</dd></div>' for k, v in facts) + '</dl>'
         f'<ul class="ah-meters" aria-label="Retained against a full squad">{"".join(meter(m) for m in t.meters)}</ul>'
         f'<details class="ah-squad"><summary>Retained squad ({t.size})</summary>{"".join(groups)}</details>'
+        f'<a class="ah-analysis" href="{ANALYSIS}#{t.short.lower()}">View analysis →</a>'
         '</article>')
 
 
 def teams_section(teams: list[hub.TeamView], who: Who) -> str:
     top = max(t.purse for t in teams)
     size = max(t.size + t.places for t in teams)
-    intro = para(f"Retained players against a full squad of {size}. Red is short.")
+    intro = para(f"Retained players against a full squad of {size}. Red is short. "
+                 f'<a href="{ANALYSIS}">What every team needs, from IPL 2026 ball by ball →</a>')
     cards = "".join(team_card(t, who, top) for t in teams)
     return section("The ten teams", intro + f'<div class="ah-teams">{cards}</div>')
 

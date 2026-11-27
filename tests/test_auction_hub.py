@@ -9,6 +9,7 @@ from the code they test (A207's trap).
 
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -223,3 +224,15 @@ def test_days_to_the_auction_are_counted_in_indian_time(now, days):
 @needs_node
 def test_count_text():
     assert node("[19, 1, 0, -1].map(m.ahCountText)") == ["19 days to go", "tomorrow", "today", ""]
+
+
+def test_every_team_card_opens_its_own_section_of_the_needs_article(preset):
+    """[A327] A card's "View analysis" link must land on that team's section, which must exist."""
+    text = build.OUT.read_text()
+    article = (ROOT / "web" / "static" / "articles" / "what-each-team-needs.html").read_text()
+    links = re.findall(r'class="ah-analysis" href="/articles/what-each-team-needs#([a-z]+)"', text)
+    assert sorted(links) == sorted(v.short.lower() for v in hub.teams(preset))
+    for short in links:
+        assert f'<section class="hx-sec" id="{short}">' in article, short
+    sections = re.findall(r'<section class="hx-sec" id="([a-z]+)">\s*<h2>([^<]+)</h2>', article)
+    assert dict(sections) == {s.lower(): n for s, n in au.FRANCHISES}

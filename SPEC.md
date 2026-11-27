@@ -2759,6 +2759,10 @@ rather than written (A326):
   team, and never a team with no overseas place for an overseas player.
 - **No full list** until the official register (3 December), and **no ratings** (A298).
 
+- **What every team needs** (A327): each team card's "View analysis" opens that team's section of
+  `/articles/what-each-team-needs`, an article written by hand whose every number is
+  `tools.article_figures`' (via `tools.article_auction`), 2026 ball by ball.
+
 Still to come: Predict the Auction and the real register's import (3 December), and live
 sales on 16 December.
 
@@ -2928,8 +2932,12 @@ puzzle games; the daily walks a fixed shuffle of the 254 sides.
 
 ## 18. Navigation [A186]
 
-Draft and Auction lead. The top bar is `Draft, Auction, Rooms, Daily, Puzzles, Records` and does not
-grow: a new game is a card on the Puzzles hub, never a new top-level item. On the home page Draft &
+Draft and Auction lead. The top bar is `Draft, Auction, Career, Almanack, IPL Auction 2027, Rooms,
+Puzzles` (Career replaced Records in A201, the Almanack took Daily's place in A315, and the IPL Auction
+2027 hub was added at the user's request in A327, marked out in gold as the season's one event; it
+should leave the bar once the auction and its aftermath are over). A new game is still a card on the
+Puzzles hub, never a new top-level item. (This paragraph listed the A186 bar until 27 November 2026,
+two changes after it stopped being true.) On the home page Draft &
 season and Auction are the only large tiles; Rooms and the daily challenge are a smaller row; the
 puzzles are one strip. The puzzle games (Bingo, Guess the Player, Common Ground, Name the XI, the
 Flashback quiz) share a second bar that appears on their pages only, and `/puzzles` is a hub that

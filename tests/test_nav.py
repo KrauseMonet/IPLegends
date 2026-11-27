@@ -61,7 +61,10 @@ def test_the_top_bar_keeps_draft_and_auction_first_and_does_not_grow():
     links = re.findall(r'<a href="([^"]+)" data-match="([^"]+)">([^<]+)</a>',
                        (PARTIALS / "nav.html").read_text())
     assert [text for _, _, text in links][:4] == ["Draft", "Auction", "Career", "Almanack"]  # heroes, then the record
-    assert len(links) <= 6
+    # [A327] the IPL 2027 auction hub is the one seasonal item, straight after the record
+    assert len(links) <= 7
+    assert [text for _, _, text in links][4] == "IPL Auction 2027"
+    assert [url for url, _, _ in links][4] == "/ipl-auction-2027"
     assert "Daily" not in [text for _, _, text in links]                   # under Puzzles (A315)
     assert "Records" not in [text for _, _, text in links]                 # in the footer (A201)
     assert "Flashback" not in [text for _, _, text in links]               # it lives under Puzzles

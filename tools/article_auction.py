@@ -21,7 +21,7 @@ CAND_BOWL_BALLS = 90
 ROWS_SQL = """
     select m.season_year, d.batting_fs_id, d.bowling_fs_id, d.phase, d.batter_id, d.bowler_id,
            d.runs_batter, d.runs_extras, d.extra_wides, d.extra_noballs, d.legal_ball,
-           d.wicket_kind, d.player_out_id, d.credited_to_bowler, p.bowling_style
+           d.wicket_kind, d.player_out_id, d.credited_to_bowler, p.bowling_style, d.match_id
     from deliveries d join matches m using (match_id) join people p on p.person_id = d.bowler_id
     where m.season_year >= %s and not d.is_super_over and d.innings_scheduled_balls = 120
       and d.phase is not null"""
@@ -29,10 +29,21 @@ ROWS_SQL = """
 # The teams' gaps the article names, and the candidates it quotes, by display name.
 DEPARTED = ("Ajinkya Rahane", "Travis Head", "Mohammed Shami", "Arshdeep Singh", "Allah Ghazanfar",
             "Pathum Nissanka", "Rishabh Pant", "Mitchell Starc", "Kuldeep Yadav", "T Natarajan",
-            "Deepak Chahar", "Trent Boult", "Khaleel Ahmed", "Hardik Pandya")
+            "Deepak Chahar", "Trent Boult", "Khaleel Ahmed", "Hardik Pandya", "Shimron Hetmyer",
+            "Harshal Patel", "Liam Livingstone", "Matt Henry", "Spencer Johnson",
+            "Matheesha Pathirana", "Mayank Markande")
 CANDIDATES = ("Pathum Nissanka", "Jonny Bairstow", "Jake Fraser-McGurk", "Abishek Porel",
               "Daryl Mitchell", "Nitish Rana", "Nehal Wadhera", "Mahipal Lomror", "Shahrukh Khan",
-              "Trent Boult", "Avesh Khan", "Deepak Chahar", "Maheesh Theekshana", "Matheesha Pathirana")
+              "Trent Boult", "Avesh Khan", "Deepak Chahar", "Maheesh Theekshana", "Matheesha Pathirana",
+              "Shimron Hetmyer", "Tushar Deshpande", "Shai Hope")
+# Retained players the article quotes from their own IPL 2024-26 record. [A328]
+KEPT_QUOTED = ("Prithvi Shaw",)
+# Who opened in 2026: the first ball of each innings names both openers. [A328]
+OPENERS_SQL = """
+    select distinct on (d.match_id, d.innings_no) d.batting_fs_id, d.batter_id, d.non_striker_id
+    from deliveries d join matches m using (match_id)
+    where m.season_year = %s and not d.is_super_over
+    order by d.match_id, d.innings_no, d.delivery_id"""
 KKR_MIDDLE = ("Rinku Singh", "Rovman Powell", "Ramandeep Singh", "Manish Pandey")
 
 
@@ -59,6 +70,7 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
         "select franchise_season_id, display_name from franchise_seasons where season_year = %s", (YEAR,))}
     pid = {nm: p for p, nm in conn.execute(
         "select person_id, coalesce(display_name, primary_name) from people")}
+    names = {p: nm for nm, p in pid.items()}
     preset = load_preset()
     kept = {s: {c.person_id for c in cs} for s, cs in preset.squads.items()}
 
@@ -72,7 +84,8 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
     cand = defaultdict(lambda: defaultdict(int))  # pid 2024-26 -> stats
     vspin_late = [0, 0]                       # 2024-26 overs 7-20 v spin, league: runs, balls faced
 
-    for (yr, bfs, wfs, phase, b, w, rb, rx, wd, nb, legal, wk, out, cred, style) in conn.execute(ROWS_SQL, (FORM_FROM,)):
+    plm = defaultdict(set)                    # (pid, team) 2026 -> matches batted or bowled in
+    for (yr, bfs, wfs, phase, b, w, rb, rx, wd, nb, legal, wk, out, cred, style, mid) in conn.execute(ROWS_SQL, (FORM_FROM,)):
         ph = PHASES[phase]
         out_b = out == b and wk != "retired hurt"
         faced = wd == 0
@@ -88,6 +101,7 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
                 vspin_late[0] += rb
                 vspin_late[1] += 1
         cw = cand[w]
+        cw["spin"] = style == "spin"
         cw[f"{ph}_bb"] += legal
         cw[f"{ph}_conc"] += rb + wd + nb
         cw[f"{ph}_w"] += bool(cred)
@@ -124,6 +138,9 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
             p["r"] += rb
         pw = pl[(w, O)]
         pw["bb"] += legal
+        pw["conc"] += rb + wd + nb
+        plm[(b, T)].add(mid)
+        plm[(w, O)].add(mid)
         pw["w"] += bool(cred)
         pw[f"{ph}_bb"] += legal
 
@@ -200,6 +217,9 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
         figs[f"need_p_{k}_pp_overs"] = n(s["pp_bb"] // 6)
         figs[f"need_p_{k}_death_overs"] = n(s["death_bb"] // 6)
         figs[f"need_p_{k}_team"] = team
+        figs[f"need_p_{k}_matches"] = n(len(plm[(p, team)]))
+        if s["bb"]:
+            figs[f"need_p_{k}_econ"] = f2(6 * s["conc"] / s["bb"])
 
     # the candidates' IPL 2024-26
     for nm in CANDIDATES:
@@ -214,6 +234,32 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
         if c["late_spin_bf"] >= 60:
             figs[f"need_c_{k}_late_spin_sr"] = f"{100 * c['late_spin_r'] / c['late_spin_bf']:.0f}"
             figs[f"need_c_{k}_late_spin_bf"] = n(c["late_spin_bf"])
+    for nm in KEPT_QUOTED:
+        c, k = cand[pid[nm]], slug(nm)
+        bf = sum(c[f"{ph}_bf"] for ph in PHASES.values())
+        figs[f"need_r_{k}_runs"] = n(sum(c[f"{ph}_r"] for ph in PHASES.values()))
+        figs[f"need_r_{k}_balls"] = n(bf)
+        figs[f"need_r_{k}_pp_sr"] = f"{100 * c['pp_r'] / c['pp_bf']:.0f}"
+
+    # who opened each 2026 innings
+    opened = defaultdict(int)
+    innings = defaultdict(int)
+    for fs, b, ns in conn.execute(OPENERS_SQL, (YEAR,)):
+        t = fs_short[fs]
+        innings[t] += 1
+        opened[(t, b)] += 1
+        opened[(t, ns)] += 1
+    for (t, p), k in opened.items():
+        if k >= 2:
+            figs[f"need_{t.lower()}_opened_{slug(names[p])}"] = str(k)
+    for t in teams:
+        figs[f"need_{t.lower()}_innings"] = str(innings[t])
+
+    # listed overseas batters with a record at the death, 2024-26
+    listed_os = {c.person_id for c, _b, _cap in preset.lots if c.overseas}
+    os_death = sorted(names[p] for p in listed_os
+                      if cand[p]["death_bf"] >= CAND_BAT_BALLS // 3)
+
     group = [cand[pid[nm]] for nm in KKR_MIDDLE]
     gr, gb = sum(c["late_spin_r"] for c in group), sum(c["late_spin_bf"] for c in group)
     figs["need_kkr_middle_vspin_sr"] = f"{100 * gr / gb:.0f}"
@@ -221,7 +267,35 @@ def compute(conn, figs: dict, f1, f2, pct, n, check_claims) -> None:
 
     listed = {c.person_id for c, _b, _cap in preset.lots}
     retained = {p for ps in kept.values() for p in ps}
+    last_season = dict(conn.execute(
+        "select coalesce(p.display_name, p.primary_name), max(m.season_year) from deliveries d"
+        " join matches m using (match_id) join people p on p.person_id in (d.batter_id, d.bowler_id)"
+        " where coalesce(p.display_name, p.primary_name) = any(%s) group by 1",
+        (["Prithvi Shaw", "MS Dhoni", "Harshit Rana"],)).fetchall())
     check_claims({
+        # [A328] the claims the reporting pass added
+        "Lucknow also took middle-overs wickets least often": rank[("LSG", "bowl_bpw", "mid")] == 10,
+        "Kolkata keep the bowlers who bowled their death overs":
+            povers[("KKR", "death")][1] / povers[("KKR", "death")][0] >= 0.95,
+        "Chennai took middle-overs wickets second most often, powerplay wickets 9th":
+            rank[("CSK", "bowl_bpw", "mid")] == 2 and rank[("CSK", "bowl_bpw", "pp")] == 9,
+        "KL Rahul opened every Delhi innings of 2026":
+            figs["need_dc_opened_kl_rahul"] == figs["need_dc_innings"],
+        "Finn Allen opened Kolkata's innings more than anyone but Rahane":
+            sorted(((k, p) for (t, p), k in opened.items() if t == "KKR"), reverse=True)[1][1]
+            == pid["Finn Allen"],
+        "Hetmyer and Mitchell are the listed overseas batters with a record at the death":
+            os_death == ["Daryl Mitchell", "Shimron Hetmyer"],
+        "Mitchell struck slower than Hetmyer at the death":
+            cand[pid["Daryl Mitchell"]]["death_r"] / cand[pid["Daryl Mitchell"]]["death_bf"]
+            < cand[pid["Shimron Hetmyer"]]["death_r"] / cand[pid["Shimron Hetmyer"]]["death_bf"],
+        "no listed Indian spinner bowled 10+ middle overs at under 9 an over, 2024-26":
+            not [p for p in listed - listed_os if cand[p]["spin"] and cand[p]["mid_bb"] >= 60
+                 and 6 * cand[p]["mid_conc"] / cand[p]["mid_bb"] < 9],
+        "Harshal Patel took no wicket for Hyderabad in 2026": pl[(pid["Harshal Patel"], "SRH")]["w"] == 0,
+        "Shaw last played in 2024, Dhoni and Harshit Rana before 2026":
+            last_season["Prithvi Shaw"] == 2024 and last_season["MS Dhoni"] < YEAR
+            and last_season["Harshit Rana"] < YEAR,
         "Lucknow were the slowest middle-overs batting side of 2026":
             rank[("LSG", "bat_rr", "mid")] == 10,
         "Lucknow were the slowest against spin in the middle overs": spin_order[-1] == "LSG",

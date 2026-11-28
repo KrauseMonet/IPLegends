@@ -1,0 +1,15 @@
+deal,date,player,person_id,from,to,fee_lakh,source
+1,2026-06-23,Rishabh Pant,919a3be2,LSG,DC,1500,https://www.iplt20.com/news/article/rishabh-pant-and-kuldeep-yadav-complete-high-profile-trade-between-dc-and-lsg
+1,2026-06-23,Kuldeep Yadav,8d2c70ad,DC,LSG,1350,https://www.iplt20.com/news/article/rishabh-pant-and-kuldeep-yadav-complete-high-profile-trade-between-dc-and-lsg
+2,2026-10-14,T Natarajan,ce794613,DC,SRH,500,https://www.delhicapitals.in/www.delhicapitals.in/news/delhi-capitals-trade-t-natarajan-to-sunrisers-hyderabad-ahead-of-ipl-2027
+2,2026-10-14,Zeeshan Ansari,36619795,SRH,DC,40,https://www.delhicapitals.in/www.delhicapitals.in/news/delhi-capitals-trade-t-natarajan-to-sunrisers-hyderabad-ahead-of-ipl-2027
+3,2026-11-05,Liam Livingstone,50c6bc2b,SRH,CSK,600,https://www.iplt20.com/news/article/csk-and-srh-agree-to-four-player-trade
+3,2026-11-05,Jack Edwards,,SRH,CSK,300,https://www.iplt20.com/news/article/csk-and-srh-agree-to-four-player-trade
+3,2026-11-05,Khaleel Ahmed,a2f46292,CSK,SRH,480,https://www.iplt20.com/news/article/csk-and-srh-agree-to-four-player-trade
+3,2026-11-05,Nathan Ellis,9eb1455b,CSK,SRH,200,https://www.iplt20.com/news/article/csk-and-srh-agree-to-four-player-trade
+4,2026-11-11,Hardik Pandya,dbe50b21,MI,PBKS,1800,https://www.iplt20.com/news/article/hardik-pandya-and-arshdeep-singh-complete-major-trade-between-pbks-and-mi
+4,2026-11-11,Arshdeep Singh,244048f6,PBKS,MI,1800,https://www.iplt20.com/news/article/hardik-pandya-and-arshdeep-singh-complete-major-trade-between-pbks-and-mi
+5,2026-11-17,Harshal Patel,f986ca1a,SRH,GT,400,https://www.iplt20.com/news/article/harshal-patel-traded-to-gujarat-titans-from-sunrisers-hyderabad
+6,2026-11-17,Mohammed Shami,8cf9814c,LSG,RR,800,https://www.iplt20.com/news/article/mohd-shami-and-m-siddharth-traded-to-rajasthan-royals-sam-curran-traded-to-lucknow-super-giants
+6,2026-11-17,Manimaran Siddharth,cf0ccafa,LSG,RR,75,https://www.iplt20.com/news/article/mohd-shami-and-m-siddharth-traded-to-rajasthan-royals-sam-curran-traded-to-lucknow-super-giants
+6,2026-11-17,Sam Curran,e94915e6,RR,LSG,240,https://www.iplt20.com/news/article/mohd-shami-and-m-siddharth-traded-to-rajasthan-royals-sam-curran-traded-to-lucknow-super-giants

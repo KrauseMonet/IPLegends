@@ -236,3 +236,46 @@ def test_every_team_card_opens_its_own_section_of_the_needs_article(preset):
         assert f'<section class="hx-sec" id="{short}">' in article, short
     sections = re.findall(r'<section class="hx-sec" id="([a-z]+)">\s*<h2>([^<]+)</h2>', article)
     assert dict(sections) == {s.lower(): n for s, n in au.FRANCHISES}
+
+
+# ---------------------------------------------------------------- [A329] trades so far
+
+def test_every_trade_lands_in_the_squad_and_at_the_fee_the_retentions_record(preset):
+    """The trades come from the IPL's own releases; the squads and fees from the retention lists.
+    The two are separate sources, so a player in the wrong squad or at the wrong fee is a real
+    disagreement, not one copy agreeing with itself."""
+    from etl.derive_people import OVERRIDES, read_override
+    retained = {}
+    for r in read_override(OVERRIDES / "retained_2027.csv"):
+        retained[r["name"].replace(".", "")] = (r["short"], int(r["salary_lakh"]))
+    rows = build.trades()
+    assert len(rows) == 14
+    for r in rows:
+        assert r["from"] != r["to"]
+        assert retained[r["player"].replace(".", "")] == (r["to"], int(r["fee_lakh"])), r["player"]
+        if r["person_id"]:
+            assert r["person_id"] in {c.person_id for c in preset.squads[r["to"]]}, r["player"]
+
+
+def test_a_deal_is_two_teams_on_one_date_and_deals_run_oldest_first():
+    deals: dict[str, list] = {}
+    for r in build.trades():
+        deals.setdefault(r["deal"], []).append(r)
+    assert len(deals) == 6
+    dates = []
+    for rows in deals.values():
+        assert len({r["date"] for r in rows}) == 1
+        assert len({frozenset((r["from"], r["to"])) for r in rows}) == 1
+        dates.append(rows[0]["date"])
+    assert dates == sorted(dates)
+
+
+def test_the_page_draws_every_deal_both_ways_with_a_cash_side(preset):
+    html = build.OUT.read_text()
+    sec = html[html.index("Trades so far"):html.index("Released, and where they fit")]
+    assert sec.count('class="ah-tr"') == 6
+    for r in build.trades():
+        assert r["player"] in sec
+    # Harshal Patel went for cash: Hyderabad's side of that deal holds no player
+    assert sec.count('class="ah-tr-cash"') == 1
+    assert "Rishabh Pant" in sec[sec.index("23 June 2026"):sec.index("14 October 2026")]

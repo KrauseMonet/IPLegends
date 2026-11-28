@@ -251,6 +251,58 @@ def line_for(card) -> str:
     return line[6:] if line else "barely used"
 
 
+TRADES = OVERRIDES / "trades_2027.csv"   # [A329] every trade since IPL 2026, from the IPL's releases
+
+
+def trades() -> list[dict]:
+    """The trades, one row a player, grouped into deals in the file's order."""
+    return read_override(TRADES)
+
+
+def long_date(iso: str) -> str:
+    y, m, d = (int(x) for x in iso.split("-"))
+    return f"{d} {('January February March April May June July August September October November December').split()[m - 1]} {y}"
+
+
+def trades_section(preset, who: Who) -> str:
+    """Each deal as a card: the two franchises, who went each way and at what fee. A player is
+    named from his retained card where there is one, so the page links him like every other."""
+    cards = {c.person_id: c for cs in preset.squads.values() for c in cs}
+    deals: dict[str, list[dict]] = {}
+    for r in trades():
+        deals.setdefault(r["deal"], []).append(r)
+    out = []
+    for rows in deals.values():
+        a, b = rows[0]["from"], rows[0]["to"]
+        sides = []
+        for to in (b, a):
+            got = [r for r in rows if r["to"] == to]
+            if got:
+                items = []
+                for r in got:
+                    c = cards.get(r["person_id"])
+                    name = who.name(c) if c else esc(r["player"])
+                    tags = (marks(c) + band_tag(c)) if c else ""
+                    items.append(f'<li><span class="ah-tr-who"><span class="ah-tr-name">{name}</span>'
+                                 f'<span class="ah-tr-fee">{money(int(r["fee_lakh"]))}</span></span>'
+                                 f'<span class="ah-tr-tags">{tags}</span></li>')
+                body = "<ul>" + "".join(items) + "</ul>"
+            else:
+                body = '<p class="ah-tr-cash">A cash deal</p>'
+            sides.append(f'<div class="ah-tr-side"><div class="ah-tr-to">To {crest_chip(to, 20)} {esc(to)}</div>{body}</div>')
+        n = len(rows)
+        out.append(
+            f'<div class="ah-tr"><div class="ah-tr-h"><span>{esc(long_date(rows[0]["date"]))}</span>'
+            f'<span class="ah-tr-teams">{crest_chip(a, 24)}<b>⇄</b>{crest_chip(b, 24)}</span>'
+            f'<a href="{esc(rows[0]["source"])}" rel="noopener">{plural(n, "player")} · source</a></div>'
+            f'<div class="ah-tr-sides">{"".join(sides)}</div></div>')
+    intro = para(
+        f"{plural(len(deals), 'trade')} since IPL 2026, oldest first, each player at the fee the new "
+        "team pays. The window stays open until 9 December and reopens the day after the auction, "
+        "so this list can still grow.")
+    return section("Trades so far", intro + f'<div class="ah-trs">{"".join(out)}</div>')
+
+
 def released_section(preset, teams: list[hub.TeamView], who: Who) -> str:
     rel = hub.released(preset)
     former = former_teams()
@@ -309,7 +361,7 @@ def build() -> str:
     teams = hub.teams(preset)
     who = Who()
     body = (hero(teams, hub.released(preset)) + teams_section(teams, who)
-            + released_section(preset, teams, who) + notes_section(teams)
+            + trades_section(preset, who) + released_section(preset, teams, who) + notes_section(teams)
             + '    <script src="/static/auction_hub.js"></script>\n')
     return page(PATH, "IPL 2027 auction: squads, purses and needs",
                 "Before the IPL 2027 auction on 16 December: each franchise's money and places left, what "

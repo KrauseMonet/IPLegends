@@ -37,16 +37,7 @@ body{
   background-color:var(--bg); color:var(--ink);
   font-family:var(--sans); font-size:16px; line-height:1.55;
   -webkit-font-smoothing:antialiased;
-  /* The stadium photo is GONE, and that is the point rather than a saving. Scrimmed to
-     ~90% to keep text legible it contributed no readable detail, only a muddy mid-tone
-     that dragged every panel toward the same value and stole the contrast flat colour
-     needs to hit hard. Two wide, very dark radial washes give depth without competing;
-     everything punchy on screen is now type and accent, not wallpaper. */
-  background-image:
-    radial-gradient(1200px 620px at 78% -12%, rgba(245,184,61,.10), transparent 62%),
-    radial-gradient(1000px 560px at 8% 4%, rgba(51,160,209,.07), transparent 62%);
-  background-repeat:no-repeat;
-  background-attachment:fixed;
+  /* The background is the floodlit ground in the `body::before` layer below [A333]. */
   position:relative;
 }
 .sheet{max-width:1180px;margin:0 auto;padding:0 26px 100px;position:relative}
@@ -1228,17 +1219,18 @@ svg.wheel.wheel-mini .wheel-spoke{display:none}
 .folio{gap:30px}
 
 
-/* --- background: two dark washes, no photograph ------------------------------------------
-   The stadium photo is gone for good. Scrimmed to keep text legible it added a muddy
-   mid-tone and no detail, and once real crests arrived it competed with the one place on
-   screen colour should come from: the teams. 75 kB saved on every first visit too. */
-body{
-  background-image:
-    radial-gradient(1100px 560px at 85% -12%, rgba(245,184,61,.11), transparent 60%),
-    radial-gradient(900px 520px at 0% 28%, rgba(60,120,255,.07), transparent 60%);
-  background-repeat:no-repeat;
-  background-attachment:fixed;
-}
+/* --- background: the ground under lights [A333] ------------------------------------------
+   A145 took the old stadium photo out; this one was chosen by the site owner to replace
+   the two plain washes. It sits in a fixed layer of its own rather than as
+   `background-attachment:fixed` on body, because iOS Safari ignores fixed attachment and
+   would stretch a cover image over the whole page height. Anchored at the bottom so the
+   square and the pitch stay in view on a tall phone screen; a navy scrim keeps it behind
+   the panels rather than among them. The file name carries its content hash (A106): the
+   stylesheet is cached for a year, so a new photo must be a new URL. 30 kB. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    linear-gradient(180deg, rgba(6,13,31,.30) 0%, rgba(6,13,31,.45) 55%, rgba(6,13,31,.62) 100%),
+    url("/static/stadium-82eed6722e.webp") center bottom / cover no-repeat;}
 
 /* --- column titles, and whose turn it is ----------------------------------------------------
    `.col-head` was 10px mono at .2em tracking in --ink-3, the dimmest ink on the palette --

@@ -183,3 +183,17 @@ def test_ads_txt_names_the_publisher_and_is_routed_at_the_root():
     r = TestClient(app).get("/ads.txt")
     assert r.status_code == 200 and r.text.strip() == line
     assert r.headers["content-type"].startswith("text/plain")
+
+
+def test_the_background_photo_exists_and_its_name_is_its_own_hash():
+    # [A333] style.css is cached for a year (A106), so the photo it names must change
+    # URL whenever it changes content -- the name carries its own hash, checked here.
+    import hashlib
+    import re
+    css = (ROOT / "web" / "static" / "style.css").read_text()
+    names = re.findall(r'url\("/static/(stadium-([0-9a-f]{10})\.webp)"\)', css)
+    assert len(names) == 1
+    name, digest = names[0]
+    data = (ROOT / "web" / "static" / name).read_bytes()
+    assert hashlib.sha256(data).hexdigest()[:10] == digest
+    assert len(data) < 80_000

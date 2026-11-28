@@ -1,134 +1,127 @@
 {
   "files": {
-    "CSK": "CSK-d64ab22559.webp",
-    "DC": "DC-b806756a94.webp",
-    "DCH": "DCH-d5e8cafdc2.webp",
-    "DD": "DD-192da9ba7c.webp",
-    "GL": "GL-e8ae3e8514.webp",
-    "GT": "GT-654eb7556d.webp",
-    "KKR": "KKR-03a652a6d5.webp",
-    "KTK": "KTK-80cb659f70.webp",
-    "KXIP": "KXIP-8b4bca1b13.webp",
-    "LSG": "LSG-17a790c572.webp",
-    "MI": "MI-0181cfeeb1.webp",
-    "PBKS": "PBKS-9db9031ca2.webp",
-    "PWI": "PWI-9cc8828e1d.webp",
-    "RCB": "RCB-6f7bdc34a4.webp",
-    "RCBB": "RCBB-732d119ad4.webp",
-    "RPS": "RPS-e617700640.webp",
-    "RR": "RR-41fbbbf110.webp",
-    "SRH": "SRH-9e8ebc4b7c.webp"
+    "CSK": "CSK-fcb89e0cb8.webp",
+    "DC": "DC-9842f275c9.webp",
+    "DCH": "DCH-debc568bba.webp",
+    "DD": "DD-84764da815.webp",
+    "GL": "GL-995ec3bfbb.webp",
+    "GT": "GT-05803faba7.webp",
+    "KKR": "KKR-74bbc56fa9.webp",
+    "KTK": "KTK-603d99edd8.webp",
+    "KXIP": "KXIP-747ad28ec2.webp",
+    "LSG": "LSG-eae192347e.webp",
+    "MI": "MI-58e9ac0c09.webp",
+    "PBKS": "PBKS-cb9565457f.webp",
+    "PWI": "PWI-982fe539c8.webp",
+    "RCB": "RCB-e6ef244c05.webp",
+    "RPS": "RPS-f74e556692.webp",
+    "RR": "RR-4a2701f0ee.webp",
+    "SRH": "SRH-32fa3a1fd8.webp"
   },
   "sources": {
-    "CSK": "8295b96b6e",
-    "DC": "a50ec6ee79",
-    "DCH": "ff48a17a09",
-    "DD": "dc2751992c",
-    "GL": "7972ee2397",
-    "GT": "a1defcb81c",
-    "KKR": "bd1de89488",
-    "KTK": "41f2cff065",
-    "KXIP": "055952e7b0",
-    "LSG": "dcac6d9d03",
-    "MI": "200d05c0d8",
-    "PBKS": "0c4722c819",
-    "PWI": "3582860d0d",
-    "RCB": "9e560e2979",
-    "RCBB": "2b8cc4cd8d",
-    "RPS": "9e4e554557",
-    "RR": "e39ea96721",
-    "SRH": "8ab2bf63e2"
+    "CSK": "991f955536",
+    "DC": "7968475587",
+    "DCH": "44cc66eb1e",
+    "DD": "28f4858c91",
+    "GL": "e6787227d2",
+    "GT": "525a0dca49",
+    "KKR": "29e7276728",
+    "KTK": "5c805a49ae",
+    "KXIP": "665241ff9f",
+    "LSG": "047cfd6f45",
+    "MI": "58fbe1ef3b",
+    "PBKS": "e779cb4935",
+    "PWI": "0c7c97e196",
+    "RCB": "85028438c3",
+    "RPS": "d33faddb83",
+    "RR": "51f9fd9b73",
+    "SRH": "bc8e5d95db"
   },
   "colours": {
     "CSK": {
-      "team": "#f75e19",
-      "deep": "#3b1f1e",
-      "ink": "#f75e19"
+      "team": "#fdd20a",
+      "deep": "#3c381a",
+      "ink": "#fdd20a"
     },
     "DC": {
-      "team": "#3a469d",
-      "deep": "#111a3b",
-      "ink": "#7a84ce"
+      "team": "#91a6ff",
+      "deep": "#252f50",
+      "ink": "#91a6ff"
     },
     "DCH": {
-      "team": "#3764a0",
-      "deep": "#11203b",
-      "ink": "#608dc8"
+      "team": "#5fb0e2",
+      "deep": "#1a314a",
+      "ink": "#5fb0e2"
     },
     "DD": {
-      "team": "#e63037",
-      "deep": "#371524",
-      "ink": "#ea545a"
+      "team": "#91a6ff",
+      "deep": "#252f50",
+      "ink": "#91a6ff"
     },
     "GL": {
-      "team": "#f0db26",
-      "deep": "#393a21",
-      "ink": "#f0db26"
+      "team": "#f2a11f",
+      "deep": "#3a2e1f",
+      "ink": "#f2a11f"
     },
     "GT": {
-      "team": "#d8b95a",
-      "deep": "#34332c",
-      "ink": "#d8b95a"
+      "team": "#c99d3e",
+      "deep": "#312d26",
+      "ink": "#c99d3e"
     },
     "KKR": {
-      "team": "#edc745",
-      "deep": "#393627",
-      "ink": "#edc745"
+      "team": "#7b45c9",
+      "deep": "#201944",
+      "ink": "#9d74d7"
     },
     "KTK": {
-      "team": "#813e98",
-      "deep": "#21183a",
-      "ink": "#ae6ec4"
+      "team": "#e8892b",
+      "deep": "#382822",
+      "ink": "#e8892b"
     },
     "KXIP": {
-      "team": "#f30e0d",
-      "deep": "#3a0d1b",
-      "ink": "#f53e3e"
+      "team": "#c9cfd9",
+      "deep": "#313848",
+      "ink": "#c9cfd9"
     },
     "LSG": {
-      "team": "#af2736",
-      "deep": "#2b1324",
-      "ink": "#da5866"
+      "team": "#35c8ef",
+      "deep": "#10364d",
+      "ink": "#35c8ef"
     },
     "MI": {
-      "team": "#1672c0",
-      "deep": "#0a2342",
-      "ink": "#238de6"
+      "team": "#1a62d6",
+      "deep": "#0a2047",
+      "ink": "#4e89e9"
     },
     "PBKS": {
-      "team": "#dd212e",
-      "deep": "#351122",
-      "ink": "#e6565f"
+      "team": "#c9cfd9",
+      "deep": "#313848",
+      "ink": "#c9cfd9"
     },
     "PWI": {
-      "team": "#dbc406",
-      "deep": "#35351a",
-      "ink": "#dbc406"
+      "team": "#22b8a6",
+      "deep": "#0c333d",
+      "ink": "#22b8a6"
     },
     "RCB": {
-      "team": "#c8a944",
-      "deep": "#312f27",
-      "ink": "#c8a944"
-    },
-    "RCBB": {
-      "team": "#ba8d1c",
-      "deep": "#2e291e",
-      "ink": "#ba8d1c"
+      "team": "#da1b2b",
+      "deep": "#351022",
+      "ink": "#ea535f"
     },
     "RPS": {
-      "team": "#b77a32",
-      "deep": "#2d2523",
-      "ink": "#c78536"
+      "team": "#c73b9c",
+      "deep": "#30173a",
+      "ink": "#d263b0"
     },
     "RR": {
-      "team": "#ee1987",
-      "deep": "#391036",
-      "ink": "#f13f9b"
+      "team": "#ec2f8f",
+      "deep": "#391438",
+      "ink": "#ef4b9e"
     },
     "SRH": {
-      "team": "#c52230",
-      "deep": "#301223",
-      "ink": "#e25763"
+      "team": "#f26a1b",
+      "deep": "#3a211e",
+      "ink": "#f26a1b"
     }
   }
 }

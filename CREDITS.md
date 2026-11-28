@@ -72,3 +72,11 @@ the risk is accepted rather than resolved. The footer on every page says
 the site is unofficial and that team names and logos belong to their owners. If a
 rights-holder objects, removing them is one command: delete the entries in
 `web/crests.py` and every surface falls back to the old initials badge.
+
+**[Changed 2026-11-28, A332 -- the official crests are gone.]** Every crest on the site
+is now the site's own artwork, supplied by the owner and stated to be copyright-free; no
+franchise's official logo is used anywhere. The team NAMES are still the franchises'
+trademarks and are used only to identify the teams, which the footer says. Provenance is
+in `assets/crests/SOURCES.md`. Their team colours are picked by hand (A333). The site's
+background photo of a floodlit ground (`web/static/stadium-*.webp`) was supplied by the
+site owner the same day.

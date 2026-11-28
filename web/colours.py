@@ -46,7 +46,13 @@ def hex_rgb(h: str) -> tuple[int, int, int]:
 def colours_from(hue: tuple[float, float, float]) -> dict[str, str]:
     """team / deep / ink, as hex, from one RGB colour. See the module docstring."""
     lightness = colorsys.rgb_to_hls(*(x / 255 for x in hue))[1]
-    team = with_lightness(hue, min(max(lightness, .42), .6))
+    return colours_for_team(with_lightness(hue, min(max(lightness, .42), .6)))
+
+
+def colours_for_team(team: tuple[int, int, int]) -> dict[str, str]:
+    """team / deep / ink from a --team chosen exactly, with no lightness clamp: the
+    franchises' hand-picked colours [A333] use lightness as well as hue to stay apart."""
+    team = tuple(round(x) for x in team)
     deep = tuple(round(team[i] * .22 + NAVY[i] * .78) for i in range(3))
     ink, lightness = team, colorsys.rgb_to_hls(*(x / 255 for x in team))[1]
     while contrast(ink, deep) < 4.5 and lightness < .92:

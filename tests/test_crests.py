@@ -49,7 +49,7 @@ def test_no_name_and_year_matches_two_crests():
     ("Delhi Capitals", 2019, "DC"),
     ("Kings XI Punjab", 2019, "KXIP"),
     ("Kings XI Punjab", 2020, "PBKS"),
-    ("Royal Challengers Bangalore", 2019, "RCBB"),
+    ("Royal Challengers Bangalore", 2008, "RCB"),
     ("Royal Challengers Bangalore", 2020, "RCB"),
     ("Royal Challengers Bengaluru", 2024, "RCB"),
     ("Rising Pune Supergiants", 2016, "RPS"),
@@ -124,7 +124,9 @@ def test_every_crest_has_team_colours_and_its_ink_is_readable():
 
 def test_flashback_withholds_a_crest_that_would_hint_at_the_year():
     assert crests.unambiguous_crest("Kings XI Punjab") is None
-    assert crests.unambiguous_crest("Royal Challengers Bangalore") is None
+    # Since A332 every Bangalore-era season wears the one RCB crest, so it gives nothing away.
+    assert crests.unambiguous_crest("Royal Challengers Bangalore") == crests.crest_url(
+        "Royal Challengers Bengaluru", 2024)
     assert crests.unambiguous_crest("Delhi Daredevils") == crests.crest_url("Delhi Daredevils", 2010)
 
 
@@ -140,3 +142,58 @@ def test_analysis_rows_get_a_crest_only_when_their_label_is_unambiguous():
     you = Side("Your eleven", "YOU", [], you=True)
     got = _crests_by_short([SimpleNamespace(home=dd, away=kx), SimpleNamespace(home=you, away=clash)])
     assert got == {"DD 2012": crests.crest_url("Delhi Daredevils", 2012)}
+
+
+# --- hand-picked team colours [A333] -------------------------------------------------------
+
+def _lab(h: str) -> tuple[float, float, float]:
+    # sRGB -> CIE Lab (D65), written out here so the test shares no code with the build.
+    def ch(x):
+        x /= 255
+        return x / 12.92 if x <= .04045 else ((x + .055) / 1.055) ** 2.4
+    r, g, b = (ch(int(h[i:i + 2], 16)) for i in (1, 3, 5))
+    x = (r * .4124 + g * .3576 + b * .1805) / .95047
+    y = r * .2126 + g * .7152 + b * .0722
+    z = (r * .0193 + g * .1192 + b * .9505) / 1.08883
+    f = lambda t: t ** (1 / 3) if t > .008856 else 7.787 * t + 16 / 116
+    return 116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))
+
+
+def _served_team_colours() -> dict[str, str]:
+    import re
+    css = build_crests.CSS.read_text()
+    return {k: re.search(r"--team:(#[0-9a-f]{6})", body).group(1)
+            for k, body in re.findall(r"\.crest-(\w+)\{([^}]*)\}", css)}
+
+
+def test_every_crest_key_has_a_hand_picked_colour_and_it_is_what_is_served():
+    served = _served_team_colours()
+    assert set(crests.COLOURS) == {c.key for c in crests.CRESTS}
+    assert served == crests.COLOURS
+
+
+def test_teams_that_shared_a_season_never_share_a_colour():
+    import itertools
+    import math
+    by_year: dict[int, set[str]] = {}
+    for name, year in _franchise_seasons():
+        by_year.setdefault(year, set()).add(crests.crest_key(name, year))
+    served, close = _served_team_colours(), []
+    for year, keys in by_year.items():
+        for a, b in itertools.combinations(sorted(keys), 2):
+            d = math.dist(_lab(served[a]), _lab(served[b]))
+            if d < crests.MIN_SEASON_DELTA_E:
+                close.append((year, a, b, round(d, 1)))
+    assert crests.MIN_SEASON_DELTA_E >= 25          # stated, not read back blindly
+    assert close == []
+
+
+def test_one_franchise_wears_one_colour_across_a_rename():
+    c = crests.COLOURS
+    assert c["DD"] == c["DC"] and c["KXIP"] == c["PBKS"]
+
+
+def test_every_team_colour_reads_against_the_page():
+    # A stripe or glow in --team must stand off the site's navy, not sink into it.
+    for key, team in _served_team_colours().items():
+        assert _independent_contrast(team, "#060d1f") >= 3, key

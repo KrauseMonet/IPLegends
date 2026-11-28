@@ -3,8 +3,8 @@
 Keyed on the franchise-season's own DISPLAY NAME and year -- `franchise_seasons.display_name`,
 the era-correct string the rest of the site already shows ("Delhi Daredevils" in 2012,
 "Delhi Capitals" in 2020) -- because the crest is a fact about the same era the name is. A
-name alone is not enough: RCB and Kings XI both changed crest in 2020 while keeping their
-names until later, so each entry carries a year range.
+name alone is not enough: Kings XI changed crest in 2020 while keeping its name until
+2021, so an entry can carry a year range.
 
 The images themselves are built by `tools.build_crests` into `web/static/crests/`, with a
 content hash in every file name (A106: a changed image must be a changed URL). This module
@@ -50,10 +50,9 @@ CRESTS: tuple[Crest, ...] = (
     Crest("KKR", ("Kolkata Knight Riders",)),
     Crest("MI", ("Mumbai Indians",)),
     Crest("RR", ("Rajasthan Royals",)),
-    # RCB's rampant lion arrived in 2020; the "Bengaluru" spelling only in 2024.
-    Crest("RCBB", ("Royal Challengers Bangalore",), last=2019),
-    Crest("RCB", ("Royal Challengers Bangalore",), first=2020),
-    Crest("RCB", ("Royal Challengers Bengaluru",)),
+    # One RCB crest for every season under either spelling (A332): the replacement set has
+    # no separate Bangalore-era crest, and keeping the official one would defeat the change.
+    Crest("RCB", ("Royal Challengers Bangalore", "Royal Challengers Bengaluru")),
     Crest("KTK", ("Kochi Tuskers Kerala",)),
     Crest("PWI", ("Pune Warriors",)),
     Crest("SRH", ("Sunrisers Hyderabad",)),
@@ -63,6 +62,37 @@ CRESTS: tuple[Crest, ...] = (
     Crest("LSG", ("Lucknow Super Giants",)),
 )
 
+
+# Each franchise's colour, PICKED BY HAND [A333] -- reversing A145's rule that colours are
+# derived from the crest. The replacement crests all wear gold frames, and the derivation
+# put about ten teams in gold or orange, so KKR, RCB and GT read alike on one scoreboard.
+# Picked for the franchise's own identity first and then for distance from every team it
+# shared a season with: `tests/test_crests.py` holds every same-season pair at least
+# MIN_SEASON_DELTA_E apart (CIE76, ~2 is just noticeable). Three compromises, because ten
+# current teams cannot all have their own red or blue: Punjab is SILVER (Kings XI's old
+# second colour; RCB keeps the red), Gujarat Titans ANTIQUE GOLD, and Delhi a LIGHT
+# periwinkle so it stands apart from Mumbai's royal blue and Kolkata's purple. One
+# franchise, one colour across a rename: Daredevils = Capitals, Kings XI = Punjab Kings.
+COLOURS: dict[str, str] = {
+    "CSK": "#fdd20a",   # lemon yellow
+    "MI": "#1a62d6",    # royal blue
+    "KKR": "#7b45c9",   # purple
+    "RCB": "#da1b2b",   # red
+    "RR": "#ec2f8f",    # pink
+    "SRH": "#f26a1b",   # orange
+    "DC": "#91a6ff",    # periwinkle
+    "DD": "#91a6ff",
+    "PBKS": "#c9cfd9",  # silver
+    "KXIP": "#c9cfd9",
+    "GT": "#c99d3e",    # antique gold
+    "LSG": "#35c8ef",   # sky blue
+    "DCH": "#5fb0e2",   # steel sky
+    "PWI": "#22b8a6",   # turquoise
+    "KTK": "#e8892b",   # saffron
+    "GL": "#f2a11f",    # amber
+    "RPS": "#c73b9c",   # magenta
+}
+MIN_SEASON_DELTA_E = 25
 
 @cache
 def _files() -> dict[str, str]:
